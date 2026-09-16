@@ -20,6 +20,7 @@ import {
   UsersIcon,
 } from "@/components/icons";
 import { OutlookConnectPanel, OutlookWhyCard } from "./outlook-tab";
+import { CalendlyConnectPanel, CalendlySettingsPanel, CalendlyWhyCard } from "./calendly-tab";
 import "./shared.css";
 import "./calendar.css";
 
@@ -93,6 +94,8 @@ export default function CalendarSetupPage() {
 
           {provider === "outlook" ? (
             <OutlookConnectPanel />
+          ) : provider === "calendly" ? (
+            <CalendlyConnectPanel />
           ) : (
             <>
               <section className="calendarAccessBanner">
@@ -121,62 +124,66 @@ export default function CalendarSetupPage() {
             </>
           )}
 
-          <section className="calendarSettingsSection">
-            <div className="calendarSectionTitle">
-              <h2>Calendar settings</h2>
-              <p>{provider === "outlook" ? "Configure how your AI assistant should handle appointments from your Outlook calendar." : "Configure how your AI assistant should handle appointments."}</p>
-            </div>
-
-            <div className="calendarSettingsGrid twoCol">
-              <label className="calendarField"><span>Default meeting duration</span><select defaultValue="30 minutes"><option>15 minutes</option><option>30 minutes</option><option>45 minutes</option><option>60 minutes</option></select></label>
-              <label className="calendarField"><span>Buffer time between meetings</span><select defaultValue="15 minutes"><option>No buffer</option><option>10 minutes</option><option>15 minutes</option><option>30 minutes</option></select></label>
-            </div>
-
-            <div className="availabilityBlock">
-              <strong>Available days</strong>
-              <div className="daySelector">
-                {weekDays.map((day) => (
-                  <label key={day} className="dayOption">
-                    <input type="checkbox" checked={days[day]} onChange={(event) => setDays((current) => ({ ...current, [day]: event.target.checked }))} />
-                    <span className="dayCheck"><CheckIcon size={13} /></span>
-                    <b>{day}</b>
-                  </label>
-                ))}
+          {provider === "calendly" ? (
+            <CalendlySettingsPanel />
+          ) : (
+            <section className="calendarSettingsSection">
+              <div className="calendarSectionTitle">
+                <h2>Calendar settings</h2>
+                <p>{provider === "outlook" ? "Configure how your AI assistant should handle appointments from your Outlook calendar." : "Configure how your AI assistant should handle appointments."}</p>
               </div>
-            </div>
 
-            <div className="hoursTimezoneGrid">
-              <div className="hoursGroup">
-                <strong>Available hours</strong>
-                <div className="timeRange">
-                  <select defaultValue="9:00 AM"><option>8:00 AM</option><option>9:00 AM</option><option>10:00 AM</option></select>
-                  <span>to</span>
-                  <select defaultValue="5:00 PM"><option>4:00 PM</option><option>5:00 PM</option><option>6:00 PM</option></select>
+              <div className="calendarSettingsGrid twoCol">
+                <label className="calendarField"><span>Default meeting duration</span><select defaultValue="30 minutes"><option>15 minutes</option><option>30 minutes</option><option>45 minutes</option><option>60 minutes</option></select></label>
+                <label className="calendarField"><span>Buffer time between meetings</span><select defaultValue="15 minutes"><option>No buffer</option><option>10 minutes</option><option>15 minutes</option><option>30 minutes</option></select></label>
+              </div>
+
+              <div className="availabilityBlock">
+                <strong>Available days</strong>
+                <div className="daySelector">
+                  {weekDays.map((day) => (
+                    <label key={day} className="dayOption">
+                      <input type="checkbox" checked={days[day]} onChange={(event) => setDays((current) => ({ ...current, [day]: event.target.checked }))} />
+                      <span className="dayCheck"><CheckIcon size={13} /></span>
+                      <b>{day}</b>
+                    </label>
+                  ))}
                 </div>
               </div>
-              <label className="calendarField timezoneField"><span>Timezone</span><select defaultValue="Lagos"><option value="Lagos">(GMT+01:00) Lagos, Nigeria (WAT)</option><option value="New York">(GMT-05:00) New York (ET)</option><option value="London">(GMT+00:00) London (GMT)</option></select></label>
-            </div>
 
-            <label className="suggestNearestRow">
-              <input type="checkbox" defaultChecked />
-              <span className="squareCheck"><CheckIcon size={14} /></span>
-              <span><strong>Allow AI to suggest the nearest available time</strong><small>When your preferred time isn&apos;t available, your AI assistant can suggest the next best option.</small></span>
-            </label>
-
-            <div className={`advancedCalendar ${advancedOpen ? "open" : ""}`}>
-              <button type="button" onClick={() => setAdvancedOpen((open) => !open)}>
-                <span className="advancedIcon"><GearIcon size={19} /></span>
-                <span><strong>Advanced settings (optional)</strong><small>{provider === "outlook" ? "Set specific event types, locations, meeting links, availability rules and more." : "Set specific event types, locations, meeting links and more"}</small></span>
-                <ChevronRightIcon size={18} />
-              </button>
-              {advancedOpen && (
-                <div className="advancedBody">
-                  <label className="calendarField"><span>Meeting location</span><select defaultValue="Use calendar default"><option>Use calendar default</option><option>Microsoft Teams</option><option>Google Meet</option><option>Zoom</option><option>Phone call</option></select></label>
-                  <label className="calendarField"><span>Maximum bookings per day</span><input type="number" min={1} defaultValue={8} /></label>
+              <div className="hoursTimezoneGrid">
+                <div className="hoursGroup">
+                  <strong>Available hours</strong>
+                  <div className="timeRange">
+                    <select defaultValue="9:00 AM"><option>8:00 AM</option><option>9:00 AM</option><option>10:00 AM</option></select>
+                    <span>to</span>
+                    <select defaultValue="5:00 PM"><option>4:00 PM</option><option>5:00 PM</option><option>6:00 PM</option></select>
+                  </div>
                 </div>
-              )}
-            </div>
-          </section>
+                <label className="calendarField timezoneField"><span>Timezone</span><select defaultValue="Lagos"><option value="Lagos">(GMT+01:00) Lagos, Nigeria (WAT)</option><option value="New York">(GMT-05:00) New York (ET)</option><option value="London">(GMT+00:00) London (GMT)</option></select></label>
+              </div>
+
+              <label className="suggestNearestRow">
+                <input type="checkbox" defaultChecked />
+                <span className="squareCheck"><CheckIcon size={14} /></span>
+                <span><strong>Allow AI to suggest the nearest available time</strong><small>When your preferred time isn&apos;t available, your AI assistant can suggest the next best option.</small></span>
+              </label>
+
+              <div className={`advancedCalendar ${advancedOpen ? "open" : ""}`}>
+                <button type="button" onClick={() => setAdvancedOpen((open) => !open)}>
+                  <span className="advancedIcon"><GearIcon size={19} /></span>
+                  <span><strong>Advanced settings (optional)</strong><small>{provider === "outlook" ? "Set specific event types, locations, meeting links, availability rules and more." : "Set specific event types, locations, meeting links and more"}</small></span>
+                  <ChevronRightIcon size={18} />
+                </button>
+                {advancedOpen && (
+                  <div className="advancedBody">
+                    <label className="calendarField"><span>Meeting location</span><select defaultValue="Use calendar default"><option>Use calendar default</option><option>Microsoft Teams</option><option>Google Meet</option><option>Zoom</option><option>Phone call</option></select></label>
+                    <label className="calendarField"><span>Maximum bookings per day</span><input type="number" min={1} defaultValue={8} /></label>
+                  </div>
+                )}
+              </div>
+            </section>
+          )}
 
           <div className="calendarFooter">
             <Link className="backLink" href="/setup/communication">←&nbsp;&nbsp;Back to Communication</Link>
@@ -207,6 +214,8 @@ export default function CalendarSetupPage() {
 
           {provider === "outlook" ? (
             <OutlookWhyCard />
+          ) : provider === "calendly" ? (
+            <CalendlyWhyCard />
           ) : (
             <section className="sidebarCard calendarWhyCard">
               <h2>Why connect your calendar?</h2>
