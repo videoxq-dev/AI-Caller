@@ -78,6 +78,24 @@ const setupSteps: SetupStep[] = [
   },
 ];
 
+function SetupRowContent({ step }: { step: SetupStep }) {
+  return (
+    <>
+      <span className="stepNumber">{step.number}</span>
+      <span className={`stepIcon ${step.tone}`}>{step.icon}</span>
+      <span className="stepCopy">
+        <strong>{step.title}</strong>
+        <span>{step.description}</span>
+      </span>
+      <span className={`statusPill ${step.status === "Locked" ? "locked" : ""}`}>
+        {step.status === "Locked" ? <LockIcon size={13} /> : <i />}
+        {step.status}
+      </span>
+      <ChevronRightIcon className="stepChevron" size={20} />
+    </>
+  );
+}
+
 export default function WelcomePage() {
   return (
     <main className="welcomePage">
@@ -114,27 +132,21 @@ export default function WelcomePage() {
           </div>
 
           <div className="setupList" aria-label="Setup checklist">
-            {setupSteps.map((step) => (
+            {setupSteps.map((step) => step.number === 1 ? (
+              <Link className="setupRow" href="/setup/business" key={step.number}>
+                <SetupRowContent step={step} />
+              </Link>
+            ) : (
               <button className="setupRow" type="button" key={step.number} disabled={step.status === "Locked"}>
-                <span className="stepNumber">{step.number}</span>
-                <span className={`stepIcon ${step.tone}`}>{step.icon}</span>
-                <span className="stepCopy">
-                  <strong>{step.title}</strong>
-                  <span>{step.description}</span>
-                </span>
-                <span className={`statusPill ${step.status === "Locked" ? "locked" : ""}`}>
-                  {step.status === "Locked" ? <LockIcon size={13} /> : <i />}
-                  {step.status}
-                </span>
-                <ChevronRightIcon className="stepChevron" size={20} />
+                <SetupRowContent step={step} />
               </button>
             ))}
           </div>
 
           <div className="welcomeActions">
-            <button className="primaryButton welcomePrimary" type="button">
+            <Link className="primaryButton welcomePrimary" href="/setup/business">
               <span>Start Setup</span><ChevronRightIcon size={18} />
-            </button>
+            </Link>
             <button className="secondaryButton" type="button">Explore Dashboard</button>
           </div>
         </div>
