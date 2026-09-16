@@ -19,6 +19,7 @@ import {
   StoreIcon,
   UsersIcon,
 } from "@/components/icons";
+import { OutlookConnectPanel, OutlookWhyCard } from "./outlook-tab";
 import "./shared.css";
 import "./calendar.css";
 
@@ -44,7 +45,7 @@ const progressSteps: ProgressStep[] = [
 
 const providers: Array<{ id: CalendarProvider; name: string; subtitle: string; badge: string; tone: string }> = [
   { id: "google", name: "Google Calendar", subtitle: "Most popular", badge: "G", tone: "google" },
-  { id: "outlook", name: "Microsoft Outlook", subtitle: "Connect your Outlook", badge: "O", tone: "outlook" },
+  { id: "outlook", name: "Microsoft Outlook", subtitle: "For Microsoft 365", badge: "O", tone: "outlook" },
   { id: "calendly", name: "Calendly", subtitle: "Simple and powerful", badge: "C", tone: "calendly" },
   { id: "calcom", name: "Cal.com", subtitle: "For advanced users", badge: "Cal", tone: "calcom" },
 ];
@@ -90,34 +91,40 @@ export default function CalendarSetupPage() {
             ))}
           </div>
 
-          <section className="calendarAccessBanner">
-            <span className="accessIcon"><CalendarIcon size={24} /></span>
-            <div>
-              <h2>Give your AI assistant access to your calendar</h2>
-              <p>We only need read and write access to manage appointments. Your calendar data remains private and secure.</p>
-              <small><LockIcon size={13} /> Your data is encrypted and never shared.</small>
-            </div>
-          </section>
+          {provider === "outlook" ? (
+            <OutlookConnectPanel />
+          ) : (
+            <>
+              <section className="calendarAccessBanner">
+                <span className="accessIcon"><CalendarIcon size={24} /></span>
+                <div>
+                  <h2>Give your AI assistant access to your calendar</h2>
+                  <p>We only need read and write access to manage appointments. Your calendar data remains private and secure.</p>
+                  <small><LockIcon size={13} /> Your data is encrypted and never shared.</small>
+                </div>
+              </section>
 
-          <section className="calendarConnectSection">
-            <h2>Connect your {selectedProvider.name}</h2>
-            <button type="button" className="calendarConnectButton">
-              <span className={`providerIcon large ${selectedProvider.tone}`}>{selectedProvider.badge}</span>
-              <span><strong>Connect with {provider === "google" ? "Google" : provider === "outlook" ? "Microsoft" : selectedProvider.name}</strong><small>Securely connect your {selectedProvider.name} account</small></span>
-              <ChevronRightIcon size={20} />
-            </button>
-            <div className="calendarOr"><span />or<span /></div>
-            <button type="button" className="calendarSecondaryButton">
-              <span className="secondaryIcon"><CalendarIcon size={21} /></span>
-              <span><strong>Use a different calendar</strong><small>Select from your connected {selectedProvider.name} accounts</small></span>
-              <ChevronRightIcon size={20} />
-            </button>
-          </section>
+              <section className="calendarConnectSection">
+                <h2>Connect your {selectedProvider.name}</h2>
+                <button type="button" className="calendarConnectButton">
+                  <span className={`providerIcon large ${selectedProvider.tone}`}>{selectedProvider.badge}</span>
+                  <span><strong>Connect with {provider === "google" ? "Google" : selectedProvider.name}</strong><small>Securely connect your {selectedProvider.name} account</small></span>
+                  <ChevronRightIcon size={20} />
+                </button>
+                <div className="calendarOr"><span />or<span /></div>
+                <button type="button" className="calendarSecondaryButton">
+                  <span className="secondaryIcon"><CalendarIcon size={21} /></span>
+                  <span><strong>Use a different calendar</strong><small>Select from your connected {selectedProvider.name} accounts</small></span>
+                  <ChevronRightIcon size={20} />
+                </button>
+              </section>
+            </>
+          )}
 
           <section className="calendarSettingsSection">
             <div className="calendarSectionTitle">
               <h2>Calendar settings</h2>
-              <p>Configure how your AI assistant should handle appointments.</p>
+              <p>{provider === "outlook" ? "Configure how your AI assistant should handle appointments from your Outlook calendar." : "Configure how your AI assistant should handle appointments."}</p>
             </div>
 
             <div className="calendarSettingsGrid twoCol">
@@ -159,12 +166,12 @@ export default function CalendarSetupPage() {
             <div className={`advancedCalendar ${advancedOpen ? "open" : ""}`}>
               <button type="button" onClick={() => setAdvancedOpen((open) => !open)}>
                 <span className="advancedIcon"><GearIcon size={19} /></span>
-                <span><strong>Advanced settings (optional)</strong><small>Set specific event types, locations, meeting links and more</small></span>
+                <span><strong>Advanced settings (optional)</strong><small>{provider === "outlook" ? "Set specific event types, locations, meeting links, availability rules and more." : "Set specific event types, locations, meeting links and more"}</small></span>
                 <ChevronRightIcon size={18} />
               </button>
               {advancedOpen && (
                 <div className="advancedBody">
-                  <label className="calendarField"><span>Meeting location</span><select defaultValue="Use calendar default"><option>Use calendar default</option><option>Google Meet</option><option>Zoom</option><option>Phone call</option></select></label>
+                  <label className="calendarField"><span>Meeting location</span><select defaultValue="Use calendar default"><option>Use calendar default</option><option>Microsoft Teams</option><option>Google Meet</option><option>Zoom</option><option>Phone call</option></select></label>
                   <label className="calendarField"><span>Maximum bookings per day</span><input type="number" min={1} defaultValue={8} /></label>
                 </div>
               )}
@@ -198,35 +205,39 @@ export default function CalendarSetupPage() {
             </div>
           </section>
 
-          <section className="sidebarCard calendarWhyCard">
-            <h2>Why connect your calendar?</h2>
-            <p>Your AI assistant will check your real-time availability, book appointments, send confirmations and reminders, and help you manage your schedule — automatically.</p>
+          {provider === "outlook" ? (
+            <OutlookWhyCard />
+          ) : (
+            <section className="sidebarCard calendarWhyCard">
+              <h2>Why connect your calendar?</h2>
+              <p>Your AI assistant will check your real-time availability, book appointments, send confirmations and reminders, and help you manage your schedule — automatically.</p>
 
-            <div className="calendarBenefits">
-              <div className="calendarBenefit"><span className="benefitIcon green"><CalendarIcon size={16} /></span><div><strong>Book more appointments</strong><small>Let customers schedule with you 24/7</small></div></div>
-              <div className="calendarBenefit"><span className="benefitIcon purple"><ClockIcon size={16} /></span><div><strong>Reduce no-shows</strong><small>Automatic reminders and follow-ups</small></div></div>
-              <div className="calendarBenefit"><span className="benefitIcon orange"><UsersIcon size={16} /></span><div><strong>Sync in real time</strong><small>Always up-to-date availability</small></div></div>
-              <div className="calendarBenefit"><span className="benefitIcon blue"><GearIcon size={16} /></span><div><strong>Work with your existing tools</strong><small>Use the calendar you already rely on</small></div></div>
-              <div className="calendarBenefit"><span className="benefitIcon green"><ShieldIcon size={16} /></span><div><strong>Keep your data secure</strong><small>We only access what&apos;s needed</small></div></div>
-            </div>
-
-            <div className="calendarIllustration" aria-hidden="true">
-              <span className="illustrationNote calendarNote">Turn conversations<br />into appointments!</span>
-              <div className="miniCalendar">
-                <div className="miniCalendarHeader"><strong>April 2025</strong><span>○</span></div>
-                <div className="miniWeek"><span>Mon</span><span>Tue</span><span>Wed</span><span>Thu</span><span>Fri</span></div>
-                <div className="miniDots">{Array.from({ length: 15 }).map((_, index) => <i key={index} />)}</div>
-                <div className="miniAppointment"><b>10:00 AM</b><span>Customer Consultation</span></div>
-                <span className="miniSuccess"><CheckIcon size={17} /></span>
-                <div className="miniConfirm">Your appointment is confirmed!</div>
+              <div className="calendarBenefits">
+                <div className="calendarBenefit"><span className="benefitIcon green"><CalendarIcon size={16} /></span><div><strong>Book more appointments</strong><small>Let customers schedule with you 24/7</small></div></div>
+                <div className="calendarBenefit"><span className="benefitIcon purple"><ClockIcon size={16} /></span><div><strong>Reduce no-shows</strong><small>Automatic reminders and follow-ups</small></div></div>
+                <div className="calendarBenefit"><span className="benefitIcon orange"><UsersIcon size={16} /></span><div><strong>Sync in real time</strong><small>Always up-to-date availability</small></div></div>
+                <div className="calendarBenefit"><span className="benefitIcon blue"><GearIcon size={16} /></span><div><strong>Work with your existing tools</strong><small>Use the calendar you already rely on</small></div></div>
+                <div className="calendarBenefit"><span className="benefitIcon green"><ShieldIcon size={16} /></span><div><strong>Keep your data secure</strong><small>We only access what&apos;s needed</small></div></div>
               </div>
-            </div>
 
-            <div className="editableNote calendarEditableNote">
-              <span className="infoBubble"><InfoIcon size={18} /></span>
-              <div><strong>You can change these settings anytime from Settings.</strong><p>Reconnect, add another calendar, or adjust availability whenever you need to.</p></div>
-            </div>
-          </section>
+              <div className="calendarIllustration" aria-hidden="true">
+                <span className="illustrationNote calendarNote">Turn conversations<br />into appointments!</span>
+                <div className="miniCalendar">
+                  <div className="miniCalendarHeader"><strong>April 2025</strong><span>○</span></div>
+                  <div className="miniWeek"><span>Mon</span><span>Tue</span><span>Wed</span><span>Thu</span><span>Fri</span></div>
+                  <div className="miniDots">{Array.from({ length: 15 }).map((_, index) => <i key={index} />)}</div>
+                  <div className="miniAppointment"><b>10:00 AM</b><span>Customer Consultation</span></div>
+                  <span className="miniSuccess"><CheckIcon size={17} /></span>
+                  <div className="miniConfirm">Your appointment is confirmed!</div>
+                </div>
+              </div>
+
+              <div className="editableNote calendarEditableNote">
+                <span className="infoBubble"><InfoIcon size={18} /></span>
+                <div><strong>You can change these settings anytime from Settings.</strong><p>Reconnect, add another calendar, or adjust availability whenever you need to.</p></div>
+              </div>
+            </section>
+          )}
         </aside>
       </div>
     </main>
