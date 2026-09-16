@@ -18,6 +18,7 @@ import {
   RocketIcon,
   SparkleIcon,
   StoreIcon,
+  UsersIcon,
 } from "@/components/icons";
 import "./communication.css";
 
@@ -55,6 +56,8 @@ export default function CommunicationSetupPage() {
   const [selectedNumber, setSelectedNumber] = useState(phoneNumbers[0].number);
   const [smsProviderMode, setSmsProviderMode] = useState<"ours" | "byo">("ours");
   const [smsNumberMode, setSmsNumberMode] = useState<"same" | "separate">("same");
+  const [whatsappProviderMode, setWhatsappProviderMode] = useState<"ours" | "byo">("ours");
+  const [whatsappAccountMode, setWhatsappAccountMode] = useState<"new" | "existing">("new");
 
   return (
     <main className="communicationPage">
@@ -217,75 +220,95 @@ export default function CommunicationSetupPage() {
               <div className="smsBlock messagingSettingsBlock">
                 <h3>Messaging settings</h3>
                 <div className="smsSettingsGrid">
-                  <label className="communicationField">
-                    <span>Display business name</span>
-                    <input defaultValue="Brightside Auto Spa" />
-                  </label>
-                  <label className="communicationField">
-                    <span>Reply window</span>
-                    <select defaultValue="Always respond"><option>Always respond</option><option>Business hours only</option><option>After-hours only</option></select>
-                  </label>
-                  <label className="communicationField">
-                    <span>After-hours behavior</span>
-                    <select defaultValue="Auto-reply + collect details"><option>Auto-reply + collect details</option><option>Auto-reply only</option><option>Hold for next business day</option></select>
-                  </label>
-                  <div className="complianceField">
-                    <span className="complianceLabel">Compliance</span>
-                    <div className="compliancePills">
-                      <span><CheckIcon size={13} /> STOP / HELP keywords enabled</span>
-                      <span><CheckIcon size={13} /> Consent reminder included</span>
-                    </div>
-                  </div>
+                  <label className="communicationField"><span>Display business name</span><input defaultValue="Brightside Auto Spa" /></label>
+                  <label className="communicationField"><span>Reply window</span><select defaultValue="Always respond"><option>Always respond</option><option>Business hours only</option><option>After-hours only</option></select></label>
+                  <label className="communicationField"><span>After-hours behavior</span><select defaultValue="Auto-reply + collect details"><option>Auto-reply + collect details</option><option>Auto-reply only</option><option>Hold for next business day</option></select></label>
+                  <div className="complianceField"><span className="complianceLabel">Compliance</span><div className="compliancePills"><span><CheckIcon size={13} /> STOP / HELP keywords enabled</span><span><CheckIcon size={13} /> Consent reminder included</span></div></div>
                 </div>
               </div>
 
               <div className="smsBlock previewBlock">
                 <h3>Conversation preview</h3>
                 <div className="conversationPreview">
-                  <div className="previewMessage customerMessage">
-                    <span className="previewAvatar customerAvatar">●</span>
-                    <div><p>Hi, do you have any openings tomorrow for a full detailing?</p><small>10:14 AM</small></div>
-                  </div>
-                  <div className="previewMessage aiMessage">
-                    <span className="previewAvatar aiAvatar"><LogoMark size={21} /></span>
-                    <div><p>Yes — we have a few openings tomorrow. I can help you book one. What time works best for you?</p><small>10:14 AM</small></div>
-                  </div>
-                  <div className="previewMessage customerMessage">
-                    <span className="previewAvatar customerAvatar">●</span>
-                    <div><p>Around 2pm if possible.</p><small>10:16 AM</small></div>
-                  </div>
-                  <div className="previewMessage aiMessage">
-                    <span className="previewAvatar aiAvatar"><LogoMark size={21} /></span>
-                    <div><p>We have 2:30 PM available. Would you like me to reserve it for you?</p><small>10:16 AM</small></div>
-                  </div>
+                  <div className="previewMessage customerMessage"><span className="previewAvatar customerAvatar">●</span><div><p>Hi, do you have any openings tomorrow for a full detailing?</p><small>10:14 AM</small></div></div>
+                  <div className="previewMessage aiMessage"><span className="previewAvatar aiAvatar"><LogoMark size={21} /></span><div><p>Yes — we have a few openings tomorrow. I can help you book one. What time works best for you?</p><small>10:14 AM</small></div></div>
+                  <div className="previewMessage customerMessage"><span className="previewAvatar customerAvatar">●</span><div><p>Around 2pm if possible.</p><small>10:16 AM</small></div></div>
+                  <div className="previewMessage aiMessage"><span className="previewAvatar aiAvatar"><LogoMark size={21} /></span><div><p>We have 2:30 PM available. Would you like me to reserve it for you?</p><small>10:16 AM</small></div></div>
                 </div>
                 <p className="previewCaption">Your AI will reply instantly, answer questions, and guide customers toward booking.</p>
               </div>
             </section>
           )}
 
-          {(channel === "whatsapp" || channel === "webchat") && (
-            <section className="channelSetupCard alternateChannelCard">
+          {channel === "whatsapp" && (
+            <section className="channelSetupCard whatsappSetupCard">
               <div className="communicationSectionHeading">
-                <span className={`sectionCircle ${channel === "whatsapp" ? "green" : "orange"}`}><MessageIcon size={22} /></span>
-                <div>
-                  <h2>{channel === "whatsapp" ? "WhatsApp Setup" : "Web Chat Setup"}</h2>
-                  <p>{channel === "whatsapp" ? "Connect WhatsApp Business so customers can message your AI on WhatsApp." : "Add the AI chat widget to your website so visitors can get help instantly."}</p>
+                <span className="sectionCircle green"><MessageIcon size={23} /></span>
+                <div><h2>WhatsApp Setup</h2><p>Connect WhatsApp so your AI assistant can chat with your customers on the world&apos;s most popular messaging app.</p></div>
+              </div>
+
+              <div className="whatsappBlock">
+                <h3>Choose how to connect</h3>
+                <div className="choiceGrid providerChoiceGrid whatsappProviderGrid">
+                  <button type="button" className={`choiceCard whatsappChoiceCard ${whatsappProviderMode === "ours" ? "selected" : ""}`} onClick={() => setWhatsappProviderMode("ours")}>
+                    <span className="radioDot" />
+                    <span className="choiceText"><strong>Use our provider (recommended)</strong><small>Quick and easy setup with a verified WhatsApp Business account.</small><em className="officialApiTag">Official WhatsApp Business API</em></span>
+                    <span className="providerBrand metaBrand">∞ Meta</span>
+                  </button>
+                  <button type="button" className={`choiceCard whatsappChoiceCard ${whatsappProviderMode === "byo" ? "selected" : ""}`} onClick={() => setWhatsappProviderMode("byo")}>
+                    <span className="radioDot" />
+                    <span className="choiceText"><strong>Use my own provider (BYO)</strong><small>Connect your existing WhatsApp Business API account.</small><span className="whatsappProviderLogos"><b>twilio</b><b>360dialog</b><b>MessageBird</b></span></span>
+                  </button>
                 </div>
               </div>
-              <div className="alternateChannelBody">
-                <span className={`largeChannelIcon ${channel}`}><MessageIcon size={30} /></span>
-                <div><strong>{channel === "webchat" ? "Website chat is included" : "Choose how you want to connect"}</strong><p>{channel === "webchat" ? "We&apos;ll generate a small embed snippet during the final setup step." : "Use AI Caller credits or bring your own provider credentials. Detailed connection controls will appear here."}</p></div>
+
+              <div className="whatsappBlock">
+                <h3>Connect a WhatsApp Business account</h3>
+                <p>Link your existing WhatsApp Business account or create a new one.</p>
+                <div className="choiceGrid numberChoiceGrid">
+                  <button type="button" className={`choiceCard compact ${whatsappAccountMode === "new" ? "selected" : ""}`} onClick={() => setWhatsappAccountMode("new")}>
+                    <span className="radioDot" />
+                    <span className="choiceText"><strong>Create a new business account</strong><small>We&apos;ll guide you through the WhatsApp Business setup and verification.</small></span>
+                  </button>
+                  <button type="button" className={`choiceCard compact ${whatsappAccountMode === "existing" ? "selected" : ""}`} onClick={() => setWhatsappAccountMode("existing")}>
+                    <span className="radioDot" />
+                    <span className="choiceText"><strong>Connect existing account</strong><small>Use an existing WhatsApp Business account.</small></span>
+                  </button>
+                </div>
               </div>
+
+              <div className="whatsappBlock whatsappBusinessInfo">
+                <h3>Business information</h3>
+                <p>This information will be used for WhatsApp Business verification.</p>
+                <div className="whatsappInfoGrid">
+                  <label className="communicationField"><span>Business name</span><input defaultValue="Brightside Auto Spa" /><small className="fieldCounter">18/100</small></label>
+                  <label className="communicationField"><span>Business category</span><select defaultValue="Automotive Service"><option>Automotive Service</option><option>Professional Services</option><option>Retail</option><option>Health &amp; Beauty</option></select></label>
+                  <label className="communicationField"><span>Website (optional)</span><input type="url" defaultValue="https://www.brightsideautospa.com" /></label>
+                  <label className="communicationField"><span>Business description</span><textarea rows={2} defaultValue="Professional car detailing, washing and ceramic coating services in Miami." /><small className="fieldCounter">72/512</small></label>
+                </div>
+              </div>
+
+              <div className="whatsappBlock whatsappMessagingSettings">
+                <div className="whatsappSettingsHeader"><span className="settingsIcon">⚙</span><div><h3>Messaging settings</h3><p>Control how your AI assistant responds on WhatsApp.</p></div></div>
+                <div className="whatsappSettingsGrid">
+                  <label className="communicationField"><span>Reply window</span><select defaultValue="24 hours (recommended)"><option>24 hours (recommended)</option><option>Business hours only</option><option>Always respond</option></select><small>WhatsApp allows business-initiated messages within 24 hours of a customer&apos;s last message.</small></label>
+                  <label className="communicationField"><span>After-hours behavior</span><select defaultValue="Use AI assistant (recommended)"><option>Use AI assistant (recommended)</option><option>Send away message</option><option>Pause replies</option></select><small>Your AI assistant will continue to respond even outside business hours.</small></label>
+                  <label className="communicationField"><span>Welcome message (optional)</span><textarea rows={3} defaultValue="Hi! 👋 Welcome to Brightside Auto Spa. How can we help you today?" /><small className="fieldCounter">57/250</small></label>
+                </div>
+              </div>
+            </section>
+          )}
+
+          {channel === "webchat" && (
+            <section className="channelSetupCard alternateChannelCard">
+              <div className="communicationSectionHeading"><span className="sectionCircle orange"><MessageIcon size={22} /></span><div><h2>Web Chat Setup</h2><p>Add the AI chat widget to your website so visitors can get help instantly.</p></div></div>
+              <div className="alternateChannelBody"><span className="largeChannelIcon webchat"><MessageIcon size={30} /></span><div><strong>Website chat is included</strong><p>We&apos;ll generate a small embed snippet during the final setup step.</p></div></div>
             </section>
           )}
 
           <div className="communicationFooter">
             <Link className="backLink" href="/setup/ai">←&nbsp;&nbsp;Back to AI setup</Link>
-            <div className="formActions">
-              <button type="button" className="outlineAction">Save for later</button>
-              <Link className="continueAction" href="/setup/calendar">Save &amp; Continue <ChevronRightIcon size={18} /></Link>
-            </div>
+            <div className="formActions"><button type="button" className="outlineAction">Save for later</button><Link className="continueAction" href="/setup/calendar">Save &amp; Continue <ChevronRightIcon size={18} /></Link></div>
           </div>
         </section>
 
@@ -294,14 +317,11 @@ export default function CommunicationSetupPage() {
             <div className="sidebarProgressTop"><h2>Setup progress</h2><span>Estimated setup time: 7 minutes</span></div>
             <div className="sidebarProgressBar communicationProgressBar"><span /></div>
             <div className="sidebarProgressMeta"><span>2 of 6 completed</span><strong>50%</strong></div>
-
             <div className="sidebarSteps communicationSteps">
               {progressSteps.map((step) => (
                 <div className={`sidebarStep ${step.state}`} key={step.number}>
                   <span className="sidebarStepNumber">{step.number}</span>
-                  <span className={`sidebarStepIcon ${step.tone}`}>
-                    {step.state === "complete" ? <CheckIcon size={20} /> : step.icon}
-                  </span>
+                  <span className={`sidebarStepIcon ${step.tone}`}>{step.state === "complete" ? <CheckIcon size={20} /> : step.icon}</span>
                   <div><strong>{step.title}</strong><span>{step.description}</span></div>
                   {step.state === "locked" ? <LockIcon size={15} /> : step.state === "active" ? <ChevronRightIcon size={18} /> : null}
                 </div>
@@ -313,47 +333,43 @@ export default function CommunicationSetupPage() {
             <section className="sidebarCard communicationWhyCard smsWhyCard">
               <h2>Why connect SMS?</h2>
               <p>SMS helps your AI respond instantly, continue conversations after missed calls, confirm appointments, and keep customers updated.</p>
-
               <div className="communicationBenefits smsBenefits">
                 <div className="communicationBenefit"><span className="benefitIcon green"><SparkleIcon size={16} /></span><div><strong>Respond to customer questions instantly</strong><small>Fast, familiar communication</small></div></div>
                 <div className="communicationBenefit"><span className="benefitIcon purple"><PhoneIcon size={16} /></span><div><strong>Recover missed calls with automatic text-back</strong><small>Don&apos;t lose inbound leads</small></div></div>
                 <div className="communicationBenefit"><span className="benefitIcon orange"><CalendarIcon size={16} /></span><div><strong>Send confirmations and reminders</strong><small>Reduce no-shows</small></div></div>
                 <div className="communicationBenefit"><span className="benefitIcon blue"><ClockIcon size={16} /></span><div><strong>Keep the conversation going after hours</strong><small>Capture leads 24/7</small></div></div>
               </div>
-
-              <div className="phoneIllustration smsPhoneIllustration" aria-hidden="true">
-                <span className="illustrationNote communicationNote">Fast replies.<br />More bookings.</span>
-                <div className="phoneDevice smsPhoneDevice"><div className="phoneSpeaker" /><span className="smsPreviewBubble top" /><span className="smsPreviewBubble bottom" /></div>
+              <div className="phoneIllustration smsPhoneIllustration" aria-hidden="true"><span className="illustrationNote communicationNote">Fast replies.<br />More bookings.</span><div className="phoneDevice smsPhoneDevice"><div className="phoneSpeaker" /><span className="smsPreviewBubble top" /><span className="smsPreviewBubble bottom" /></div></div>
+              <div className="editableNote communicationEditableNote"><span className="infoBubble"><InfoIcon size={18} /></span><div><strong>You can add or change channels anytime from Settings.</strong><p>Start with SMS now and connect more later.</p></div></div>
+            </section>
+          ) : channel === "whatsapp" ? (
+            <section className="sidebarCard communicationWhyCard whatsappWhyCard">
+              <h2>Why connect WhatsApp?</h2>
+              <p>Your customers are already on WhatsApp. Let them chat with your AI assistant, get answers, book appointments and more — all from the app they trust.</p>
+              <div className="communicationBenefits whatsappBenefits">
+                <div className="communicationBenefit"><span className="benefitIcon green"><SparkleIcon size={16} /></span><div><strong>Reach more customers</strong><small>Chat with millions of WhatsApp users</small></div></div>
+                <div className="communicationBenefit"><span className="benefitIcon purple"><ClockIcon size={16} /></span><div><strong>Automate responses</strong><small>Answer common questions 24/7</small></div></div>
+                <div className="communicationBenefit"><span className="benefitIcon blue"><CalendarIcon size={16} /></span><div><strong>Book appointments</strong><small>Let customers book directly in chat</small></div></div>
+                <div className="communicationBenefit"><span className="benefitIcon orange"><UsersIcon size={16} /></span><div><strong>Build lasting relationships</strong><small>Provide fast, convenient support</small></div></div>
               </div>
-
-              <div className="editableNote communicationEditableNote">
-                <span className="infoBubble"><InfoIcon size={18} /></span>
-                <div><strong>You can add or change channels anytime from Settings.</strong><p>Start with SMS now and connect more later.</p></div>
+              <div className="whatsappPhoneIllustration" aria-hidden="true">
+                <span className="illustrationNote whatsappNote">Meet your<br />customers where<br />they are.</span>
+                <div className="whatsappPhone"><div className="phoneSpeaker" /><span className="whatsappLogoBubble"><MessageIcon size={23} /></span><span className="waBubble incoming">Hi! Do you offer<br />ceramic coating?</span><span className="waBubble outgoing">Yes! Would you<br />like to book an appointment?</span></div>
               </div>
+              <div className="editableNote communicationEditableNote"><span className="infoBubble"><InfoIcon size={18} /></span><div><strong>You can change these settings anytime from Settings.</strong><p>Add or disconnect channels, update your business information, or configure advanced options at any time.</p></div></div>
             </section>
           ) : (
             <section className="sidebarCard communicationWhyCard">
               <h2>Why connect communication?</h2>
               <p>Your AI assistant will use these channels to talk with your customers, answer questions, and book appointments — 24/7.</p>
-
               <div className="communicationBenefits">
                 <div className="communicationBenefit"><span className="benefitIcon green"><PhoneIcon size={16} /></span><div><strong>Handle inbound customer calls</strong><small>Never miss a customer inquiry</small></div></div>
                 <div className="communicationBenefit"><span className="benefitIcon purple"><MessageIcon size={16} /></span><div><strong>Send and receive text messages</strong><small>Keep customers updated instantly</small></div></div>
                 <div className="communicationBenefit"><span className="benefitIcon green"><MessageIcon size={16} /></span><div><strong>Chat with customers on WhatsApp</strong><small>Meet your customers where they are</small></div></div>
                 <div className="communicationBenefit"><span className="benefitIcon orange"><MessageIcon size={16} /></span><div><strong>Add web chat to your website</strong><small>Let visitors chat with your AI assistant</small></div></div>
               </div>
-
-              <div className="phoneIllustration" aria-hidden="true">
-                <span className="illustrationNote communicationNote">More ways<br />to reach your<br />customers.</span>
-                <div className="phoneDevice"><div className="phoneSpeaker" /><LogoMark size={36} /><PhoneIcon size={26} /></div>
-                <span className="floatingBadge whatsapp"><MessageIcon size={20} /></span>
-                <span className="floatingBadge sms"><MessageIcon size={20} /></span>
-              </div>
-
-              <div className="editableNote communicationEditableNote">
-                <span className="infoBubble"><InfoIcon size={18} /></span>
-                <div><strong>You can add or change channels anytime from Settings.</strong><p>Start with one channel now and connect more later.</p></div>
-              </div>
+              <div className="phoneIllustration" aria-hidden="true"><span className="illustrationNote communicationNote">More ways<br />to reach your<br />customers.</span><div className="phoneDevice"><div className="phoneSpeaker" /><LogoMark size={36} /><PhoneIcon size={26} /></div><span className="floatingBadge whatsapp"><MessageIcon size={20} /></span><span className="floatingBadge sms"><MessageIcon size={20} /></span></div>
+              <div className="editableNote communicationEditableNote"><span className="infoBubble"><InfoIcon size={18} /></span><div><strong>You can add or change channels anytime from Settings.</strong><p>Start with one channel now and connect more later.</p></div></div>
             </section>
           )}
         </aside>
