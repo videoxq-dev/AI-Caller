@@ -30,6 +30,7 @@ type ProgressStep = {
 };
 
 const testNumber = "+1 (555) 123-4567";
+const webChatEmbedCode = '<script src="https://app.aicaller.com/widget.js" data-widget-id="your-widget-id"></script>';
 
 const progressSteps: ProgressStep[] = [
   { number: 1, title: "Add your business", description: "Business details, hours and service area", icon: <StoreIcon size={19} />, state: "complete" },
@@ -57,6 +58,7 @@ export default function TestSetupPage() {
     webchat: "ready",
   });
   const [copied, setCopied] = useState(false);
+  const [copiedEmbed, setCopiedEmbed] = useState(false);
   const [isLive, setIsLive] = useState(false);
 
   const runTest = (key: TestKey) => {
@@ -71,6 +73,16 @@ export default function TestSetupPage() {
       window.setTimeout(() => setCopied(false), 1400);
     } catch {
       setCopied(false);
+    }
+  };
+
+  const copyEmbedCode = async () => {
+    try {
+      await navigator.clipboard.writeText(webChatEmbedCode);
+      setCopiedEmbed(true);
+      window.setTimeout(() => setCopiedEmbed(false), 1400);
+    } catch {
+      setCopiedEmbed(false);
     }
   };
 
@@ -171,6 +183,18 @@ export default function TestSetupPage() {
             status={readyLabel("webchat")}
             statusState={status.webchat}
           >
+            <div className="webChatEmbedBlock">
+              <div className="webChatEmbedHeading">
+                <div><strong>Web chat embed code</strong><small>Paste this snippet just before the closing &lt;/body&gt; tag on your website.</small></div>
+              </div>
+              <div className="webChatEmbedField">
+                <input aria-label="Web chat embed code" readOnly value={webChatEmbedCode} />
+                <button type="button" onClick={copyEmbedCode} aria-label="Copy web chat embed code" title="Copy embed code">
+                  <span className="copyGlyph">⧉</span>
+                  <span>{copiedEmbed ? "Copied" : "Copy"}</span>
+                </button>
+              </div>
+            </div>
             <div className="webChatActions">
               <button type="button" className="primaryTestButton" onClick={() => runTest("webchat")}>Open chat widget ↗</button>
               <button type="button" className="secondaryTestButton" onClick={() => runTest("webchat")}>Preview on your website ↗</button>
