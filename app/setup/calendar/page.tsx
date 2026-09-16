@@ -19,6 +19,7 @@ import {
   StoreIcon,
   UsersIcon,
 } from "@/components/icons";
+import "./shared.css";
 import "./calendar.css";
 
 type CalendarProvider = "google" | "outlook" | "calendly" | "calcom";
