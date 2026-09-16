@@ -1,4 +1,6 @@
+import type { ReactNode } from "react";
 import Link from "next/link";
+import "./welcome.css";
 import {
   CalendarIcon,
   CheckIcon,
@@ -22,7 +24,7 @@ type SetupStep = {
   description: string;
   status: "Not started" | "Locked";
   tone: string;
-  icon: React.ReactNode;
+  icon: ReactNode;
 };
 
 const setupSteps: SetupStep[] = [
