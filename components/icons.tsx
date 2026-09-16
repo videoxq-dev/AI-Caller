@@ -30,3 +30,5 @@ export function GearIcon({ size, ...props }: IconProps) { return <svg {...base(s
 export function InfoIcon({ size, ...props }: IconProps) { return <svg {...base(size)} {...props}><circle cx="12" cy="12" r="9"/><path d="M12 11v5M12 8h.01"/></svg>; }
 export function MapPinIcon({ size, ...props }: IconProps) { return <svg {...base(size)} {...props}><path d="M20 10c0 5-8 12-8 12S4 15 4 10a8 8 0 1 1 16 0Z"/><circle cx="12" cy="10" r="2.5"/></svg>; }
 export function ClockIcon({ size, ...props }: IconProps) { return <svg {...base(size)} {...props}><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg>; }
+export function ShieldIcon({ size, ...props }: IconProps) { return <svg {...base(size)} {...props}><path d="M12 3 19 6v5c0 4.5-2.7 8-7 10-4.3-2-7-5.5-7-10V6l7-3Z"/><path d="m9 12 2 2 4-4"/></svg>; }
+export function LinkIcon({ size, ...props }: IconProps) { return <svg {...base(size)} {...props}><path d="M10 13a5 5 0 0 0 7.07.07l2-2A5 5 0 0 0 12 4l-1.15 1.15"/><path d="M14 11a5 5 0 0 0-7.07-.07l-2 2A5 5 0 0 0 12 20l1.15-1.15"/></svg>; }
