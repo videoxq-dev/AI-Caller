@@ -154,7 +154,7 @@ export default function BusinessProfilePage() {
               <Link className="backLink" href="/welcome">←&nbsp;&nbsp;Back to welcome</Link>
               <div className="formActions">
                 <button type="button" className="outlineAction">Save for later</button>
-                <button type="button" className="continueAction">Save &amp; Continue <ArrowRightIcon size={18} /></button>
+                <Link className="continueAction" href="/setup/ai">Save &amp; Continue <ArrowRightIcon size={18} /></Link>
               </div>
             </div>
           </form>
