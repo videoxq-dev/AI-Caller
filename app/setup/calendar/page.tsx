@@ -21,6 +21,7 @@ import {
 } from "@/components/icons";
 import { OutlookConnectPanel, OutlookWhyCard } from "./outlook-tab";
 import { CalendlyConnectPanel, CalendlySettingsPanel, CalendlyWhyCard } from "./calendly-tab";
+import { CalcomConnectPanel, CalcomSettingsPanel, CalcomWhyCard } from "./calcom-tab";
 import "./shared.css";
 import "./calendar.css";
 
@@ -96,6 +97,8 @@ export default function CalendarSetupPage() {
             <OutlookConnectPanel />
           ) : provider === "calendly" ? (
             <CalendlyConnectPanel />
+          ) : provider === "calcom" ? (
+            <CalcomConnectPanel />
           ) : (
             <>
               <section className="calendarAccessBanner">
@@ -126,6 +129,8 @@ export default function CalendarSetupPage() {
 
           {provider === "calendly" ? (
             <CalendlySettingsPanel />
+          ) : provider === "calcom" ? (
+            <CalcomSettingsPanel />
           ) : (
             <section className="calendarSettingsSection">
               <div className="calendarSectionTitle">
@@ -216,6 +221,8 @@ export default function CalendarSetupPage() {
             <OutlookWhyCard />
           ) : provider === "calendly" ? (
             <CalendlyWhyCard />
+          ) : provider === "calcom" ? (
+            <CalcomWhyCard />
           ) : (
             <section className="sidebarCard calendarWhyCard">
               <h2>Why connect your calendar?</h2>
