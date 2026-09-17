@@ -1,5 +1,6 @@
+import { getEnv } from "@/server/env";
 import { decryptIntegrationCredentials, type EncryptedSecretEnvelope } from "@/server/security/secrets";
-import { getPrivateIntegration } from "@/server/domain/integrations/repository";
+import { getCommunicationSetup, getPrivateIntegration } from "@/server/domain/integrations/repository";
 import { normalizePhone } from "@/server/domain/core/schemas";
 import { resolveProviderRoute } from "../resolver";
 import type { SMSProvider } from "../contracts";
@@ -11,9 +12,9 @@ export type SmsProviderName = "telnyx" | "twilio" | "plivo";
 
 export type SmsRuntime = {
   workspaceId: string;
-  mode: "BYOP";
+  mode: "HOSTED" | "BYOP";
   providerName: SmsProviderName;
-  integrationId: string;
+  integrationId: string | null;
   senderNumber: string;
   provider: SMSProvider;
 };
@@ -31,6 +32,78 @@ function credentials(envelope: Record<string, unknown> | null): CredentialMap {
   return decryptIntegrationCredentials<CredentialMap>(envelope as EncryptedSecretEnvelope);
 }
 
+function createProvider(provider: SmsProviderName, secret: Record<string, unknown>, settings: Record<string, unknown>, fetcher: typeof fetch) {
+  switch (provider) {
+    case "twilio":
+      return createTwilioSmsProvider({
+        accountSid: required(secret, "sid", "Twilio Account SID"),
+        authToken: required(secret, "authToken", "Twilio Auth Token"),
+        fetcher,
+      });
+    case "plivo":
+      return createPlivoSmsProvider({
+        authId: required(secret, "authId", "Plivo Auth ID"),
+        authToken: required(secret, "authToken", "Plivo Auth Token"),
+        fetcher,
+      });
+    case "telnyx":
+      return createTelnyxSmsProvider({
+        apiKey: required(secret, "apiKey", "Telnyx API key"),
+        webhookPublicKey: typeof settings.webhookPublicKey === "string" && settings.webhookPublicKey.trim()
+          ? settings.webhookPublicKey
+          : required(secret, "webhookPublicKey", "Telnyx webhook public key"),
+        fetcher,
+      });
+  }
+}
+
+async function hostedSenderNumber(workspaceId: string) {
+  const setup = await getCommunicationSetup(workspaceId) as {
+    voice?: { number?: unknown };
+    sms?: { number?: unknown };
+  } | null;
+  const smsNumber = setup?.sms?.number;
+  const voiceNumber = setup?.voice?.number;
+  const selected = typeof smsNumber === "string" && smsNumber.trim()
+    ? smsNumber
+    : typeof voiceNumber === "string" && voiceNumber.trim()
+      ? voiceNumber
+      : null;
+  if (!selected) throw new Error("A hosted SMS sender number has not been assigned to this workspace.");
+  return normalizePhone(selected);
+}
+
+function hostedProviderConfig(provider: SmsProviderName) {
+  const env = getEnv();
+  switch (provider) {
+    case "twilio":
+      return {
+        secret: {
+          sid: env.HOSTED_SMS_TWILIO_ACCOUNT_SID,
+          authToken: env.HOSTED_SMS_TWILIO_AUTH_TOKEN,
+        },
+        settings: {},
+      };
+    case "plivo":
+      return {
+        secret: {
+          authId: env.HOSTED_SMS_PLIVO_AUTH_ID,
+          authToken: env.HOSTED_SMS_PLIVO_AUTH_TOKEN,
+        },
+        settings: {},
+      };
+    case "telnyx":
+      return {
+        secret: {
+          apiKey: env.HOSTED_SMS_TELNYX_API_KEY,
+        },
+        settings: {
+          webhookPublicKey: env.HOSTED_SMS_TELNYX_WEBHOOK_PUBLIC_KEY,
+        },
+      };
+  }
+}
+
 export async function resolveSmsRuntime(
   workspaceId: string,
   requestedProvider: SmsProviderName,
@@ -38,7 +111,21 @@ export async function resolveSmsRuntime(
 ): Promise<SmsRuntime> {
   const route = await resolveProviderRoute(workspaceId, "SMS");
   if (!route) throw new Error("No SMS provider route is configured for this workspace.");
-  if (route.mode !== "BYOP") throw new Error("Hosted SMS routing is not configured yet.");
+
+  if (route.mode === "HOSTED") {
+    const providerName = getEnv().HOSTED_SMS_PROVIDER;
+    if (requestedProvider !== providerName) throw new Error("The webhook provider is not the active hosted SMS provider.");
+    const config = hostedProviderConfig(providerName);
+    return {
+      workspaceId,
+      mode: "HOSTED",
+      providerName,
+      integrationId: null,
+      senderNumber: await hostedSenderNumber(workspaceId),
+      provider: createProvider(providerName, config.secret, config.settings, fetcher),
+    };
+  }
+
   if (route.provider !== requestedProvider) throw new Error("The webhook provider is not the active SMS provider for this workspace.");
   if (!route.integrationId) throw new Error("The active SMS integration is missing.");
 
@@ -55,39 +142,12 @@ export async function resolveSmsRuntime(
       : required(secret, "phone", "SMS phone number"),
   );
 
-  let provider: SMSProvider;
-  switch (requestedProvider) {
-    case "twilio":
-      provider = createTwilioSmsProvider({
-        accountSid: required(secret, "sid", "Twilio Account SID"),
-        authToken: required(secret, "authToken", "Twilio Auth Token"),
-        fetcher,
-      });
-      break;
-    case "plivo":
-      provider = createPlivoSmsProvider({
-        authId: required(secret, "authId", "Plivo Auth ID"),
-        authToken: required(secret, "authToken", "Plivo Auth Token"),
-        fetcher,
-      });
-      break;
-    case "telnyx":
-      provider = createTelnyxSmsProvider({
-        apiKey: required(secret, "apiKey", "Telnyx API key"),
-        webhookPublicKey: typeof settings.webhookPublicKey === "string" && settings.webhookPublicKey.trim()
-          ? settings.webhookPublicKey
-          : required(secret, "webhookPublicKey", "Telnyx webhook public key"),
-        fetcher,
-      });
-      break;
-  }
-
   return {
     workspaceId,
     mode: "BYOP",
     providerName: requestedProvider,
     integrationId: route.integrationId,
     senderNumber,
-    provider,
+    provider: createProvider(requestedProvider, secret, settings, fetcher),
   };
 }
