@@ -1,6 +1,6 @@
 import { afterAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { closeDatabase, db } from "@/db";
-import { contactIdentities, creditWallets, messages, usageEvents, workspaces } from "@/db/schema";
+import { contactIdentities, creditWallets, messages, providerWebhookEvents, usageEvents, workspaces } from "@/db/schema";
 import type { SmsInboundResponseJob } from "@/server/jobs/queues";
 import type { NormalizedSmsEvent, SMSProvider } from "@/server/providers/contracts";
 import { ProviderRequestError } from "@/server/providers/http";
@@ -104,6 +104,33 @@ describe("SMS webhook service", () => {
     expect(identities[0].normalizedValue).toBe("+12025550100");
   });
 
+  it("requeues safe worker failures so pg-boss retries can process the SMS", async () => {
+    const send = vi.fn(async () => ({ externalId: "msg-out-retry", status: "QUEUED" as const }));
+    const provider: SMSProvider = {
+      send,
+      verifyWebhook: vi.fn(async () => true),
+      normalizeWebhook: vi.fn(async () => [inboundEvent("worker-retry", "+12025550104")]),
+    };
+    const runtime = runtimeFor(workspaceId, provider);
+    let attempt = 0;
+    const respond = vi.fn(async () => {
+      attempt += 1;
+      if (attempt === 1) throw new Error("temporary orchestrator failure");
+      return orchestratorReply("Recovered");
+    });
+    const { service, jobs } = serviceHarness(runtime, respond);
+
+    await service.ingest(request(), workspaceId, "twilio");
+    await expect(service.processInboundJob(jobs[0])).rejects.toThrow("temporary orchestrator failure");
+    expect((await db.select().from(providerWebhookEvents))[0].status).toBe("QUEUED");
+
+    await expect(service.processInboundJob(jobs[0])).resolves.toMatchObject({ replied: true });
+    expect(respond).toHaveBeenCalledTimes(2);
+    expect(send).toHaveBeenCalledTimes(1);
+    expect(await db.select().from(messages)).toHaveLength(2);
+    expect((await db.select().from(providerWebhookEvents))[0].status).toBe("PROCESSED");
+  });
+
   it("reconciles delivery callbacks onto the existing outbound message", async () => {
     const send = vi.fn(async () => ({ externalId: "msg-out-2", status: "QUEUED" as const }));
     let normalized: NormalizedSmsEvent[] = [inboundEvent("in-2", "+12025550101")];
@@ -169,6 +196,7 @@ describe("SMS webhook service", () => {
     await expect(service.processInboundJob(jobs.shift()!)).rejects.toThrow("Rejected");
     expect((await db.select().from(creditWallets))[0].balance).toBe(5);
     expect((await db.select().from(messages)).find((message) => message.direction === "OUTBOUND")?.status).toBe("FAILED");
+    expect((await db.select().from(providerWebhookEvents))[0].status).toBe("FAILED");
 
     currentEvent = inboundEvent("hosted-unknown", "+12025550103");
     send.mockImplementation(async () => { throw new ProviderRequestError("Timeout", 504); });
@@ -179,5 +207,6 @@ describe("SMS webhook service", () => {
     expect(outbound.at(-1)?.status).toBe("SEND_UNKNOWN");
     const usage = await db.select().from(usageEvents);
     expect(usage.at(-1)).toMatchObject({ mode: "HOSTED", creditsCharged: 1 });
+    expect((await db.select().from(providerWebhookEvents)).at(-1)?.status).toBe("FAILED");
   });
 });
