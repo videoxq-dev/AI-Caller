@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   appointmentInputSchema,
   contactInputSchema,
+  conversationTimelineQuerySchema,
   handlingModeInputSchema,
   messageInputSchema,
 } from "./schemas";
@@ -56,5 +57,11 @@ describe("core domain schemas", () => {
   it("accepts human takeover and return-to-AI modes", () => {
     expect(handlingModeInputSchema.parse({ mode: "HUMAN" })).toEqual({ mode: "HUMAN" });
     expect(handlingModeInputSchema.parse({ mode: "AI" })).toEqual({ mode: "AI" });
+  });
+
+  it("bounds conversation timeline pagination", () => {
+    expect(conversationTimelineQuerySchema.parse({})).toEqual({ limit: 100, offset: 0 });
+    expect(conversationTimelineQuerySchema.parse({ limit: "200", offset: "10" })).toEqual({ limit: 200, offset: 10 });
+    expect(conversationTimelineQuerySchema.safeParse({ limit: "201" }).success).toBe(false);
   });
 });
