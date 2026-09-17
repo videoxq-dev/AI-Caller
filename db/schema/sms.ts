@@ -15,7 +15,7 @@ export const providerWebhookEvents = pgTable(
     processedAt: timestamp("processed_at", { withTimezone: true, mode: "date" }),
   },
   (table) => [
-    uniqueIndex("provider_webhook_events_provider_external_uq").on(table.provider, table.externalEventId),
+    uniqueIndex("provider_webhook_events_workspace_provider_external_uq").on(table.workspaceId, table.provider, table.externalEventId),
     index("provider_webhook_events_workspace_received_idx").on(table.workspaceId, table.receivedAt),
     index("provider_webhook_events_workspace_status_idx").on(table.workspaceId, table.status),
   ],
