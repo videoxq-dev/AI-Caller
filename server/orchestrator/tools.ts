@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { calendarBookingService } from "@/server/domain/core/calendar-booking";
+import { updateContactProfile } from "@/server/domain/core/contact-profile";
 import {
   appendMessage,
   getContactDetail,
@@ -48,6 +49,11 @@ export const orchestratorActionSchema = z.discriminatedUnion("type", [
 
 export const orchestratorEnvelopeSchema = z.object({
   reply: z.string().trim().min(1).max(5000).optional(),
+  contact: z.object({
+    name: z.string().trim().min(1).max(200).optional(),
+    email: z.string().trim().email().max(320).transform((value) => value.toLowerCase()).optional(),
+    phone: z.string().trim().min(1).max(50).optional(),
+  }).optional(),
   lead: z.object({
     status: z.enum(["NEW", "QUALIFIED"]).optional(),
     intent: optionalShortText,
@@ -122,6 +128,7 @@ export async function executeOrchestratorTools(
   contactId: string,
   envelope: OrchestratorEnvelope,
 ): Promise<OrchestratorToolResult> {
+  if (envelope.contact) await updateContactProfile(workspaceId, contactId, envelope.contact);
   if (envelope.lead) await updateLeadFromEnvelope(workspaceId, contactId, envelope.lead);
 
   if (envelope.action.type === "NONE") return { kind: "none", data: {} };
