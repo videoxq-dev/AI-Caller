@@ -44,6 +44,13 @@ export async function POST(request: Request) {
     if (claim.state === "in_progress") {
       throw new AppError("WEBCHAT_TURN_IN_PROGRESS", "This message is already being processed.", 409);
     }
+    if (claim.state === "failed") {
+      throw new AppError(
+        "WEBCHAT_TURN_FAILED",
+        "This message was not automatically retried because the previous processing result is uncertain. Send a new message if you still need help.",
+        409,
+      );
+    }
 
     const stream = new ReadableStream<Uint8Array>({
       async start(controller) {
