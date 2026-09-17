@@ -65,8 +65,8 @@ const settingKeys: Record<string, readonly string[]> = {
 
 const defaultSettingsByProvider: Record<string, Record<string, unknown>> = {
   openai: { model: "gpt-5.6" },
-  gemini: { model: "gemini-2.5-flash" },
-  openrouter: { model: "openai/gpt-5.6" },
+  gemini: { model: "gemini-3.8-flash" },
+  openrouter: { model: "openai/gpt-5.6-sol" },
 };
 
 function filterCredentials(provider: string, credentials: Record<string, string>) {
