@@ -37,17 +37,29 @@ describe("provider webhook persistence", () => {
     expect(rows[0].status).toBe("RECEIVED");
   });
 
-  it("allows only one worker to claim a queued event", async () => {
+  it("allows only one queue transition and one worker claim", async () => {
     const claim = await claimProviderWebhookEvent(workspaceId, {
       provider: "twilio",
       externalEventId: "SM-queued",
       payload: {},
     });
-    await markProviderWebhookQueued(workspaceId, claim.eventId);
+    const payload = {
+      workspaceId,
+      provider: "twilio",
+      webhookEventId: claim.eventId,
+      externalMessageId: "SM-queued",
+      customerNumber: "+12025550100",
+      destinationNumber: "+12025550200",
+      text: "Hello",
+    };
+    const transitions = await Promise.all(Array.from({ length: 8 }, () => markProviderWebhookQueued(workspaceId, claim.eventId, payload)));
+    expect(transitions.filter(Boolean)).toHaveLength(1);
+
     const workers = await Promise.all(Array.from({ length: 8 }, () => claimQueuedProviderWebhookEvent(workspaceId, claim.eventId)));
     expect(workers.filter(Boolean)).toHaveLength(1);
     const [stored] = await db.select().from(providerWebhookEvents);
     expect(stored.status).toBe("PROCESSING");
+    expect(stored.payload).toMatchObject({ externalMessageId: "SM-queued", text: "Hello" });
   });
 
   it("records terminal processed and failed states", async () => {
