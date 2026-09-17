@@ -73,6 +73,17 @@ export async function attachSmsProviderMessage(
   return updated;
 }
 
+export async function markSmsSendFailure(workspaceId: string, messageId: string, status: "FAILED" | "SEND_UNKNOWN", error: unknown) {
+  const message = error instanceof Error ? error.message : "SMS provider send failed.";
+  const [existing] = await db.select().from(messages).where(and(eq(messages.workspaceId, workspaceId), eq(messages.id, messageId))).limit(1);
+  if (!existing) throw new AppError("MESSAGE_NOT_FOUND", "SMS message not found.", 404);
+  const [updated] = await db.update(messages).set({
+    status,
+    metadata: { ...existing.metadata, sendError: message.slice(0, 500) },
+  }).where(and(eq(messages.workspaceId, workspaceId), eq(messages.id, messageId))).returning();
+  return updated;
+}
+
 const DELIVERY_RANK: Record<SmsDeliveryStatus, number> = { QUEUED: 1, SENT: 2, DELIVERED: 3, FAILED: 4 };
 
 export async function updateSmsDeliveryStatus(
