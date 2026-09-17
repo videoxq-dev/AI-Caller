@@ -3,6 +3,7 @@ import { db } from "@/db";
 import { usageEvents } from "@/db/schema";
 import { debitCredits, refundCredits } from "@/server/credits/service";
 import { getEnv } from "@/server/env";
+import { logger } from "@/server/observability/logger";
 import { resolveAIProvider } from "@/server/providers/registry";
 import { resolveProviderRoute } from "@/server/providers/resolver";
 import type { AIProvider } from "@/server/providers/contracts";
@@ -51,16 +52,23 @@ export async function generateAIWithUsage(
     throw error;
   }
 
-  await db.insert(usageEvents).values({
-    workspaceId,
-    capability: "AI_TEXT",
-    provider: providerName,
-    mode: route.mode,
-    providerUsage: providerUsage(response.raw),
-    creditsCharged: hostedCredits,
-    referenceType: "CONVERSATION",
-    referenceId,
-  });
+  try {
+    await db.insert(usageEvents).values({
+      workspaceId,
+      capability: "AI_TEXT",
+      provider: providerName,
+      mode: route.mode,
+      providerUsage: providerUsage(response.raw),
+      creditsCharged: hostedCredits,
+      referenceType: "CONVERSATION",
+      referenceId,
+    });
+  } catch (error) {
+    logger.error(
+      { err: error, workspaceId, referenceId, callId, provider: providerName, mode: route.mode },
+      "Failed to persist AI usage after successful provider call",
+    );
+  }
 
   return response;
 }
