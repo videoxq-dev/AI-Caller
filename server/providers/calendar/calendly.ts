@@ -72,7 +72,7 @@ export class CalendlyCalendarProvider implements CalendarProvider {
     return { externalId, startsAt: input.startsAt, endsAt: input.endsAt };
   }
 
-  async reschedule(_input: { externalId: string; startsAt: Date; endsAt: Date; timezone: string }) {
+  async reschedule(_input: { externalId: string; startsAt: Date; endsAt: Date; timezone: string }): Promise<{ externalId: string; startsAt: Date; endsAt: Date }> {
     throw new Error("Calendly does not expose direct API rescheduling. Use its invitee reschedule URL or cancel and rebook explicitly.");
   }
 

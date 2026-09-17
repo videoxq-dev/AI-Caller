@@ -1,8 +1,8 @@
 import { getEnv } from "@/server/env";
 import { decryptIntegrationCredentials, type EncryptedSecretEnvelope } from "@/server/security/secrets";
-import type { AIProvider } from "../contracts";
-import { providerJson } from "../http";
-import type { PrivateIntegration } from "../connections";
+import type { AIProvider } from "./contracts";
+import { providerJson } from "./http";
+import type { PrivateIntegration } from "./connections";
 
 type Credentials = Record<string, string>;
 type Message = { role: "system" | "user" | "assistant"; content: string };
@@ -11,8 +11,9 @@ type OpenAICompatibleResponse = {
   choices?: Array<{ message?: { content?: string } }>;
 };
 
+type GeminiPart = { text?: string };
 type GeminiResponse = {
-  candidates?: Array<{ content?: { parts?: Array<{ text?: string }> } }>;
+  candidates?: Array<{ content?: { parts?: GeminiPart[] } }>;
 };
 
 function decryptCredentials(input: PrivateIntegration) {
@@ -88,7 +89,7 @@ class GeminiProvider implements AIProvider {
       this.fetcher,
     );
 
-    const text = response.candidates?.[0]?.content?.parts?.map((part) => part.text ?? "").join("").trim();
+    const text = response.candidates?.[0]?.content?.parts?.map((part: GeminiPart) => part.text ?? "").join("").trim();
     if (!text) throw new Error("Gemini returned an empty response.");
     return { text, raw: response };
   }
