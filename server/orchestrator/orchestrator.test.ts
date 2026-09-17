@@ -47,6 +47,27 @@ describe("orchestrator response protocol", () => {
     });
   });
 
+  it("rejects malformed or invalid structured actions instead of exposing raw JSON", () => {
+    expect(() => parseOrchestratorEnvelope('{"action":{"type":"BOOK_APPOINTMENT"}}')).toThrow("invalid orchestration action");
+    expect(() => parseOrchestratorEnvelope(JSON.stringify({
+      action: {
+        type: "BOOK_APPOINTMENT",
+        startsAt: "2026-09-18T11:00:00Z",
+        endsAt: "2026-09-18T10:00:00Z",
+        timezone: "UTC",
+        title: "Consultation",
+      },
+    }))).toThrow("invalid orchestration action");
+    expect(() => parseOrchestratorEnvelope(JSON.stringify({
+      action: {
+        type: "CHECK_AVAILABILITY",
+        startsAt: "2026-09-18T09:00:00Z",
+        endsAt: "2026-09-18T17:00:00Z",
+        timezone: "Definitely/Not-A-Timezone",
+      },
+    }))).toThrow("invalid orchestration action");
+  });
+
   it("does not invoke AI while a human owns the conversation", async () => {
     const generate = vi.fn();
     const orchestrator = createResponseOrchestrator({
