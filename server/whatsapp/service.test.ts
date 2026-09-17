@@ -74,12 +74,16 @@ function runtimeFor(workspaceId: string, provider: WhatsAppProvider): WhatsAppRu
   };
 }
 
-function harness(runtime: WhatsAppRuntime, respond: () => Promise<ReturnType<typeof orchestratorReply>>) {
+function harness(
+  runtime: WhatsAppRuntime,
+  respond: () => Promise<ReturnType<typeof orchestratorReply>>,
+  options: { resolveForWorkspace?: (workspaceId: string) => Promise<WhatsAppRuntime> } = {},
+) {
   const jobs: WhatsAppInboundResponseJob[] = [];
   const outbound = createWhatsAppOutboundService({ resolveRuntime: async () => runtime });
   const service = createWhatsAppWebhookService({
     resolveByPhoneNumberId: async () => runtime,
-    resolveForWorkspace: async () => runtime,
+    resolveForWorkspace: options.resolveForWorkspace ?? (async () => runtime),
     respond: async () => respond(),
     sendText: (workspaceId, conversationId, input) => outbound.sendText(workspaceId, conversationId, input),
     enqueueResponseJob: async (job) => {
@@ -158,7 +162,7 @@ describe("WhatsApp webhook service", () => {
     expect(outbound?.status).toBe("READ");
   });
 
-  it("requeues pre-send failures so the worker can safely retry", async () => {
+  it("requeues failures that happen before orchestration begins", async () => {
     const sendText = vi.fn(async () => ({ externalId: "wamid.retry-out", status: "SENT" as const }));
     const provider: WhatsAppProvider = {
       sendText,
@@ -167,19 +171,41 @@ describe("WhatsApp webhook service", () => {
       normalizeWebhook: vi.fn(async () => []),
     };
     const runtime = runtimeFor(workspaceId, provider);
-    let attempt = 0;
-    const respond = vi.fn(async () => {
-      attempt += 1;
-      if (attempt === 1) throw new Error("temporary orchestrator failure");
-      return orchestratorReply("Recovered");
+    const respond = vi.fn(async () => orchestratorReply("Recovered"));
+    let resolveAttempt = 0;
+    const resolveForWorkspace = vi.fn(async () => {
+      resolveAttempt += 1;
+      if (resolveAttempt === 1) throw new Error("temporary runtime failure");
+      return runtime;
     });
-    const { service, jobs } = harness(runtime, respond);
+    const { service, jobs } = harness(runtime, respond, { resolveForWorkspace });
 
     await service.ingest(signedRequest(inboundPayload("wamid.retry", "15551234569")));
-    await expect(service.processInboundJob(jobs[0])).rejects.toThrow("temporary orchestrator failure");
+    await expect(service.processInboundJob(jobs[0])).rejects.toThrow("temporary runtime failure");
     expect((await db.select().from(providerWebhookEvents))[0].status).toBe("QUEUED");
     await expect(service.processInboundJob(jobs[0])).resolves.toMatchObject({ replied: true });
+    expect(respond).toHaveBeenCalledTimes(1);
     expect(sendText).toHaveBeenCalledTimes(1);
     expect((await db.select().from(providerWebhookEvents))[0].status).toBe("PROCESSED");
+  });
+
+  it("fails closed once orchestration begins so retries cannot replay calendar/provider tools", async () => {
+    const sendText = vi.fn(async () => ({ externalId: "wamid.should-not-send", status: "SENT" as const }));
+    const provider: WhatsAppProvider = {
+      sendText,
+      sendTemplate: vi.fn(async () => ({ externalId: "wamid.template", status: "SENT" as const })),
+      verifyWebhook: vi.fn(async () => true),
+      normalizeWebhook: vi.fn(async () => []),
+    };
+    const runtime = runtimeFor(workspaceId, provider);
+    const respond = vi.fn(async () => { throw new Error("orchestrator failed after starting"); });
+    const { service, jobs } = harness(runtime, respond);
+
+    await service.ingest(signedRequest(inboundPayload("wamid.fail-closed", "15551234570")));
+    await expect(service.processInboundJob(jobs[0])).rejects.toThrow("orchestrator failed after starting");
+    expect((await db.select().from(providerWebhookEvents))[0].status).toBe("FAILED");
+    await expect(service.processInboundJob(jobs[0])).resolves.toEqual({ skipped: true });
+    expect(respond).toHaveBeenCalledTimes(1);
+    expect(sendText).not.toHaveBeenCalled();
   });
 });
