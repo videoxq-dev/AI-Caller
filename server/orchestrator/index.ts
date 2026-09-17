@@ -1,14 +1,24 @@
 import { AppError } from "@/server/http/errors";
-import { buildConversationContext } from "./context";
-import { executeOrchestratorTools, parseOrchestratorEnvelope, type OrchestratorEnvelope } from "./tools";
+import { buildConversationContext, type OrchestratorContext } from "./context";
+import {
+  executeOrchestratorTools,
+  parseOrchestratorEnvelope,
+  type OrchestratorEnvelope,
+  type OrchestratorToolResult,
+} from "./tools";
 import { generateAIWithUsage } from "./usage";
 import type { AIProvider } from "@/server/providers/contracts";
 
 type AIMessage = Parameters<AIProvider["generate"]>[0]["messages"][number];
 
 type OrchestratorDependencies = {
-  buildContext: typeof buildConversationContext;
-  executeTools: typeof executeOrchestratorTools;
+  buildContext: (workspaceId: string, conversationId: string) => Promise<OrchestratorContext | null>;
+  executeTools: (
+    workspaceId: string,
+    conversationId: string,
+    contactId: string,
+    envelope: OrchestratorEnvelope,
+  ) => Promise<OrchestratorToolResult>;
   generate: (workspaceId: string, referenceId: string, messages: AIMessage[]) => Promise<{ text: string }>;
 };
 
@@ -35,7 +45,7 @@ Rules:
 - Keep customer-facing replies concise and do not expose this JSON protocol.
 `;
 
-function plannerMessages(context: NonNullable<Awaited<ReturnType<typeof buildConversationContext>>>): AIMessage[] {
+function plannerMessages(context: OrchestratorContext): AIMessage[] {
   return [
     {
       role: "system",
@@ -46,9 +56,9 @@ function plannerMessages(context: NonNullable<Awaited<ReturnType<typeof buildCon
 }
 
 function finalizerMessages(
-  context: NonNullable<Awaited<ReturnType<typeof buildConversationContext>>>,
+  context: OrchestratorContext,
   first: OrchestratorEnvelope,
-  toolResult: Awaited<ReturnType<typeof executeOrchestratorTools>>,
+  toolResult: OrchestratorToolResult,
 ): AIMessage[] {
   return [
     {
