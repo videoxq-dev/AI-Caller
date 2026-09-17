@@ -21,8 +21,6 @@ type OutboundDependencies = {
   resolveRuntime: (workspaceId: string) => Promise<WhatsAppRuntime>;
 };
 
-type ProviderAttemptHook = () => void;
-
 function whatsappText(value: string) {
   const text = value.trim();
   if (!text) throw new AppError("EMPTY_WHATSAPP_MESSAGE", "WhatsApp message cannot be empty.", 400);
@@ -88,7 +86,7 @@ export function createWhatsAppOutboundService(dependencies: OutboundDependencies
     async sendText(
       workspaceId: string,
       conversationId: string,
-      input: { senderType: "AI" | "USER"; text: string; beforeProviderSend?: ProviderAttemptHook },
+      input: { senderType: "AI" | "USER"; text: string },
     ) {
       const conversation = await conversationState(workspaceId, conversationId);
       if (input.senderType === "USER" && conversation.handlingMode !== "HUMAN") {
@@ -114,7 +112,6 @@ export function createWhatsAppOutboundService(dependencies: OutboundDependencies
       });
 
       try {
-        input.beforeProviderSend?.();
         const sent = await runtime.provider.sendText({ phoneNumberId: runtime.phoneNumberId, to, text });
         const updated = await attachWhatsAppProviderMessage(workspaceId, outbound.id, sent.externalId, sent.status);
         await reconcileDeliveryAfterConfirmedSend(workspaceId, sent.externalId);
@@ -136,7 +133,6 @@ export function createWhatsAppOutboundService(dependencies: OutboundDependencies
         templateName: string;
         languageCode: string;
         components?: unknown[];
-        beforeProviderSend?: ProviderAttemptHook;
       },
     ) {
       const conversation = await conversationState(workspaceId, conversationId);
@@ -159,7 +155,6 @@ export function createWhatsAppOutboundService(dependencies: OutboundDependencies
       });
 
       try {
-        input.beforeProviderSend?.();
         const sent = await runtime.provider.sendTemplate({
           phoneNumberId: runtime.phoneNumberId,
           to,
@@ -186,7 +181,7 @@ export const whatsAppOutboundService = createWhatsAppOutboundService({ resolveRu
 export function sendWhatsAppConversationText(
   workspaceId: string,
   conversationId: string,
-  input: { senderType: "AI" | "USER"; text: string; beforeProviderSend?: ProviderAttemptHook },
+  input: { senderType: "AI" | "USER"; text: string },
 ) {
   return whatsAppOutboundService.sendText(workspaceId, conversationId, input);
 }
@@ -199,7 +194,6 @@ export function sendWhatsAppConversationTemplate(
     templateName: string;
     languageCode: string;
     components?: unknown[];
-    beforeProviderSend?: ProviderAttemptHook;
   },
 ) {
   return whatsAppOutboundService.sendTemplate(workspaceId, conversationId, input);
