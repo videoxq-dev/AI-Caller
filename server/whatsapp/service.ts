@@ -78,6 +78,8 @@ function safeEventPayload(event: NormalizedWhatsAppEvent) {
         externalMessageId: event.externalMessageId,
         phoneNumberId: event.phoneNumberId,
         status: event.status,
+        error: event.error,
+        occurredAt: event.occurredAt?.toISOString() ?? null,
       };
 }
 
