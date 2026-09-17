@@ -21,8 +21,10 @@ export const smsInboundResponseJobSchema = z.object({
   workspaceId: z.string().uuid(),
   provider: z.enum(["telnyx", "twilio", "plivo"]),
   webhookEventId: z.string().uuid(),
-  conversationId: z.string().uuid(),
+  externalMessageId: z.string().min(1).max(500),
   customerNumber: z.string().min(1).max(80),
+  destinationNumber: z.string().min(1).max(80),
+  text: z.string().min(1).max(10_000),
 });
 
 export type PasswordResetEmailJob = z.infer<typeof passwordResetEmailJobSchema>;
