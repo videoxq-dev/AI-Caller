@@ -51,6 +51,13 @@ const SUCCESS_RANK: Record<Exclude<WhatsAppDeliveryStatus, "FAILED">, number> = 
 
 const DELIVERY_STATUSES = new Set<WhatsAppDeliveryStatus>(["SENT", "DELIVERED", "READ", "FAILED"]);
 
+function metadataDate(metadata: Record<string, unknown>, key: string) {
+  const value = metadata[key];
+  if (typeof value !== "string") return null;
+  const parsed = new Date(value);
+  return Number.isNaN(parsed.getTime()) ? null : parsed;
+}
+
 export async function updateWhatsAppDeliveryStatus(
   workspaceId: string,
   externalMessageId: string,
@@ -66,6 +73,9 @@ export async function updateWhatsAppDeliveryStatus(
   if (!existing) return null;
 
   const current = existing.status as WhatsAppDeliveryStatus | "SEND_UNKNOWN" | null;
+  const currentOccurredAt = metadataDate(existing.metadata, "whatsappStatusAt");
+  if (occurredAt && currentOccurredAt && occurredAt < currentOccurredAt) return existing;
+
   const currentSuccessRank = current && current in SUCCESS_RANK
     ? SUCCESS_RANK[current as keyof typeof SUCCESS_RANK]
     : null;
@@ -141,10 +151,7 @@ export async function getWhatsAppConversationRecipient(workspaceId: string, conv
 }
 
 function providerOccurredAt(metadata: Record<string, unknown>, fallback: Date) {
-  const value = metadata.occurredAt;
-  if (typeof value !== "string") return fallback;
-  const parsed = new Date(value);
-  return Number.isNaN(parsed.getTime()) ? fallback : parsed;
+  return metadataDate(metadata, "occurredAt") ?? fallback;
 }
 
 export async function latestWhatsAppInboundAt(workspaceId: string, conversationId: string) {
