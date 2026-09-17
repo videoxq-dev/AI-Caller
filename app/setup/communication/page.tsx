@@ -42,8 +42,6 @@ export default function CommunicationSetupPage() {
   const [displayName, setDisplayName] = useState("");
   const [replyWindow, setReplyWindow] = useState("Always respond");
   const [afterHoursBehavior, setAfterHoursBehavior] = useState("Auto-reply + collect details");
-  const [whatsappMode, setWhatsappMode] = useState<Mode>("HOSTED");
-  const [whatsappAccountMode, setWhatsappAccountMode] = useState<"new" | "existing">("existing");
   const [integrations, setIntegrations] = useState<IntegrationSummary[]>([]);
   const [saving, setSaving] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
@@ -68,15 +66,12 @@ export default function CommunicationSetupPage() {
         setReplyWindow(saved.sms.replyWindow ?? "Always respond");
         setAfterHoursBehavior(saved.sms.afterHoursBehavior ?? "Auto-reply + collect details");
       }
-      if (saved?.whatsapp) {
-        setWhatsappMode(saved.whatsapp.mode ?? "HOSTED");
-        setWhatsappAccountMode(saved.whatsapp.accountMode ?? "existing");
-      }
       if (Array.isArray(integrationPayload?.integrations)) setIntegrations(integrationPayload.integrations);
     }).catch(() => undefined);
   }, []);
 
   const connected = useMemo(() => new Set(integrations.filter((item) => item.status === "CONNECTED").map((item) => item.provider)), [integrations]);
+  const whatsappConnected = connected.has("whatsapp");
 
   async function save(completeStep: boolean) {
     setSaving(true);
@@ -88,7 +83,7 @@ export default function CommunicationSetupPage() {
         body: JSON.stringify({
           voice: { mode: voiceMode, provider: voiceMode === "BYOP" ? voiceProvider : null, numberMode, number: selectedNumber },
           sms: { mode: smsMode, provider: smsMode === "BYOP" ? smsProvider : null, numberMode: smsNumberMode, displayName, replyWindow, afterHoursBehavior },
-          whatsapp: { mode: whatsappMode, provider: whatsappMode === "BYOP" ? "whatsapp" : null, accountMode: whatsappAccountMode },
+          whatsapp: { mode: "BYOP", provider: "whatsapp", accountMode: "existing" },
           webchat: { enabled: true },
           completeStep,
         }),
@@ -117,13 +112,13 @@ export default function CommunicationSetupPage() {
             <span className="stepBadge">STEP 3 OF 6</span>
             <h1>Connect your communication channels</h1>
             <p>Link the channels your AI assistant will use to talk with your customers.</p>
-            <span className="introHelper">Hosted channels use AI Caller credits. BYOP channels use credentials saved in Integrations.</span>
+            <span className="introHelper">Hosted voice and SMS use AI Caller credits. BYOP providers and your Meta WhatsApp connection are shared with Integrations.</span>
           </div>
 
           <div className="channelTabs" role="tablist" aria-label="Communication channels">
             <button className={channel === "phone" ? "active" : ""} onClick={() => setChannel("phone")} type="button"><span className="channelTabIcon blue"><PhoneIcon size={21} /></span><span><strong>Phone &amp; Voice</strong><small>Receive inbound calls</small></span></button>
             <button className={channel === "sms" ? "active" : ""} onClick={() => setChannel("sms")} type="button"><span className="channelTabIcon purple"><MessageIcon size={20} /></span><span><strong>SMS</strong><small>Send text messages</small></span></button>
-            <button className={channel === "whatsapp" ? "active" : ""} onClick={() => setChannel("whatsapp")} type="button"><span className="channelTabIcon green"><MessageIcon size={20} /></span><span><strong>WhatsApp</strong><small>Chat with customers</small></span></button>
+            <button className={channel === "whatsapp" ? "active" : ""} onClick={() => setChannel("whatsapp")} type="button"><span className="channelTabIcon green"><MessageIcon size={20} /></span><span><strong>WhatsApp</strong><small>Connect with Meta</small></span></button>
             <button className={channel === "webchat" ? "active" : ""} onClick={() => setChannel("webchat")} type="button"><span className="channelTabIcon orange"><MessageIcon size={20} /></span><span><strong>Web Chat</strong><small>Add to your website</small></span></button>
           </div>
 
@@ -142,7 +137,7 @@ export default function CommunicationSetupPage() {
                   <button type="button" className={`choiceCard compact ${numberMode === "new" ? "selected" : ""}`} onClick={() => setNumberMode("new")}><span className="radioDot" /><span className="choiceText"><strong>Get a new number</strong><small>Choose an available hosted number</small></span></button>
                   <button type="button" className={`choiceCard compact ${numberMode === "existing" ? "selected" : ""}`} onClick={() => setNumberMode("existing")}><span className="radioDot" /><span className="choiceText"><strong>Use existing number</strong><small>Use a number from your provider account</small></span></button>
                 </div>
-                {numberMode === "new" ? <div className="availableNumbers"><h3>Available numbers</h3><div className="phoneNumberList">{phoneNumbers.map((item) => <button key={item.number} type="button" className={`phoneNumberRow ${selectedNumber === item.number ? "selected" : ""}`} onClick={() => setSelectedNumber(item.number)}><span className="radioDot" /><strong>{item.number}</strong><span className="localTag">Local</span><span className="locationTag">{item.location}</span><b>Free</b></button>)}</div></div> : <div className="existingNumberEmpty"><PhoneIcon size={24} /><div><strong>{voiceMode === "BYOP" && connected.has(voiceProvider) ? "Your connected provider will supply the number" : "Connect your provider first"}</strong><span>Provider numbers will be synchronized in the provider integration milestone.</span></div></div>}
+                {numberMode === "new" ? <div className="availableNumbers"><h3>Available numbers</h3><div className="phoneNumberList">{phoneNumbers.map((item) => <button key={item.number} type="button" className={`phoneNumberRow ${selectedNumber === item.number ? "selected" : ""}`} onClick={() => setSelectedNumber(item.number)}><span className="radioDot" /><strong>{item.number}</strong><span className="localTag">Local</span><span className="locationTag">{item.location}</span><b>Free</b></button>)}</div></div> : <div className="existingNumberEmpty"><PhoneIcon size={24} /><div><strong>{voiceMode === "BYOP" && connected.has(voiceProvider) ? "Your connected provider will supply the number" : "Connect your provider first"}</strong><span>Provider numbers will be synchronized when live channel transport is enabled.</span></div></div>}
               </div>
             </section>
           )}
@@ -162,10 +157,15 @@ export default function CommunicationSetupPage() {
 
           {channel === "whatsapp" && (
             <section className="channelSetupCard whatsappSetupCard">
-              <div className="communicationSectionHeading"><span className="sectionCircle green"><MessageIcon size={23} /></span><div><h2>WhatsApp Setup</h2><p>Use hosted WhatsApp or connect the official Meta WhatsApp Cloud API.</p></div></div>
-              <div className="whatsappBlock"><h3>Choose how to connect</h3><div className="choiceGrid providerChoiceGrid whatsappProviderGrid"><button type="button" className={`choiceCard whatsappChoiceCard ${whatsappMode === "HOSTED" ? "selected" : ""}`} onClick={() => setWhatsappMode("HOSTED")}><span className="radioDot" /><span className="choiceText"><strong>Use our provider</strong><small>Use hosted WhatsApp with AI Caller credits.</small></span><span className="providerBrand metaBrand">∞ Meta</span></button><button type="button" className={`choiceCard whatsappChoiceCard ${whatsappMode === "BYOP" ? "selected" : ""}`} onClick={() => setWhatsappMode("BYOP")}><span className="radioDot" /><span className="choiceText"><strong>Use Meta WhatsApp Cloud API (BYOP)</strong><small>Use credentials from your Meta Business account.</small></span><span className="providerBrand metaBrand">∞ Meta</span></button></div></div>
-              {whatsappMode === "BYOP" && <div className="existingNumberEmpty"><MessageIcon size={24} /><div><strong>{connected.has("whatsapp") ? "Meta WhatsApp is connected" : "Connect your Meta credentials"}</strong><span>Your permanent token and account IDs are stored securely in Integrations.</span></div><Link className="outlineAction" href="/integrations?provider=whatsapp&return=%2Fsetup%2Fcommunication">{connected.has("whatsapp") ? "Manage" : "Connect"}</Link></div>}
-              <div className="whatsappBlock"><h3>Business account</h3><div className="choiceGrid numberChoiceGrid"><button type="button" className={`choiceCard compact ${whatsappAccountMode === "new" ? "selected" : ""}`} onClick={() => setWhatsappAccountMode("new")}><span className="radioDot" /><span className="choiceText"><strong>Create a new business account</strong><small>Configure a new WhatsApp Business account.</small></span></button><button type="button" className={`choiceCard compact ${whatsappAccountMode === "existing" ? "selected" : ""}`} onClick={() => setWhatsappAccountMode("existing")}><span className="radioDot" /><span className="choiceText"><strong>Connect existing account</strong><small>Use your existing Meta WhatsApp Business account.</small></span></button></div></div>
+              <div className="communicationSectionHeading"><span className="sectionCircle green"><MessageIcon size={23} /></span><div><h2>WhatsApp Setup</h2><p>Connect your business directly through AI Caller&apos;s approved Meta Tech Provider app.</p></div></div>
+              <div className="whatsappBlock">
+                <h3>Meta Embedded Signup</h3>
+                <div className="existingNumberEmpty"><MessageIcon size={24} /><div><strong>{whatsappConnected ? "WhatsApp Business is connected" : "Connect WhatsApp with Meta"}</strong><span>{whatsappConnected ? "Your Meta business assets are authorized and ready for this workspace." : "Sign in with Meta to select or create your business portfolio, WhatsApp Business Account and phone number. No API keys need to be copied into AI Caller."}</span></div><Link className="outlineAction" href="/integrations?provider=whatsapp&return=%2Fsetup%2Fcommunication">{whatsappConnected ? "Manage" : "Connect with Meta"}</Link></div>
+              </div>
+              <div className="whatsappBlock">
+                <h3>How the connection works</h3>
+                <div className="compliancePills"><span><CheckIcon size={13} /> Official Meta Cloud API</span><span><CheckIcon size={13} /> Customer-owned WhatsApp assets</span><span><CheckIcon size={13} /> Access token encrypted server-side</span><span><CheckIcon size={13} /> Webhook subscription handled automatically</span></div>
+              </div>
             </section>
           )}
 
@@ -177,7 +177,7 @@ export default function CommunicationSetupPage() {
 
         <aside className="communicationSidebar">
           <SetupProgressPanel currentStep={3} estimated="7 minutes" className="sidebarCard communicationProgressCard" progressClassName="sidebarProgressBar communicationProgressBar" />
-          {channel === "webchat" ? <WebChatSidebar /> : <section className="sidebarCard communicationWhyCard"><h2>One setup, one routing layer</h2><p>Your choices are now persisted as capability bindings. Voice, SMS and WhatsApp can each use hosted credits or a connected BYOP provider.</p><div className="communicationBenefits"><div className="communicationBenefit"><span className="benefitIcon green"><CheckIcon size={16} /></span><div><strong>Provider-independent</strong><small>Switch providers without changing your conversation logic.</small></div></div><div className="communicationBenefit"><span className="benefitIcon blue"><PhoneIcon size={16} /></span><div><strong>Inbound voice only</strong><small>Voice setup remains aligned with the MVP boundary.</small></div></div></div></section>}
+          {channel === "webchat" ? <WebChatSidebar /> : <section className="sidebarCard communicationWhyCard"><h2>One setup, one routing layer</h2><p>Voice and SMS can use hosted or BYOP routing. WhatsApp connects directly through Meta Embedded Signup and is stored as the workspace&apos;s WhatsApp capability.</p><div className="communicationBenefits"><div className="communicationBenefit"><span className="benefitIcon green"><CheckIcon size={16} /></span><div><strong>Provider-independent</strong><small>Switch voice or SMS providers without changing conversation logic.</small></div></div><div className="communicationBenefit"><span className="benefitIcon blue"><PhoneIcon size={16} /></span><div><strong>Inbound voice only</strong><small>Voice setup remains aligned with the MVP boundary.</small></div></div></div></section>}
         </aside>
       </div>
     </main>
