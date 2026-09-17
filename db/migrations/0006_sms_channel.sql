@@ -3,7 +3,7 @@ CREATE TABLE "provider_webhook_events" (
   "workspace_id" uuid NOT NULL REFERENCES "workspaces"("id") ON DELETE CASCADE,
   "provider" text NOT NULL,
   "external_event_id" text NOT NULL,
-  "status" text DEFAULT 'PROCESSING' NOT NULL,
+  "status" text DEFAULT 'RECEIVED' NOT NULL,
   "payload" jsonb DEFAULT '{}'::jsonb NOT NULL,
   "error" text,
   "received_at" timestamptz DEFAULT now() NOT NULL,
