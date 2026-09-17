@@ -51,7 +51,7 @@ describe("core domain persistence", () => {
       name: "Concurrent Contact",
     })));
 
-    expect(new Set(contacts.map((contact) => contact.id))).toHaveSize(1);
+    expect(new Set(contacts.map((contact) => contact.id)).size).toBe(1);
   });
 
   it("keeps SMS and WhatsApp events in one conversation timeline", async () => {
@@ -71,7 +71,7 @@ describe("core domain persistence", () => {
     const [first] = openConversations;
 
     expect(first).toBeDefined();
-    expect(new Set(openConversations.map((conversation) => conversation.id))).toHaveSize(1);
+    expect(new Set(openConversations.map((conversation) => conversation.id)).size).toBe(1);
 
     await appendMessage(workspaceId, first.id, {
       channel: "SMS",
