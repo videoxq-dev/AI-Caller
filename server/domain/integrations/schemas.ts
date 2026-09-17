@@ -47,6 +47,7 @@ export const communicationSetupSchema = z.object({
   }),
   sms: channelBindingSchema.extend({
     numberMode: z.enum(["same", "separate"]).default("same"),
+    number: z.string().nullable().optional(),
     displayName: z.string().max(100).default(""),
     replyWindow: z.string().default("Always respond"),
     afterHoursBehavior: z.string().default("Auto-reply + collect details"),
@@ -67,6 +68,19 @@ export const communicationSetupSchema = z.object({
       }
     } else if (channel.provider != null) {
       ctx.addIssue({ code: "custom", path: [field, "provider"], message: "Hosted voice and SMS must not specify a BYOP provider." });
+    }
+  }
+
+  if (input.completeStep && input.sms.mode === "HOSTED") {
+    const number = input.sms.numberMode === "separate" ? input.sms.number : input.voice.number;
+    if (!number?.trim()) {
+      ctx.addIssue({
+        code: "custom",
+        path: ["sms", "number"],
+        message: input.sms.numberMode === "separate"
+          ? "Assign a dedicated SMS number before completing setup."
+          : "Choose a business phone number before completing hosted SMS setup.",
+      });
     }
   }
 
