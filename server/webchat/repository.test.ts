@@ -105,4 +105,30 @@ describe("web chat persistence", () => {
     const [stored] = await db.select().from(webchatTurns).where(eq(webchatTurns.id, staleClaim.turnId));
     expect(stored.status).toBe("FAILED");
   });
+
+  it("rate limits anonymous session creation per workspace", async () => {
+    for (let index = 0; index < 40; index += 1) {
+      const session = await createOrResumeWebchatSession({ widgetKey });
+      expect(session).not.toBeNull();
+    }
+    await expect(createOrResumeWebchatSession({ widgetKey })).rejects.toMatchObject({
+      code: "WEBCHAT_RATE_LIMITED",
+      status: 429,
+    });
+  });
+
+  it("rate limits new message turns per session", async () => {
+    const session = await createOrResumeWebchatSession({ widgetKey });
+    expect(session).not.toBeNull();
+    if (!session) throw new Error("Expected a web chat session.");
+
+    for (let index = 0; index < 30; index += 1) {
+      const id = `20000000-0000-4000-8000-${String(index).padStart(12, "0")}`;
+      expect((await claimWebchatTurn(workspaceId, session.sessionId, id)).state).toBe("claimed");
+    }
+    await expect(claimWebchatTurn(workspaceId, session.sessionId, "20000000-0000-4000-8000-999999999999")).rejects.toMatchObject({
+      code: "WEBCHAT_RATE_LIMITED",
+      status: 429,
+    });
+  });
 });
