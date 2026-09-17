@@ -3,8 +3,10 @@ import { closeDatabase, db } from "@/db";
 import { providerWebhookEvents, workspaces } from "@/db/schema";
 import {
   claimProviderWebhookEvent,
+  claimQueuedProviderWebhookEvent,
   completeProviderWebhookEvent,
   failProviderWebhookEvent,
+  markProviderWebhookQueued,
 } from "./repository";
 
 describe("provider webhook persistence", () => {
@@ -32,7 +34,20 @@ describe("provider webhook persistence", () => {
 
     const rows = await db.select().from(providerWebhookEvents);
     expect(rows).toHaveLength(1);
-    expect(rows[0].status).toBe("PROCESSING");
+    expect(rows[0].status).toBe("RECEIVED");
+  });
+
+  it("allows only one worker to claim a queued event", async () => {
+    const claim = await claimProviderWebhookEvent(workspaceId, {
+      provider: "twilio",
+      externalEventId: "SM-queued",
+      payload: {},
+    });
+    await markProviderWebhookQueued(workspaceId, claim.eventId);
+    const workers = await Promise.all(Array.from({ length: 8 }, () => claimQueuedProviderWebhookEvent(workspaceId, claim.eventId)));
+    expect(workers.filter(Boolean)).toHaveLength(1);
+    const [stored] = await db.select().from(providerWebhookEvents);
+    expect(stored.status).toBe("PROCESSING");
   });
 
   it("records terminal processed and failed states", async () => {
