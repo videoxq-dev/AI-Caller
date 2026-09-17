@@ -9,7 +9,7 @@ type TelnyxConfig = {
   fetcher?: typeof fetch;
 };
 
-function telnyxPublicKey(value: string) {
+export function parseTelnyxWebhookPublicKey(value: string) {
   const trimmed = requiredString(value, "Telnyx webhook public key");
   if (trimmed.includes("BEGIN PUBLIC KEY")) return createPublicKey(trimmed);
   const raw = Buffer.from(trimmed, "base64");
@@ -25,7 +25,7 @@ function asRecord(value: unknown): Record<string, unknown> | null {
 export function createTelnyxSmsProvider(config: TelnyxConfig): SMSProvider {
   const fetcher = config.fetcher ?? fetch;
   const apiKey = requiredString(config.apiKey, "Telnyx API key");
-  const publicKey = telnyxPublicKey(config.webhookPublicKey);
+  const publicKey = parseTelnyxWebhookPublicKey(config.webhookPublicKey);
 
   return {
     async send(input) {
