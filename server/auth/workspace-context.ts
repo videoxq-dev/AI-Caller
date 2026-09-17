@@ -5,9 +5,7 @@ import { ensureDefaultWorkspace, getPrimaryMembership } from "./workspace-reposi
 export async function resolveWorkspaceContext(requestHeaders: Headers) {
   const session = await auth.api.getSession({ headers: requestHeaders });
 
-  if (!session) {
-    throw new AppError("UNAUTHORIZED", "You must be signed in.", 401);
-  }
+  if (!session) throw new AppError("UNAUTHORIZED", "You must be signed in.", 401);
 
   let membership = await getPrimaryMembership(session.user.id);
   if (!membership) {
@@ -18,6 +16,10 @@ export async function resolveWorkspaceContext(requestHeaders: Headers) {
     });
   }
 
+  if (membership.workspaceStatus === "SUSPENDED") {
+    throw new AppError("WORKSPACE_SUSPENDED", "This workspace is suspended.", 403);
+  }
+
   return {
     session,
     workspace: {
@@ -25,8 +27,6 @@ export async function resolveWorkspaceContext(requestHeaders: Headers) {
       name: membership.workspaceName,
       status: membership.workspaceStatus,
     },
-    membership: {
-      role: membership.role,
-    },
+    membership: { role: membership.role },
   };
 }

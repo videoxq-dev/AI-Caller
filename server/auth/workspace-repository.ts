@@ -25,7 +25,7 @@ export async function getPrimaryMembership(userId: string): Promise<WorkspaceMem
     })
     .from(memberships)
     .innerJoin(workspaces, eq(memberships.workspaceId, workspaces.id))
-    .where(and(eq(memberships.userId, userId), eq(workspaces.status, "ACTIVE")))
+    .where(eq(memberships.userId, userId))
     .orderBy(asc(memberships.createdAt))
     .limit(1);
 
@@ -46,7 +46,7 @@ export async function ensureDefaultWorkspace(user: WorkspaceUser): Promise<Works
       })
       .from(memberships)
       .innerJoin(workspaces, eq(memberships.workspaceId, workspaces.id))
-      .where(and(eq(memberships.userId, user.id), eq(workspaces.status, "ACTIVE")))
+      .where(eq(memberships.userId, user.id))
       .orderBy(asc(memberships.createdAt))
       .limit(1);
 
