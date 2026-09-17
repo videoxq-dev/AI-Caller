@@ -169,6 +169,12 @@ async function verifyDesktop() {
   await waitForText(page, "Please confirm the appointment by SMS too.");
   for (const channel of ["Web Chat", "WhatsApp", "SMS"]) await page.getByText(channel, { exact: true }).first().waitFor({ state: "visible" });
 
+  const channelFilter = page.getByLabel("Channel filter");
+  await channelFilter.selectOption("PHONE");
+  await waitForText(page, "No conversations match this channel.");
+  await channelFilter.selectOption("ALL");
+  await waitForText(page, "Browser QA Contact");
+
   await page.getByRole("button", { name: "Human takeover" }).click();
   await page.getByRole("button", { name: "Return to AI" }).waitFor({ state: "visible" });
   const timelineData = await request(context, "GET", `/api/conversations/${conversationId}`, undefined, "read conversation after takeover");
