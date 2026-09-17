@@ -23,18 +23,15 @@ export async function claimProviderWebhookEvent(workspaceId: string, input: Prov
 
   const [existing] = await db.select({
     id: providerWebhookEvents.id,
-    workspaceId: providerWebhookEvents.workspaceId,
     status: providerWebhookEvents.status,
     payload: providerWebhookEvents.payload,
   }).from(providerWebhookEvents).where(and(
+    eq(providerWebhookEvents.workspaceId, workspaceId),
     eq(providerWebhookEvents.provider, input.provider),
     eq(providerWebhookEvents.externalEventId, input.externalEventId),
   )).limit(1);
 
   if (!existing) throw new AppError("WEBHOOK_CONFLICT", "The provider webhook could not be claimed.", 409);
-  if (existing.workspaceId !== workspaceId) {
-    throw new AppError("WEBHOOK_WORKSPACE_MISMATCH", "The provider webhook does not belong to this workspace.", 409);
-  }
   return { state: "duplicate" as const, eventId: existing.id, status: existing.status, payload: existing.payload };
 }
 
