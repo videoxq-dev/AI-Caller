@@ -19,15 +19,30 @@ export async function GET(request: Request, { params }: { params: Promise<{ prov
     const { provider: rawProvider } = await params;
     if (rawProvider !== "google" && rawProvider !== "outlook") throw new Error("Unsupported OAuth provider.");
     provider = rawProvider;
+
     const url = new URL(request.url);
     const stateValue = url.searchParams.get("state");
-    const code = url.searchParams.get("code");
-    if (!stateValue || !code) throw new Error(url.searchParams.get("error_description") ?? "Calendar authorization was not completed.");
+    if (!stateValue) throw new Error("Calendar authorization state is missing.");
+
     const state = verifyOAuthState(stateValue);
     returnTo = state.returnTo;
-    if (state.provider !== rawProvider || state.workspaceId !== context.workspace.id) throw new Error("OAuth authorization does not match this workspace.");
+    if (state.provider !== rawProvider || state.workspaceId !== context.workspace.id) {
+      throw new Error("OAuth authorization does not match this workspace.");
+    }
+
+    const code = url.searchParams.get("code");
+    if (!code) {
+      throw new Error(url.searchParams.get("error_description") ?? "Calendar authorization was not completed.");
+    }
+
     const result = await exchangeOAuthCode(rawProvider as OAuthProviderId, code);
-    await saveVerifiedIntegration(context.workspace.id, { provider: rawProvider as OAuthProviderId, category: "CALENDAR", mode: "BYOP", credentials: result.credentials, settings: result.settings });
+    await saveVerifiedIntegration(context.workspace.id, {
+      provider: rawProvider as OAuthProviderId,
+      category: "CALENDAR",
+      mode: "BYOP",
+      credentials: result.credentials,
+      settings: result.settings,
+    });
     return redirectWithStatus(returnTo, rawProvider, "connected");
   } catch (error) {
     return redirectWithStatus(returnTo, provider, "error", error instanceof Error ? error.message : "Calendar connection failed.");
