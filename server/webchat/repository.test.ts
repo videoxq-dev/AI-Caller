@@ -1,3 +1,4 @@
+import { eq } from "drizzle-orm";
 import { afterAll, beforeEach, describe, expect, it } from "vitest";
 import { closeDatabase, db } from "@/db";
 import { webchatTurns, workspaces } from "@/db/schema";
@@ -72,7 +73,7 @@ describe("web chat persistence", () => {
 
     await db.update(webchatTurns)
       .set({ updatedAt: new Date(Date.now() - 3 * 60 * 1000) })
-      .where((table, { eq }) => eq(table.id, first.turnId));
+      .where(eq(webchatTurns.id, first.turnId));
 
     const reclaimed = await claimWebchatTurn(workspaceId, session.sessionId, clientMessageId);
     expect(reclaimed.state).toBe("claimed");
