@@ -93,6 +93,50 @@ describe("WhatsApp delivery reconciliation", () => {
     await expect(getWhatsAppConversationRecipient(workspaceId, conversationId)).resolves.toBe("15551110001");
   });
 
+  it("uses provider event time when delayed inbound messages arrive out of order", async () => {
+    await db.insert(contactIdentities).values({
+      workspaceId,
+      contactId,
+      channel: "WHATSAPP",
+      externalId: "15551110001",
+      normalizedValue: "+15551110001",
+    });
+    const newerProviderTime = new Date("2026-09-17T20:10:00.000Z");
+    const olderProviderTime = new Date("2026-09-17T19:10:00.000Z");
+    await db.insert(messages).values([
+      {
+        workspaceId,
+        conversationId,
+        channel: "WHATSAPP",
+        direction: "INBOUND",
+        senderType: "CUSTOMER",
+        contentType: "TEXT",
+        body: "Newer provider event",
+        provider: "whatsapp",
+        externalMessageId: "wamid.provider-newer",
+        status: "RECEIVED",
+        metadata: { whatsappWaId: "15551110000", occurredAt: newerProviderTime.toISOString() },
+        createdAt: new Date("2026-09-17T20:10:01.000Z"),
+      },
+      {
+        workspaceId,
+        conversationId,
+        channel: "WHATSAPP",
+        direction: "INBOUND",
+        senderType: "CUSTOMER",
+        contentType: "TEXT",
+        body: "Older provider event processed later",
+        provider: "whatsapp",
+        externalMessageId: "wamid.provider-older",
+        status: "RECEIVED",
+        metadata: { whatsappWaId: "15551110001", occurredAt: olderProviderTime.toISOString() },
+        createdAt: new Date("2026-09-17T20:10:02.000Z"),
+      },
+    ]);
+
+    await expect(getWhatsAppConversationRecipient(workspaceId, conversationId)).resolves.toBe("15551110000");
+  });
+
   it("fails safe instead of choosing an arbitrary legacy identity when multiple WhatsApp identities exist", async () => {
     await db.insert(contactIdentities).values({
       workspaceId,
