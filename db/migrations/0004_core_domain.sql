@@ -69,6 +69,7 @@ CREATE TABLE "conversations" (
 );
 CREATE INDEX "conversations_workspace_activity_idx" ON "conversations" ("workspace_id", "last_message_at");
 CREATE INDEX "conversations_contact_status_idx" ON "conversations" ("contact_id", "status");
+CREATE UNIQUE INDEX "conversations_one_open_per_contact_uq" ON "conversations" ("workspace_id", "contact_id") WHERE "status" = 'OPEN';
 
 CREATE TABLE "messages" (
   "id" uuid PRIMARY KEY DEFAULT gen_random_uuid() NOT NULL,
