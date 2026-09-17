@@ -8,7 +8,7 @@ export const providerWebhookEvents = pgTable(
     workspaceId: uuid("workspace_id").notNull().references(() => workspaces.id, { onDelete: "cascade" }),
     provider: text("provider").notNull(),
     externalEventId: text("external_event_id").notNull(),
-    status: text("status").default("PROCESSING").notNull(),
+    status: text("status").default("RECEIVED").notNull(),
     payload: jsonb("payload").$type<Record<string, unknown>>().default({}).notNull(),
     error: text("error"),
     receivedAt: timestamp("received_at", { withTimezone: true, mode: "date" }).defaultNow().notNull(),
