@@ -23,18 +23,29 @@ function callbackUrl(provider: string, workspaceId: string) {
 export async function GET(request: Request) {
   try {
     const context = await resolveWorkspaceContext(request.headers);
+    const requestedProvider = providerSchema.safeParse(new URL(request.url).searchParams.get("provider"));
     const route = await resolveProviderRoute(context.workspace.id, "SMS");
-    if (!route) return Response.json({ configured: false, mode: null, provider: null, webhookUrl: null });
+    const activeProvider = route
+      ? route.mode === "HOSTED" ? getEnv().HOSTED_SMS_PROVIDER : providerSchema.parse(route.provider)
+      : null;
+    const provider = requestedProvider.success ? requestedProvider.data : activeProvider;
+    if (!provider) return Response.json({ configured: false, mode: null, provider: null, webhookUrl: null });
 
-    const provider = route.mode === "HOSTED" ? getEnv().HOSTED_SMS_PROVIDER : providerSchema.parse(route.provider);
+    const integration = await getPrivateIntegration(context.workspace.id, provider);
+    const settings = integration?.settings && typeof integration.settings === "object"
+      ? integration.settings as Record<string, unknown>
+      : {};
+    const active = activeProvider === provider;
+    const hosted = active && route?.mode === "HOSTED";
+
     return Response.json({
-      configured: true,
-      mode: route.mode,
+      configured: active,
+      mode: active ? route?.mode ?? null : null,
       provider,
       webhookUrl: callbackUrl(provider, context.workspace.id),
-      senderNumber: typeof route.settings.phone === "string" ? route.settings.phone : null,
+      senderNumber: typeof settings.phone === "string" ? settings.phone : null,
       webhookPublicKeyConfigured: provider === "telnyx"
-        ? (route.mode === "HOSTED" ? Boolean(getEnv().HOSTED_SMS_TELNYX_WEBHOOK_PUBLIC_KEY) : Boolean(route.settings.webhookPublicKey))
+        ? (hosted ? Boolean(getEnv().HOSTED_SMS_TELNYX_WEBHOOK_PUBLIC_KEY) : Boolean(settings.webhookPublicKey))
         : null,
     });
   } catch (error) {
@@ -46,13 +57,9 @@ export async function PUT(request: Request) {
   try {
     const context = await resolveWorkspaceContext(request.headers);
     const input = parseInput(updateSchema, await request.json());
-    const route = await resolveProviderRoute(context.workspace.id, "SMS");
-    if (!route || route.mode !== "BYOP" || route.provider !== input.provider) {
-      throw new AppError("SMS_ROUTE_MISMATCH", "Configure the active BYOP SMS provider before updating webhook settings.", 409);
-    }
     const integration = await getPrivateIntegration(context.workspace.id, input.provider);
-    if (!integration || integration.id !== route.integrationId || integration.status !== "CONNECTED") {
-      throw new AppError("SMS_INTEGRATION_NOT_CONNECTED", "The active SMS integration is not connected.", 409);
+    if (!integration || integration.status !== "CONNECTED") {
+      throw new AppError("SMS_INTEGRATION_NOT_CONNECTED", "The SMS integration must be connected before updating webhook settings.", 409);
     }
     if (input.webhookPublicKey !== undefined && input.provider !== "telnyx") {
       throw new AppError("BAD_REQUEST", "Only Telnyx uses a configured Ed25519 webhook public key.", 400);
