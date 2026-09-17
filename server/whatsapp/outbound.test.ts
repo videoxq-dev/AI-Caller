@@ -48,7 +48,9 @@ describe("WhatsApp outbound service", () => {
     await closeDatabase();
   });
 
-  async function addInbound(createdAt = new Date()) {
+  async function addInbound(options: { createdAt?: Date; occurredAt?: Date } = {}) {
+    const createdAt = options.createdAt ?? new Date();
+    const occurredAt = options.occurredAt ?? createdAt;
     await db.insert(messages).values({
       workspaceId,
       conversationId,
@@ -58,9 +60,9 @@ describe("WhatsApp outbound service", () => {
       contentType: "TEXT",
       body: "Hello",
       provider: "whatsapp",
-      externalMessageId: `wamid.in.${createdAt.getTime()}`,
+      externalMessageId: `wamid.in.${createdAt.getTime()}.${occurredAt.getTime()}`,
       status: "RECEIVED",
-      metadata: {},
+      metadata: { occurredAt: occurredAt.toISOString() },
       createdAt,
     });
   }
@@ -82,8 +84,19 @@ describe("WhatsApp outbound service", () => {
     expect(provider.sendText).toHaveBeenCalledTimes(1);
   });
 
+  it("uses the provider event timestamp for the 24-hour customer window", async () => {
+    await addInbound({ createdAt: new Date(), occurredAt: new Date(Date.now() - 25 * 60 * 60 * 1000) });
+    await setConversationHandlingMode(workspaceId, conversationId, "HUMAN", null);
+    const service = createWhatsAppOutboundService({ resolveRuntime: async () => runtime });
+
+    await expect(service.sendText(workspaceId, conversationId, { senderType: "USER", text: "Checking in" }))
+      .rejects.toMatchObject({ code: "WHATSAPP_TEMPLATE_REQUIRED" });
+    expect(provider.sendText).not.toHaveBeenCalled();
+  });
+
   it("blocks free-form text outside 24 hours but allows an approved template path", async () => {
-    await addInbound(new Date(Date.now() - 25 * 60 * 60 * 1000));
+    const old = new Date(Date.now() - 25 * 60 * 60 * 1000);
+    await addInbound({ createdAt: old, occurredAt: old });
     await setConversationHandlingMode(workspaceId, conversationId, "HUMAN", null);
     const service = createWhatsAppOutboundService({ resolveRuntime: async () => runtime });
 
