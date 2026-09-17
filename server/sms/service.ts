@@ -20,6 +20,7 @@ import {
   failProviderWebhookEvent,
   markProviderWebhookQueued,
   markSmsSendFailure,
+  releaseProviderWebhookEventForRetry,
   updateSmsDeliveryStatus,
 } from "./repository";
 
@@ -264,6 +265,7 @@ export function createSmsWebhookService(dependencies: SmsServiceDependencies) {
       const claimed = await claimQueuedProviderWebhookEvent(job.workspaceId, job.webhookEventId);
       if (!claimed) return { skipped: true as const };
 
+      let terminalFailure = false;
       try {
         const runtime = await dependencies.resolveRuntime(job.workspaceId, job.provider);
         if (job.destinationNumber !== runtime.senderNumber) {
@@ -307,10 +309,12 @@ export function createSmsWebhookService(dependencies: SmsServiceDependencies) {
         try {
           reservedCredits = await reserveHostedSmsCredits(job.workspaceId, runtime, outbound.id);
         } catch (error) {
+          terminalFailure = true;
           await markSmsSendFailure(job.workspaceId, outbound.id, "FAILED", error);
           throw error;
         }
 
+        terminalFailure = true;
         try {
           const sent = await runtime.provider.send({
             to: job.customerNumber,
@@ -335,7 +339,11 @@ export function createSmsWebhookService(dependencies: SmsServiceDependencies) {
         await completeProviderWebhookEvent(job.workspaceId, job.webhookEventId);
         return { skipped: false as const, replied: true as const, messageId: outbound.id };
       } catch (error) {
-        await failProviderWebhookEvent(job.workspaceId, job.webhookEventId, error);
+        if (terminalFailure) {
+          await failProviderWebhookEvent(job.workspaceId, job.webhookEventId, error);
+        } else {
+          await releaseProviderWebhookEventForRetry(job.workspaceId, job.webhookEventId, error);
+        }
         throw error;
       }
     },
