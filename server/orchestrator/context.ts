@@ -1,6 +1,9 @@
+import { and, asc, eq } from "drizzle-orm";
+import { db } from "@/db";
+import { aiAgents, faqs, policies, services } from "@/db/schema";
 import { getConversationTimelinePage } from "@/server/domain/core/conversation-timeline";
 import { getContactDetail } from "@/server/domain/core/repository";
-import { getAgentSetup, getBusinessSetup } from "@/server/domain/onboarding/repository";
+import { getBusinessSetup } from "@/server/domain/onboarding/repository";
 
 const DAY_NAMES = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
 
@@ -29,6 +32,27 @@ type CustomerPromptState = {
   } | null;
 };
 
+async function getOrchestrationAgentSetup(workspaceId: string) {
+  const [agentRows, serviceRows, faqRows, policyRows] = await Promise.all([
+    db.select().from(aiAgents).where(eq(aiAgents.workspaceId, workspaceId)).limit(1),
+    db.select().from(services).where(and(
+      eq(services.workspaceId, workspaceId),
+      eq(services.active, true),
+    )).orderBy(asc(services.createdAt)).limit(20),
+    db.select().from(faqs).where(and(
+      eq(faqs.workspaceId, workspaceId),
+      eq(faqs.active, true),
+    )).orderBy(asc(faqs.createdAt)).limit(20),
+    db.select().from(policies).where(eq(policies.workspaceId, workspaceId)).orderBy(asc(policies.createdAt)).limit(12),
+  ]);
+  return {
+    agent: agentRows[0] ?? null,
+    services: serviceRows,
+    faqs: faqRows,
+    policies: policyRows,
+  };
+}
+
 function clip(value: string | null | undefined, max = 1200) {
   const text = value?.trim();
   if (!text) return "";
@@ -45,23 +69,20 @@ function formatHours(hours: Awaited<ReturnType<typeof getBusinessSetup>>["hours"
 
 function buildSystemPrompt(
   businessSetup: Awaited<ReturnType<typeof getBusinessSetup>>,
-  agentSetup: Awaited<ReturnType<typeof getAgentSetup>>,
+  agentSetup: Awaited<ReturnType<typeof getOrchestrationAgentSetup>>,
   customer: CustomerPromptState,
 ) {
   const { profile, hours } = businessSetup;
   const agent = agentSetup.agent;
-  const activeServices = agentSetup.services.filter((service) => service.active).slice(0, 20);
-  const activeFaqs = agentSetup.faqs.filter((faq) => faq.active).slice(0, 20);
-  const policies = agentSetup.policies.slice(0, 12);
 
-  const serviceText = activeServices.length
-    ? activeServices.map((service) => `- ${clip(service.name, 200)}${service.priceText ? ` — ${clip(service.priceText, 300)}` : ""}${service.description ? `: ${clip(service.description, 700)}` : ""}${service.durationMinutes ? ` (${service.durationMinutes} min)` : ""}`).join("\n")
+  const serviceText = agentSetup.services.length
+    ? agentSetup.services.map((service) => `- ${clip(service.name, 200)}${service.priceText ? ` — ${clip(service.priceText, 300)}` : ""}${service.description ? `: ${clip(service.description, 700)}` : ""}${service.durationMinutes ? ` (${service.durationMinutes} min)` : ""}`).join("\n")
     : "No active services configured.";
-  const faqText = activeFaqs.length
-    ? activeFaqs.map((faq) => `Q: ${clip(faq.question, 500)}\nA: ${clip(faq.answer, 900)}`).join("\n\n")
+  const faqText = agentSetup.faqs.length
+    ? agentSetup.faqs.map((faq) => `Q: ${clip(faq.question, 500)}\nA: ${clip(faq.answer, 900)}`).join("\n\n")
     : "No FAQs configured.";
-  const policyText = policies.length
-    ? policies.map((policy) => `- ${clip(policy.title, 300)} (${clip(policy.type, 100)}): ${clip(policy.content, 1000)}`).join("\n")
+  const policyText = agentSetup.policies.length
+    ? agentSetup.policies.map((policy) => `- ${clip(policy.title, 300)} (${clip(policy.type, 100)}): ${clip(policy.content, 1000)}`).join("\n")
     : "No policies configured.";
 
   return [
@@ -106,7 +127,7 @@ export async function buildConversationContext(workspaceId: string, conversation
 
   const [businessSetup, agentSetup, contact] = await Promise.all([
     getBusinessSetup(workspaceId),
-    getAgentSetup(workspaceId),
+    getOrchestrationAgentSetup(workspaceId),
     getContactDetail(workspaceId, timeline.contact.id),
   ]);
   if (!contact) return null;
@@ -149,7 +170,7 @@ export async function buildConversationContext(workspaceId: string, conversation
 export async function buildAgentTestContext(workspaceId: string, messages: OrchestratorMessage[]): Promise<OrchestratorContext> {
   const [businessSetup, agentSetup] = await Promise.all([
     getBusinessSetup(workspaceId),
-    getAgentSetup(workspaceId),
+    getOrchestrationAgentSetup(workspaceId),
   ]);
   return {
     workspaceId,
