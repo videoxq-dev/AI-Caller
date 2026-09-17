@@ -21,6 +21,10 @@ type Mode = "HOSTED" | "BYOP";
 type VoiceProvider = "telnyx" | "plivo" | "twilio";
 type SMSProvider = VoiceProvider;
 type IntegrationSummary = { provider: string; status: "CONNECTED" | "ERROR" | "DISCONNECTED" };
+type SmsConfig = {
+  webhookUrl: string | null;
+  webhookPublicKeyConfigured: boolean | null;
+};
 
 const phoneNumbers = [
   { number: "+1 (305) 555-0124", location: "Miami, FL" },
@@ -42,6 +46,8 @@ export default function CommunicationSetupPage() {
   const [displayName, setDisplayName] = useState("");
   const [replyWindow, setReplyWindow] = useState("Always respond");
   const [afterHoursBehavior, setAfterHoursBehavior] = useState("Auto-reply + collect details");
+  const [smsConfig, setSmsConfig] = useState<SmsConfig>({ webhookUrl: null, webhookPublicKeyConfigured: null });
+  const [smsWebhookPublicKey, setSmsWebhookPublicKey] = useState("");
   const [integrations, setIntegrations] = useState<IntegrationSummary[]>([]);
   const [saving, setSaving] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
@@ -70,13 +76,60 @@ export default function CommunicationSetupPage() {
     }).catch(() => undefined);
   }, []);
 
+  useEffect(() => {
+    if (smsMode !== "BYOP") {
+      setSmsConfig({ webhookUrl: null, webhookPublicKeyConfigured: null });
+      setSmsWebhookPublicKey("");
+      return;
+    }
+
+    const controller = new AbortController();
+    fetch(`/api/integrations/sms/config?provider=${encodeURIComponent(smsProvider)}`, { cache: "no-store", signal: controller.signal })
+      .then((response) => response.ok ? response.json() : Promise.reject(new Error("Unable to load SMS webhook configuration.")))
+      .then((payload) => {
+        setSmsConfig({
+          webhookUrl: typeof payload?.webhookUrl === "string" ? payload.webhookUrl : null,
+          webhookPublicKeyConfigured: typeof payload?.webhookPublicKeyConfigured === "boolean" ? payload.webhookPublicKeyConfigured : null,
+        });
+        setSmsWebhookPublicKey("");
+      })
+      .catch((error) => {
+        if (error instanceof Error && error.name === "AbortError") return;
+        setSmsConfig({ webhookUrl: null, webhookPublicKeyConfigured: null });
+      });
+    return () => controller.abort();
+  }, [smsMode, smsProvider]);
+
   const connected = useMemo(() => new Set(integrations.filter((item) => item.status === "CONNECTED").map((item) => item.provider)), [integrations]);
   const whatsappConnected = connected.has("whatsapp");
+
+  async function saveSmsWebhookConfig() {
+    if (smsMode !== "BYOP" || smsProvider !== "telnyx" || !smsWebhookPublicKey.trim()) return;
+    const response = await fetch("/api/integrations/sms/config", {
+      method: "PUT",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ provider: smsProvider, webhookPublicKey: smsWebhookPublicKey.trim() }),
+    });
+    const payload = await response.json().catch(() => ({}));
+    if (!response.ok) throw new Error(payload?.error?.message ?? "Unable to save the Telnyx webhook signing key.");
+    setSmsConfig({
+      webhookUrl: typeof payload?.webhookUrl === "string" ? payload.webhookUrl : smsConfig.webhookUrl,
+      webhookPublicKeyConfigured: true,
+    });
+    setSmsWebhookPublicKey("");
+  }
 
   async function save(completeStep: boolean) {
     setSaving(true);
     setNotice(null);
     try {
+      if (smsMode === "BYOP" && smsProvider === "telnyx") {
+        if (completeStep && !smsConfig.webhookPublicKeyConfigured && !smsWebhookPublicKey.trim()) {
+          throw new Error("Enter the Telnyx webhook signing public key before completing SMS setup.");
+        }
+        await saveSmsWebhookConfig();
+      }
+
       const response = await fetch("/api/setup/communication", {
         method: "PUT",
         headers: { "content-type": "application/json" },
@@ -150,6 +203,16 @@ export default function CommunicationSetupPage() {
                 <button type="button" className={`choiceCard ${smsMode === "BYOP" ? "selected" : ""}`} onClick={() => setSmsMode("BYOP")}><span className="radioDot" /><span className="choiceText"><strong>Use my own provider (BYOP)</strong><small>Use your existing messaging provider</small></span><span className="providerLogos"><b>telnyx</b><b>plivo</b><b>twilio</b></span></button>
               </div>
               {smsMode === "BYOP" && <ProviderChooser label="SMS provider" value={smsProvider} onChange={(value) => setSmsProvider(value as SMSProvider)} connected={connected.has(smsProvider)} />}
+              {smsMode === "BYOP" && (
+                <div className="smsBlock messagingSettingsBlock">
+                  <h3>Inbound webhook</h3>
+                  <div className="smsSettingsGrid">
+                    <label className="communicationField"><span>Callback URL</span><input value={smsConfig.webhookUrl ?? "Loading callback URL..."} readOnly aria-label="SMS callback URL" /></label>
+                    {smsProvider === "telnyx" && <label className="communicationField"><span>Webhook signing public key</span><input value={smsWebhookPublicKey} onChange={(event) => setSmsWebhookPublicKey(event.target.value)} placeholder={smsConfig.webhookPublicKeyConfigured ? "Saved — enter a new key only to replace it" : "Paste the Telnyx Ed25519 public key"} /></label>}
+                    <div className="complianceField"><span className="complianceLabel">Webhook status</span><div className="compliancePills"><span><CheckIcon size={13} /> {connected.has(smsProvider) ? "Provider connected" : "Connect provider credentials first"}</span>{smsProvider === "telnyx" && <span><CheckIcon size={13} /> {smsConfig.webhookPublicKeyConfigured ? "Signing key saved" : "Signing key required"}</span>}</div></div>
+                  </div>
+                </div>
+              )}
               <div className="smsBlock"><h3>Choose an SMS number</h3><div className="choiceGrid numberChoiceGrid"><button type="button" className={`choiceCard compact ${smsNumberMode === "same" ? "selected" : ""}`} onClick={() => setSmsNumberMode("same")}><span className="radioDot" /><span className="choiceText"><strong>Use the same business number</strong><small>{selectedNumber}</small></span></button><button type="button" className={`choiceCard compact ${smsNumberMode === "separate" ? "selected" : ""}`} onClick={() => setSmsNumberMode("separate")}><span className="radioDot" /><span className="choiceText"><strong>Use a separate SMS number</strong><small>Choose a dedicated text number later</small></span></button></div></div>
               <div className="smsBlock messagingSettingsBlock"><h3>Messaging settings</h3><div className="smsSettingsGrid"><label className="communicationField"><span>Display business name</span><input value={displayName} onChange={(event) => setDisplayName(event.target.value)} placeholder="Your business name" /></label><label className="communicationField"><span>Reply window</span><select value={replyWindow} onChange={(event) => setReplyWindow(event.target.value)}><option>Always respond</option><option>Business hours only</option><option>After-hours only</option></select></label><label className="communicationField"><span>After-hours behavior</span><select value={afterHoursBehavior} onChange={(event) => setAfterHoursBehavior(event.target.value)}><option>Auto-reply + collect details</option><option>Auto-reply only</option><option>Hold for next business day</option></select></label><div className="complianceField"><span className="complianceLabel">Compliance</span><div className="compliancePills"><span><CheckIcon size={13} /> STOP / HELP enabled</span><span><CheckIcon size={13} /> Consent reminder included</span></div></div></div></div>
             </section>
