@@ -9,14 +9,8 @@ type PlivoConfig = {
   fetcher?: typeof fetch;
 };
 
-function plivoV3Signature(url: string, rawBody: string, nonce: string, authToken: string) {
-  const form = parseFormBody(rawBody);
-  const pairs = Array.from(form.entries()).sort(([leftKey, leftValue], [rightKey, rightValue]) => {
-    const keyCompare = leftKey.localeCompare(rightKey);
-    return keyCompare === 0 ? leftValue.localeCompare(rightValue) : keyCompare;
-  });
-  const payload = `${url}${pairs.map(([key, value]) => `${key}${value}`).join("")}${nonce}`;
-  return createHmac("sha256", authToken).update(payload, "utf8").digest("base64");
+function plivoV2Signature(url: string, nonce: string, authToken: string) {
+  return createHmac("sha256", authToken).update(`${url}${nonce}`, "utf8").digest("base64");
 }
 
 export function createPlivoSmsProvider(config: PlivoConfig): SMSProvider {
@@ -48,10 +42,11 @@ export function createPlivoSmsProvider(config: PlivoConfig): SMSProvider {
     },
 
     async verifyWebhook(input: SmsWebhookInput) {
-      const signatureHeader = input.request.headers.get("x-plivo-signature-v3");
-      const nonce = input.request.headers.get("x-plivo-signature-v3-nonce");
-      if (!signatureHeader || !nonce || !input.contentType?.toLowerCase().includes("application/x-www-form-urlencoded")) return false;
-      const expected = plivoV3Signature(input.webhookUrl, input.rawBody, nonce, authToken);
+      const signatureHeader = input.request.headers.get("x-plivo-signature-v2")
+        ?? input.request.headers.get("x-plivo-signature-ma-v2");
+      const nonce = input.request.headers.get("x-plivo-signature-v2-nonce");
+      if (!signatureHeader || !nonce) return false;
+      const expected = plivoV2Signature(input.webhookUrl, nonce, authToken);
       return signatureHeader.split(",").some((signature) => constantTimeTextEqual(signature.trim(), expected));
     },
 
