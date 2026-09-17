@@ -13,10 +13,13 @@ async function executeTestTools(
   _contactId: string,
   envelope: OrchestratorEnvelope,
 ): Promise<OrchestratorToolResult> {
-  const lead = envelope.lead ? { lead: envelope.lead, leadUpdateSimulated: true } : {};
+  const captured = {
+    ...(envelope.contact ? { contact: envelope.contact, contactUpdateSimulated: true } : {}),
+    ...(envelope.lead ? { lead: envelope.lead, leadUpdateSimulated: true } : {}),
+  };
 
   if (envelope.action.type === "NONE") {
-    return { kind: "none", data: lead };
+    return { kind: "none", data: captured };
   }
 
   if (envelope.action.type === "CHECK_AVAILABILITY") {
@@ -29,7 +32,7 @@ async function executeTestTools(
     return {
       kind: "availability",
       data: {
-        ...lead,
+        ...captured,
         slots: slots.slice(0, 12).map((slot) => ({
           startsAt: slot.startsAt.toISOString(),
           endsAt: slot.endsAt.toISOString(),
@@ -42,7 +45,7 @@ async function executeTestTools(
     return {
       kind: "booking",
       data: {
-        ...lead,
+        ...captured,
         simulated: true,
         title: envelope.action.title,
         startsAt: envelope.action.startsAt,
@@ -56,7 +59,7 @@ async function executeTestTools(
   return {
     kind: "escalation",
     data: {
-      ...lead,
+      ...captured,
       simulated: true,
       handlingMode: "HUMAN",
       reason: envelope.action.reason ?? null,
