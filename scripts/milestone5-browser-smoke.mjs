@@ -37,6 +37,14 @@ async function sendTwilioWebhook(workspaceId, values, signature = true) {
   const text = await response.text();
   let payload = null;
   try { payload = text ? JSON.parse(text) : null; } catch {}
+  if (!payload && response.headers.get("content-type")?.includes("text/xml")) {
+    payload = {
+      queued: Number(response.headers.get("x-ai-caller-queued") ?? 0),
+      processed: Number(response.headers.get("x-ai-caller-processed") ?? 0),
+      duplicates: Number(response.headers.get("x-ai-caller-duplicates") ?? 0),
+      deferred: Number(response.headers.get("x-ai-caller-deferred") ?? 0),
+    };
+  }
   return { response, payload, text };
 }
 
@@ -177,7 +185,9 @@ try {
       Body: turn.body,
       SmsStatus: "received",
     });
-    assert(webhook.response.status === 202, `Expected SMS webhook 202 for ${turn.sid}, received ${webhook.response.status}: ${webhook.text}`);
+    assert(webhook.response.status === 200, `Expected Twilio SMS webhook 200 for ${turn.sid}, received ${webhook.response.status}: ${webhook.text}`);
+    assert(webhook.response.headers.get("content-type")?.includes("text/xml"), `Expected Twilio SMS webhook XML response for ${turn.sid}.`);
+    assert(webhook.text.includes("<Response>"), `Expected Twilio SMS webhook TwiML response for ${turn.sid}.`);
     assert(webhook.payload?.queued === 1, `Expected ${turn.sid} to queue one SMS response.`);
 
     const result = await waitFor(
@@ -202,7 +212,7 @@ try {
     Body: turns[2].body,
     SmsStatus: "received",
   });
-  assert(duplicate.response.status === 202, "Duplicate SMS webhook was not safely acknowledged.");
+  assert(duplicate.response.status === 200, "Duplicate SMS webhook was not safely acknowledged with TwiML.");
   assert(duplicate.payload?.duplicates === 1, "Duplicate SMS webhook was not identified as a duplicate.");
   const messageCountAfterDuplicate = (await pool.query(`SELECT count(*)::int AS count FROM messages WHERE workspace_id = $1 AND conversation_id = $2`, [workspaceId, conversationId])).rows[0].count;
 
@@ -254,7 +264,8 @@ try {
     MessageSid: lastOutbound.external_message_id,
     MessageStatus: "delivered",
   });
-  assert(delivery.response.status === 202, `Delivery callback failed with ${delivery.response.status}: ${delivery.text}`);
+  assert(delivery.response.status === 200, `Delivery callback failed with ${delivery.response.status}: ${delivery.text}`);
+  assert(delivery.response.headers.get("content-type")?.includes("text/xml"), "Twilio delivery callback did not receive an XML acknowledgement.");
   await waitFor(
     pool,
     `SELECT status FROM messages WHERE workspace_id = $1 AND provider = 'twilio' AND external_message_id = $2 LIMIT 1`,
@@ -287,7 +298,7 @@ try {
     Body: "A human is helping me now",
     SmsStatus: "received",
   });
-  assert(humanWebhook.response.status === 202 && humanWebhook.payload?.queued === 1, "Human-mode inbound SMS was not safely queued/persisted.");
+  assert(humanWebhook.response.status === 200 && humanWebhook.payload?.queued === 1, "Human-mode inbound SMS was not safely queued/persisted with a TwiML acknowledgement.");
   await waitFor(
     pool,
     `SELECT status FROM provider_webhook_events WHERE workspace_id = $1 AND provider = 'twilio' AND external_event_id = 'SM-m5-human:received' LIMIT 1`,
@@ -307,7 +318,7 @@ try {
   await page.screenshot({ path: path.join(outputDir, "inbox-sms-mobile.png"), fullPage: true });
 
   assert(runtimeErrors.length === 0, `Milestone 5 browser runtime errors:\n${runtimeErrors.join("\n")}`);
-  console.log("Milestone 5 browser acceptance passed: signed SMS webhook, async worker, knowledge response, contact capture, qualification, availability, booking, hosted credits, duplicate suppression, delivery reconciliation, unified Inbox, and human takeover suppression.");
+  console.log("Milestone 5 browser acceptance passed: signed SMS webhook, provider-compatible TwiML acknowledgement, async worker, knowledge response, contact capture, qualification, availability, booking, hosted credits, duplicate suppression, delivery reconciliation, unified Inbox, and human takeover suppression.");
 } finally {
   await pool.end();
   await browser.close();
