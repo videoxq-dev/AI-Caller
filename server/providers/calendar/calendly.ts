@@ -18,8 +18,25 @@ type CalendlyEventType = {
   scheduling_url?: string;
 };
 
+type CalendlyInvitee = {
+  email?: string;
+  name?: string;
+  timezone?: string;
+  status?: string;
+};
+
+type CalendlyCreateInviteeResponse = {
+  resource?: {
+    event?: string;
+  };
+};
+
 function normalized(value: string | undefined) {
   return value?.trim().toLowerCase() ?? "";
+}
+
+function eventIdFromUri(uri: string | undefined) {
+  return uri?.split("/").filter(Boolean).pop();
 }
 
 export class CalendlyCalendarProvider implements CalendarProvider {
@@ -36,6 +53,13 @@ export class CalendlyCalendarProvider implements CalendarProvider {
     return requireCredential(this.credentials, "token", "Calendly Personal Access Token");
   }
 
+  private headers(includeJson = false) {
+    return {
+      authorization: `Bearer ${this.token()}`,
+      ...(includeJson ? { "content-type": "application/json" } : {}),
+    };
+  }
+
   private async eventType() {
     if (this.resolvedEventTypeUri) return this.resolvedEventTypeUri;
 
@@ -47,7 +71,7 @@ export class CalendlyCalendarProvider implements CalendarProvider {
 
     const me = await providerJson<{ resource?: { uri?: string } }>(
       "https://api.calendly.com/users/me",
-      { headers: { authorization: `Bearer ${this.token()}` } },
+      { headers: this.headers() },
       this.fetcher,
     );
     const userUri = me.resource?.uri;
@@ -56,7 +80,7 @@ export class CalendlyCalendarProvider implements CalendarProvider {
     const query = new URLSearchParams({ user: userUri, active: "true", count: "100", sort: "name:asc" });
     const response = await providerJson<{ collection?: CalendlyEventType[] }>(
       `https://api.calendly.com/event_types?${query.toString()}`,
-      { headers: { authorization: `Bearer ${this.token()}` } },
+      { headers: this.headers() },
       this.fetcher,
     );
     const active = (response.collection ?? []).filter((item) => item.active !== false && item.uri);
@@ -80,6 +104,33 @@ export class CalendlyCalendarProvider implements CalendarProvider {
     return selected.uri;
   }
 
+  private async createInvitee(input: { eventType: string; startsAt: Date; timezone: string; attendeeName?: string; attendeeEmail: string }) {
+    const response = await providerJson<CalendlyCreateInviteeResponse>("https://api.calendly.com/invitees", {
+      method: "POST",
+      headers: this.headers(true),
+      body: JSON.stringify({
+        event_type: input.eventType,
+        start_time: input.startsAt.toISOString(),
+        invitee: {
+          email: input.attendeeEmail,
+          ...(input.attendeeName ? { name: input.attendeeName } : {}),
+          timezone: input.timezone,
+        },
+      }),
+    }, this.fetcher);
+    const externalId = eventIdFromUri(response.resource?.event);
+    if (!externalId) throw new Error("Calendly did not return a scheduled event ID.");
+    return externalId;
+  }
+
+  private async cancelEvent(externalId: string, reason: string) {
+    await providerJson<unknown>(`https://api.calendly.com/scheduled_events/${encodeURIComponent(externalId)}/cancellation`, {
+      method: "POST",
+      headers: this.headers(true),
+      body: JSON.stringify({ reason }),
+    }, this.fetcher);
+  }
+
   async getAvailability(input: { startsAt: Date; endsAt: Date; timezone: string; durationMinutes?: number }) {
     const query = new URLSearchParams({
       event_type: await this.eventType(),
@@ -88,7 +139,7 @@ export class CalendlyCalendarProvider implements CalendarProvider {
     });
     const response = await providerJson<{ collection?: Array<{ status?: string; start_time?: string }> }>(
       `https://api.calendly.com/event_type_available_times?${query.toString()}`,
-      { headers: { authorization: `Bearer ${this.token()}` } },
+      { headers: this.headers() },
       this.fetcher,
     );
     const durationMs = (input.durationMinutes ?? numberSetting(this.settings, "meetingDurationMinutes", 30)) * 60_000;
@@ -102,34 +153,56 @@ export class CalendlyCalendarProvider implements CalendarProvider {
 
   async book(input: { startsAt: Date; endsAt: Date; timezone: string; title: string; attendeeName?: string; attendeeEmail?: string }) {
     if (!input.attendeeEmail) throw new Error("Calendly requires an attendee email address to create a booking.");
-    const response = await providerJson<{ resource?: { event?: string } }>("https://api.calendly.com/invitees", {
-      method: "POST",
-      headers: { authorization: `Bearer ${this.token()}`, "content-type": "application/json" },
-      body: JSON.stringify({
-        event_type: await this.eventType(),
-        start_time: input.startsAt.toISOString(),
-        invitee: {
-          email: input.attendeeEmail,
-          name: input.attendeeName,
-          timezone: input.timezone,
-        },
-      }),
-    }, this.fetcher);
-    const eventUri = response.resource?.event;
-    const externalId = eventUri?.split("/").filter(Boolean).pop();
-    if (!externalId) throw new Error("Calendly did not return a scheduled event ID.");
+    const externalId = await this.createInvitee({
+      eventType: await this.eventType(),
+      startsAt: input.startsAt,
+      timezone: input.timezone,
+      attendeeName: input.attendeeName,
+      attendeeEmail: input.attendeeEmail,
+    });
     return { externalId, startsAt: input.startsAt, endsAt: input.endsAt };
   }
 
-  async reschedule(_input: { externalId: string; startsAt: Date; endsAt: Date; timezone: string }): Promise<{ externalId: string; startsAt: Date; endsAt: Date }> {
-    throw new Error("Calendly does not expose direct API rescheduling. Use its invitee reschedule URL or cancel and rebook explicitly.");
+  async reschedule(input: { externalId: string; startsAt: Date; endsAt: Date; timezone: string }) {
+    const event = await providerJson<{ resource?: { event_type?: string } }>(
+      `https://api.calendly.com/scheduled_events/${encodeURIComponent(input.externalId)}`,
+      { headers: this.headers() },
+      this.fetcher,
+    );
+    const eventType = event.resource?.event_type;
+    if (!eventType) throw new Error("Calendly did not return the original event type for rescheduling.");
+
+    const invitees = await providerJson<{ collection?: CalendlyInvitee[] }>(
+      `https://api.calendly.com/scheduled_events/${encodeURIComponent(input.externalId)}/invitees?status=active&count=1`,
+      { headers: this.headers() },
+      this.fetcher,
+    );
+    const invitee = invitees.collection?.find((item) => item.status !== "canceled") ?? invitees.collection?.[0];
+    if (!invitee?.email) throw new Error("Calendly did not return an active invitee for rescheduling.");
+
+    const replacementId = await this.createInvitee({
+      eventType,
+      startsAt: input.startsAt,
+      timezone: invitee.timezone || input.timezone,
+      attendeeName: invitee.name,
+      attendeeEmail: invitee.email,
+    });
+
+    try {
+      await this.cancelEvent(input.externalId, "Rescheduled through AI Caller");
+    } catch (error) {
+      try {
+        await this.cancelEvent(replacementId, "Rollback after incomplete AI Caller reschedule");
+      } catch {
+        // Preserve the original failure; cleanup failure is secondary and the caller must surface the error.
+      }
+      throw error;
+    }
+
+    return { externalId: replacementId, startsAt: input.startsAt, endsAt: input.endsAt };
   }
 
   async cancel(input: { externalId: string }) {
-    await providerJson<unknown>(`https://api.calendly.com/scheduled_events/${encodeURIComponent(input.externalId)}/cancellation`, {
-      method: "POST",
-      headers: { authorization: `Bearer ${this.token()}`, "content-type": "application/json" },
-      body: JSON.stringify({ reason: "Cancelled through AI Caller" }),
-    }, this.fetcher);
+    await this.cancelEvent(input.externalId, "Cancelled through AI Caller");
   }
 }
