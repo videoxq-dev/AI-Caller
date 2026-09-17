@@ -12,6 +12,16 @@ const envSchema = z.object({
   JVZOO_IPN_SECRET: z.string().min(1).optional(),
   JVZOO_CORE_PRODUCT_IDS: z.string().default(""),
   STARTER_CREDITS: z.coerce.number().int().positive().default(2500),
+  GOOGLE_OAUTH_CLIENT_ID: z.string().min(1).optional(),
+  GOOGLE_OAUTH_CLIENT_SECRET: z.string().min(1).optional(),
+  MICROSOFT_OAUTH_CLIENT_ID: z.string().min(1).optional(),
+  MICROSOFT_OAUTH_CLIENT_SECRET: z.string().min(1).optional(),
+  META_APP_ID: z.string().min(1).optional(),
+  META_APP_SECRET: z.string().min(1).optional(),
+  META_EMBEDDED_SIGNUP_CONFIG_ID: z.string().min(1).optional(),
+  META_GRAPH_API_VERSION: z.string().regex(/^v\d+\.\d+$/).default("v22.0"),
+  META_WEBHOOK_VERIFY_TOKEN: z.string().min(8).optional(),
+  META_PHONE_REGISTRATION_PIN: z.string().regex(/^\d{6}$/).optional(),
   NODE_ENV: z.enum(["development", "test", "production"]).default("development"),
 });
 

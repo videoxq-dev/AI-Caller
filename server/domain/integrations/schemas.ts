@@ -24,9 +24,14 @@ export const integrationSaveSchema = z.object({
   provider: providerIdSchema,
   category: integrationCategorySchema,
   mode: integrationModeSchema.default("BYOP"),
-  status: integrationStatusSchema.default("CONNECTED"),
   credentials: z.record(z.string(), z.string()).default({}),
   settings: z.record(z.string(), z.unknown()).default({}),
+});
+
+export const capabilityBindingInputSchema = z.object({
+  capability: capabilitySchema,
+  mode: integrationModeSchema,
+  provider: providerIdSchema.nullable().optional(),
 });
 
 const channelBindingSchema = z.object({
