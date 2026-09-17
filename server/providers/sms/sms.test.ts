@@ -18,9 +18,8 @@ function twilioSignature(url: string, rawBody: string, token: string) {
   return createHmac("sha1", token).update(`${url}${pairs.map(([key, value]) => `${key}${value}`).join("")}`, "utf8").digest("base64");
 }
 
-function plivoSignature(url: string, rawBody: string, nonce: string, token: string) {
-  const pairs = Array.from(new URLSearchParams(rawBody).entries()).sort(([ak, av], [bk, bv]) => ak.localeCompare(bk) || av.localeCompare(bv));
-  return createHmac("sha256", token).update(`${url}${pairs.map(([key, value]) => `${key}${value}`).join("")}${nonce}`, "utf8").digest("base64");
+function plivoSignature(url: string, nonce: string, token: string) {
+  return createHmac("sha256", token).update(`${url}${nonce}`, "utf8").digest("base64");
 }
 
 describe("SMS provider adapters", () => {
@@ -41,15 +40,15 @@ describe("SMS provider adapters", () => {
     })]);
   });
 
-  it("verifies and normalizes Plivo delivery callbacks", async () => {
+  it("verifies and normalizes Plivo messaging callbacks with V2 signatures", async () => {
     const url = "https://app.example.com/api/webhooks/sms/plivo";
     const nonce = "nonce-123";
     const token = "plivo-secret";
     const body = new URLSearchParams({ MessageUUID: "uuid-123", Status: "delivered" }).toString();
     const provider = createPlivoSmsProvider({ authId: "MA123", authToken: token });
     const input = formRequest(url, body, {
-      "x-plivo-signature-v3": plivoSignature(url, body, nonce, token),
-      "x-plivo-signature-v3-nonce": nonce,
+      "x-plivo-signature-v2": plivoSignature(url, nonce, token),
+      "x-plivo-signature-v2-nonce": nonce,
     });
 
     await expect(provider.verifyWebhook(input)).resolves.toBe(true);
@@ -82,12 +81,12 @@ describe("SMS provider adapters", () => {
   });
 
   it("sends outbound messages through the normalized adapter contract", async () => {
-    const fetcher = vi.fn(async () => new Response(JSON.stringify({ sid: "SM-outbound", status: "queued" }), { status: 201, headers: { "content-type": "application/json" } })) as unknown as typeof fetch;
-    const provider = createTwilioSmsProvider({ accountSid: "AC123", authToken: "secret", fetcher });
+    const fetcherMock = vi.fn(async () => new Response(JSON.stringify({ sid: "SM-outbound", status: "queued" }), { status: 201, headers: { "content-type": "application/json" } }));
+    const provider = createTwilioSmsProvider({ accountSid: "AC123", authToken: "secret", fetcher: fetcherMock as unknown as typeof fetch });
 
     await expect(provider.send({ to: "+12025550100", from: "+12025550200", text: "Confirmed" })).resolves.toEqual({ externalId: "SM-outbound", status: "QUEUED" });
-    expect(fetcher).toHaveBeenCalledTimes(1);
-    const [, init] = fetcher.mock.calls[0] as unknown as [string, RequestInit];
+    expect(fetcherMock).toHaveBeenCalledTimes(1);
+    const [, init] = fetcherMock.mock.calls[0] as unknown as [string, RequestInit];
     expect(String(init.body)).toContain("Body=Confirmed");
   });
 });
