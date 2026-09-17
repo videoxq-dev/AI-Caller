@@ -23,14 +23,17 @@ export const auth = betterAuth({
     minPasswordLength: 8,
     maxPasswordLength: 128,
     revokeSessionsOnPasswordReset: true,
-    sendResetPassword: ({ user, url }) => {
-      void enqueueJob(AUTH_PASSWORD_RESET_EMAIL, {
-        to: user.email,
-        name: user.name,
-        url,
-      }).catch((error) => {
+    sendResetPassword: async ({ user, url }) => {
+      try {
+        await enqueueJob(AUTH_PASSWORD_RESET_EMAIL, {
+          to: user.email,
+          name: user.name,
+          url,
+        });
+      } catch (error) {
         logger.error({ err: error, userId: user.id }, "Failed to queue password reset email");
-      });
+        throw error;
+      }
     },
   },
   databaseHooks: {
