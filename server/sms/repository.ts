@@ -19,7 +19,7 @@ export async function claimProviderWebhookEvent(workspaceId: string, input: Prov
     status: "PROCESSING",
   }).onConflictDoNothing().returning({ id: providerWebhookEvents.id });
 
-  if (created) return { state: "claimed" as const, eventId: created.id };
+  if (created) return { state: "claimed" as const, eventId: created.id, status: "PROCESSING" as const };
 
   const [existing] = await db.select({
     id: providerWebhookEvents.id,
@@ -35,6 +35,24 @@ export async function claimProviderWebhookEvent(workspaceId: string, input: Prov
     throw new AppError("WEBHOOK_WORKSPACE_MISMATCH", "The provider webhook does not belong to this workspace.", 409);
   }
   return { state: "duplicate" as const, eventId: existing.id, status: existing.status };
+}
+
+export async function markProviderWebhookQueued(workspaceId: string, eventId: string) {
+  const [updated] = await db.update(providerWebhookEvents).set({ status: "QUEUED", error: null, processedAt: null }).where(and(
+    eq(providerWebhookEvents.workspaceId, workspaceId),
+    eq(providerWebhookEvents.id, eventId),
+    eq(providerWebhookEvents.status, "PROCESSING"),
+  )).returning();
+  return updated ?? null;
+}
+
+export async function claimQueuedProviderWebhookEvent(workspaceId: string, eventId: string) {
+  const [updated] = await db.update(providerWebhookEvents).set({ status: "PROCESSING", error: null, processedAt: null }).where(and(
+    eq(providerWebhookEvents.workspaceId, workspaceId),
+    eq(providerWebhookEvents.id, eventId),
+    eq(providerWebhookEvents.status, "QUEUED"),
+  )).returning();
+  return updated ?? null;
 }
 
 export async function completeProviderWebhookEvent(workspaceId: string, eventId: string) {
