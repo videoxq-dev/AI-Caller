@@ -36,10 +36,15 @@ function hasCredentials(credentials: Record<string, string>) {
   return Object.values(credentials).some((value) => value.trim().length > 0);
 }
 
+function decryptCredentialMap(envelope: Record<string, unknown> | null | undefined) {
+  if (!envelope) return {} as Record<string, string>;
+  return decryptIntegrationCredentials<Record<string, string>>(envelope as EncryptedSecretEnvelope);
+}
+
 function maskedCredentialMap(envelope: Record<string, unknown> | null) {
   if (!envelope) return {};
   try {
-    const credentials = decryptIntegrationCredentials<Record<string, string>>(envelope as EncryptedSecretEnvelope);
+    const credentials = decryptCredentialMap(envelope);
     return Object.fromEntries(Object.entries(credentials).map(([key, value]) => [key, maskSecret(value)]));
   } catch {
     return {};
@@ -61,6 +66,15 @@ function publicIntegration(row: typeof integrations.$inferSelect) {
   };
 }
 
+function assertIntegrationIdentity(input: IntegrationSaveInput) {
+  const expectedCategory = categoryByProvider[input.provider];
+  if (!expectedCategory) throw new Error(`Unsupported integration provider: ${input.provider}`);
+  if (input.category !== expectedCategory) throw new Error(`${input.provider} must use the ${expectedCategory} integration category.`);
+
+  const expectedMode = input.provider === "credits" ? "HOSTED" : "BYOP";
+  if (input.mode !== expectedMode) throw new Error(`${input.provider} must use ${expectedMode} mode.`);
+}
+
 export async function listIntegrations(workspaceId: string) {
   const rows = await db.select().from(integrations).where(eq(integrations.workspaceId, workspaceId));
   return rows.map(publicIntegration);
@@ -77,11 +91,17 @@ export async function getPrivateIntegration(workspaceId: string, provider: strin
 }
 
 export async function saveIntegration(workspaceId: string, input: IntegrationSaveInput) {
+  assertIntegrationIdentity(input);
   const [existing] = await db.select().from(integrations).where(and(eq(integrations.workspaceId, workspaceId), eq(integrations.provider, input.provider))).limit(1);
   const credentialsChanged = hasCredentials(input.credentials);
+  const incomingCredentials = Object.fromEntries(Object.entries(input.credentials).filter(([, value]) => value.trim().length > 0));
+  const existingCredentials = existing?.encryptedCredentials ? decryptCredentialMap(existing.encryptedCredentials) : {};
+  const mergedCredentials = { ...existingCredentials, ...incomingCredentials };
   const encryptedCredentials = credentialsChanged
-    ? (encryptIntegrationCredentials(input.credentials) as unknown as Record<string, unknown>)
+    ? (encryptIntegrationCredentials(mergedCredentials) as unknown as Record<string, unknown>)
     : existing?.encryptedCredentials ?? null;
+  const previousSettings = existing?.settings && typeof existing.settings === "object" ? existing.settings as Record<string, unknown> : {};
+  const settings = { ...previousSettings, ...input.settings };
   const now = new Date();
   const nextStatus = credentialsChanged ? "DISCONNECTED" as const : existing?.status ?? "DISCONNECTED" as const;
 
@@ -92,7 +112,7 @@ export async function saveIntegration(workspaceId: string, input: IntegrationSav
     mode: input.mode,
     status: nextStatus,
     encryptedCredentials,
-    settings: input.settings,
+    settings,
     lastError: credentialsChanged ? null : existing?.lastError ?? null,
     updatedAt: now,
   }).onConflictDoUpdate({
@@ -102,7 +122,7 @@ export async function saveIntegration(workspaceId: string, input: IntegrationSav
       mode: input.mode,
       status: nextStatus,
       encryptedCredentials,
-      settings: input.settings,
+      settings,
       lastError: credentialsChanged ? null : existing?.lastError ?? null,
       updatedAt: now,
     },
@@ -113,6 +133,9 @@ export async function saveIntegration(workspaceId: string, input: IntegrationSav
 
 export async function setIntegrationStatus(workspaceId: string, provider: string, status: "CONNECTED" | "ERROR" | "DISCONNECTED", lastError: string | null = null) {
   const [row] = await db.update(integrations).set({ status, lastError, updatedAt: new Date() }).where(and(eq(integrations.workspaceId, workspaceId), eq(integrations.provider, provider))).returning();
+  if (row && status === "DISCONNECTED") {
+    await db.delete(capabilityBindings).where(and(eq(capabilityBindings.workspaceId, workspaceId), eq(capabilityBindings.integrationId, row.id)));
+  }
   return row ? publicIntegration(row) : null;
 }
 
@@ -155,8 +178,12 @@ async function requireConnectedProvider(workspaceId: string, provider: string, l
 export async function bindCapability(workspaceId: string, capability: "AI_TEXT" | "SMS" | "VOICE" | "WHATSAPP" | "CALENDAR", mode: "HOSTED" | "BYOP", provider?: string | null) {
   if (mode === "BYOP") {
     if (!provider) throw new Error(`${capability} requires a provider when using BYOP mode.`);
+    if (provider === "credits") throw new Error("Our Credits is a hosted AI route and cannot be configured as BYOP.");
     assertProviderSupportsCapability(provider, capability);
+  } else if (capability === "CALENDAR" || capability === "WHATSAPP") {
+    throw new Error(`${capability} does not support hosted routing.`);
   }
+
   const integration = mode === "BYOP" && provider ? await ensureIntegration(workspaceId, provider) : null;
   const now = new Date();
   const [binding] = await db.insert(capabilityBindings).values({ workspaceId, capability, mode, integrationId: integration?.id ?? null, updatedAt: now }).onConflictDoUpdate({
@@ -170,7 +197,7 @@ export async function resolveCapability(workspaceId: string, capability: "AI_TEX
   const [binding] = await db.select().from(capabilityBindings).where(and(eq(capabilityBindings.workspaceId, workspaceId), eq(capabilityBindings.capability, capability))).limit(1);
   if (!binding) return null;
   if (!binding.integrationId) return { ...binding, integration: null };
-  const [integration] = await db.select().from(integrations).where(eq(integrations.id, binding.integrationId)).limit(1);
+  const [integration] = await db.select().from(integrations).where(and(eq(integrations.workspaceId, workspaceId), eq(integrations.id, binding.integrationId))).limit(1);
   return { ...binding, integration: integration ? publicIntegration(integration) : null };
 }
 
