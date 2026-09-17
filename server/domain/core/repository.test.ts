@@ -6,6 +6,7 @@ import {
   createContact,
   getContactDetail,
   getConversationTimeline,
+  getOrCreateContactByIdentity,
   getOrCreateOpenConversation,
   setConversationHandlingMode,
 } from "./repository";
@@ -43,6 +44,16 @@ describe("core domain persistence", () => {
     expect(detail?.tags).toEqual(["VIP"]);
   });
 
+  it("resolves concurrent identity creation to one contact", async () => {
+    const contacts = await Promise.all(Array.from({ length: 8 }, () => getOrCreateContactByIdentity(workspaceId, {
+      channel: "SMS",
+      externalId: "+1 (555) 400-5000",
+      name: "Concurrent Contact",
+    })));
+
+    expect(new Set(contacts.map((contact) => contact.id)).size).toBe(1);
+  });
+
   it("keeps SMS and WhatsApp events in one conversation timeline", async () => {
     const contact = await createContact(workspaceId, {
       name: "Grace Hopper",
@@ -53,12 +64,14 @@ describe("core domain persistence", () => {
       identities: [],
     });
 
-    const [first, second] = await Promise.all([
-      getOrCreateOpenConversation(workspaceId, contact.id),
-      getOrCreateOpenConversation(workspaceId, contact.id),
-    ]);
+    const openConversations = await Promise.all(Array.from(
+      { length: 8 },
+      () => getOrCreateOpenConversation(workspaceId, contact.id),
+    ));
+    const [first] = openConversations;
 
-    expect(first.id).toBe(second.id);
+    expect(first).toBeDefined();
+    expect(new Set(openConversations.map((conversation) => conversation.id)).size).toBe(1);
 
     await appendMessage(workspaceId, first.id, {
       channel: "SMS",

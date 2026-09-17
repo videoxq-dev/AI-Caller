@@ -47,8 +47,10 @@ type AppointmentListOptions = {
   offset?: number;
 };
 
-function isUniqueViolation(error: unknown) {
-  return typeof error === "object" && error !== null && "code" in error && (error as { code?: string }).code === "23505";
+function isUniqueViolation(error: unknown): boolean {
+  if (typeof error !== "object" || error === null) return false;
+  if ("code" in error && (error as { code?: string }).code === "23505") return true;
+  return "cause" in error && isUniqueViolation((error as { cause?: unknown }).cause);
 }
 
 async function ensureContactInWorkspace(workspaceId: string, contactId: string) {
@@ -285,15 +287,15 @@ export async function getOrCreateOpenConversation(workspaceId: string, contactId
   const existing = await findOpen();
   if (existing) return existing;
 
-  try {
-    const [created] = await db.insert(conversations).values({ workspaceId, contactId }).returning();
-    return created;
-  } catch (error) {
-    if (!isUniqueViolation(error)) throw error;
-    const raced = await findOpen();
-    if (raced) return raced;
-    throw error;
-  }
+  const [created] = await db.insert(conversations)
+    .values({ workspaceId, contactId })
+    .onConflictDoNothing()
+    .returning();
+  if (created) return created;
+
+  const raced = await findOpen();
+  if (raced) return raced;
+  throw new AppError("CONVERSATION_CONFLICT", "The open conversation could not be resolved after a concurrent insert.", 409);
 }
 
 export async function appendMessage(workspaceId: string, conversationId: string, input: MessageInput) {
