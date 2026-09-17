@@ -16,6 +16,7 @@ import {
 } from "@/server/security/secrets";
 import { assertProviderSupportsCapability } from "@/server/providers/catalog";
 import { testProviderConnection } from "@/server/providers/connections";
+import { parseTelnyxWebhookPublicKey } from "@/server/providers/sms/telnyx";
 import type { CalendarSetupInput, CommunicationSetupInput, IntegrationSaveInput } from "./schemas";
 
 const categoryByProvider: Record<string, "AI" | "COMMUNICATION" | "WHATSAPP" | "CALENDAR"> = {
@@ -206,6 +207,11 @@ async function requireSmsIntegrationReady(workspaceId: string, provider: string)
       : credentials.webhookPublicKey?.trim();
     if (!publicKey) {
       throw new Error("Telnyx SMS needs its webhook signing public key before this setup step can be completed.");
+    }
+    try {
+      parseTelnyxWebhookPublicKey(publicKey);
+    } catch (error) {
+      throw new Error(error instanceof Error ? error.message : "Telnyx SMS webhook signing public key is invalid.");
     }
   }
 }
