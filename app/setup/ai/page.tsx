@@ -1,46 +1,24 @@
 import Link from "next/link";
 import { headers } from "next/headers";
-import type { ReactNode } from "react";
 import {
   CalendarIcon,
   CheckIcon,
   ChevronRightIcon,
   FileIcon,
-  FlaskIcon,
   HelpIcon,
   InfoIcon,
   LinkIcon,
-  LockIcon,
   LogoMark,
-  PhoneIcon,
-  RocketIcon,
   ShieldIcon,
   SparkleIcon,
-  StoreIcon,
   UsersIcon,
 } from "@/components/icons";
 import { resolveWorkspaceContext } from "@/server/auth/workspace-context";
-import { getAgentSetup, getBusinessSetup } from "@/server/domain/onboarding/repository";
+import { getAgentSetup, getBusinessSetup, getSetupStatus } from "@/server/domain/onboarding/repository";
 import { saveAISetupAction } from "../actions";
+import { SetupProgressPanel } from "../setup-progress";
+import { KnowledgeEditor } from "./knowledge-editor";
 import "./ai-assistant.css";
-
-type ProgressStep = {
-  number: number;
-  title: string;
-  description: string;
-  tone: "blue" | "purple" | "green" | "orange";
-  icon: ReactNode;
-  state: "complete" | "active" | "locked";
-};
-
-const progressSteps: ProgressStep[] = [
-  { number: 1, title: "Add your business", description: "Business details, hours and service area", tone: "blue", icon: <StoreIcon size={21} />, state: "complete" },
-  { number: 2, title: "Teach your AI", description: "Services, FAQs and policies", tone: "purple", icon: <SparkleIcon size={21} />, state: "active" },
-  { number: 3, title: "Connect communication", description: "Phone, SMS, WhatsApp and web chat", tone: "green", icon: <PhoneIcon size={20} />, state: "locked" },
-  { number: 4, title: "Connect your calendar", description: "Google, Outlook, Calendly or Cal.com", tone: "orange", icon: <CalendarIcon size={20} />, state: "locked" },
-  { number: 5, title: "Test your AI", description: "Run a chat or call test before going live", tone: "purple", icon: <FlaskIcon size={20} />, state: "locked" },
-  { number: 6, title: "Go live", description: "Activate your assistant and start handling inquiries", tone: "blue", icon: <RocketIcon size={20} />, state: "locked" },
-];
 
 const defaultGuardrails = [
   "Never invent pricing",
@@ -51,9 +29,10 @@ const defaultGuardrails = [
 
 export default async function AIAssistantSetupPage() {
   const context = await resolveWorkspaceContext(await headers());
-  const [saved, business] = await Promise.all([
+  const [saved, business, setup] = await Promise.all([
     getAgentSetup(context.workspace.id),
     getBusinessSetup(context.workspace.id),
+    getSetupStatus(context.workspace.id),
   ]);
   const agent = saved.agent;
   const configuredGuardrails = agent?.behaviorSettings?.guardrails;
@@ -102,42 +81,15 @@ export default async function AIAssistantSetupPage() {
             <section className="aiSection knowledgeSection">
               <div className="sectionHeading">
                 <span className="sectionIcon blue"><FileIcon size={22} /></span>
-                <div><h2>Services &amp; FAQs</h2><p>Help your AI understand what you offer and the questions customers ask most.</p></div>
+                <div><h2>Services, FAQs &amp; policies</h2><p>Give your AI approved business knowledge it can use in customer conversations.</p></div>
               </div>
-
-              <div className="knowledgeGrid">
-                <div className="serviceColumn">
-                  <div className="miniSectionHeader"><strong>Services</strong><button type="button">+&nbsp; Add service</button></div>
-                  <div className="serviceList">
-                    {saved.services.length ? saved.services.map((service) => (
-                      <div className="serviceRow" key={service.id}>
-                        <span className="dragDots" aria-hidden="true">⠿</span>
-                        <span>{service.name}</span>
-                        <small>{service.priceText ?? "No price set"}</small>
-                        <button className="moreButton" type="button" aria-label={`More options for ${service.name}`}>•••</button>
-                      </div>
-                    )) : <div className="serviceRow"><span>Add your first service using the API-backed editor.</span></div>}
-                  </div>
-                </div>
-
-                <div className="faqColumn">
-                  <div className="miniSectionHeader"><strong>Frequently asked questions</strong><button type="button">+&nbsp; Add FAQ</button></div>
-                  <div className="faqList">
-                    {saved.faqs.length ? saved.faqs.map((faq) => (
-                      <details className="faqRow" key={faq.id}>
-                        <summary>{faq.question}<ChevronRightIcon size={16} /></summary>
-                        <p>{faq.answer}</p>
-                      </details>
-                    )) : <div className="faqRow"><p>Add approved FAQ answers for your assistant.</p></div>}
-                  </div>
-                </div>
-              </div>
+              <KnowledgeEditor initialServices={saved.services} initialFaqs={saved.faqs} initialPolicies={saved.policies} />
             </section>
 
             <section className="aiSection guardrailsSection">
               <div className="sectionHeading">
                 <span className="sectionIcon blue"><ShieldIcon size={22} /></span>
-                <div><h2>Policies &amp; guardrails</h2><p>Set the rules your AI should follow.</p></div>
+                <div><h2>Guardrails</h2><p>Set the rules your AI should follow.</p></div>
               </div>
 
               <div className="guardrailsGrid">
@@ -189,24 +141,7 @@ export default async function AIAssistantSetupPage() {
         </section>
 
         <aside className="aiSidebar">
-          <section className="sidebarCard aiProgressCard">
-            <div className="sidebarProgressTop"><h2>Setup progress</h2><span>Estimated setup time: 7 minutes</span></div>
-            <div className="sidebarProgressBar aiProgressBar"><span /></div>
-            <div className="sidebarProgressMeta"><span>Step 2 of 6</span><strong>33%</strong></div>
-
-            <div className="sidebarSteps">
-              {progressSteps.map((step) => (
-                <div className={`sidebarStep ${step.state}`} key={step.number}>
-                  <span className="sidebarStepNumber">{step.number}</span>
-                  <span className={`sidebarStepIcon ${step.tone}`}>
-                    {step.state === "complete" ? <CheckIcon size={20} /> : step.icon}
-                  </span>
-                  <div><strong>{step.title}</strong><span>{step.description}</span></div>
-                  {step.state === "locked" ? <LockIcon size={15} /> : <ChevronRightIcon size={18} />}
-                </div>
-              ))}
-            </div>
-          </section>
+          <SetupProgressPanel currentStep={2} estimated="7 minutes" initialStatus={setup} className="sidebarCard aiProgressCard" progressClassName="sidebarProgressBar aiProgressBar" />
 
           <section className="sidebarCard aiWhyCard">
             <h2>Why this matters</h2>
