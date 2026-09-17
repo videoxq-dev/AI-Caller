@@ -10,16 +10,19 @@ const testInputSchema = z.object({
     role: z.enum(["user", "assistant"]),
     content: z.string().trim().min(1).max(4000),
   })).max(30).default([]),
+  clientMessageId: z.string().uuid().optional(),
+  reset: z.boolean().default(false),
 });
 
 export async function POST(request: Request) {
   try {
     const context = await resolveWorkspaceContext(request.headers);
     const input = parseInput(testInputSchema, await request.json());
+    const history = input.reset ? [] : input.history;
     const result = await runAgentTest(
       context.workspace.id,
-      context.session.user.id,
-      [...input.history, { role: "user" as const, content: input.message }],
+      input.clientMessageId ?? context.session.user.id,
+      [...history, { role: "user" as const, content: input.message }],
     );
     const simulated = "simulated" in result.toolResult.data && result.toolResult.data.simulated === true;
 
