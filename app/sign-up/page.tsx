@@ -1,9 +1,38 @@
+"use client";
+
 import Link from "next/link";
+import { useRouter } from "next/navigation";
+import { useState, type FormEvent } from "react";
 import { AuthShell } from "@/components/auth-shell";
 import { ArrowRightIcon, CheckIcon, LockIcon, RocketIcon } from "@/components/icons";
 import { PasswordField } from "@/components/password-field";
+import { authClient } from "@/lib/auth-client";
 
 export default function SignUpPage() {
+  const router = useRouter();
+  const [pending, setPending] = useState(false);
+  const [error, setError] = useState("");
+
+  async function handleSubmit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    setError("");
+    setPending(true);
+
+    const form = new FormData(event.currentTarget);
+    const name = String(form.get("name") ?? "").trim();
+    const email = String(form.get("email") ?? "").trim();
+    const password = String(form.get("password") ?? "");
+
+    const result = await authClient.signUp.email({ name, email, password });
+    if (result.error) {
+      setError(result.error.message ?? "Unable to create your account.");
+      setPending(false);
+      return;
+    }
+
+    router.replace("/welcome");
+  }
+
   return (
     <AuthShell>
       <div className="authCardContent">
@@ -17,7 +46,7 @@ export default function SignUpPage() {
           <div><strong>Purchase confirmed</strong><span>Your Core license is ready to activate.</span></div>
         </div>
 
-        <form className="authForm">
+        <form className="authForm" onSubmit={handleSubmit}>
           <label className="field" htmlFor="name">
             <span className="fieldLabel">Full name</span>
             <input id="name" name="name" type="text" autoComplete="name" placeholder="Alex Carter" required />
@@ -38,8 +67,10 @@ export default function SignUpPage() {
             <span>I agree to the <a href="#">Terms of Service</a> and <a href="#">Privacy Policy</a>.</span>
           </label>
 
-          <button className="primaryButton" type="submit">
-            <span>Create Account</span><ArrowRightIcon size={19} />
+          {error ? <p role="alert" style={{ margin: 0, color: "#c62828", fontSize: 13 }}>{error}</p> : null}
+
+          <button className="primaryButton" type="submit" disabled={pending}>
+            <span>{pending ? "Creating account..." : "Create Account"}</span><ArrowRightIcon size={19} />
           </button>
         </form>
 
