@@ -212,6 +212,7 @@ export function createWhatsAppWebhookService(dependencies: WhatsAppServiceDepend
           status: "RECEIVED",
           metadata: {
             providerEventId: job.webhookEventId,
+            whatsappWaId: job.customerWaId,
             ...(job.occurredAt ? { occurredAt: job.occurredAt } : {}),
           },
         });
