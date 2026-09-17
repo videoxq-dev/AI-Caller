@@ -1,6 +1,7 @@
 import { afterAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { closeDatabase, db } from "@/db";
 import { contactIdentities, creditWallets, messages, usageEvents, workspaces } from "@/db/schema";
+import type { SmsInboundResponseJob } from "@/server/jobs/queues";
 import type { NormalizedSmsEvent, SMSProvider } from "@/server/providers/contracts";
 import { ProviderRequestError } from "@/server/providers/http";
 import type { SmsRuntime } from "@/server/providers/sms/runtime";
@@ -46,6 +47,19 @@ function runtimeFor(workspaceId: string, provider: SMSProvider, mode: "HOSTED" |
   };
 }
 
+function serviceHarness(runtime: SmsRuntime, respond: () => Promise<ReturnType<typeof orchestratorReply>>) {
+  const jobs: SmsInboundResponseJob[] = [];
+  const service = createSmsWebhookService({
+    resolveRuntime: async () => runtime,
+    respond: async () => respond(),
+    enqueueResponseJob: async (job) => {
+      jobs.push(job);
+      return `job-${jobs.length}`;
+    },
+  });
+  return { service, jobs };
+}
+
 describe("SMS webhook service", () => {
   let workspaceId = "";
 
@@ -59,7 +73,7 @@ describe("SMS webhook service", () => {
     await closeDatabase();
   });
 
-  it("persists one inbound/outbound pair and does not replay duplicate inbound events", async () => {
+  it("queues once, persists one inbound/outbound pair, and does not replay duplicate inbound events", async () => {
     const inbound = inboundEvent("in-1");
     const send = vi.fn(async () => ({ externalId: "msg-out-1", status: "QUEUED" as const }));
     const provider: SMSProvider = {
@@ -69,10 +83,12 @@ describe("SMS webhook service", () => {
     };
     const runtime = runtimeFor(workspaceId, provider);
     const respond = vi.fn(async () => orchestratorReply("Sure — I can help with that."));
-    const service = createSmsWebhookService({ resolveRuntime: async () => runtime, respond });
+    const { service, jobs } = serviceHarness(runtime, respond);
 
-    await expect(service.process(request(), workspaceId, "twilio")).resolves.toMatchObject({ processed: 1, duplicates: 0 });
-    await expect(service.process(request(), workspaceId, "twilio")).resolves.toMatchObject({ processed: 0, duplicates: 1 });
+    await expect(service.ingest(request(), workspaceId, "twilio")).resolves.toMatchObject({ queued: 1, duplicates: 0 });
+    expect(jobs).toHaveLength(1);
+    await expect(service.processInboundJob(jobs[0])).resolves.toMatchObject({ replied: true });
+    await expect(service.ingest(request(), workspaceId, "twilio")).resolves.toMatchObject({ queued: 0, duplicates: 1 });
 
     expect(respond).toHaveBeenCalledTimes(1);
     expect(send).toHaveBeenCalledTimes(1);
@@ -97,9 +113,10 @@ describe("SMS webhook service", () => {
       normalizeWebhook: vi.fn(async () => normalized),
     };
     const runtime = runtimeFor(workspaceId, provider);
-    const service = createSmsWebhookService({ resolveRuntime: async () => runtime, respond: async () => orchestratorReply("Hi there") });
+    const { service, jobs } = serviceHarness(runtime, async () => orchestratorReply("Hi there"));
 
-    await service.process(request(), workspaceId, "twilio");
+    await service.ingest(request(), workspaceId, "twilio");
+    await service.processInboundJob(jobs[0]);
     normalized = [{
       type: "DELIVERY_UPDATED",
       externalEventId: "evt-delivery-2",
@@ -108,7 +125,7 @@ describe("SMS webhook service", () => {
       error: null,
       occurredAt: null,
     }];
-    await expect(service.process(request(), workspaceId, "twilio")).resolves.toMatchObject({ processed: 1 });
+    await expect(service.ingest(request(), workspaceId, "twilio")).resolves.toMatchObject({ processed: 1 });
 
     const stored = await db.select().from(messages);
     expect(stored).toHaveLength(2);
@@ -117,7 +134,7 @@ describe("SMS webhook service", () => {
     expect(outbound?.status).toBe("DELIVERED");
   });
 
-  it("charges hosted credits once after a successful provider send", async () => {
+  it("charges hosted credits once after a successful worker send", async () => {
     await db.insert(creditWallets).values({ workspaceId, balance: 5 });
     const provider: SMSProvider = {
       send: vi.fn(async () => ({ externalId: "hosted-out-1", status: "QUEUED" as const })),
@@ -125,9 +142,10 @@ describe("SMS webhook service", () => {
       normalizeWebhook: vi.fn(async () => [inboundEvent("hosted-success")]),
     };
     const runtime = runtimeFor(workspaceId, provider, "HOSTED");
-    const service = createSmsWebhookService({ resolveRuntime: async () => runtime, respond: async () => orchestratorReply("Booked") });
+    const { service, jobs } = serviceHarness(runtime, async () => orchestratorReply("Booked"));
 
-    await service.process(request(), workspaceId, "twilio");
+    await service.ingest(request(), workspaceId, "twilio");
+    await service.processInboundJob(jobs[0]);
     const [wallet] = await db.select().from(creditWallets);
     expect(wallet.balance).toBe(4);
     const usage = await db.select().from(usageEvents);
@@ -138,24 +156,24 @@ describe("SMS webhook service", () => {
   it("refunds hosted credits on definitive rejection but not on an uncertain provider outcome", async () => {
     await db.insert(creditWallets).values({ workspaceId, balance: 5 });
     let currentEvent = inboundEvent("hosted-reject", "+12025550102");
-    const send = vi.fn(async () => {
-      throw new ProviderRequestError("Rejected", 400);
-    });
+    const send = vi.fn(async () => { throw new ProviderRequestError("Rejected", 400); });
     const provider: SMSProvider = {
       send,
       verifyWebhook: vi.fn(async () => true),
       normalizeWebhook: vi.fn(async () => [currentEvent]),
     };
     const runtime = runtimeFor(workspaceId, provider, "HOSTED");
-    const service = createSmsWebhookService({ resolveRuntime: async () => runtime, respond: async () => orchestratorReply("Reply") });
+    const { service, jobs } = serviceHarness(runtime, async () => orchestratorReply("Reply"));
 
-    await expect(service.process(request(), workspaceId, "twilio")).rejects.toThrow("Rejected");
+    await service.ingest(request(), workspaceId, "twilio");
+    await expect(service.processInboundJob(jobs.shift()!)).rejects.toThrow("Rejected");
     expect((await db.select().from(creditWallets))[0].balance).toBe(5);
     expect((await db.select().from(messages)).find((message) => message.direction === "OUTBOUND")?.status).toBe("FAILED");
 
     currentEvent = inboundEvent("hosted-unknown", "+12025550103");
     send.mockImplementation(async () => { throw new ProviderRequestError("Timeout", 504); });
-    await expect(service.process(request(), workspaceId, "twilio")).rejects.toThrow("Timeout");
+    await service.ingest(request(), workspaceId, "twilio");
+    await expect(service.processInboundJob(jobs.shift()!)).rejects.toThrow("Timeout");
     expect((await db.select().from(creditWallets))[0].balance).toBe(4);
     const outbound = (await db.select().from(messages)).filter((message) => message.direction === "OUTBOUND");
     expect(outbound.at(-1)?.status).toBe("SEND_UNKNOWN");
