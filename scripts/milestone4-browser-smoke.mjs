@@ -116,9 +116,7 @@ try {
   await page.getByRole("button", { name: "Test", exact: true }).click();
   await page.getByRole("heading", { name: "Test your AI" }).waitFor();
   await page.getByPlaceholder("Type a test message...").fill("How much is the QA Consultation?");
-  await page.getByRole("button", { name: "Send message" }).click().catch(async () => {
-    await page.locator(".testComposer button").click();
-  });
+  await page.locator(".testComposer button").click();
   await page.getByText(/QA Consultation is \$120/).last().waitFor({ timeout: 15_000 });
   await page.getByText(/data-ai-caller-key=/).waitFor({ timeout: 15_000 });
   await assertNoHorizontalOverflow(page, "AI Agent Test desktop");
