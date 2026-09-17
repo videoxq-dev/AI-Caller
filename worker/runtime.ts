@@ -6,7 +6,7 @@ import { logger } from "@/server/observability/logger";
 export async function startWorker() {
   const boss = await ensureQueue(AUTH_PASSWORD_RESET_EMAIL);
 
-  await boss.work(AUTH_PASSWORD_RESET_EMAIL, { teamSize: 5 }, async (jobs) => {
+  await boss.work(AUTH_PASSWORD_RESET_EMAIL, { batchSize: 5 }, async (jobs) => {
     for (const job of jobs) {
       const payload = passwordResetEmailJobSchema.parse(job.data);
       await sendPasswordResetEmail(payload);
