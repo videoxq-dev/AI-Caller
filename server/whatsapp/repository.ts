@@ -100,12 +100,18 @@ function providerOccurredAt(metadata: Record<string, unknown>, fallback: Date) {
 }
 
 export async function latestWhatsAppInboundAt(workspaceId: string, conversationId: string) {
-  const [row] = await db.select({ createdAt: messages.createdAt, metadata: messages.metadata }).from(messages).where(and(
+  const rows = await db.select({ createdAt: messages.createdAt, metadata: messages.metadata }).from(messages).where(and(
     eq(messages.workspaceId, workspaceId),
     eq(messages.conversationId, conversationId),
     eq(messages.channel, "WHATSAPP"),
     eq(messages.direction, "INBOUND"),
     eq(messages.senderType, "CUSTOMER"),
-  )).orderBy(desc(messages.createdAt)).limit(1);
-  return row ? providerOccurredAt(row.metadata, row.createdAt) : null;
+  )).orderBy(desc(messages.createdAt)).limit(100);
+
+  let latest: Date | null = null;
+  for (const row of rows) {
+    const occurredAt = providerOccurredAt(row.metadata, row.createdAt);
+    if (!latest || occurredAt > latest) latest = occurredAt;
+  }
+  return latest;
 }
