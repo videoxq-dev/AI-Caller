@@ -1,5 +1,5 @@
 import { createHash, randomBytes, randomUUID } from "node:crypto";
-import { and, desc, eq, gt } from "drizzle-orm";
+import { and, desc, eq, gt, lt } from "drizzle-orm";
 import { db } from "@/db";
 import {
   aiAgents,
@@ -15,6 +15,7 @@ import { getOrCreateContactByIdentity, getOrCreateOpenConversation } from "@/ser
 import type { WebchatSessionInput } from "./schemas";
 
 const SESSION_TTL_MS = 30 * 24 * 60 * 60 * 1000;
+const TURN_LEASE_MS = 2 * 60 * 1000;
 
 function tokenHash(token: string) {
   return createHash("sha256").update(token).digest("hex");
@@ -109,7 +110,10 @@ export async function createOrResumeWebchatSession(input: WebchatSessionInput) {
     }
   }
 
-  const visitorId = input.visitorId ?? `visitor_${randomUUID()}`;
+  // Visitor IDs are identity hints, not credentials. A fresh session always receives a
+  // server-generated visitor identity so a caller cannot claim another visitor's contact
+  // or conversation merely by supplying a known identifier.
+  const visitorId = `visitor_${randomUUID()}`;
   const contact = await getOrCreateContactByIdentity(widget.workspaceId, {
     channel: "WEBCHAT",
     externalId: visitorId,
@@ -133,7 +137,7 @@ export async function createOrResumeWebchatSession(input: WebchatSessionInput) {
     sessionId: session.id,
     conversationId: conversation.id,
     widget,
-    history: await sessionHistory(widget.workspaceId, conversation.id),
+    history: [],
   };
 }
 
@@ -149,33 +153,53 @@ export async function claimWebchatTurn(workspaceId: string, sessionId: string, c
   if (created) return { state: "claimed", turnId: created.id };
 
   const [existing] = await db.select().from(webchatTurns).where(and(
+    eq(webchatTurns.workspaceId, workspaceId),
     eq(webchatTurns.sessionId, sessionId),
     eq(webchatTurns.clientMessageId, clientMessageId),
   )).limit(1);
   if (!existing) throw new Error("Unable to resolve the web chat turn after a conflict.");
   if (existing.status === "COMPLETED") return { state: "completed", turnId: existing.id, responseText: existing.responseText };
+
   if (existing.status === "FAILED") {
     const [reclaimed] = await db.update(webchatTurns).set({ status: "PROCESSING", error: null, updatedAt: new Date() })
-      .where(and(eq(webchatTurns.id, existing.id), eq(webchatTurns.status, "FAILED")))
+      .where(and(
+        eq(webchatTurns.workspaceId, workspaceId),
+        eq(webchatTurns.id, existing.id),
+        eq(webchatTurns.status, "FAILED"),
+      ))
       .returning();
     if (reclaimed) return { state: "claimed", turnId: reclaimed.id };
   }
+
+  if (existing.status === "PROCESSING") {
+    const staleBefore = new Date(Date.now() - TURN_LEASE_MS);
+    const [reclaimed] = await db.update(webchatTurns).set({ error: null, updatedAt: new Date() })
+      .where(and(
+        eq(webchatTurns.workspaceId, workspaceId),
+        eq(webchatTurns.id, existing.id),
+        eq(webchatTurns.status, "PROCESSING"),
+        lt(webchatTurns.updatedAt, staleBefore),
+      ))
+      .returning();
+    if (reclaimed) return { state: "claimed", turnId: reclaimed.id };
+  }
+
   return { state: "in_progress", turnId: existing.id };
 }
 
-export async function completeWebchatTurn(turnId: string, responseText: string | null) {
+export async function completeWebchatTurn(workspaceId: string, turnId: string, responseText: string | null) {
   await db.update(webchatTurns).set({
     status: "COMPLETED",
     responseText,
     error: null,
     updatedAt: new Date(),
-  }).where(eq(webchatTurns.id, turnId));
+  }).where(and(eq(webchatTurns.workspaceId, workspaceId), eq(webchatTurns.id, turnId)));
 }
 
-export async function failWebchatTurn(turnId: string, error: unknown) {
+export async function failWebchatTurn(workspaceId: string, turnId: string, error: unknown) {
   const message = error instanceof Error ? error.message : "Unknown web chat turn failure";
   await db.update(webchatTurns).set({ status: "FAILED", error: message.slice(0, 2000), updatedAt: new Date() })
-    .where(eq(webchatTurns.id, turnId));
+    .where(and(eq(webchatTurns.workspaceId, workspaceId), eq(webchatTurns.id, turnId)));
 }
 
 export async function findWebchatAIResponse(workspaceId: string, externalMessageId: string) {
