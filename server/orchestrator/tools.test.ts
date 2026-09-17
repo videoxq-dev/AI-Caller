@@ -2,11 +2,13 @@ import { afterAll, beforeEach, describe, expect, it } from "vitest";
 import { and, eq } from "drizzle-orm";
 import { closeDatabase, db } from "@/db";
 import { contacts, leads, workspaces } from "@/db/schema";
+import { appendMessage, getOrCreateOpenConversation } from "@/server/domain/core/repository";
 import { executeOrchestratorTools } from "./tools";
 
 describe("orchestrator lead updates", () => {
   let workspaceId = "";
   let contactId = "";
+  let conversationId = "";
 
   beforeEach(async () => {
     await db.delete(workspaces);
@@ -14,6 +16,19 @@ describe("orchestrator lead updates", () => {
     workspaceId = workspace.id;
     const [contact] = await db.insert(contacts).values({ workspaceId, name: "Ada" }).returning();
     contactId = contact.id;
+    const conversation = await getOrCreateOpenConversation(workspaceId, contactId);
+    conversationId = conversation.id;
+    await appendMessage(workspaceId, conversationId, {
+      channel: "WEBCHAT",
+      direction: "INBOUND",
+      senderType: "CUSTOMER",
+      contentType: "TEXT",
+      body: "Follow-up question",
+      provider: null,
+      externalMessageId: null,
+      status: "RECEIVED",
+      metadata: {},
+    });
   });
 
   afterAll(async () => {
@@ -30,7 +45,7 @@ describe("orchestrator lead updates", () => {
       source: "WEBCHAT",
     });
 
-    await executeOrchestratorTools(workspaceId, "unused-conversation", contactId, {
+    await executeOrchestratorTools(workspaceId, conversationId, contactId, {
       lead: {
         status: "QUALIFIED",
         intent: "Asked a follow-up pricing question",
@@ -56,7 +71,7 @@ describe("orchestrator lead updates", () => {
       source: "WEBCHAT",
     });
 
-    await executeOrchestratorTools(workspaceId, "unused-conversation", contactId, {
+    await executeOrchestratorTools(workspaceId, conversationId, contactId, {
       lead: { status: "NEW", intent: "Follow-up" },
       action: { type: "NONE" },
     });
