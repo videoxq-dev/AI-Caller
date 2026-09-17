@@ -5,35 +5,9 @@ import { parseOrchestratorEnvelope } from "./tools";
 function fakeContext(handlingMode: "AI" | "HUMAN" = "AI") {
   return {
     workspaceId: "00000000-0000-0000-0000-000000000001",
-    conversation: {
-      id: "00000000-0000-0000-0000-000000000002",
-      workspaceId: "00000000-0000-0000-0000-000000000001",
-      contactId: "00000000-0000-0000-0000-000000000003",
-      status: "OPEN",
-      handlingMode,
-      assignedUserId: null,
-      lastMessageAt: null,
-      aiPausedAt: null,
-      createdAt: new Date(),
-      updatedAt: new Date(),
-    },
-    contact: {
-      id: "00000000-0000-0000-0000-000000000003",
-      workspaceId: "00000000-0000-0000-0000-000000000001",
-      name: "Ada",
-      email: "ada@example.com",
-      phone: null,
-      notes: null,
-      createdAt: new Date(),
-      updatedAt: new Date(),
-      identities: [],
-      tags: [],
-      lead: null,
-      appointments: [],
-    },
-    business: null,
+    conversation: { handlingMode },
+    contact: { id: "00000000-0000-0000-0000-000000000003" },
     agent: null,
-    timezone: "UTC",
     systemPrompt: "You are the assistant.",
     messages: [{ role: "user" as const, content: "Can I book tomorrow?" }],
   };
@@ -71,8 +45,8 @@ describe("orchestrator response protocol", () => {
   it("does not invoke AI while a human owns the conversation", async () => {
     const generate = vi.fn();
     const orchestrator = createResponseOrchestrator({
-      buildContext: vi.fn(async () => fakeContext("HUMAN")) as any,
-      executeTools: vi.fn() as any,
+      buildContext: vi.fn(async () => fakeContext("HUMAN")),
+      executeTools: vi.fn(),
       generate,
     });
 
@@ -103,8 +77,8 @@ describe("orchestrator response protocol", () => {
       data: { slots: [{ startsAt: "2026-09-18T10:00:00.000Z", endsAt: "2026-09-18T10:30:00.000Z" }] },
     });
     const orchestrator = createResponseOrchestrator({
-      buildContext: vi.fn(async () => fakeContext("AI")) as any,
-      executeTools: executeTools as any,
+      buildContext: vi.fn(async () => fakeContext("AI")),
+      executeTools,
       generate,
     });
 
@@ -114,5 +88,43 @@ describe("orchestrator response protocol", () => {
     expect(generate).toHaveBeenCalledTimes(2);
     expect(executeTools).toHaveBeenCalledTimes(1);
     expect(JSON.stringify(generate.mock.calls[1][2])).toContain("2026-09-18T10:00:00.000Z");
+  });
+
+  it("returns an authoritative confirmation if the AI finalizer fails after booking", async () => {
+    const generate = vi.fn()
+      .mockResolvedValueOnce({
+        text: JSON.stringify({
+          action: {
+            type: "BOOK_APPOINTMENT",
+            startsAt: "2026-09-18T10:00:00Z",
+            endsAt: "2026-09-18T10:30:00Z",
+            timezone: "UTC",
+            title: "Consultation",
+          },
+        }),
+      })
+      .mockRejectedValueOnce(new Error("provider unavailable"));
+    const executeTools = vi.fn().mockResolvedValue({
+      kind: "booking",
+      data: {
+        appointmentId: "appointment-1",
+        title: "Consultation",
+        startsAt: "2026-09-18T10:00:00.000Z",
+        endsAt: "2026-09-18T10:30:00.000Z",
+        timezone: "UTC",
+        status: "CONFIRMED",
+      },
+    });
+    const orchestrator = createResponseOrchestrator({
+      buildContext: vi.fn(async () => fakeContext("AI")),
+      executeTools,
+      generate,
+    });
+
+    const result = await orchestrator.respond("workspace", "conversation");
+    expect(result.toolResult.kind).toBe("booking");
+    expect(result.reply).toContain("Consultation is booked");
+    expect(result.reply).toContain("UTC");
+    expect(generate).toHaveBeenCalledTimes(2);
   });
 });
