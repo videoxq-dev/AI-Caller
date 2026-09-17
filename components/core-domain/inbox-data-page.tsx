@@ -30,6 +30,8 @@ export function InboxDataPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [switching, setSwitching] = useState(false);
+  const [draft, setDraft] = useState("");
+  const [sendingReply, setSendingReply] = useState(false);
 
   const loadConversations = useCallback(async () => {
     setLoading(true);
@@ -62,6 +64,7 @@ export function InboxDataPage() {
 
   useEffect(() => {
     if (!selectedId) { setTimeline(null); return; }
+    setDraft("");
     void loadTimeline(selectedId);
   }, [loadTimeline, selectedId]);
 
@@ -100,6 +103,30 @@ export function InboxDataPage() {
   }
 
   const latestChannel = timeline?.messages.at(-1)?.channel ?? "WEBCHAT";
+  const canReplyOnWhatsApp = Boolean(timeline && latestChannel === "WHATSAPP" && timeline.conversation.handlingMode === "HUMAN");
+
+  async function sendWhatsAppReply() {
+    if (!timeline || !canReplyOnWhatsApp || !draft.trim()) return;
+    setSendingReply(true);
+    setError(null);
+    try {
+      const response = await fetch(`/api/conversations/${timeline.conversation.id}/whatsapp-reply`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ text: draft.trim() }),
+      });
+      if (!response.ok) {
+        const data = await response.json().catch(() => null) as { error?: { message?: string } } | null;
+        throw new Error(data?.error?.message ?? "Unable to send WhatsApp reply.");
+      }
+      setDraft("");
+      await Promise.all([loadTimeline(timeline.conversation.id), loadConversations()]);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Unable to send WhatsApp reply.");
+    } finally {
+      setSendingReply(false);
+    }
+  }
 
   return (
     <main className="inboxShell">
@@ -134,7 +161,7 @@ export function InboxDataPage() {
                   return <div key={message.id} className={`messageRow ${customer ? "customer" : "agent"}`}>{customer && <span className="miniAvatar">{initials(timeline.contact.name)}</span>}<div className={`messageBubble ${customer ? "incoming" : "outgoing"}`}><div className="messageMeta"><span className={`channelBadge ${channelLabels[message.channel].toLowerCase().replace(" ", "-")}`}>{message.channel === "PHONE" ? <PhoneIcon size={13} /> : <MessageIcon size={13} />}{channelLabels[message.channel]}</span><time>{displayTime(message.createdAt)}</time></div><p>{message.body}</p></div>{!customer && <span className="botAvatar">{message.senderType === "USER" ? <UsersIcon size={16} /> : "✦"}</span>}</div>;
                 })}
               </div>
-              <div className="composerWrap"><div className="composerTabs"><button className="active" type="button">Message</button></div><textarea disabled placeholder={`Staff outbound ${channelLabels[latestChannel]} replies are not enabled yet.`} /><div className="composerFooter"><span>The unified timeline and AI channel transport are live; staff-authored replies arrive with the human takeover milestone.</span></div></div>
+              <div className="composerWrap"><div className="composerTabs"><button className="active" type="button">Message</button></div><textarea aria-label="Conversation reply" value={draft} onChange={(event) => setDraft(event.target.value)} disabled={!canReplyOnWhatsApp || sendingReply} placeholder={canReplyOnWhatsApp ? "Reply on WhatsApp…" : latestChannel === "WHATSAPP" ? "Take over this conversation to reply on WhatsApp." : `Staff outbound ${channelLabels[latestChannel]} replies are not enabled yet.`} /><div className="composerFooter"><span>{canReplyOnWhatsApp ? "Free-form WhatsApp replies require an active 24-hour customer window." : "WhatsApp staff replies are available after human takeover."}</span>{canReplyOnWhatsApp && <button className="sendButton" type="button" disabled={sendingReply || !draft.trim()} onClick={() => void sendWhatsAppReply()}>{sendingReply ? "Sending…" : "Send"}</button>}</div></div>
             </> : <div style={{ display: "grid", placeItems: "center", height: "100%", minHeight: 420 }}>Select a conversation to view its timeline.</div>}
           </section>
 
