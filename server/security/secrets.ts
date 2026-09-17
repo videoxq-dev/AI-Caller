@@ -74,3 +74,18 @@ export function maskSecret(value: string): string {
   if (value.length <= 4) return "••••";
   return `••••••••${value.slice(-4)}`;
 }
+
+export function redactSecretsFromText(text: string, secretValues: Iterable<string>) {
+  let redacted = text;
+  const candidates = new Set<string>();
+  for (const value of secretValues) {
+    const secret = value.trim();
+    if (secret.length < 4) continue;
+    candidates.add(secret);
+    try { candidates.add(encodeURIComponent(secret)); } catch { /* Ignore values that cannot be URI encoded. */ }
+  }
+  for (const secret of candidates) {
+    if (secret) redacted = redacted.split(secret).join("[redacted]");
+  }
+  return redacted;
+}
