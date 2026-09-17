@@ -140,7 +140,7 @@ export function createAIProvider(input: PrivateIntegration, fetcher: typeof fetc
     const siteUrl = settingString(input.settings, "siteUrl");
     return new OpenAICompatibleProvider(
       requireCredential(values, "apiKey", "OpenRouter API key"),
-      model ?? "openai/gpt-5.6",
+      model ?? "openai/gpt-5.6-sol",
       "https://openrouter.ai/api/v1/chat/completions",
       { ...(siteUrl ? { "HTTP-Referer": siteUrl } : {}), "X-Title": "AI Caller" },
       fetcher,
@@ -165,7 +165,7 @@ export function createHostedAIProvider(fetcher: typeof fetch = fetch): AIProvide
   if (env.HOSTED_AI_PROVIDER === "openrouter") {
     return new OpenAICompatibleProvider(
       env.HOSTED_AI_API_KEY,
-      env.HOSTED_AI_MODEL ?? "openai/gpt-5.6",
+      env.HOSTED_AI_MODEL ?? "openai/gpt-5.6-sol",
       "https://openrouter.ai/api/v1/chat/completions",
       { "X-Title": "AI Caller Hosted" },
       fetcher,
