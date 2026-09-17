@@ -39,7 +39,8 @@ export async function POST(request: Request) {
 
     const body = await request.json();
     const input = parseInput(webchatMessageInputSchema, body);
-    const claim = await claimWebchatTurn(resolved.session.workspaceId, resolved.session.id, input.clientMessageId);
+    const workspaceId = resolved.session.workspaceId;
+    const claim = await claimWebchatTurn(workspaceId, resolved.session.id, input.clientMessageId);
     if (claim.state === "in_progress") {
       throw new AppError("WEBCHAT_TURN_IN_PROGRESS", "This message is already being processed.", 409);
     }
@@ -57,7 +58,7 @@ export async function POST(request: Request) {
           }
 
           const externalBase = `${resolved.session.id}:${input.clientMessageId}`;
-          await appendMessage(resolved.session.workspaceId, resolved.session.conversationId, {
+          await appendMessage(workspaceId, resolved.session.conversationId, {
             channel: "WEBCHAT",
             direction: "INBOUND",
             senderType: "CUSTOMER",
@@ -69,25 +70,25 @@ export async function POST(request: Request) {
             metadata: { sessionId: resolved.session.id, clientMessageId: input.clientMessageId },
           });
 
-          const existingReply = await findWebchatAIResponse(resolved.session.workspaceId, `${externalBase}:reply`);
+          const existingReply = await findWebchatAIResponse(workspaceId, `${externalBase}:reply`);
           if (existingReply) {
-            await completeWebchatTurn(claim.turnId, existingReply.body);
+            await completeWebchatTurn(workspaceId, claim.turnId, existingReply.body);
             enqueueReply(controller, existingReply.body);
             controller.enqueue(event("done", { cached: true }));
             controller.close();
             return;
           }
 
-          const result = await responseOrchestrator.respond(resolved.session.workspaceId, resolved.session.conversationId);
+          const result = await responseOrchestrator.respond(workspaceId, resolved.session.conversationId);
           if (!result.reply) {
-            await completeWebchatTurn(claim.turnId, null);
+            await completeWebchatTurn(workspaceId, claim.turnId, null);
             controller.enqueue(event("handoff", { message: "A team member is handling this conversation." }));
             controller.enqueue(event("done", { handlingMode: result.handlingMode }));
             controller.close();
             return;
           }
 
-          const saved = await appendMessage(resolved.session.workspaceId, resolved.session.conversationId, {
+          const saved = await appendMessage(workspaceId, resolved.session.conversationId, {
             channel: "WEBCHAT",
             direction: "OUTBOUND",
             senderType: "AI",
@@ -99,7 +100,7 @@ export async function POST(request: Request) {
             metadata: { action: result.action.type, toolResult: result.toolResult.kind },
           });
 
-          await completeWebchatTurn(claim.turnId, saved.body);
+          await completeWebchatTurn(workspaceId, claim.turnId, saved.body);
           enqueueReply(controller, saved.body);
           if (result.handlingMode === "HUMAN") {
             controller.enqueue(event("handoff", { message: "A team member will continue from here." }));
@@ -107,7 +108,7 @@ export async function POST(request: Request) {
           controller.enqueue(event("done", { handlingMode: result.handlingMode }));
           controller.close();
         } catch (error) {
-          await failWebchatTurn(claim.turnId, error).catch(() => undefined);
+          await failWebchatTurn(workspaceId, claim.turnId, error).catch(() => undefined);
           const message = error instanceof Error ? error.message : "Unable to process this message.";
           controller.enqueue(event("error", { message }));
           controller.close();
