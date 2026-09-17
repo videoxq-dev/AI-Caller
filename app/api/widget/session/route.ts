@@ -21,6 +21,11 @@ export async function POST(request: Request) {
         greeting: result.widget.greeting,
         launcherLabel: result.widget.launcherLabel,
       },
+    }, {
+      headers: {
+        "cache-control": "no-store",
+        "x-content-type-options": "nosniff",
+      },
     });
   } catch (error) {
     return toErrorResponse(error);
