@@ -8,6 +8,7 @@ import {
   saveIntegration,
   saveVerifiedIntegration,
   setIntegrationStatus,
+  testSavedIntegration,
 } from "@/server/domain/integrations/repository";
 import { decryptIntegrationCredentials, type EncryptedSecretEnvelope } from "@/server/security/secrets";
 import { resolveProviderRoute } from "./resolver";
@@ -37,7 +38,7 @@ describe("provider capability routing", () => {
       provider: "openai",
       category: "AI",
       mode: "BYOP",
-      credentials: { apiKey: "sk-provider-routing-secret" },
+      credentials: { apiKey: "test-provider-routing-secret" },
       settings: { model: "gpt-4.1-mini" },
     });
     await bindCapability(workspaceId, "AI_TEXT", "BYOP", "openai");
@@ -48,7 +49,28 @@ describe("provider capability routing", () => {
     const publicIntegration = await getIntegration(workspaceId, "openai");
     expect(publicIntegration).not.toHaveProperty("encryptedCredentials");
     expect(publicIntegration?.maskedCredentials.apiKey).toMatch(/^••••••••/);
-    expect(JSON.stringify(publicIntegration)).not.toContain("sk-provider-routing-secret");
+    expect(JSON.stringify(publicIntegration)).not.toContain("test-provider-routing-secret");
+  });
+
+  it("redacts provider-echoed credentials from connection errors", async () => {
+    const apiKey = "test-echoed-provider-secret";
+    await saveIntegration(workspaceId, {
+      provider: "openai",
+      category: "AI",
+      mode: "BYOP",
+      credentials: { apiKey },
+      settings: {},
+    });
+
+    const fetcher = (async () => new Response(JSON.stringify({ error: { message: `Invalid API credential: ${apiKey}` } }), { status: 401 })) as typeof fetch;
+    const result = await testSavedIntegration(workspaceId, "openai", fetcher);
+
+    expect(result.ok).toBe(false);
+    expect(result.ok ? "" : result.error).toContain("[redacted]");
+    expect(JSON.stringify(result)).not.toContain(apiKey);
+
+    const publicIntegration = await getIntegration(workspaceId, "openai");
+    expect(publicIntegration?.lastError).not.toContain(apiKey);
   });
 
   it("merges partial credential updates without deleting previously saved secrets", async () => {
@@ -80,7 +102,7 @@ describe("provider capability routing", () => {
       provider: "openai",
       category: "AI",
       mode: "BYOP",
-      credentials: { apiKey: "sk-disconnect-test" },
+      credentials: { apiKey: "test-disconnect-secret" },
       settings: {},
     });
     await bindCapability(workspaceId, "AI_TEXT", "BYOP", "openai");
@@ -95,7 +117,7 @@ describe("provider capability routing", () => {
       provider: "telnyx",
       category: "AI",
       mode: "BYOP",
-      credentials: { apiKey: "KEY" },
+      credentials: { apiKey: "TEST" },
       settings: {},
     })).rejects.toThrow("telnyx must use the COMMUNICATION integration category");
 
