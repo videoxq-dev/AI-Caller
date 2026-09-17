@@ -8,6 +8,7 @@ import {
   completeWebchatTurn,
   createOrResumeWebchatSession,
   ensureWebchatWidget,
+  failWebchatTurn,
 } from "./repository";
 
 describe("web chat persistence", () => {
@@ -59,7 +60,7 @@ describe("web chat persistence", () => {
     expect(unauthenticated?.history).toEqual([]);
   });
 
-  it("deduplicates active turns, caches completed responses, and reclaims stale processing leases", async () => {
+  it("deduplicates active and completed turns without replaying side effects", async () => {
     const session = await createOrResumeWebchatSession({ widgetKey });
     expect(session).not.toBeNull();
     if (!session) throw new Error("Expected a web chat session.");
@@ -71,16 +72,37 @@ describe("web chat persistence", () => {
     const duplicate = await claimWebchatTurn(workspaceId, session.sessionId, clientMessageId);
     expect(duplicate.state).toBe("in_progress");
 
-    await db.update(webchatTurns)
-      .set({ updatedAt: new Date(Date.now() - 3 * 60 * 1000) })
-      .where(eq(webchatTurns.id, first.turnId));
-
-    const reclaimed = await claimWebchatTurn(workspaceId, session.sessionId, clientMessageId);
-    expect(reclaimed.state).toBe("claimed");
-    expect(reclaimed.turnId).toBe(first.turnId);
-
     await completeWebchatTurn(workspaceId, first.turnId, "Cached response");
     const completed = await claimWebchatTurn(workspaceId, session.sessionId, clientMessageId);
     expect(completed).toEqual({ state: "completed", turnId: first.turnId, responseText: "Cached response" });
+  });
+
+  it("fails closed for failed or lease-expired turns instead of re-executing them", async () => {
+    const session = await createOrResumeWebchatSession({ widgetKey });
+    expect(session).not.toBeNull();
+    if (!session) throw new Error("Expected a web chat session.");
+
+    const failedMessageId = "10000000-0000-4000-8000-000000000002";
+    const failedClaim = await claimWebchatTurn(workspaceId, session.sessionId, failedMessageId);
+    expect(failedClaim.state).toBe("claimed");
+    await failWebchatTurn(workspaceId, failedClaim.turnId, new Error("provider failed"));
+    expect(await claimWebchatTurn(workspaceId, session.sessionId, failedMessageId)).toEqual({
+      state: "failed",
+      turnId: failedClaim.turnId,
+    });
+
+    const staleMessageId = "10000000-0000-4000-8000-000000000003";
+    const staleClaim = await claimWebchatTurn(workspaceId, session.sessionId, staleMessageId);
+    expect(staleClaim.state).toBe("claimed");
+    await db.update(webchatTurns)
+      .set({ updatedAt: new Date(Date.now() - 3 * 60 * 1000) })
+      .where(eq(webchatTurns.id, staleClaim.turnId));
+
+    expect(await claimWebchatTurn(workspaceId, session.sessionId, staleMessageId)).toEqual({
+      state: "failed",
+      turnId: staleClaim.turnId,
+    });
+    const [stored] = await db.select().from(webchatTurns).where(eq(webchatTurns.id, staleClaim.turnId));
+    expect(stored.status).toBe("FAILED");
   });
 });
