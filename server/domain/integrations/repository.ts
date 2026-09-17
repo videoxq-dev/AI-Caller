@@ -11,6 +11,7 @@ import {
   decryptIntegrationCredentials,
   encryptIntegrationCredentials,
   maskSecret,
+  redactSecretsFromText,
   type EncryptedSecretEnvelope,
 } from "@/server/security/secrets";
 import { assertProviderSupportsCapability } from "@/server/providers/catalog";
@@ -48,6 +49,14 @@ function maskedCredentialMap(envelope: Record<string, unknown> | null) {
     return Object.fromEntries(Object.entries(credentials).map(([key, value]) => [key, maskSecret(value)]));
   } catch {
     return {};
+  }
+}
+
+function providerErrorMessage(message: string, envelope: Record<string, unknown> | null) {
+  try {
+    return redactSecretsFromText(message, Object.values(decryptCredentialMap(envelope))).slice(0, 500);
+  } catch {
+    return message.slice(0, 500);
   }
 }
 
@@ -149,8 +158,9 @@ export async function testSavedIntegration(workspaceId: string, provider: string
     const [updated] = await db.update(integrations).set({ status: "CONNECTED", lastTestedAt: testedAt, lastError: null, settings, updatedAt: testedAt }).where(and(eq(integrations.workspaceId, workspaceId), eq(integrations.provider, provider))).returning();
     return { ok: true as const, integration: publicIntegration(updated) };
   } catch (error) {
-    const message = error instanceof Error ? error.message : "Provider connection failed.";
-    const [updated] = await db.update(integrations).set({ status: "ERROR", lastTestedAt: testedAt, lastError: message.slice(0, 500), updatedAt: testedAt }).where(and(eq(integrations.workspaceId, workspaceId), eq(integrations.provider, provider))).returning();
+    const rawMessage = error instanceof Error ? error.message : "Provider connection failed.";
+    const message = providerErrorMessage(rawMessage, row.encryptedCredentials);
+    const [updated] = await db.update(integrations).set({ status: "ERROR", lastTestedAt: testedAt, lastError: message, updatedAt: testedAt }).where(and(eq(integrations.workspaceId, workspaceId), eq(integrations.provider, provider))).returning();
     return { ok: false as const, error: message, integration: publicIntegration(updated) };
   }
 }
