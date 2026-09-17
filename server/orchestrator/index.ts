@@ -1,4 +1,5 @@
 import { AppError } from "@/server/http/errors";
+import { logger } from "@/server/observability/logger";
 import { buildConversationContext, type OrchestratorContext } from "./context";
 import {
   executeOrchestratorTools,
@@ -77,6 +78,22 @@ function finalizerMessages(
   ];
 }
 
+function bookingFallback(toolResult: OrchestratorToolResult) {
+  const title = typeof toolResult.data.title === "string" ? toolResult.data.title : "appointment";
+  const startsAt = typeof toolResult.data.startsAt === "string" ? toolResult.data.startsAt : null;
+  const timezone = typeof toolResult.data.timezone === "string" ? toolResult.data.timezone : "UTC";
+  if (!startsAt) return `Your ${title} is booked.`;
+
+  const parsed = new Date(startsAt);
+  if (Number.isNaN(parsed.getTime())) return `Your ${title} is booked.`;
+  const formatted = new Intl.DateTimeFormat("en-US", {
+    dateStyle: "medium",
+    timeStyle: "short",
+    timeZone: timezone,
+  }).format(parsed);
+  return `Your ${title} is booked for ${formatted} (${timezone}).`;
+}
+
 export function createResponseOrchestrator(dependencies: OrchestratorDependencies) {
   return {
     async respond(workspaceId: string, conversationId: string) {
@@ -101,19 +118,33 @@ export function createResponseOrchestrator(dependencies: OrchestratorDependencie
       );
 
       if (toolResult.kind === "availability" || toolResult.kind === "booking") {
-        const finalResponse = await dependencies.generate(
-          workspaceId,
-          conversationId,
-          finalizerMessages(context, first, toolResult),
-        );
-        const finalEnvelope = parseOrchestratorEnvelope(finalResponse.text);
-        if (!finalEnvelope.reply) throw new Error("AI provider did not return a customer-facing response after the tool call.");
-        return {
-          reply: finalEnvelope.reply,
-          handlingMode: "AI" as const,
-          action: first.action,
-          toolResult,
-        };
+        try {
+          const finalResponse = await dependencies.generate(
+            workspaceId,
+            conversationId,
+            finalizerMessages(context, first, toolResult),
+          );
+          const finalEnvelope = parseOrchestratorEnvelope(finalResponse.text);
+          if (!finalEnvelope.reply) throw new Error("AI provider did not return a customer-facing response after the tool call.");
+          return {
+            reply: finalEnvelope.reply,
+            handlingMode: "AI" as const,
+            action: first.action,
+            toolResult,
+          };
+        } catch (error) {
+          if (toolResult.kind !== "booking") throw error;
+          logger.error(
+            { err: error, workspaceId, conversationId },
+            "AI booking finalizer failed after a confirmed booking; returning authoritative fallback confirmation",
+          );
+          return {
+            reply: bookingFallback(toolResult),
+            handlingMode: "AI" as const,
+            action: first.action,
+            toolResult,
+          };
+        }
       }
 
       if (toolResult.kind === "escalation") {
