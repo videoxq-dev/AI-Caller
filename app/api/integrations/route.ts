@@ -46,7 +46,7 @@ const categoryByProvider: Record<string, "AI" | "COMMUNICATION" | "WHATSAPP" | "
 
 const credentialKeys: Record<string, readonly string[]> = {
   plivo: ["authId", "authToken", "phone"],
-  telnyx: ["apiKey", "connectionId", "phone"],
+  telnyx: ["apiKey", "connectionId", "phone", "webhookPublicKey"],
   twilio: ["sid", "authToken", "phone"],
   openai: ["apiKey"],
   gemini: ["apiKey"],
@@ -56,6 +56,9 @@ const credentialKeys: Record<string, readonly string[]> = {
 };
 
 const settingKeys: Record<string, readonly string[]> = {
+  plivo: ["phone"],
+  telnyx: ["phone", "webhookPublicKey"],
+  twilio: ["phone"],
   openai: ["model"],
   gemini: ["model"],
   openrouter: ["model", "siteUrl"],

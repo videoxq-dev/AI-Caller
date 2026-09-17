@@ -16,6 +16,7 @@ import {
 } from "@/server/security/secrets";
 import { assertProviderSupportsCapability } from "@/server/providers/catalog";
 import { testProviderConnection } from "@/server/providers/connections";
+import { parseTelnyxWebhookPublicKey } from "@/server/providers/sms/telnyx";
 import type { CalendarSetupInput, CommunicationSetupInput, IntegrationSaveInput } from "./schemas";
 
 const categoryByProvider: Record<string, "AI" | "COMMUNICATION" | "WHATSAPP" | "CALENDAR"> = {
@@ -185,6 +186,36 @@ async function requireConnectedProvider(workspaceId: string, provider: string, l
   if (row?.status !== "CONNECTED") throw new Error(`${label} provider ${provider} must be connected before this setup step can be completed.`);
 }
 
+async function requireSmsIntegrationReady(workspaceId: string, provider: string) {
+  const row = await getPrivateIntegration(workspaceId, provider);
+  if (!row || row.status !== "CONNECTED") {
+    throw new Error(`SMS provider ${provider} must be connected before this setup step can be completed.`);
+  }
+
+  const settings = row.settings && typeof row.settings === "object" ? row.settings as Record<string, unknown> : {};
+  const credentials = decryptCredentialMap(row.encryptedCredentials);
+  const phone = typeof settings.phone === "string" && settings.phone.trim()
+    ? settings.phone.trim()
+    : credentials.phone?.trim();
+  if (!phone) {
+    throw new Error(`SMS provider ${provider} needs a sender phone number before this setup step can be completed.`);
+  }
+
+  if (provider === "telnyx") {
+    const publicKey = typeof settings.webhookPublicKey === "string" && settings.webhookPublicKey.trim()
+      ? settings.webhookPublicKey.trim()
+      : credentials.webhookPublicKey?.trim();
+    if (!publicKey) {
+      throw new Error("Telnyx SMS needs its webhook signing public key before this setup step can be completed.");
+    }
+    try {
+      parseTelnyxWebhookPublicKey(publicKey);
+    } catch (error) {
+      throw new Error(error instanceof Error ? error.message : "Telnyx SMS webhook signing public key is invalid.");
+    }
+  }
+}
+
 export async function bindCapability(workspaceId: string, capability: "AI_TEXT" | "SMS" | "VOICE" | "WHATSAPP" | "CALENDAR", mode: "HOSTED" | "BYOP", provider?: string | null) {
   if (mode === "BYOP") {
     if (!provider) throw new Error(`${capability} requires a provider when using BYOP mode.`);
@@ -219,7 +250,7 @@ export async function getCommunicationSetup(workspaceId: string) {
 export async function saveCommunicationSetup(workspaceId: string, input: CommunicationSetupInput) {
   if (input.completeStep) {
     if (input.voice.mode === "BYOP" && input.voice.provider) await requireConnectedProvider(workspaceId, input.voice.provider, "Voice");
-    if (input.sms.mode === "BYOP" && input.sms.provider) await requireConnectedProvider(workspaceId, input.sms.provider, "SMS");
+    if (input.sms.mode === "BYOP" && input.sms.provider) await requireSmsIntegrationReady(workspaceId, input.sms.provider);
     if (input.whatsapp.mode === "BYOP") await requireConnectedProvider(workspaceId, input.whatsapp.provider ?? "whatsapp", "WhatsApp");
   }
   const settings = { voice: input.voice, sms: input.sms, whatsapp: input.whatsapp, webchat: input.webchat };

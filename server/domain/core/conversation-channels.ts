@@ -1,4 +1,4 @@
-import { and, eq, inArray } from "drizzle-orm";
+import { and, desc, eq, inArray } from "drizzle-orm";
 import { db } from "@/db";
 import { messages } from "@/db/schema";
 
@@ -24,4 +24,14 @@ export async function listConversationChannels(workspaceId: string, conversation
   }
 
   return channelsByConversation;
+}
+
+export async function getActiveConversationChannel(workspaceId: string, conversationId: string): Promise<ConversationChannel | null> {
+  const [row] = await db.select({ channel: messages.channel }).from(messages).where(and(
+    eq(messages.workspaceId, workspaceId),
+    eq(messages.conversationId, conversationId),
+    eq(messages.direction, "INBOUND"),
+    eq(messages.senderType, "CUSTOMER"),
+  )).orderBy(desc(messages.createdAt), desc(messages.id)).limit(1);
+  return row?.channel ?? null;
 }

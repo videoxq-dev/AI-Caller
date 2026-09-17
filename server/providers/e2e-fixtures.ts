@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import type { AIProvider, CalendarProvider } from "./contracts";
+import type { AIProvider, CalendarProvider, SMSProvider } from "./contracts";
 
 function nextUtcDay(hour: number, minute = 0) {
   const now = new Date();
@@ -63,7 +63,7 @@ export function createE2EAIProvider(): AIProvider {
               timezone: "UTC",
               title: "QA Consultation",
               serviceId: null,
-              notes: "Booked by Milestone 4 browser acceptance verification.",
+              notes: "Booked by browser acceptance verification.",
             },
           }),
         };
@@ -98,5 +98,19 @@ export function createE2ECalendarProvider(): CalendarProvider {
       return { externalId: input.externalId, startsAt: input.startsAt, endsAt: input.endsAt };
     },
     async cancel() {},
+  };
+}
+
+export function createE2ESmsProvider(base: SMSProvider): SMSProvider {
+  if (!isE2EProviderFixtureMode()) throw new Error("E2E provider fixtures are not available outside guarded CI localhost mode.");
+  return {
+    verifyWebhook: (input) => base.verifyWebhook(input),
+    normalizeWebhook: (input) => base.normalizeWebhook(input),
+    async send(input) {
+      return {
+        externalId: `e2e-sms-${input.idempotencyKey ?? randomUUID()}`,
+        status: "QUEUED",
+      };
+    },
   };
 }
