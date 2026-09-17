@@ -160,6 +160,12 @@ export function createSmsWebhookService(dependencies: SmsServiceDependencies) {
           continue;
         }
 
+        if (claim.state === "duplicate") {
+          duplicates += 1;
+          continue;
+        }
+
+        let safelyQueued = false;
         try {
           if (normalizePhone(event.to) !== runtime.senderNumber) {
             throw new AppError("SMS_DESTINATION_MISMATCH", "The inbound SMS destination does not match this workspace's configured SMS number.", 409);
@@ -186,12 +192,15 @@ export function createSmsWebhookService(dependencies: SmsServiceDependencies) {
             conversationId: conversation.id,
             customerNumber: normalizePhone(event.from),
           };
-          await updateProviderWebhookPayload(workspaceId, claim.eventId, { ...safeEventPayload(event), ...job });
-          await markProviderWebhookQueued(workspaceId, claim.eventId);
+          const payloadUpdated = await updateProviderWebhookPayload(workspaceId, claim.eventId, { ...safeEventPayload(event), ...job });
+          if (!payloadUpdated) throw new AppError("WEBHOOK_STATE_CONFLICT", "The SMS webhook state changed before it could be queued.", 409);
+          const queuedEvent = await markProviderWebhookQueued(workspaceId, claim.eventId);
+          if (!queuedEvent) throw new AppError("WEBHOOK_STATE_CONFLICT", "The SMS webhook could not transition to the queue.", 409);
+          safelyQueued = true;
           await enqueueInbound(job);
           queued += 1;
         } catch (error) {
-          await failProviderWebhookEvent(workspaceId, claim.eventId, error);
+          if (!safelyQueued) await failProviderWebhookEvent(workspaceId, claim.eventId, error);
           throw error;
         }
       }
