@@ -67,7 +67,7 @@ describe("Meta WhatsApp Cloud adapter", () => {
   });
 
   it("sends text and template messages through the Graph messages endpoint", async () => {
-    const fetcher = vi.fn(async (_input: string | URL | Request, _init?: RequestInit) => new Response(JSON.stringify({ messages: [{ id: "wamid.sent" }] }), {
+    const fetcher = vi.fn(async (input: Parameters<typeof fetch>[0], init?: Parameters<typeof fetch>[1]) => new Response(JSON.stringify({ messages: [{ id: "wamid.sent" }] }), {
       status: 200,
       headers: { "content-type": "application/json" },
     }));
