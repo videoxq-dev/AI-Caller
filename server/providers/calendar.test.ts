@@ -55,10 +55,10 @@ describe("Calendly normalized rescheduling", () => {
         return new Response(JSON.stringify({ collection: [{ email: "lead@example.com", name: "Lead", timezone: "America/New_York", status: "active" }] }), { status: 200 });
       }
       if (url.endsWith("/invitees") && method === "POST") {
-        return new Response(JSON.stringify({ resource: { event: "https://api.calendly.com/scheduled_events/replacement" } }), { status: 200 });
+        return new Response(JSON.stringify({ resource: { uri: "https://calendly.com/scheduled_events/replacement/invitees/INVITEE1" } }), { status: 201 });
       }
       if (url.endsWith("/scheduled_events/original/cancellation") && method === "POST") {
-        return new Response(JSON.stringify({ resource: {} }), { status: 200 });
+        return new Response(JSON.stringify({ resource: {} }), { status: 201 });
       }
       return new Response(JSON.stringify({ message: "Unexpected request" }), { status: 500 });
     }) as typeof fetch;
@@ -95,12 +95,12 @@ describe("Calendly normalized rescheduling", () => {
         return new Response(JSON.stringify({ collection: [{ email: "lead@example.com", status: "active" }] }), { status: 200 });
       }
       if (url.endsWith("/invitees") && method === "POST") {
-        return new Response(JSON.stringify({ resource: { event: "https://api.calendly.com/scheduled_events/replacement" } }), { status: 200 });
+        return new Response(JSON.stringify({ resource: { uri: "https://api.calendly.com/scheduled_events/replacement/invitees/INVITEE2" } }), { status: 201 });
       }
       if (url.includes("/cancellation") && method === "POST") {
         cancellations.push(url);
         if (url.includes("/original/")) return new Response(JSON.stringify({ message: "cancel failed" }), { status: 500 });
-        return new Response(JSON.stringify({ resource: {} }), { status: 200 });
+        return new Response(JSON.stringify({ resource: {} }), { status: 201 });
       }
       return new Response(JSON.stringify({ message: "Unexpected request" }), { status: 500 });
     }) as typeof fetch;
