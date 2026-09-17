@@ -115,7 +115,7 @@ export function createSmsWebhookService(dependencies: SmsServiceDependencies) {
       const webhookInput: SmsWebhookInput = {
         request,
         rawBody,
-        webhookUrl: request.url,
+        webhookUrl: webhookUrl(providerName, workspaceId),
         contentType: request.headers.get("content-type"),
       };
 
