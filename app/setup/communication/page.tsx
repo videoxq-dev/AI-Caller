@@ -23,6 +23,7 @@ type SMSProvider = VoiceProvider;
 type IntegrationSummary = { provider: string; status: "CONNECTED" | "ERROR" | "DISCONNECTED" };
 type SmsConfig = {
   webhookUrl: string | null;
+  senderNumber: string | null;
   webhookPublicKeyConfigured: boolean | null;
 };
 
@@ -46,7 +47,7 @@ export default function CommunicationSetupPage() {
   const [displayName, setDisplayName] = useState("");
   const [replyWindow, setReplyWindow] = useState("Always respond");
   const [afterHoursBehavior, setAfterHoursBehavior] = useState("Auto-reply + collect details");
-  const [smsConfig, setSmsConfig] = useState<SmsConfig>({ webhookUrl: null, webhookPublicKeyConfigured: null });
+  const [smsConfig, setSmsConfig] = useState<SmsConfig>({ webhookUrl: null, senderNumber: null, webhookPublicKeyConfigured: null });
   const [smsWebhookPublicKey, setSmsWebhookPublicKey] = useState("");
   const [integrations, setIntegrations] = useState<IntegrationSummary[]>([]);
   const [saving, setSaving] = useState(false);
@@ -78,7 +79,7 @@ export default function CommunicationSetupPage() {
 
   useEffect(() => {
     if (smsMode !== "BYOP") {
-      setSmsConfig({ webhookUrl: null, webhookPublicKeyConfigured: null });
+      setSmsConfig({ webhookUrl: null, senderNumber: null, webhookPublicKeyConfigured: null });
       setSmsWebhookPublicKey("");
       return;
     }
@@ -89,13 +90,14 @@ export default function CommunicationSetupPage() {
       .then((payload) => {
         setSmsConfig({
           webhookUrl: typeof payload?.webhookUrl === "string" ? payload.webhookUrl : null,
+          senderNumber: typeof payload?.senderNumber === "string" ? payload.senderNumber : null,
           webhookPublicKeyConfigured: typeof payload?.webhookPublicKeyConfigured === "boolean" ? payload.webhookPublicKeyConfigured : null,
         });
         setSmsWebhookPublicKey("");
       })
       .catch((error) => {
         if (error instanceof Error && error.name === "AbortError") return;
-        setSmsConfig({ webhookUrl: null, webhookPublicKeyConfigured: null });
+        setSmsConfig({ webhookUrl: null, senderNumber: null, webhookPublicKeyConfigured: null });
       });
     return () => controller.abort();
   }, [smsMode, smsProvider]);
@@ -114,6 +116,7 @@ export default function CommunicationSetupPage() {
     if (!response.ok) throw new Error(payload?.error?.message ?? "Unable to save the Telnyx webhook signing key.");
     setSmsConfig({
       webhookUrl: typeof payload?.webhookUrl === "string" ? payload.webhookUrl : smsConfig.webhookUrl,
+      senderNumber: typeof payload?.senderNumber === "string" ? payload.senderNumber : smsConfig.senderNumber,
       webhookPublicKeyConfigured: true,
     });
     setSmsWebhookPublicKey("");
@@ -213,7 +216,7 @@ export default function CommunicationSetupPage() {
                   </div>
                 </div>
               )}
-              <div className="smsBlock"><h3>Choose an SMS number</h3><div className="choiceGrid numberChoiceGrid"><button type="button" className={`choiceCard compact ${smsNumberMode === "same" ? "selected" : ""}`} onClick={() => setSmsNumberMode("same")}><span className="radioDot" /><span className="choiceText"><strong>Use the same business number</strong><small>{selectedNumber}</small></span></button><button type="button" className={`choiceCard compact ${smsNumberMode === "separate" ? "selected" : ""}`} onClick={() => setSmsNumberMode("separate")}><span className="radioDot" /><span className="choiceText"><strong>Use a separate SMS number</strong><small>Choose a dedicated text number later</small></span></button></div></div>
+              {smsMode === "HOSTED" ? <div className="smsBlock"><h3>Choose an SMS number</h3><div className="choiceGrid numberChoiceGrid"><button type="button" className={`choiceCard compact ${smsNumberMode === "same" ? "selected" : ""}`} onClick={() => setSmsNumberMode("same")}><span className="radioDot" /><span className="choiceText"><strong>Use the same business number</strong><small>{selectedNumber}</small></span></button><button type="button" className={`choiceCard compact ${smsNumberMode === "separate" ? "selected" : ""}`} onClick={() => setSmsNumberMode("separate")}><span className="radioDot" /><span className="choiceText"><strong>Use a separate SMS number</strong><small>Choose a dedicated text number later</small></span></button></div></div> : <div className="smsBlock"><h3>SMS sender number</h3><div className="existingNumberEmpty"><PhoneIcon size={24} /><div><strong>{smsConfig.senderNumber ?? "No provider SMS number configured"}</strong><span>{smsConfig.senderNumber ? `Messages will be sent from this ${smsProvider} number.` : "Add the SMS phone number in the connected provider integration before completing setup."}</span></div><Link className="outlineAction" href={`/integrations?provider=${smsProvider}&return=%2Fsetup%2Fcommunication`}>Manage</Link></div></div>}
               <div className="smsBlock messagingSettingsBlock"><h3>Messaging settings</h3><div className="smsSettingsGrid"><label className="communicationField"><span>Display business name</span><input value={displayName} onChange={(event) => setDisplayName(event.target.value)} placeholder="Your business name" /></label><label className="communicationField"><span>Reply window</span><select value={replyWindow} onChange={(event) => setReplyWindow(event.target.value)}><option>Always respond</option><option>Business hours only</option><option>After-hours only</option></select></label><label className="communicationField"><span>After-hours behavior</span><select value={afterHoursBehavior} onChange={(event) => setAfterHoursBehavior(event.target.value)}><option>Auto-reply + collect details</option><option>Auto-reply only</option><option>Hold for next business day</option></select></label><div className="complianceField"><span className="complianceLabel">Compliance</span><div className="compliancePills"><span><CheckIcon size={13} /> STOP / HELP enabled</span><span><CheckIcon size={13} /> Consent reminder included</span></div></div></div></div>
             </section>
           )}
