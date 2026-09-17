@@ -3,6 +3,7 @@ import { resolveCalendarProvider, resolveCalendarProviderForIntegration } from "
 import { resolveProviderRoute } from "@/server/providers/resolver";
 import { AppError } from "@/server/http/errors";
 import { logger } from "@/server/observability/logger";
+import { assertAppointmentReferences } from "./references";
 import {
   getAppointment,
   insertAppointment,
@@ -24,6 +25,7 @@ type StoredAppointment = {
 type BookingDependencies = {
   resolveCurrent: (workspaceId: string) => Promise<{ integrationId: string; provider: CalendarProvider }>;
   resolveForIntegration: (workspaceId: string, integrationId: string) => Promise<CalendarProvider>;
+  validateBooking?: (workspaceId: string, input: AppointmentInput) => Promise<void>;
   insertAppointment: (
     workspaceId: string,
     input: AppointmentInput,
@@ -57,6 +59,7 @@ async function defaultResolveCurrent(workspaceId: string) {
 const defaultDependencies: BookingDependencies = {
   resolveCurrent: defaultResolveCurrent,
   resolveForIntegration: resolveCalendarProviderForIntegration,
+  validateBooking: assertAppointmentReferences,
   insertAppointment,
   getAppointment,
   updateAfterReschedule: updateAppointmentAfterReschedule,
@@ -74,6 +77,7 @@ export function createCalendarBookingService(dependencies: BookingDependencies) 
     },
 
     async book(workspaceId: string, input: AppointmentInput) {
+      await dependencies.validateBooking?.(workspaceId, input);
       const { integrationId, provider } = await dependencies.resolveCurrent(workspaceId);
       const providerBooking = await provider.book({
         startsAt: input.startsAt,
