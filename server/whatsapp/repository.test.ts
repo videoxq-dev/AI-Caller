@@ -1,15 +1,17 @@
 import { afterAll, beforeEach, describe, expect, it } from "vitest";
 import { closeDatabase, db } from "@/db";
-import { messages, workspaces } from "@/db/schema";
+import { contactIdentities, messages, workspaces } from "@/db/schema";
 import {
   appendMessage,
   getOrCreateContactByIdentity,
   getOrCreateOpenConversation,
 } from "@/server/domain/core/repository";
-import { updateWhatsAppDeliveryStatus } from "./repository";
+import { getWhatsAppConversationRecipient, updateWhatsAppDeliveryStatus } from "./repository";
 
 describe("WhatsApp delivery reconciliation", () => {
   let workspaceId = "";
+  let contactId = "";
+  let conversationId = "";
   let messageId = "";
 
   beforeEach(async () => {
@@ -20,7 +22,9 @@ describe("WhatsApp delivery reconciliation", () => {
       channel: "WHATSAPP",
       externalId: "15551110000",
     });
+    contactId = contact.id;
     const conversation = await getOrCreateOpenConversation(workspaceId, contact.id);
+    conversationId = conversation.id;
     const message = await appendMessage(workspaceId, conversation.id, {
       channel: "WHATSAPP",
       direction: "OUTBOUND",
@@ -64,5 +68,40 @@ describe("WhatsApp delivery reconciliation", () => {
     const [stored] = await db.select().from(messages);
     expect(stored).toMatchObject({ id: messageId, status: "READ" });
     expect(stored.metadata).toMatchObject({ whatsappStatusAt: occurredAt.toISOString() });
+  });
+
+  it("routes replies to the WhatsApp identity used by the latest inbound turn", async () => {
+    await db.insert(contactIdentities).values({
+      workspaceId,
+      contactId,
+      channel: "WHATSAPP",
+      externalId: "15551110001",
+      normalizedValue: "+15551110001",
+    });
+    await appendMessage(workspaceId, conversationId, {
+      channel: "WHATSAPP",
+      direction: "INBOUND",
+      senderType: "CUSTOMER",
+      contentType: "TEXT",
+      body: "Use my second WhatsApp number",
+      provider: "whatsapp",
+      externalMessageId: "wamid.second-identity",
+      status: "RECEIVED",
+      metadata: { whatsappWaId: "15551110001" },
+    });
+
+    await expect(getWhatsAppConversationRecipient(workspaceId, conversationId)).resolves.toBe("15551110001");
+  });
+
+  it("fails safe instead of choosing an arbitrary legacy identity when multiple WhatsApp identities exist", async () => {
+    await db.insert(contactIdentities).values({
+      workspaceId,
+      contactId,
+      channel: "WHATSAPP",
+      externalId: "15551110001",
+      normalizedValue: "+15551110001",
+    });
+
+    await expect(getWhatsAppConversationRecipient(workspaceId, conversationId)).resolves.toBeNull();
   });
 });
