@@ -26,10 +26,44 @@ export interface CalendarProvider {
   cancel(input: { externalId: string }): Promise<void>;
 }
 
+export type SmsDeliveryStatus = "QUEUED" | "SENT" | "DELIVERED" | "FAILED";
+
+export type NormalizedSmsEvent =
+  | {
+      type: "MESSAGE_RECEIVED";
+      externalEventId: string;
+      externalMessageId: string;
+      from: string;
+      to: string;
+      text: string;
+      occurredAt: Date | null;
+    }
+  | {
+      type: "DELIVERY_UPDATED";
+      externalEventId: string;
+      externalMessageId: string;
+      status: SmsDeliveryStatus;
+      error: string | null;
+      occurredAt: Date | null;
+    };
+
+export type SmsWebhookInput = {
+  request: Request;
+  rawBody: string;
+  webhookUrl: string;
+  contentType: string | null;
+};
+
 export interface SMSProvider {
-  send(input: { to: string; from: string; text: string }): Promise<{ externalId: string }>;
-  verifyWebhook(request: Request): Promise<boolean>;
-  normalizeWebhook(payload: unknown): Promise<unknown[]>;
+  send(input: {
+    to: string;
+    from: string;
+    text: string;
+    statusCallbackUrl?: string;
+    idempotencyKey?: string;
+  }): Promise<{ externalId: string; status: SmsDeliveryStatus }>;
+  verifyWebhook(input: SmsWebhookInput): Promise<boolean>;
+  normalizeWebhook(input: SmsWebhookInput): Promise<NormalizedSmsEvent[]>;
 }
 
 export interface WhatsAppProvider {
