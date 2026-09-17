@@ -6,6 +6,7 @@ import { resetEnvForTests } from "@/server/env";
 import type { WhatsAppInboundResponseJob } from "@/server/jobs/queues";
 import type { WhatsAppProvider } from "@/server/providers/contracts";
 import type { WhatsAppRuntime } from "@/server/providers/whatsapp/runtime";
+import { createWhatsAppOutboundService } from "./outbound";
 import { createWhatsAppWebhookService } from "./service";
 
 const APP_SECRET = "whatsapp-test-secret";
@@ -75,10 +76,12 @@ function runtimeFor(workspaceId: string, provider: WhatsAppProvider): WhatsAppRu
 
 function harness(runtime: WhatsAppRuntime, respond: () => Promise<ReturnType<typeof orchestratorReply>>) {
   const jobs: WhatsAppInboundResponseJob[] = [];
+  const outbound = createWhatsAppOutboundService({ resolveRuntime: async () => runtime });
   const service = createWhatsAppWebhookService({
     resolveByPhoneNumberId: async () => runtime,
     resolveForWorkspace: async () => runtime,
     respond: async () => respond(),
+    sendText: (workspaceId, conversationId, input) => outbound.sendText(workspaceId, conversationId, input),
     enqueueResponseJob: async (job) => {
       jobs.push(job);
       return `job-${jobs.length}`;

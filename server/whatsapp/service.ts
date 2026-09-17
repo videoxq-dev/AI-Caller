@@ -1,13 +1,9 @@
-import { db } from "@/db";
-import { usageEvents } from "@/db/schema";
 import { appendMessage, getOrCreateContactByIdentity, getOrCreateOpenConversation } from "@/server/domain/core/repository";
 import { AppError } from "@/server/http/errors";
 import { enqueueUniqueJob } from "@/server/jobs";
 import { WHATSAPP_INBOUND_RESPONSE, whatsappInboundResponseJobSchema, type WhatsAppInboundResponseJob } from "@/server/jobs/queues";
-import { logger } from "@/server/observability/logger";
 import { responseOrchestrator } from "@/server/orchestrator";
 import type { NormalizedWhatsAppEvent, WhatsAppWebhookInput } from "@/server/providers/contracts";
-import { ProviderRequestError } from "@/server/providers/http";
 import { normalizeMetaWhatsAppWebhook, verifyMetaWhatsAppWebhook } from "@/server/providers/whatsapp/meta-cloud";
 import {
   resolveWhatsAppRuntimeByPhoneNumberId,
@@ -22,14 +18,10 @@ import {
   markProviderWebhookQueued,
   releaseProviderWebhookEventForRetry,
 } from "@/server/providers/webhooks/repository";
-import {
-  attachWhatsAppProviderMessage,
-  markWhatsAppSendFailure,
-  updateWhatsAppDeliveryStatus,
-} from "./repository";
+import { sendWhatsAppConversationText } from "./outbound";
+import { updateWhatsAppDeliveryStatus } from "./repository";
 
 const MAX_WHATSAPP_WEBHOOK_BYTES = 64 * 1024;
-const MAX_WHATSAPP_TEXT_CHARACTERS = 4096;
 
 type WhatsAppOrchestratorResult = Awaited<ReturnType<typeof responseOrchestrator.respond>>;
 
@@ -37,6 +29,11 @@ type WhatsAppServiceDependencies = {
   resolveByPhoneNumberId: (phoneNumberId: string) => Promise<WhatsAppRuntime>;
   resolveForWorkspace: (workspaceId: string) => Promise<WhatsAppRuntime>;
   respond: (workspaceId: string, conversationId: string) => Promise<WhatsAppOrchestratorResult>;
+  sendText: (
+    workspaceId: string,
+    conversationId: string,
+    input: { senderType: "AI" | "USER"; text: string; beforeProviderSend?: () => void },
+  ) => Promise<unknown>;
   enqueueResponseJob: (job: WhatsAppInboundResponseJob) => Promise<string | null>;
 };
 
@@ -66,13 +63,6 @@ async function readWebhookBody(request: Request) {
     reader.releaseLock();
   }
   return Buffer.concat(chunks).toString("utf8");
-}
-
-function whatsappText(value: string) {
-  const text = value.trim();
-  const characters = Array.from(text);
-  if (characters.length <= MAX_WHATSAPP_TEXT_CHARACTERS) return text;
-  return `${characters.slice(0, MAX_WHATSAPP_TEXT_CHARACTERS - 1).join("")}…`;
 }
 
 function safeEventPayload(event: NormalizedWhatsAppEvent) {
@@ -119,27 +109,6 @@ function queuedJobFromPayload(workspaceId: string, eventId: string, payload: Rec
     text: payload.text,
     occurredAt: payload.occurredAt ?? null,
   });
-}
-
-async function recordWhatsAppUsage(workspaceId: string, runtime: WhatsAppRuntime, referenceId: string, providerUsage: Record<string, unknown>) {
-  try {
-    await db.insert(usageEvents).values({
-      workspaceId,
-      capability: "WHATSAPP",
-      provider: runtime.providerName,
-      mode: runtime.mode,
-      providerUsage,
-      creditsCharged: 0,
-      referenceType: "MESSAGE",
-      referenceId,
-    });
-  } catch (error) {
-    logger.error({ err: error, workspaceId, referenceId }, "Failed to persist WhatsApp usage event");
-  }
-}
-
-function uncertainProviderFailure(error: unknown) {
-  return !(error instanceof ProviderRequestError) || error.status >= 500;
 }
 
 export function createWhatsAppWebhookService(dependencies: WhatsAppServiceDependencies) {
@@ -254,37 +223,14 @@ export function createWhatsAppWebhookService(dependencies: WhatsAppServiceDepend
           return { skipped: false as const, replied: false as const };
         }
 
-        const reply = whatsappText(orchestrated.reply);
-        const outbound = await appendMessage(job.workspaceId, conversation.id, {
-          channel: "WHATSAPP",
-          direction: "OUTBOUND",
+        await dependencies.sendText(job.workspaceId, conversation.id, {
           senderType: "AI",
-          contentType: "TEXT",
-          body: reply,
-          provider: "whatsapp",
-          externalMessageId: null,
-          status: "SENDING",
-          metadata: { inReplyToProviderEventId: job.webhookEventId, mode: runtime.mode },
+          text: orchestrated.reply,
+          beforeProviderSend: () => { terminalFailure = true; },
         });
 
-        terminalFailure = true;
-        try {
-          const sent = await runtime.provider.sendText({
-            phoneNumberId: runtime.phoneNumberId,
-            to: job.customerWaId,
-            text: reply,
-          });
-          await attachWhatsAppProviderMessage(job.workspaceId, outbound.id, sent.externalId, sent.status);
-          await recordWhatsAppUsage(job.workspaceId, runtime, outbound.id, { messages: 1, status: sent.status });
-        } catch (error) {
-          const uncertain = uncertainProviderFailure(error);
-          await markWhatsAppSendFailure(job.workspaceId, outbound.id, uncertain ? "SEND_UNKNOWN" : "FAILED", error);
-          await recordWhatsAppUsage(job.workspaceId, runtime, outbound.id, { messages: 0, outcome: uncertain ? "unknown" : "rejected" });
-          throw error;
-        }
-
         await completeProviderWebhookEvent(job.workspaceId, job.webhookEventId);
-        return { skipped: false as const, replied: true as const, messageId: outbound.id };
+        return { skipped: false as const, replied: true as const };
       } catch (error) {
         if (terminalFailure) await failProviderWebhookEvent(job.workspaceId, job.webhookEventId, error);
         else await releaseProviderWebhookEventForRetry(job.workspaceId, job.webhookEventId, error);
@@ -298,5 +244,6 @@ export const whatsAppWebhookService = createWhatsAppWebhookService({
   resolveByPhoneNumberId: resolveWhatsAppRuntimeByPhoneNumberId,
   resolveForWorkspace: resolveWhatsAppRuntimeForWorkspace,
   respond: (workspaceId, conversationId) => responseOrchestrator.respond(workspaceId, conversationId),
+  sendText: sendWhatsAppConversationText,
   enqueueResponseJob: (job) => enqueueUniqueJob(WHATSAPP_INBOUND_RESPONSE, job.webhookEventId, job),
 });
