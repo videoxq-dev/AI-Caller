@@ -43,6 +43,7 @@ export const webchatSessions = pgTable(
   (table) => [
     uniqueIndex("webchat_sessions_token_hash_uq").on(table.tokenHash),
     index("webchat_sessions_workspace_visitor_idx").on(table.workspaceId, table.visitorId),
+    index("webchat_sessions_workspace_created_idx").on(table.workspaceId, table.createdAt),
     index("webchat_sessions_conversation_idx").on(table.conversationId),
   ],
 );
@@ -63,6 +64,7 @@ export const webchatTurns = pgTable(
   (table) => [
     uniqueIndex("webchat_turns_session_message_uq").on(table.sessionId, table.clientMessageId),
     index("webchat_turns_workspace_created_idx").on(table.workspaceId, table.createdAt),
+    index("webchat_turns_session_created_idx").on(table.sessionId, table.createdAt),
   ],
 );
 
