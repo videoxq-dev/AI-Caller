@@ -176,6 +176,11 @@ try {
      VALUES ($1, 'How much is the QA Consultation?', 'The QA Consultation is $120.', true)`,
     [workspaceId],
   );
+  await pool.query(
+    `INSERT INTO credit_wallets (workspace_id, balance) VALUES ($1, 100)
+     ON CONFLICT (workspace_id) DO UPDATE SET balance = 100, updated_at = now()`,
+    [workspaceId],
+  );
 
   const calendarIntegration = await pool.query(
     `INSERT INTO integrations (workspace_id, category, provider, mode, status, settings)
