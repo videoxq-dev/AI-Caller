@@ -61,6 +61,10 @@ export const leadInputSchema = z.object({
   assignedUserId: optionalText(200),
 });
 
+export const conversationOpenInputSchema = z.object({
+  contactId: z.string().uuid(),
+});
+
 export const messageInputSchema = z.object({
   channel: channelSchema,
   direction: z.enum(["INBOUND", "OUTBOUND", "INTERNAL"]),
@@ -104,6 +108,16 @@ export const appointmentRescheduleSchema = z.object({
   message: "Appointment end must be after its start.",
 });
 
+export const availabilityInputSchema = z.object({
+  startsAt: z.coerce.date(),
+  endsAt: z.coerce.date(),
+  timezone: z.string().trim().min(1).max(100),
+  durationMinutes: z.coerce.number().int().min(5).max(480).optional(),
+}).refine((value) => value.endsAt.getTime() > value.startsAt.getTime(), {
+  path: ["endsAt"],
+  message: "Availability range end must be after its start.",
+});
+
 export const appointmentStatusInputSchema = z.object({
   status: appointmentStatusSchema,
 });
@@ -112,6 +126,11 @@ export const contactListQuerySchema = z.object({
   query: z.string().trim().max(200).default(""),
   status: leadStatusSchema.optional(),
   channel: channelSchema.optional(),
+  limit: z.coerce.number().int().min(1).max(100).default(50),
+  offset: z.coerce.number().int().min(0).default(0),
+});
+
+export const conversationListQuerySchema = z.object({
   limit: z.coerce.number().int().min(1).max(100).default(50),
   offset: z.coerce.number().int().min(0).default(0),
 });
