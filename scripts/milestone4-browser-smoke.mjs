@@ -111,7 +111,6 @@ try {
     [workspaceId, integration.rows[0].id],
   );
 
-  // The authenticated Test tab must use the real saved knowledge without creating live customer records.
   await page.goto(`${baseUrl}/ai-agent`, { waitUntil: "networkidle" });
   await page.getByRole("button", { name: "Test", exact: true }).click();
   await page.getByRole("heading", { name: "Test your AI" }).waitFor();
@@ -135,7 +134,6 @@ try {
   assert(typeof config?.publicKey === "string", "Widget config did not return a public key.");
   const widgetKey = config.publicKey;
 
-  // Load the exact embed loader on a neutral host document, then drive the iframe as a visitor.
   await page.setContent(`<!doctype html><html><body><h1>Host website</h1><script async src="${baseUrl}/widget/loader" data-ai-caller-key="${widgetKey}"></script></body></html>`);
   await page.getByRole("button", { name: "Open chat" }).waitFor({ timeout: 15_000 });
   await page.getByRole("button", { name: "Open chat" }).click();
@@ -151,7 +149,8 @@ try {
   await composer.press("Enter");
   await widgetFrame.getByText("I have a 10:00 AM opening tomorrow.", { exact: true }).waitFor({ timeout: 15_000 });
 
-  await composer.fill("Book the 10:00 AM slot");
+  const bookingMessage = "My name is QA Visitor, qa.visitor@example.com. Book the 10:00 AM slot";
+  await composer.fill(bookingMessage);
   await composer.press("Enter");
   await widgetFrame.getByText("Your QA Consultation is booked for 10:00 AM tomorrow.", { exact: true }).waitFor({ timeout: 15_000 });
   await assertNoHorizontalOverflow(page, "Embedded Web Chat desktop");
@@ -167,6 +166,13 @@ try {
   );
   assert(sessionRow.rows[0], "Public widget did not persist a web chat session.");
   const { contact_id: contactId, conversation_id: conversationId } = sessionRow.rows[0];
+
+  const contactRow = await pool.query(
+    `SELECT name, email FROM contacts WHERE workspace_id = $1 AND id = $2 LIMIT 1`,
+    [workspaceId, contactId],
+  );
+  assert(contactRow.rows[0]?.name === "QA Visitor", `Expected captured visitor name, received ${contactRow.rows[0]?.name ?? "none"}.`);
+  assert(contactRow.rows[0]?.email === "qa.visitor@example.com", `Expected captured visitor email, received ${contactRow.rows[0]?.email ?? "none"}.`);
 
   const identityRow = await pool.query(
     `SELECT count(*)::int AS count FROM contact_identities
@@ -201,7 +207,7 @@ try {
   for (const expected of [
     "How much is the QA Consultation?",
     "What times are available tomorrow?",
-    "Book the 10:00 AM slot",
+    bookingMessage,
     "Appointment booked: QA Consultation",
   ]) assert(bodies.includes(expected), `Timeline is missing: ${expected}`);
   assert(messageRow.rows.filter((row) => row.sender_type === "AI" && row.content_type === "TEXT").length === 3, "Expected three persisted AI replies.");
@@ -218,13 +224,13 @@ try {
   await page.getByRole("heading", { name: "Inbox", level: 1 }).waitFor();
   await page.getByText("How much is the QA Consultation?", { exact: true }).waitFor({ timeout: 15_000 });
   await page.getByText("Appointment booked: QA Consultation", { exact: true }).waitFor({ timeout: 15_000 });
+  await page.getByText("QA Visitor", { exact: true }).first().waitFor({ timeout: 15_000 });
   await assertNoHorizontalOverflow(page, "Inbox after Web Chat booking");
   await page.screenshot({ path: path.join(outputDir, "inbox-after-booking.png"), fullPage: true });
 
   await page.goto(`${baseUrl}/appointments`, { waitUntil: "networkidle" });
   await page.getByText("QA Consultation", { exact: true }).first().waitFor({ timeout: 15_000 });
 
-  // Verify the hosted widget fits a phone-sized host viewport too.
   await page.setViewportSize({ width: 390, height: 844 });
   await page.setContent(`<!doctype html><html><body><h1>Mobile host</h1><script async src="${baseUrl}/widget/loader" data-ai-caller-key="${widgetKey}"></script></body></html>`);
   await page.getByRole("button", { name: "Open chat" }).waitFor({ timeout: 15_000 });
@@ -234,7 +240,7 @@ try {
   await page.screenshot({ path: path.join(outputDir, "webchat-mobile.png"), fullPage: true });
 
   assert(runtimeErrors.length === 0, `Milestone 4 browser runtime errors:\n${runtimeErrors.join("\n")}`);
-  console.log("Milestone 4 browser acceptance passed: Test tab isolation, knowledge response, qualification, availability, booking, credits, persistence, Inbox, and responsive widget rendering.");
+  console.log("Milestone 4 browser acceptance passed: Test tab isolation, knowledge response, contact capture, qualification, availability, booking, credits, persistence, Inbox, and responsive widget rendering.");
 } finally {
   await pool.end();
   await browser.close();
