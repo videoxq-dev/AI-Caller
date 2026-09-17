@@ -22,6 +22,7 @@ CREATE TABLE "webchat_sessions" (
 );
 CREATE UNIQUE INDEX "webchat_sessions_token_hash_uq" ON "webchat_sessions" ("token_hash");
 CREATE INDEX "webchat_sessions_workspace_visitor_idx" ON "webchat_sessions" ("workspace_id", "visitor_id");
+CREATE INDEX "webchat_sessions_workspace_created_idx" ON "webchat_sessions" ("workspace_id", "created_at");
 CREATE INDEX "webchat_sessions_conversation_idx" ON "webchat_sessions" ("conversation_id");
 
 CREATE TABLE "webchat_turns" (
@@ -37,6 +38,7 @@ CREATE TABLE "webchat_turns" (
 );
 CREATE UNIQUE INDEX "webchat_turns_session_message_uq" ON "webchat_turns" ("session_id", "client_message_id");
 CREATE INDEX "webchat_turns_workspace_created_idx" ON "webchat_turns" ("workspace_id", "created_at");
+CREATE INDEX "webchat_turns_session_created_idx" ON "webchat_turns" ("session_id", "created_at");
 
 CREATE TABLE "usage_events" (
   "id" uuid PRIMARY KEY DEFAULT gen_random_uuid() NOT NULL,
