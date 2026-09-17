@@ -153,7 +153,7 @@ export async function executeOrchestratorTools(
       direction: "INTERNAL",
       senderType: "SYSTEM",
       contentType: "APPOINTMENT_EVENT",
-      body: `Appointment booked: ${appointment.title}`,
+      body: `Appointment booked: ${envelope.action.title}`,
       provider: null,
       externalMessageId: null,
       status: "CONFIRMED",
@@ -164,7 +164,7 @@ export async function executeOrchestratorTools(
       kind: "booking",
       data: {
         appointmentId: appointment.id,
-        title: appointment.title,
+        title: envelope.action.title,
         startsAt: appointment.startsAt.toISOString(),
         endsAt: appointment.endsAt.toISOString(),
         timezone: appointment.timezone,
