@@ -142,6 +142,17 @@ async function ensureIntegration(workspaceId: string, provider: string) {
   return row;
 }
 
+async function requireConnectedProvider(workspaceId: string, provider: string, label: string) {
+  const [row] = await db
+    .select({ status: integrations.status })
+    .from(integrations)
+    .where(and(eq(integrations.workspaceId, workspaceId), eq(integrations.provider, provider)))
+    .limit(1);
+  if (row?.status !== "CONNECTED") {
+    throw new Error(`${label} provider ${provider} must be connected before this setup step can be completed.`);
+  }
+}
+
 export async function bindCapability(
   workspaceId: string,
   capability: "AI_TEXT" | "SMS" | "VOICE" | "WHATSAPP" | "CALENDAR",
@@ -180,12 +191,13 @@ export async function getCommunicationSetup(workspaceId: string) {
 }
 
 export async function saveCommunicationSetup(workspaceId: string, input: CommunicationSetupInput) {
-  const settings = {
-    voice: input.voice,
-    sms: input.sms,
-    whatsapp: input.whatsapp,
-    webchat: input.webchat,
-  };
+  if (input.completeStep) {
+    if (input.voice.mode === "BYOP" && input.voice.provider) await requireConnectedProvider(workspaceId, input.voice.provider, "Voice");
+    if (input.sms.mode === "BYOP" && input.sms.provider) await requireConnectedProvider(workspaceId, input.sms.provider, "SMS");
+    if (input.whatsapp.mode === "BYOP") await requireConnectedProvider(workspaceId, input.whatsapp.provider ?? "whatsapp", "WhatsApp");
+  }
+
+  const settings = { voice: input.voice, sms: input.sms, whatsapp: input.whatsapp, webchat: input.webchat };
   const now = new Date();
   await db
     .insert(communicationSetupSettings)
@@ -208,6 +220,8 @@ export async function getCalendarSetup(workspaceId: string) {
 }
 
 export async function saveCalendarSetup(workspaceId: string, input: CalendarSetupInput) {
+  if (input.completeStep) await requireConnectedProvider(workspaceId, input.provider, "Calendar");
+
   const settings = {
     provider: input.provider,
     meetingDurationMinutes: input.meetingDurationMinutes,
