@@ -149,16 +149,23 @@ try {
      ON CONFLICT (workspace_id, capability) DO UPDATE SET integration_id = EXCLUDED.integration_id, mode = EXCLUDED.mode, updated_at = now()`,
     [workspaceId, calendarIntegration.rows[0].id],
   );
+  const hostedCommunicationSettings = {
+    voice: { mode: "HOSTED", provider: null, numberMode: "new", number: "+12025550200" },
+    sms: { mode: "HOSTED", provider: null, numberMode: "same", number: null, displayName: "Milestone Five Auto Spa", replyWindow: "Always respond", afterHoursBehavior: "Auto-reply + collect details" },
+    whatsapp: { mode: "BYOP", provider: "whatsapp", accountMode: "existing" },
+    webchat: { enabled: true },
+  };
   await pool.query(
     `INSERT INTO communication_setup_settings (workspace_id, settings)
      VALUES ($1, $2::jsonb)
      ON CONFLICT (workspace_id) DO UPDATE SET settings = EXCLUDED.settings, updated_at = now()`,
-    [workspaceId, JSON.stringify({
-      voice: { mode: "HOSTED", provider: null, numberMode: "new", number: "+12025550200" },
-      sms: { mode: "HOSTED", provider: null, numberMode: "same", number: null, displayName: "Milestone Five Auto Spa", replyWindow: "Always respond", afterHoursBehavior: "Auto-reply + collect details" },
-      whatsapp: { mode: "BYOP", provider: "whatsapp", accountMode: "existing" },
-      webchat: { enabled: true },
-    })],
+    [workspaceId, JSON.stringify(hostedCommunicationSettings)],
+  );
+  await pool.query(
+    `INSERT INTO integrations (workspace_id, category, provider, mode, status, settings)
+     VALUES ($1, 'COMMUNICATION', 'telnyx', 'BYOP', 'CONNECTED', $2::jsonb)
+     ON CONFLICT (workspace_id, provider) DO UPDATE SET category = 'COMMUNICATION', mode = 'BYOP', status = 'CONNECTED', settings = EXCLUDED.settings, updated_at = now()`,
+    [workspaceId, JSON.stringify({ phone: "+12025550299" })],
   );
 
   await page.goto(`${baseUrl}/setup/communication`, { waitUntil: "networkidle" });
@@ -168,13 +175,36 @@ try {
   await callbackInput.waitFor();
   const callbackValue = await callbackInput.inputValue();
   assert(callbackValue.endsWith(`/api/webhooks/sms/telnyx/${workspaceId}`), `Unexpected Telnyx callback URL: ${callbackValue}`);
-  await page.getByLabel("Webhook signing public key").waitFor();
+  const publicKeyInput = page.getByLabel("Webhook signing public key");
+  await publicKeyInput.waitFor();
   await assertNoHorizontalOverflow(page, "BYOP SMS webhook setup desktop");
   await page.screenshot({ path: path.join(outputDir, "sms-byop-setup-desktop.png"), fullPage: true });
   await page.setViewportSize({ width: 390, height: 844 });
   await assertNoHorizontalOverflow(page, "BYOP SMS webhook setup mobile");
   await page.screenshot({ path: path.join(outputDir, "sms-byop-setup-mobile.png"), fullPage: true });
   await page.setViewportSize({ width: 1440, height: 1000 });
+
+  const telnyxPublicKey = Buffer.alloc(32, 7).toString("base64");
+  await publicKeyInput.fill(telnyxPublicKey);
+  await page.getByRole("button", { name: "Save for later" }).click();
+  await page.getByText("Communication settings saved.", { exact: true }).waitFor({ timeout: 10_000 });
+  const telnyxSettings = await pool.query(
+    `SELECT settings FROM integrations WHERE workspace_id = $1 AND provider = 'telnyx' LIMIT 1`,
+    [workspaceId],
+  );
+  assert(telnyxSettings.rows[0]?.settings?.webhookPublicKey === telnyxPublicKey, "Telnyx signing public key was not persisted through the SMS setup UI.");
+  const publicConfig = await api(context, "GET", "/api/integrations/sms/config?provider=telnyx", undefined, "load public Telnyx SMS config");
+  assert(publicConfig?.webhookPublicKeyConfigured === true, "Public SMS config did not report the saved Telnyx signing key.");
+  assert(!JSON.stringify(publicConfig).includes(telnyxPublicKey), "Public SMS config exposed the Telnyx signing public key value.");
+
+  await pool.query(
+    `UPDATE capability_bindings SET mode = 'HOSTED', integration_id = NULL, updated_at = now() WHERE workspace_id = $1 AND capability = 'SMS'`,
+    [workspaceId],
+  );
+  await pool.query(
+    `UPDATE communication_setup_settings SET settings = $2::jsonb, updated_at = now() WHERE workspace_id = $1`,
+    [workspaceId, JSON.stringify(hostedCommunicationSettings)],
+  );
 
   const invalid = await sendTwilioWebhook(workspaceId, {
     MessageSid: "SM-invalid-signature",
@@ -333,7 +363,7 @@ try {
   await page.screenshot({ path: path.join(outputDir, "inbox-sms-mobile.png"), fullPage: true });
 
   assert(runtimeErrors.length === 0, `Milestone 5 browser runtime errors:\n${runtimeErrors.join("\n")}`);
-  console.log("Milestone 5 browser acceptance passed: BYOP webhook setup UI, signed SMS webhook, provider-compatible TwiML acknowledgement, async worker, knowledge response, contact capture, qualification, availability, booking, hosted credits, duplicate suppression, delivery reconciliation, unified Inbox, and human takeover suppression.");
+  console.log("Milestone 5 browser acceptance passed: BYOP webhook setup UI and metadata privacy, signed SMS webhook, provider-compatible TwiML acknowledgement, async worker, knowledge response, contact capture, qualification, availability, booking, hosted credits, duplicate suppression, delivery reconciliation, unified Inbox, and human takeover suppression.");
 } finally {
   await pool.end();
   await browser.close();
