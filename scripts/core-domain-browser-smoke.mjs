@@ -15,18 +15,29 @@ function assert(condition, message) {
   if (!condition) throw new Error(message);
 }
 
-async function responseJson(response, label) {
+async function parseResponse(response, label) {
   const text = await response.text();
   let parsed = null;
   try {
     parsed = text ? JSON.parse(text) : null;
   } catch {
-    // Keep the raw response in the failure below.
+    // Raw response is included below if the request failed.
   }
-  if (!response.ok()) {
-    throw new Error(`${label} failed with ${response.status()}: ${text.slice(0, 1000)}`);
-  }
+  if (!response.ok()) throw new Error(`${label} failed with ${response.status()}: ${text.slice(0, 1000)}`);
   return parsed;
+}
+
+async function request(context, method, route, data, label) {
+  const response = await context.request.fetch(`${baseUrl}${route}`, {
+    method,
+    data,
+    headers: data === undefined ? undefined : { "content-type": "application/json" },
+  });
+  return parseResponse(response, label);
+}
+
+async function waitForText(page, text) {
+  await page.getByText(text, { exact: true }).first().waitFor({ state: "visible", timeout: 15_000 });
 }
 
 async function assertNoHorizontalOverflow(page, label) {
@@ -39,93 +50,69 @@ async function assertNoHorizontalOverflow(page, label) {
   assert(overflow <= 2, `${label} has ${overflow}px of horizontal overflow.`);
 }
 
-async function waitForText(page, text) {
-  await page.getByText(text, { exact: true }).first().waitFor({ state: "visible", timeout: 15_000 });
+async function assertContactDrawerRowsSeparated(page) {
+  const rows = page.locator(".contactDrawer .drawerDetails > div");
+  const count = await rows.count();
+  assert(count >= 3, "Contact drawer detail rows were not rendered.");
+  for (let index = 0; index < count; index += 1) {
+    const row = rows.nth(index);
+    const labelBox = await row.locator("span").boundingBox();
+    const valueBox = await row.locator("strong").boundingBox();
+    if (!labelBox || !valueBox) continue;
+    assert(valueBox.x >= labelBox.x + labelBox.width + 4, `Contact drawer row ${index + 1} label overlaps its value.`);
+  }
 }
 
 const browser = await chromium.launch({ headless: true });
 const context = await browser.newContext({ viewport: { width: 1440, height: 1000 } });
 const page = await context.newPage();
 const runtimeErrors = [];
-
 page.on("pageerror", (error) => runtimeErrors.push(`pageerror: ${error.message}`));
 page.on("response", (response) => {
   if (response.status() >= 500) runtimeErrors.push(`HTTP ${response.status()} ${response.url()}`);
 });
 
 const email = `milestone3-browser-${Date.now()}@example.com`;
-const password = "BrowserSmokePass123!";
-const signup = await context.request.post(`${baseUrl}/api/auth/sign-up/email`, {
-  data: { name: "Milestone Three QA", email, password },
-});
-await responseJson(signup, "sign up");
+await request(context, "POST", "/api/auth/sign-up/email", {
+  name: "Milestone Three QA",
+  email,
+  password: "BrowserSmokePass123!",
+}, "sign up");
 
-const contactResponse = await context.request.post(`${baseUrl}/api/contacts`, {
-  data: {
-    name: "Browser QA Contact",
-    email: "browser.qa.contact@example.com",
-    phone: "+1 (415) 555-0123",
-    notes: "Persisted contact created by the Milestone 3 browser verification.",
-    tags: ["Consultation", "Priority"],
-    identities: [
-      { channel: "PHONE", externalId: "+1 (415) 555-0123" },
-      { channel: "SMS", externalId: "+1 (415) 555-0123" },
-      { channel: "WHATSAPP", externalId: "+1 (415) 555-0123" },
-      { channel: "WEBCHAT", externalId: "browser-qa-session-001" },
-    ],
-  },
-});
-const contactData = await responseJson(contactResponse, "create contact");
+const contactData = await request(context, "POST", "/api/contacts", {
+  name: "Browser QA Contact",
+  email: "browser.qa.contact@example.com",
+  phone: "+1 (415) 555-0123",
+  notes: "Persisted contact created by the Milestone 3 browser verification.",
+  tags: ["Consultation", "Priority"],
+  identities: [
+    { channel: "PHONE", externalId: "+1 (415) 555-0123" },
+    { channel: "SMS", externalId: "+1 (415) 555-0123" },
+    { channel: "WHATSAPP", externalId: "+1 (415) 555-0123" },
+    { channel: "WEBCHAT", externalId: "browser-qa-session-001" },
+  ],
+}, "create contact");
 const contactId = contactData?.contact?.id;
 assert(typeof contactId === "string", "Contact creation did not return an id.");
 
-const leadResponse = await context.request.put(`${baseUrl}/api/contacts/${contactId}/lead`, {
-  data: {
-    status: "QUALIFIED",
-    intent: "Book a consultation",
-    serviceRequested: "Consultation",
-    source: "WEBCHAT",
-    estimatedValue: 15000,
-  },
-});
-await responseJson(leadResponse, "upsert lead");
+await request(context, "PUT", `/api/contacts/${contactId}/lead`, {
+  status: "QUALIFIED",
+  intent: "Book a consultation",
+  serviceRequested: "Consultation",
+  source: "WEBCHAT",
+  estimatedValue: 15000,
+}, "upsert lead");
 
-const conversationResponse = await context.request.post(`${baseUrl}/api/conversations`, {
-  data: { contactId },
-});
-const conversationData = await responseJson(conversationResponse, "create conversation");
+const conversationData = await request(context, "POST", "/api/conversations", { contactId }, "create conversation");
 const conversationId = conversationData?.conversation?.id;
 assert(typeof conversationId === "string", "Conversation creation did not return an id.");
 
-const messages = [
-  {
-    channel: "WEBCHAT",
-    direction: "INBOUND",
-    senderType: "CUSTOMER",
-    body: "I need a consultation from web chat.",
-    provider: "browser-smoke",
-    externalMessageId: "browser-message-1",
-  },
-  {
-    channel: "WHATSAPP",
-    direction: "OUTBOUND",
-    senderType: "AI",
-    body: "I can help with that. I also recognize your WhatsApp identity.",
-    provider: "browser-smoke",
-    externalMessageId: "browser-message-2",
-  },
-  {
-    channel: "SMS",
-    direction: "INBOUND",
-    senderType: "CUSTOMER",
-    body: "Please confirm the appointment by SMS too.",
-    provider: "browser-smoke",
-    externalMessageId: "browser-message-3",
-  },
-];
-for (const message of messages) {
-  const response = await context.request.post(`${baseUrl}/api/conversations/${conversationId}/messages`, { data: message });
-  await responseJson(response, `append ${message.channel} message`);
+for (const message of [
+  { channel: "WEBCHAT", direction: "INBOUND", senderType: "CUSTOMER", body: "I need a consultation from web chat.", provider: "browser-smoke", externalMessageId: "browser-message-1" },
+  { channel: "WHATSAPP", direction: "OUTBOUND", senderType: "AI", body: "I can help with that. I also recognize your WhatsApp identity.", provider: "browser-smoke", externalMessageId: "browser-message-2" },
+  { channel: "SMS", direction: "INBOUND", senderType: "CUSTOMER", body: "Please confirm the appointment by SMS too.", provider: "browser-smoke", externalMessageId: "browser-message-3" },
+]) {
+  await request(context, "POST", `/api/conversations/${conversationId}/messages`, message, `append ${message.channel} message`);
 }
 
 const pool = new Pool({ connectionString: databaseUrl, max: 1 });
@@ -133,11 +120,7 @@ try {
   let workspaceId = null;
   for (let attempt = 0; attempt < 20 && !workspaceId; attempt += 1) {
     const result = await pool.query(
-      `SELECT m.workspace_id
-       FROM memberships m
-       INNER JOIN "user" u ON u.id = m.user_id
-       WHERE u.email = $1
-       LIMIT 1`,
+      `SELECT m.workspace_id FROM memberships m INNER JOIN "user" u ON u.id = m.user_id WHERE u.email = $1 LIMIT 1`,
       [email],
     );
     workspaceId = result.rows[0]?.workspace_id ?? null;
@@ -152,17 +135,7 @@ try {
     `INSERT INTO appointments
       (workspace_id, contact_id, conversation_id, title, starts_at, ends_at, timezone, status, booking_source, notes)
      VALUES ($1, $2, $3, $4, $5, $6, $7, 'CONFIRMED', $8, $9)`,
-    [
-      workspaceId,
-      contactId,
-      conversationId,
-      "QA Consultation",
-      startsAt,
-      endsAt,
-      "America/New_York",
-      "WEBCHAT",
-      "Persisted local appointment used to verify the Appointments UI.",
-    ],
+    [workspaceId, contactId, conversationId, "QA Consultation", startsAt, endsAt, "America/New_York", "WEBCHAT", "Persisted local appointment used to verify the Appointments UI."],
   );
 } finally {
   await pool.end();
@@ -172,18 +145,17 @@ async function verifyDesktop() {
   await page.setViewportSize({ width: 1440, height: 1000 });
 
   await page.goto(`${baseUrl}/contacts`, { waitUntil: "networkidle" });
-  await page.getByRole("heading", { name: "Contacts" }).waitFor();
+  await page.getByRole("heading", { name: "Contacts", level: 1 }).waitFor();
   await waitForText(page, "Browser QA Contact");
   await page.getByRole("heading", { name: "Browser QA Contact" }).waitFor();
   await waitForText(page, "Channel identities");
-  for (const label of ["Phone · +1 (415) 555-0123", "SMS · +1 (415) 555-0123", "WhatsApp · +1 (415) 555-0123", "Web Chat · browser-qa-session-001"]) {
-    await waitForText(page, label);
-  }
+  for (const label of ["Phone · +1 (415) 555-0123", "SMS · +1 (415) 555-0123", "WhatsApp · +1 (415) 555-0123", "Web Chat · browser-qa-session-001"]) await waitForText(page, label);
+  await assertContactDrawerRowsSeparated(page);
   await assertNoHorizontalOverflow(page, "Contacts desktop");
   await page.screenshot({ path: path.join(outputDir, "contacts-desktop.png"), fullPage: true });
 
   await page.goto(`${baseUrl}/appointments`, { waitUntil: "networkidle" });
-  await page.getByRole("heading", { name: "Appointments" }).waitFor();
+  await page.getByRole("heading", { name: "Appointments", level: 1 }).waitFor();
   await waitForText(page, "QA Consultation");
   await page.getByRole("heading", { name: "QA Consultation" }).waitFor();
   await waitForText(page, "Browser QA Contact");
@@ -191,21 +163,16 @@ async function verifyDesktop() {
   await page.screenshot({ path: path.join(outputDir, "appointments-desktop.png"), fullPage: true });
 
   await page.goto(`${baseUrl}/inbox`, { waitUntil: "networkidle" });
-  await page.getByRole("heading", { name: "Inbox" }).waitFor();
+  await page.getByRole("heading", { name: "Inbox", level: 1 }).waitFor();
   await waitForText(page, "I need a consultation from web chat.");
   await waitForText(page, "I can help with that. I also recognize your WhatsApp identity.");
   await waitForText(page, "Please confirm the appointment by SMS too.");
-  for (const channel of ["Web Chat", "WhatsApp", "SMS"]) {
-    await page.getByText(channel, { exact: true }).first().waitFor({ state: "visible" });
-  }
-  const takeover = page.getByRole("button", { name: "Human takeover" });
-  await takeover.click();
+  for (const channel of ["Web Chat", "WhatsApp", "SMS"]) await page.getByText(channel, { exact: true }).first().waitFor({ state: "visible" });
+
+  await page.getByRole("button", { name: "Human takeover" }).click();
   await page.getByRole("button", { name: "Return to AI" }).waitFor({ state: "visible" });
-
-  const timelineResponse = await context.request.get(`${baseUrl}/api/conversations/${conversationId}`);
-  const timelineData = await responseJson(timelineResponse, "read conversation after takeover");
+  const timelineData = await request(context, "GET", `/api/conversations/${conversationId}`, undefined, "read conversation after takeover");
   assert(timelineData?.timeline?.conversation?.handlingMode === "HUMAN", "Human takeover was not persisted.");
-
   await page.getByRole("button", { name: "Return to AI" }).click();
   await page.getByRole("button", { name: "Human takeover" }).waitFor({ state: "visible" });
   await assertNoHorizontalOverflow(page, "Inbox desktop");
