@@ -340,16 +340,20 @@ try {
   await page.screenshot({ path: path.join(outputDir, "whatsapp-inbox-mobile.png"), fullPage: true });
   await page.setViewportSize({ width: 1440, height: 1000 });
 
+  const aiReplyCountBeforeResume = await pool.query(
+    `SELECT count(*)::int AS count FROM messages WHERE workspace_id = $1 AND conversation_id = $2 AND channel = 'WHATSAPP' AND direction = 'OUTBOUND' AND sender_type = 'AI' AND body = $3`,
+    [workspaceId, conversationId, turns[0].reply],
+  );
   await page.getByRole("button", { name: "Return to AI" }).click();
   await page.getByRole("button", { name: "Human takeover" }).waitFor({ timeout: 10_000 });
   const resumed = await sendWebhook(inboundPayload({ id: "wamid.m6.resumed", phoneNumberId, waId, text: "How much is the QA Consultation?" }));
   assert(resumed.data?.queued === 1, "Return-to-AI WhatsApp message was not queued.");
   await waitFor(
     pool,
-    `SELECT 1 FROM messages WHERE workspace_id = $1 AND conversation_id = $2 AND channel = 'WHATSAPP' AND direction = 'OUTBOUND' AND sender_type = 'AI' AND body = $3 LIMIT 1`,
+    `SELECT count(*)::int AS count FROM messages WHERE workspace_id = $1 AND conversation_id = $2 AND channel = 'WHATSAPP' AND direction = 'OUTBOUND' AND sender_type = 'AI' AND body = $3`,
     [workspaceId, conversationId, turns[0].reply],
-    (rows) => rows.rowCount === 1,
-    "AI reply after return-to-AI",
+    (rows) => rows.rows[0]?.count > aiReplyCountBeforeResume.rows[0].count,
+    "new AI reply after return-to-AI",
   );
 
   const timeline = await pool.query(`SELECT channel, direction, sender_type, body FROM messages WHERE workspace_id = $1 AND conversation_id = $2 ORDER BY created_at`, [workspaceId, conversationId]);
