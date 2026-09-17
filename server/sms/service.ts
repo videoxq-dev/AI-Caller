@@ -1,8 +1,11 @@
 import { db } from "@/db";
 import { usageEvents } from "@/db/schema";
+import { debitCredits, refundCredits } from "@/server/credits/service";
 import { appendMessage, getOrCreateContactByIdentity, getOrCreateOpenConversation } from "@/server/domain/core/repository";
 import { normalizePhone } from "@/server/domain/core/schemas";
+import { getEnv } from "@/server/env";
 import { AppError } from "@/server/http/errors";
+import { logger } from "@/server/observability/logger";
 import { responseOrchestrator } from "@/server/orchestrator";
 import type { NormalizedSmsEvent, SmsWebhookInput } from "@/server/providers/contracts";
 import { ProviderRequestError } from "@/server/providers/http";
@@ -29,21 +32,55 @@ function safeEventPayload(event: NormalizedSmsEvent) {
     : { type: event.type, externalMessageId: event.externalMessageId, status: event.status };
 }
 
-async function recordByopSmsUsage(workspaceId: string, provider: string, referenceId: string) {
-  await db.insert(usageEvents).values({
-    workspaceId,
-    capability: "SMS",
-    provider,
-    mode: "BYOP",
-    providerUsage: { messages: 1 },
-    creditsCharged: 0,
-    referenceType: "MESSAGE",
-    referenceId,
-  });
+async function recordSmsUsage(
+  workspaceId: string,
+  runtime: SmsRuntime,
+  referenceId: string,
+  creditsCharged: number,
+  providerUsage: Record<string, unknown>,
+) {
+  try {
+    await db.insert(usageEvents).values({
+      workspaceId,
+      capability: "SMS",
+      provider: runtime.providerName,
+      mode: runtime.mode,
+      providerUsage,
+      creditsCharged,
+      referenceType: "MESSAGE",
+      referenceId,
+    });
+  } catch (error) {
+    logger.error({ err: error, workspaceId, provider: runtime.providerName, referenceId }, "Failed to persist SMS usage event");
+  }
 }
 
 function uncertainProviderFailure(error: unknown) {
-  return error instanceof ProviderRequestError && error.status >= 500;
+  return !(error instanceof ProviderRequestError) || error.status >= 500;
+}
+
+function definitiveProviderRejection(error: unknown) {
+  return error instanceof ProviderRequestError && error.status >= 400 && error.status < 500;
+}
+
+async function reserveHostedSmsCredits(workspaceId: string, runtime: SmsRuntime, messageId: string) {
+  if (runtime.mode !== "HOSTED") return 0;
+  const amount = getEnv().HOSTED_SMS_CREDITS_PER_MESSAGE;
+  await debitCredits(workspaceId, amount, {
+    reason: "Hosted SMS message",
+    referenceType: "SMS_MESSAGE",
+    referenceId: messageId,
+  });
+  return amount;
+}
+
+async function refundHostedSmsCredits(workspaceId: string, amount: number, messageId: string) {
+  if (amount <= 0) return;
+  await refundCredits(workspaceId, amount, {
+    reason: "Hosted SMS provider rejected message",
+    referenceType: "SMS_MESSAGE",
+    referenceId: messageId,
+  });
 }
 
 export function createSmsWebhookService(dependencies: SmsServiceDependencies) {
@@ -138,7 +175,9 @@ export function createSmsWebhookService(dependencies: SmsServiceDependencies) {
             metadata: { inReplyToProviderEventId: event.externalEventId, mode: runtime.mode },
           });
 
+          let reservedCredits = 0;
           try {
+            reservedCredits = await reserveHostedSmsCredits(workspaceId, runtime, outbound.id);
             const sent = await runtime.provider.send({
               to: normalizePhone(event.from),
               from: runtime.senderNumber,
@@ -147,9 +186,15 @@ export function createSmsWebhookService(dependencies: SmsServiceDependencies) {
               idempotencyKey: event.externalEventId,
             });
             await attachSmsProviderMessage(workspaceId, outbound.id, providerName, sent.externalId, sent.status);
-            await recordByopSmsUsage(workspaceId, providerName, outbound.id);
+            await recordSmsUsage(workspaceId, runtime, outbound.id, reservedCredits, { messages: 1, status: sent.status });
           } catch (error) {
-            await markSmsSendFailure(workspaceId, outbound.id, uncertainProviderFailure(error) ? "SEND_UNKNOWN" : "FAILED", error);
+            const uncertain = uncertainProviderFailure(error);
+            await markSmsSendFailure(workspaceId, outbound.id, uncertain ? "SEND_UNKNOWN" : "FAILED", error);
+            if (reservedCredits > 0 && definitiveProviderRejection(error)) {
+              await refundHostedSmsCredits(workspaceId, reservedCredits, outbound.id);
+            } else if (reservedCredits > 0 && uncertain) {
+              await recordSmsUsage(workspaceId, runtime, outbound.id, reservedCredits, { messages: 0, outcome: "unknown" });
+            }
             throw error;
           }
 
