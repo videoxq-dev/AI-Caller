@@ -4,6 +4,31 @@ import { getAgentSetup, getBusinessSetup } from "@/server/domain/onboarding/repo
 
 const DAY_NAMES = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
 
+export type OrchestratorMessage = { role: "user" | "assistant"; content: string };
+export type OrchestratorContext = {
+  workspaceId: string;
+  conversation: { handlingMode: "AI" | "HUMAN" };
+  contact: { id: string };
+  agent: { escalationMessage: string | null } | null;
+  systemPrompt: string;
+  messages: OrchestratorMessage[];
+};
+
+type CustomerPromptState = {
+  name?: string | null;
+  email?: string | null;
+  phone?: string | null;
+  leadStatus?: string | null;
+  leadIntent?: string | null;
+  serviceRequested?: string | null;
+  currentAppointment?: {
+    title: string;
+    startsAt: Date;
+    timezone: string;
+    status: string;
+  } | null;
+};
+
 function clip(value: string | null | undefined, max = 1200) {
   const text = value?.trim();
   if (!text) return "";
@@ -18,26 +43,16 @@ function formatHours(hours: Awaited<ReturnType<typeof getBusinessSetup>>["hours"
   }).join("\n");
 }
 
-export type ConversationContext = Awaited<ReturnType<typeof buildConversationContext>>;
-
-export async function buildConversationContext(workspaceId: string, conversationId: string) {
-  const timeline = await getConversationTimelinePage(workspaceId, conversationId, { limit: 30, offset: 0 });
-  if (!timeline) return null;
-
-  const [{ profile, hours }, agentSetup, contact] = await Promise.all([
-    getBusinessSetup(workspaceId),
-    getAgentSetup(workspaceId),
-    getContactDetail(workspaceId, timeline.contact.id),
-  ]);
-  if (!contact) return null;
-
+function buildSystemPrompt(
+  businessSetup: Awaited<ReturnType<typeof getBusinessSetup>>,
+  agentSetup: Awaited<ReturnType<typeof getAgentSetup>>,
+  customer: CustomerPromptState,
+) {
+  const { profile, hours } = businessSetup;
   const agent = agentSetup.agent;
   const activeServices = agentSetup.services.filter((service) => service.active).slice(0, 20);
   const activeFaqs = agentSetup.faqs.filter((faq) => faq.active).slice(0, 20);
   const policies = agentSetup.policies.slice(0, 12);
-  const currentAppointment = contact.appointments.find((appointment) =>
-    appointment.status === "CONFIRMED" || appointment.status === "PENDING",
-  ) ?? null;
 
   const serviceText = activeServices.length
     ? activeServices.map((service) => `- ${clip(service.name, 200)}${service.priceText ? ` — ${clip(service.priceText, 300)}` : ""}${service.description ? `: ${clip(service.description, 700)}` : ""}${service.durationMinutes ? ` (${service.durationMinutes} min)` : ""}`).join("\n")
@@ -49,7 +64,7 @@ export async function buildConversationContext(workspaceId: string, conversation
     ? policies.map((policy) => `- ${clip(policy.title, 300)} (${clip(policy.type, 100)}): ${clip(policy.content, 1000)}`).join("\n")
     : "No policies configured.";
 
-  const systemPrompt = [
+  return [
     `You are ${clip(agent?.name, 120) || "the business AI assistant"} for ${clip(profile?.businessName, 200) || "this business"}.`,
     `Tone: ${clip(agent?.tone, 200) || "Friendly & professional"}.`,
     `Primary goal: ${clip(agent?.primaryGoal, 300) || "Answer customer questions and help with appointments"}.`,
@@ -73,16 +88,41 @@ export async function buildConversationContext(workspaceId: string, conversation
     "\nPOLICIES",
     policyText,
     "\nCUSTOMER STATE",
-    `Name: ${clip(contact.name, 200) || "Unknown"}`,
-    `Email: ${clip(contact.email, 320) || "Unknown"}`,
-    `Phone: ${clip(contact.phone, 100) || "Unknown"}`,
-    `Lead status: ${contact.lead?.status ?? "NEW"}`,
-    `Lead intent: ${clip(contact.lead?.intent, 800) || "Unknown"}`,
-    `Service requested: ${clip(contact.lead?.serviceRequested, 400) || "Unknown"}`,
-    currentAppointment
-      ? `Current appointment: ${currentAppointment.title} at ${currentAppointment.startsAt.toISOString()} (${currentAppointment.timezone}, ${currentAppointment.status})`
+    `Name: ${clip(customer.name, 200) || "Unknown"}`,
+    `Email: ${clip(customer.email, 320) || "Unknown"}`,
+    `Phone: ${clip(customer.phone, 100) || "Unknown"}`,
+    `Lead status: ${customer.leadStatus ?? "NEW"}`,
+    `Lead intent: ${clip(customer.leadIntent, 800) || "Unknown"}`,
+    `Service requested: ${clip(customer.serviceRequested, 400) || "Unknown"}`,
+    customer.currentAppointment
+      ? `Current appointment: ${customer.currentAppointment.title} at ${customer.currentAppointment.startsAt.toISOString()} (${customer.currentAppointment.timezone}, ${customer.currentAppointment.status})`
       : "Current appointment: None",
   ].filter(Boolean).join("\n");
+}
+
+export async function buildConversationContext(workspaceId: string, conversationId: string) {
+  const timeline = await getConversationTimelinePage(workspaceId, conversationId, { limit: 30, offset: 0 });
+  if (!timeline) return null;
+
+  const [businessSetup, agentSetup, contact] = await Promise.all([
+    getBusinessSetup(workspaceId),
+    getAgentSetup(workspaceId),
+    getContactDetail(workspaceId, timeline.contact.id),
+  ]);
+  if (!contact) return null;
+
+  const currentAppointment = contact.appointments.find((appointment) =>
+    appointment.status === "CONFIRMED" || appointment.status === "PENDING",
+  ) ?? null;
+  const systemPrompt = buildSystemPrompt(businessSetup, agentSetup, {
+    name: contact.name,
+    email: contact.email,
+    phone: contact.phone,
+    leadStatus: contact.lead?.status,
+    leadIntent: contact.lead?.intent,
+    serviceRequested: contact.lead?.serviceRequested,
+    currentAppointment,
+  });
 
   const messages = timeline.messages
     .filter((message) => message.contentType === "TEXT")
@@ -98,10 +138,31 @@ export async function buildConversationContext(workspaceId: string, conversation
     workspaceId,
     conversation: timeline.conversation,
     contact,
-    business: profile,
-    agent,
-    timezone: profile?.timezone ?? "UTC",
+    business: businessSetup.profile,
+    agent: agentSetup.agent,
+    timezone: businessSetup.profile?.timezone ?? "UTC",
     systemPrompt,
     messages,
+  };
+}
+
+export async function buildAgentTestContext(workspaceId: string, messages: OrchestratorMessage[]): Promise<OrchestratorContext> {
+  const [businessSetup, agentSetup] = await Promise.all([
+    getBusinessSetup(workspaceId),
+    getAgentSetup(workspaceId),
+  ]);
+  return {
+    workspaceId,
+    conversation: { handlingMode: "AI" },
+    contact: { id: "agent-test" },
+    agent: agentSetup.agent,
+    systemPrompt: buildSystemPrompt(businessSetup, agentSetup, {
+      name: "Test customer",
+      leadStatus: "NEW",
+    }),
+    messages: messages.slice(-30).map((message) => ({
+      role: message.role,
+      content: clip(message.content, 4000),
+    })).filter((message) => Boolean(message.content)),
   };
 }
