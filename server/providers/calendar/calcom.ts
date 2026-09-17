@@ -25,10 +25,10 @@ export class CalComCalendarProvider implements CalendarProvider {
     return requireCredential(this.credentials, "apiKey", "Cal.com API key");
   }
 
-  private headers(includeJson = false) {
+  private headers(version: string, includeJson = false) {
     return {
       authorization: `Bearer ${this.token()}`,
-      "cal-api-version": getEnv().CALCOM_API_VERSION,
+      "cal-api-version": version,
       ...(includeJson ? { "content-type": "application/json" } : {}),
     };
   }
@@ -39,28 +39,33 @@ export class CalComCalendarProvider implements CalendarProvider {
     return value;
   }
 
-  private ownerQuery() {
-    const owner = stringSetting(this.settings, "username", "slug");
-    if (!owner) throw new Error("A Cal.com username or team slug is required.");
-    return owner;
+  private username() {
+    const value = stringSetting(this.settings, "username", "slug");
+    if (!value) throw new Error("A Cal.com username is required.");
+    return value;
   }
 
   async getAvailability(input: { startsAt: Date; endsAt: Date; timezone: string; durationMinutes?: number }) {
+    const duration = input.durationMinutes ?? numberSetting(this.settings, "meetingDurationMinutes", 30);
     const query = new URLSearchParams({
-      username: this.ownerQuery(),
-      eventSlug: this.eventTypeSlug(),
-      startTime: input.startsAt.toISOString(),
-      endTime: input.endsAt.toISOString(),
+      username: this.username(),
+      eventTypeSlug: this.eventTypeSlug(),
+      start: input.startsAt.toISOString(),
+      end: input.endsAt.toISOString(),
+      timeZone: input.timezone,
+      duration: String(duration),
+      format: "range",
     });
-    const response = await providerJson<{ data?: { slots?: Record<string, Array<{ time?: string }>> } }>(
+    const response = await providerJson<{ data?: Record<string, Array<{ start?: string; end?: string }>> }>(
       `https://api.cal.com/v2/slots?${query.toString()}`,
-      { headers: this.headers() },
+      { headers: this.headers(getEnv().CALCOM_SLOTS_API_VERSION) },
       this.fetcher,
     );
-    const durationMs = (input.durationMinutes ?? numberSetting(this.settings, "meetingDurationMinutes", 30)) * 60_000;
-    return Object.values(response.data?.slots ?? {}).flat().filter((slot) => slot.time).map((slot) => {
-      const startsAt = new Date(slot.time!);
-      return { startsAt, endsAt: new Date(startsAt.getTime() + durationMs) };
+    const durationMs = duration * 60_000;
+    return Object.values(response.data ?? {}).flat().filter((slot) => slot.start).map((slot) => {
+      const startsAt = new Date(slot.start!);
+      const endsAt = slot.end ? new Date(slot.end) : new Date(startsAt.getTime() + durationMs);
+      return { startsAt, endsAt };
     });
   }
 
@@ -68,10 +73,10 @@ export class CalComCalendarProvider implements CalendarProvider {
     if (!input.attendeeEmail) throw new Error("Cal.com requires an attendee email address to create a booking.");
     const response = await providerJson<{ data?: { uid?: string; start?: string; end?: string } }>("https://api.cal.com/v2/bookings", {
       method: "POST",
-      headers: this.headers(true),
+      headers: this.headers(getEnv().CALCOM_BOOKINGS_API_VERSION, true),
       body: JSON.stringify({
         eventTypeSlug: this.eventTypeSlug(),
-        username: this.ownerQuery(),
+        username: this.username(),
         start: input.startsAt.toISOString(),
         attendee: {
           name: input.attendeeName ?? input.attendeeEmail,
@@ -94,8 +99,8 @@ export class CalComCalendarProvider implements CalendarProvider {
       `https://api.cal.com/v2/bookings/${encodeURIComponent(input.externalId)}/reschedule`,
       {
         method: "POST",
-        headers: this.headers(true),
-        body: JSON.stringify({ start: input.startsAt.toISOString(), rescheduleReason: "Rescheduled through AI Caller" }),
+        headers: this.headers(getEnv().CALCOM_BOOKINGS_API_VERSION, true),
+        body: JSON.stringify({ start: input.startsAt.toISOString(), reschedulingReason: "Rescheduled through AI Caller" }),
       },
       this.fetcher,
     );
@@ -109,7 +114,7 @@ export class CalComCalendarProvider implements CalendarProvider {
   async cancel(input: { externalId: string }) {
     await providerJson<unknown>(`https://api.cal.com/v2/bookings/${encodeURIComponent(input.externalId)}/cancel`, {
       method: "POST",
-      headers: this.headers(true),
+      headers: this.headers(getEnv().CALCOM_BOOKINGS_API_VERSION, true),
       body: JSON.stringify({ cancellationReason: "Cancelled through AI Caller" }),
     }, this.fetcher);
   }
