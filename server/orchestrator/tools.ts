@@ -92,6 +92,12 @@ export function parseOrchestratorEnvelope(text: string): OrchestratorEnvelope {
   return { reply: reply.slice(0, 5000), action: { type: "NONE" } };
 }
 
+function qualificationStatus(existingStatus: string | undefined, requestedStatus: "NEW" | "QUALIFIED" | undefined) {
+  if (existingStatus === "BOOKED" || existingStatus === "WON" || existingStatus === "LOST") return existingStatus;
+  if (existingStatus === "QUALIFIED" && requestedStatus === "NEW") return "QUALIFIED";
+  return requestedStatus ?? existingStatus ?? "NEW";
+}
+
 async function updateLeadFromEnvelope(
   workspaceId: string,
   contactId: string,
@@ -101,7 +107,7 @@ async function updateLeadFromEnvelope(
   if (!detail) throw new Error("The conversation contact no longer exists.");
   const existing = detail.lead;
   return upsertLead(workspaceId, contactId, {
-    status: lead.status ?? existing?.status ?? "NEW",
+    status: qualificationStatus(existing?.status, lead.status),
     intent: lead.intent !== undefined ? lead.intent : existing?.intent ?? null,
     serviceRequested: lead.serviceRequested !== undefined ? lead.serviceRequested : existing?.serviceRequested ?? null,
     source: existing?.source ?? "WEBCHAT",
