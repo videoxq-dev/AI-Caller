@@ -6,6 +6,7 @@ import { getEnv } from "@/server/env";
 import { AppError, toErrorResponse } from "@/server/http/errors";
 import { parseInput } from "@/server/http/validation";
 import { resolveProviderRoute } from "@/server/providers/resolver";
+import { parseTelnyxWebhookPublicKey } from "@/server/providers/sms/telnyx";
 import { decryptIntegrationCredentials, type EncryptedSecretEnvelope } from "@/server/security/secrets";
 
 const providerSchema = z.enum(["telnyx", "twilio", "plivo"]);
@@ -77,6 +78,13 @@ export async function PUT(request: Request) {
     }
     if (input.webhookPublicKey !== undefined && input.provider !== "telnyx") {
       throw new AppError("BAD_REQUEST", "Only Telnyx uses a configured Ed25519 webhook public key.", 400);
+    }
+    if (input.webhookPublicKey !== undefined) {
+      try {
+        parseTelnyxWebhookPublicKey(input.webhookPublicKey);
+      } catch (error) {
+        throw new AppError("INVALID_TELNYX_WEBHOOK_KEY", error instanceof Error ? error.message : "Invalid Telnyx webhook public key.", 400);
+      }
     }
 
     const legacy = legacyPublicSettings(integration.encryptedCredentials);
