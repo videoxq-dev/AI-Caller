@@ -1,4 +1,4 @@
-import PgBoss from "pg-boss";
+import { PgBoss } from "pg-boss";
 import { getEnv } from "@/server/env";
 import { logger } from "@/server/observability/logger";
 
