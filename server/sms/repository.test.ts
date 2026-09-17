@@ -84,18 +84,23 @@ describe("provider webhook persistence", () => {
     expect(failed.error).toBe("provider payload invalid");
   });
 
-  it("rejects an event id collision across workspaces", async () => {
-    await claimProviderWebhookEvent(workspaceId, {
+  it("deduplicates the same provider event independently per workspace", async () => {
+    const first = await claimProviderWebhookEvent(workspaceId, {
       provider: "telnyx",
       externalEventId: "shared-event",
       payload: {},
     });
     const [other] = await db.insert(workspaces).values({ name: "Other Workspace" }).returning();
-
-    await expect(claimProviderWebhookEvent(other.id, {
+    const second = await claimProviderWebhookEvent(other.id, {
       provider: "telnyx",
       externalEventId: "shared-event",
       payload: {},
-    })).rejects.toMatchObject({ code: "WEBHOOK_WORKSPACE_MISMATCH", status: 409 });
+    });
+
+    expect(first.state).toBe("claimed");
+    expect(second.state).toBe("claimed");
+    const rows = await db.select().from(providerWebhookEvents);
+    expect(rows).toHaveLength(2);
+    expect(new Set(rows.map((row) => row.workspaceId))).toEqual(new Set([workspaceId, other.id]));
   });
 });
