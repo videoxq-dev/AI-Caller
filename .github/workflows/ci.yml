@@ -18,9 +18,31 @@ concurrency:
 
 jobs:
   build:
-    name: Typecheck & Build
+    name: Test, Typecheck & Build
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 20
+    env:
+      DATABASE_URL: postgresql://postgres:postgres@127.0.0.1:5432/ai_caller_test
+      BETTER_AUTH_SECRET: ci-only-secret-change-me-please-1234567890
+      BETTER_AUTH_URL: http://localhost:3000
+      INTEGRATION_ENCRYPTION_KEY: AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=
+      PG_BOSS_SCHEMA: pgboss
+      LOG_LEVEL: silent
+
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: ai_caller_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d ai_caller_test"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
 
     steps:
       - name: Checkout repository
@@ -29,10 +51,16 @@ jobs:
       - name: Set up Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: 22
+          node-version: 22.12.0
 
       - name: Install dependencies
         run: npm install --no-audit --no-fund
+
+      - name: Run database migrations
+        run: npm run db:migrate
+
+      - name: Test
+        run: npm test
 
       - name: Typecheck
         run: npm run typecheck
