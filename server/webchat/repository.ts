@@ -22,6 +22,12 @@ const MAX_NEW_SESSIONS_PER_WORKSPACE = 40;
 const MAX_NEW_TURNS_PER_SESSION = 30;
 const MAX_NEW_TURNS_PER_WORKSPACE = 300;
 
+type WebchatHistoryMessage = {
+  id: string;
+  role: "customer" | "assistant";
+  text: string;
+};
+
 function tokenHash(token: string) {
   return createHash("sha256").update(token).digest("hex");
 }
@@ -112,17 +118,20 @@ export async function resolveWebchatSession(token: string, expectedWidgetKey?: s
   return row;
 }
 
-async function sessionHistory(workspaceId: string, conversationId: string) {
+async function sessionHistory(workspaceId: string, conversationId: string): Promise<WebchatHistoryMessage[]> {
   const timeline = await getConversationTimelinePage(workspaceId, conversationId, { limit: 30, offset: 0 });
   if (!timeline) return [];
-  return timeline.messages.flatMap((message) => {
-    if (message.contentType !== "TEXT") return [];
-    if (message.senderType === "CUSTOMER") return [{ id: message.id, role: "customer" as const, text: message.body }];
-    if (message.senderType === "AI" || message.senderType === "USER") {
-      return [{ id: message.id, role: "assistant" as const, text: message.body }];
+
+  const history: WebchatHistoryMessage[] = [];
+  for (const message of timeline.messages) {
+    if (message.contentType !== "TEXT") continue;
+    if (message.senderType === "CUSTOMER") {
+      history.push({ id: message.id, role: "customer", text: message.body });
+    } else if (message.senderType === "AI" || message.senderType === "USER") {
+      history.push({ id: message.id, role: "assistant", text: message.body });
     }
-    return [];
-  });
+  }
+  return history;
 }
 
 export async function createOrResumeWebchatSession(input: WebchatSessionInput) {
@@ -172,7 +181,7 @@ export async function createOrResumeWebchatSession(input: WebchatSessionInput) {
     sessionId: session.id,
     conversationId: conversation.id,
     widget,
-    history: [],
+    history: [] as WebchatHistoryMessage[],
   };
 }
 
