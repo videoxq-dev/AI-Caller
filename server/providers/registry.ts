@@ -1,3 +1,6 @@
+import { and, eq } from "drizzle-orm";
+import { db } from "@/db";
+import { integrations } from "@/db/schema";
 import { getCalendarSetup, getPrivateIntegration } from "@/server/domain/integrations/repository";
 import type { AIProvider, CalendarProvider } from "./contracts";
 import { createAIProvider, createHostedAIProvider } from "./ai";
@@ -26,6 +29,23 @@ export async function resolveCalendarProvider(workspaceId: string, fetcher: type
   const integration = await getPrivateIntegration(workspaceId, route.provider);
   if (!integration) throw new Error(`The ${route.provider} calendar integration no longer exists.`);
   if (integration.status !== "CONNECTED") throw new Error(`The ${route.provider} calendar integration is not connected.`);
+  const setup = await getCalendarSetup(workspaceId);
+  return createCalendarProvider({ ...integration, runtimeSettings: setup ?? {} }, fetcher);
+}
+
+export async function resolveCalendarProviderForIntegration(
+  workspaceId: string,
+  integrationId: string,
+  fetcher: typeof fetch = fetch,
+): Promise<CalendarProvider> {
+  const [integration] = await db.select().from(integrations).where(and(
+    eq(integrations.workspaceId, workspaceId),
+    eq(integrations.id, integrationId),
+  )).limit(1);
+
+  if (!integration) throw new Error("The appointment's calendar integration no longer exists.");
+  assertProviderSupportsCapability(integration.provider, "CALENDAR");
+  if (integration.status !== "CONNECTED") throw new Error(`The ${integration.provider} calendar integration is not connected.`);
   const setup = await getCalendarSetup(workspaceId);
   return createCalendarProvider({ ...integration, runtimeSettings: setup ?? {} }, fetcher);
 }
