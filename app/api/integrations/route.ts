@@ -55,6 +55,14 @@ const credentialKeys: Record<string, readonly string[]> = {
   calcom: ["apiKey"],
 };
 
+const settingKeys: Record<string, readonly string[]> = {
+  openai: ["model"],
+  gemini: ["model"],
+  openrouter: ["model", "siteUrl"],
+  calendly: ["org"],
+  calcom: ["slug"],
+};
+
 const defaultSettingsByProvider: Record<string, Record<string, unknown>> = {
   openai: { model: "gpt-5.6" },
   gemini: { model: "gemini-2.5-flash" },
@@ -68,6 +76,11 @@ function filterCredentials(provider: string, credentials: Record<string, string>
       .filter(([key, value]) => allowed.has(key) && value.trim().length > 0)
       .map(([key, value]) => [key, value.trim()]),
   );
+}
+
+function filterSettings(provider: string, settings: Record<string, unknown>) {
+  const allowed = new Set(settingKeys[provider] ?? []);
+  return Object.fromEntries(Object.entries(settings).filter(([key]) => allowed.has(key)));
 }
 
 export async function GET(request: Request) {
@@ -111,8 +124,8 @@ export async function POST(request: Request) {
       credentials,
       settings: {
         ...(defaultSettingsByProvider[input.provider] ?? {}),
-        ...(existing?.settings ?? {}),
-        ...input.settings,
+        ...filterSettings(input.provider, existing?.settings ?? {}),
+        ...filterSettings(input.provider, input.settings),
       },
     };
 
