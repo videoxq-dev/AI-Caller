@@ -34,6 +34,7 @@ export const capabilityBindingInputSchema = z.object({
   provider: providerIdSchema.nullable().optional(),
 });
 
+const communicationProviderSchema = z.enum(["plivo", "telnyx", "twilio"]);
 const channelBindingSchema = z.object({
   mode: integrationModeSchema,
   provider: providerIdSchema.nullable().optional(),
@@ -57,6 +58,21 @@ export const communicationSetupSchema = z.object({
     enabled: z.boolean().default(true),
   }).default({ enabled: true }),
   completeStep: z.boolean().default(false),
+}).superRefine((input, ctx) => {
+  for (const [field, channel] of [["voice", input.voice], ["sms", input.sms]] as const) {
+    if (channel.mode === "BYOP") {
+      const parsed = communicationProviderSchema.safeParse(channel.provider);
+      if (!parsed.success) {
+        ctx.addIssue({ code: "custom", path: [field, "provider"], message: "BYOP voice and SMS require Telnyx, Plivo, or Twilio." });
+      }
+    } else if (channel.provider != null) {
+      ctx.addIssue({ code: "custom", path: [field, "provider"], message: "Hosted voice and SMS must not specify a BYOP provider." });
+    }
+  }
+
+  if (input.whatsapp.mode !== "BYOP" || input.whatsapp.provider !== "whatsapp") {
+    ctx.addIssue({ code: "custom", path: ["whatsapp", "provider"], message: "WhatsApp must use the Meta Embedded Signup integration." });
+  }
 });
 
 export const calendarSetupSchema = z.object({
