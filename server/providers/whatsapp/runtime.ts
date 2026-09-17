@@ -5,6 +5,7 @@ import { getPrivateIntegration } from "@/server/domain/integrations/repository";
 import { decryptIntegrationCredentials, type EncryptedSecretEnvelope } from "@/server/security/secrets";
 import { resolveProviderRoute } from "@/server/providers/resolver";
 import type { WhatsAppProvider } from "@/server/providers/contracts";
+import { createE2EWhatsAppProvider, isE2EProviderFixtureMode } from "@/server/providers/e2e-fixtures";
 import { createMetaWhatsAppProvider } from "./meta-cloud";
 
 export type WhatsAppRuntime = {
@@ -43,6 +44,7 @@ function runtimeFromIntegration(row: {
   const wabaId = typeof row.settings.wabaId === "string" && row.settings.wabaId.trim()
     ? row.settings.wabaId.trim()
     : required(secret, "wabaId", "WhatsApp Business Account ID");
+  const baseProvider = createMetaWhatsAppProvider({ accessToken: required(secret, "accessToken", "Meta access token") }, {}, fetcher);
   return {
     workspaceId: row.workspaceId,
     integrationId: row.id,
@@ -50,7 +52,7 @@ function runtimeFromIntegration(row: {
     wabaId,
     mode: "BYOP",
     providerName: "whatsapp",
-    provider: createMetaWhatsAppProvider({ accessToken: required(secret, "accessToken", "Meta access token") }, {}, fetcher),
+    provider: isE2EProviderFixtureMode() ? createE2EWhatsAppProvider(baseProvider) : baseProvider,
   };
 }
 

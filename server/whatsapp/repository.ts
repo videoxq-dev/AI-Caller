@@ -61,7 +61,7 @@ export async function updateWhatsAppDeliveryStatus(
 
   const current = existing.status as WhatsAppDeliveryStatus | "SEND_UNKNOWN" | null;
   if (current === "READ" || current === "FAILED") return existing;
-  if (status === "FAILED" && (current === "DELIVERED" || current === "READ")) return existing;
+  if (status === "FAILED" && current === "DELIVERED") return existing;
   if (status !== "FAILED" && current && current in SUCCESS_RANK) {
     const currentRank = SUCCESS_RANK[current as keyof typeof SUCCESS_RANK];
     if (currentRank >= SUCCESS_RANK[status]) return existing;
