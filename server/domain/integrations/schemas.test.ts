@@ -17,14 +17,14 @@ describe("communication setup provider validation", () => {
   });
 
   it("rejects non-communication providers for voice and SMS", () => {
-    const input = validCommunicationSetup();
-    input.voice = { ...input.voice, mode: "BYOP", provider: "openai" };
+    const base = validCommunicationSetup();
+    const input = { ...base, voice: { ...base.voice, mode: "BYOP", provider: "openai" } };
     expect(communicationSetupSchema.safeParse(input).success).toBe(false);
   });
 
   it("rejects hosted WhatsApp so setup cannot persist an unroutable state", () => {
-    const input = validCommunicationSetup();
-    input.whatsapp = { ...input.whatsapp, mode: "HOSTED", provider: null };
+    const base = validCommunicationSetup();
+    const input = { ...base, whatsapp: { ...base.whatsapp, mode: "HOSTED", provider: null } };
     const result = communicationSetupSchema.safeParse(input);
     expect(result.success).toBe(false);
     if (!result.success) expect(result.error.issues.some((issue) => issue.path.join(".") === "whatsapp.provider")).toBe(true);
