@@ -21,7 +21,8 @@ export function createE2EAIProvider(): AIProvider {
   return {
     async generate({ messages }) {
       const system = messages.filter((message) => message.role === "system").map((message) => message.content).join("\n");
-      const lastUser = [...messages].reverse().find((message) => message.role === "user")?.content.toLowerCase() ?? "";
+      const lastUserMessage = [...messages].reverse().find((message) => message.role === "user")?.content ?? "";
+      const lastUser = lastUserMessage.toLowerCase();
       const toolResult = [...messages].reverse().find((message) => message.role === "system" && message.content.includes("SERVER TOOL RESULT"))?.content;
 
       if (toolResult) {
@@ -49,8 +50,11 @@ export function createE2EAIProvider(): AIProvider {
       }
 
       if (lastUser.includes("book")) {
+        const email = lastUserMessage.match(/[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/i)?.[0] ?? "qa.visitor@example.com";
+        const explicitName = lastUserMessage.match(/my name is\s+([^,.]+)[,.]?/i)?.[1]?.trim() ?? "QA Visitor";
         return {
           text: JSON.stringify({
+            contact: { name: explicitName, email },
             lead: { status: "QUALIFIED", intent: "Book a QA consultation", serviceRequested: "QA Consultation" },
             action: {
               type: "BOOK_APPOINTMENT",
@@ -87,6 +91,7 @@ export function createE2ECalendarProvider(): CalendarProvider {
       return [slot];
     },
     async book(input) {
+      if (!input.attendeeEmail) throw new Error("E2E calendar fixture requires the same attendee email needed by Cal.com.");
       return { externalId: `e2e-${randomUUID()}`, startsAt: input.startsAt, endsAt: input.endsAt };
     },
     async reschedule(input) {
