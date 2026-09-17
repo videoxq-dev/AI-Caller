@@ -1,8 +1,12 @@
-import { and, desc, eq } from "drizzle-orm";
+import { and, asc, desc, eq, sql } from "drizzle-orm";
 import { db } from "@/db";
-import { contactIdentities, conversations, messages } from "@/db/schema";
+import { contactIdentities, conversations, messages, providerWebhookEvents } from "@/db/schema";
 import { AppError } from "@/server/http/errors";
 import type { WhatsAppDeliveryStatus } from "@/server/providers/contracts";
+import {
+  completeProviderWebhookEvent,
+  failProviderWebhookEvent,
+} from "@/server/providers/webhooks/repository";
 
 export async function attachWhatsAppProviderMessage(
   workspaceId: string,
@@ -45,6 +49,8 @@ const SUCCESS_RANK: Record<Exclude<WhatsAppDeliveryStatus, "FAILED">, number> = 
   READ: 3,
 };
 
+const DELIVERY_STATUSES = new Set<WhatsAppDeliveryStatus>(["SENT", "DELIVERED", "READ", "FAILED"]);
+
 export async function updateWhatsAppDeliveryStatus(
   workspaceId: string,
   externalMessageId: string,
@@ -77,6 +83,48 @@ export async function updateWhatsAppDeliveryStatus(
     eq(messages.id, existing.id),
   )).returning();
   return updated ?? existing;
+}
+
+function deferredOccurredAt(value: unknown) {
+  if (typeof value !== "string") return null;
+  const parsed = new Date(value);
+  return Number.isNaN(parsed.getTime()) ? null : parsed;
+}
+
+export async function reconcileDeferredWhatsAppDeliveryStatuses(
+  workspaceId: string,
+  externalMessageId: string,
+) {
+  const events = await db.select({
+    id: providerWebhookEvents.id,
+    payload: providerWebhookEvents.payload,
+  }).from(providerWebhookEvents).where(and(
+    eq(providerWebhookEvents.workspaceId, workspaceId),
+    eq(providerWebhookEvents.provider, "whatsapp"),
+    eq(providerWebhookEvents.status, "RECEIVED"),
+    sql`${providerWebhookEvents.payload}->>'externalMessageId' = ${externalMessageId}`,
+    sql`${providerWebhookEvents.payload}->>'type' = 'DELIVERY_UPDATED'`,
+  )).orderBy(asc(providerWebhookEvents.receivedAt)).limit(50);
+
+  let reconciled = 0;
+  for (const event of events) {
+    const status = event.payload.status;
+    if (typeof status !== "string" || !DELIVERY_STATUSES.has(status as WhatsAppDeliveryStatus)) {
+      await failProviderWebhookEvent(workspaceId, event.id, new Error("Deferred WhatsApp delivery status is invalid."));
+      continue;
+    }
+    const updated = await updateWhatsAppDeliveryStatus(
+      workspaceId,
+      externalMessageId,
+      status as WhatsAppDeliveryStatus,
+      typeof event.payload.error === "string" ? event.payload.error : null,
+      deferredOccurredAt(event.payload.occurredAt),
+    );
+    if (!updated) break;
+    await completeProviderWebhookEvent(workspaceId, event.id);
+    reconciled += 1;
+  }
+  return reconciled;
 }
 
 export async function getWhatsAppConversationRecipient(workspaceId: string, conversationId: string) {
