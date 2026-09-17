@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { headers } from "next/headers";
 import type { ReactNode } from "react";
 import {
   CalendarIcon,
@@ -11,7 +12,6 @@ import {
   LinkIcon,
   LockIcon,
   LogoMark,
-  MessageIcon,
   PhoneIcon,
   RocketIcon,
   ShieldIcon,
@@ -19,6 +19,9 @@ import {
   StoreIcon,
   UsersIcon,
 } from "@/components/icons";
+import { resolveWorkspaceContext } from "@/server/auth/workspace-context";
+import { getAgentSetup, getBusinessSetup } from "@/server/domain/onboarding/repository";
+import { saveAISetupAction } from "../actions";
 import "./ai-assistant.css";
 
 type ProgressStep = {
@@ -39,19 +42,25 @@ const progressSteps: ProgressStep[] = [
   { number: 6, title: "Go live", description: "Activate your assistant and start handling inquiries", tone: "blue", icon: <RocketIcon size={20} />, state: "locked" },
 ];
 
-const services = [
-  { name: "Exterior Wash", price: "Starts at $25" },
-  { name: "Full Detailing", price: "Starts at $120" },
-  { name: "Ceramic Coating", price: "By quote" },
+const defaultGuardrails = [
+  "Never invent pricing",
+  "Never confirm unavailable appointments",
+  "Only answer based on approved business information",
+  "Collect customer name and phone number before handing off",
 ];
 
-const faqs = [
-  "Do you offer same-day appointments?",
-  "How long does a full detailing take?",
-  "Do you accept walk-ins?",
-];
+export default async function AIAssistantSetupPage() {
+  const context = await resolveWorkspaceContext(await headers());
+  const [saved, business] = await Promise.all([
+    getAgentSetup(context.workspace.id),
+    getBusinessSetup(context.workspace.id),
+  ]);
+  const agent = saved.agent;
+  const configuredGuardrails = agent?.behaviorSettings?.guardrails;
+  const guardrails = Array.isArray(configuredGuardrails) && configuredGuardrails.every((item) => typeof item === "string")
+    ? configuredGuardrails as string[]
+    : defaultGuardrails;
 
-export default function AIAssistantSetupPage() {
   return (
     <main className="aiSetupPage">
       <header className="siteHeader aiSetupHeader">
@@ -74,7 +83,7 @@ export default function AIAssistantSetupPage() {
             <p>Tell your AI how your business works so it can answer customer questions accurately<br className="desktopBreak" /> and guide people toward booking.</p>
           </div>
 
-          <form className="aiSetupForm">
+          <form className="aiSetupForm" action={saveAISetupAction}>
             <section className="aiSection basicsSection">
               <div className="sectionHeading">
                 <span className="sectionIcon purple"><SparkleIcon size={22} /></span>
@@ -82,11 +91,11 @@ export default function AIAssistantSetupPage() {
               </div>
 
               <div className="aiFieldGrid twoColumns">
-                <label className="aiField"><span>Assistant name</span><input name="assistantName" defaultValue="Mia" /></label>
-                <label className="aiField"><span>Primary goal</span><select name="primaryGoal" defaultValue="Book appointments"><option>Book appointments</option><option>Capture leads</option><option>Answer questions</option><option>Combination</option></select></label>
-                <label className="aiField"><span>Tone</span><select name="tone" defaultValue="Friendly & professional"><option>Friendly &amp; professional</option><option>Professional</option><option>Casual</option></select></label>
-                <label className="aiField"><span>When unsure</span><select name="fallback" defaultValue="Escalate to a human"><option>Escalate to a human</option><option>Take a message</option></select></label>
-                <label className="aiField summaryField"><span>Business summary</span><textarea name="summary" rows={2} defaultValue="Brightside Auto Spa is a Miami-based auto detailing shop that offers exterior washes, full detailing, and ceramic coating. We focus on high-quality service, quick turnaround times, and exceptional customer care." /></label>
+                <label className="aiField"><span>Assistant name</span><input name="assistantName" defaultValue={agent?.name ?? "Mia"} required /></label>
+                <label className="aiField"><span>Primary goal</span><select name="primaryGoal" defaultValue={agent?.primaryGoal ?? "Book appointments"}><option>Book appointments</option><option>Capture leads</option><option>Answer questions</option><option>Combination</option></select></label>
+                <label className="aiField"><span>Tone</span><select name="tone" defaultValue={agent?.tone ?? "Friendly & professional"}><option>Friendly &amp; professional</option><option>Professional</option><option>Casual</option></select></label>
+                <label className="aiField"><span>When unsure</span><select name="fallback" defaultValue={agent?.whenUnsure ?? "Escalate to a human"}><option>Escalate to a human</option><option>Take a message</option></select></label>
+                <label className="aiField summaryField"><span>Business summary</span><textarea name="summary" rows={2} defaultValue={business.profile?.summary ?? ""} /></label>
               </div>
             </section>
 
@@ -100,26 +109,26 @@ export default function AIAssistantSetupPage() {
                 <div className="serviceColumn">
                   <div className="miniSectionHeader"><strong>Services</strong><button type="button">+&nbsp; Add service</button></div>
                   <div className="serviceList">
-                    {services.map((service) => (
-                      <div className="serviceRow" key={service.name}>
+                    {saved.services.length ? saved.services.map((service) => (
+                      <div className="serviceRow" key={service.id}>
                         <span className="dragDots" aria-hidden="true">⠿</span>
                         <span>{service.name}</span>
-                        <small>{service.price}</small>
+                        <small>{service.priceText ?? "No price set"}</small>
                         <button className="moreButton" type="button" aria-label={`More options for ${service.name}`}>•••</button>
                       </div>
-                    ))}
+                    )) : <div className="serviceRow"><span>Add your first service using the API-backed editor.</span></div>}
                   </div>
                 </div>
 
                 <div className="faqColumn">
                   <div className="miniSectionHeader"><strong>Frequently asked questions</strong><button type="button">+&nbsp; Add FAQ</button></div>
                   <div className="faqList">
-                    {faqs.map((faq) => (
-                      <details className="faqRow" key={faq}>
-                        <summary>{faq}<ChevronRightIcon size={16} /></summary>
-                        <p>Add the approved answer here.</p>
+                    {saved.faqs.length ? saved.faqs.map((faq) => (
+                      <details className="faqRow" key={faq.id}>
+                        <summary>{faq.question}<ChevronRightIcon size={16} /></summary>
+                        <p>{faq.answer}</p>
                       </details>
-                    ))}
+                    )) : <div className="faqRow"><p>Add approved FAQ answers for your assistant.</p></div>}
                   </div>
                 </div>
               </div>
@@ -133,16 +142,16 @@ export default function AIAssistantSetupPage() {
 
               <div className="guardrailsGrid">
                 <div className="guardrailList">
-                  {["Never invent pricing", "Never confirm unavailable appointments", "Only answer based on approved business information", "Collect customer name and phone number before handing off"].map((rule) => (
+                  {defaultGuardrails.map((rule) => (
                     <label className="guardrailRow" key={rule}>
-                      <span className="toggle"><input type="checkbox" defaultChecked /><span /></span>
+                      <span className="toggle"><input name="guardrails" value={rule} type="checkbox" defaultChecked={guardrails.includes(rule)} /><span /></span>
                       <span>{rule}</span>
                     </label>
                   ))}
                 </div>
                 <label className="aiField escalationField">
                   <span>Escalation instructions</span>
-                  <textarea rows={4} defaultValue="If the customer asks about special pricing, complaints, or anything uncertain, offer to connect them with the team." />
+                  <textarea name="escalationInstructions" rows={4} defaultValue={agent?.escalationMessage ?? "If the customer asks about special pricing, complaints, or anything uncertain, offer to connect them with the team."} />
                 </label>
               </div>
             </section>
@@ -155,16 +164,15 @@ export default function AIAssistantSetupPage() {
 
               <div className="importGrid">
                 <div className="websiteImport">
-                  <label className="aiField"><span>Website URL</span><input type="url" defaultValue="https://www.brightsideautospa.com" /></label>
-                  <button type="button" className="importButton"><LinkIcon size={16} /> Import from website</button>
+                  <label className="aiField"><span>Website URL</span><input type="url" defaultValue={business.profile?.websiteUrl ?? ""} readOnly /></label>
+                  <button type="button" className="importButton" disabled><LinkIcon size={16} /> Import from website</button>
                 </div>
                 <div className="fileUploadBlock">
                   <strong>Upload files</strong>
                   <label className="uploadDropzone">
                     <FileIcon size={20} />
                     <span>PDF, DOCX, TXT</span>
-                    <span className="chooseFiles">Choose files</span>
-                    <input type="file" accept=".pdf,.doc,.docx,.txt" multiple />
+                    <span className="chooseFiles">Available in the knowledge milestone</span>
                   </label>
                 </div>
               </div>
@@ -173,8 +181,8 @@ export default function AIAssistantSetupPage() {
             <div className="aiFormFooter">
               <Link className="backLink" href="/setup/business">←&nbsp;&nbsp;Back to business profile</Link>
               <div className="formActions">
-                <button type="button" className="outlineAction">Save for later</button>
-                <Link className="continueAction" href="/setup/communication">Save &amp; Continue <ChevronRightIcon size={18} /></Link>
+                <button type="submit" name="intent" value="save" className="outlineAction">Save for later</button>
+                <button type="submit" name="intent" value="continue" className="continueAction">Save &amp; Continue <ChevronRightIcon size={18} /></button>
               </div>
             </div>
           </form>
@@ -184,7 +192,7 @@ export default function AIAssistantSetupPage() {
           <section className="sidebarCard aiProgressCard">
             <div className="sidebarProgressTop"><h2>Setup progress</h2><span>Estimated setup time: 7 minutes</span></div>
             <div className="sidebarProgressBar aiProgressBar"><span /></div>
-            <div className="sidebarProgressMeta"><span>2 of 6 completed</span><strong>33%</strong></div>
+            <div className="sidebarProgressMeta"><span>Step 2 of 6</span><strong>33%</strong></div>
 
             <div className="sidebarSteps">
               {progressSteps.map((step) => (

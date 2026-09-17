@@ -9,6 +9,10 @@ const envSchema = z.object({
   SMTP_URL: z.string().url().optional(),
   SMTP_FROM: z.string().min(3).optional(),
   LOG_LEVEL: z.enum(["fatal", "error", "warn", "info", "debug", "trace", "silent"]).default("info"),
+  JVZOO_IPN_SECRET: z.string().min(1).optional(),
+  JVZOO_CORE_PRODUCT_IDS: z.string().default(""),
+  STARTER_CREDITS: z.coerce.number().int().positive().default(2500),
+  NODE_ENV: z.enum(["development", "test", "production"]).default("development"),
 });
 
 export type AppEnv = z.infer<typeof envSchema>;

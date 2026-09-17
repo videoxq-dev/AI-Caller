@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { headers } from "next/headers";
 import type { ReactNode } from "react";
 import {
   ArrowRightIcon,
@@ -18,6 +19,9 @@ import {
   StoreIcon,
   UsersIcon,
 } from "@/components/icons";
+import { resolveWorkspaceContext } from "@/server/auth/workspace-context";
+import { getBusinessSetup } from "@/server/domain/onboarding/repository";
+import { saveBusinessSetupAction } from "../actions";
 import "./business-profile.css";
 
 type ProgressStep = {
@@ -37,7 +41,7 @@ const progressSteps: ProgressStep[] = [
   { number: 6, title: "Go live", description: "Activate your assistant and start handling inquiries", tone: "blue", icon: <RocketIcon size={20} /> },
 ];
 
-const days = [
+const defaultDays = [
   { day: "Monday", open: "8:00 AM", close: "6:00 PM", enabled: true },
   { day: "Tuesday", open: "8:00 AM", close: "6:00 PM", enabled: true },
   { day: "Wednesday", open: "8:00 AM", close: "6:00 PM", enabled: true },
@@ -47,7 +51,16 @@ const days = [
   { day: "Sunday", open: "", close: "", enabled: false },
 ];
 
-export default function BusinessProfilePage() {
+export default async function BusinessProfilePage() {
+  const context = await resolveWorkspaceContext(await headers());
+  const saved = await getBusinessSetup(context.workspace.id);
+  const hourMap = new Map(saved.hours.map((row) => [row.dayOfWeek, row]));
+  const days = defaultDays.map((day, index) => {
+    const stored = hourMap.get(index);
+    return stored ? { day: day.day, open: stored.openTime ?? day.open, close: stored.closeTime ?? day.close, enabled: stored.enabled } : day;
+  });
+  const profile = saved.profile;
+
   return (
     <main className="businessSetupPage">
       <header className="siteHeader businessSetupHeader">
@@ -70,7 +83,7 @@ export default function BusinessProfilePage() {
             <p>Tell us about your business so your AI assistant can answer customers accurately.</p>
           </div>
 
-          <form className="businessProfileForm">
+          <form className="businessProfileForm" action={saveBusinessSetupAction}>
             <section className="formSection">
               <div className="sectionHeading">
                 <span className="sectionIcon blue"><StoreIcon size={22} /></span>
@@ -80,21 +93,21 @@ export default function BusinessProfilePage() {
               <div className="fieldGrid twoColumns">
                 <label className="businessField">
                   <span>Business name</span>
-                  <input type="text" name="businessName" defaultValue="Brightside Auto Spa" />
+                  <input type="text" name="businessName" defaultValue={profile?.businessName ?? ""} required />
                 </label>
                 <label className="businessField">
                   <span>Industry</span>
-                  <select name="industry" defaultValue="Auto Repair">
+                  <select name="industry" defaultValue={profile?.industry ?? "Other"}>
                     <option>Auto Repair</option><option>Plumbing</option><option>HVAC</option><option>Roofing</option><option>Dental</option><option>Med Spa</option><option>Cleaning</option><option>Other</option>
                   </select>
                 </label>
                 <label className="businessField">
                   <span>Website URL</span>
-                  <input type="url" name="website" defaultValue="https://www.brightsideautospa.com" />
+                  <input type="url" name="website" defaultValue={profile?.websiteUrl ?? ""} />
                 </label>
                 <label className="businessField">
                   <span>Business phone</span>
-                  <input type="tel" name="phone" defaultValue="(305) 555-0142" />
+                  <input type="tel" name="phone" defaultValue={profile?.phone ?? ""} />
                   <small>We&apos;ll use this number for your AI assistant to handle calls.</small>
                 </label>
               </div>
@@ -109,13 +122,13 @@ export default function BusinessProfilePage() {
               <div className="fieldGrid locationGrid">
                 <label className="businessField addressField">
                   <span>Address</span>
-                  <input type="text" name="address" defaultValue="1452 Palm Ave, Miami, FL 33101" />
+                  <input type="text" name="address" defaultValue={profile?.address ?? ""} />
                 </label>
-                <label className="businessField"><span>City</span><input type="text" name="city" defaultValue="Miami" /></label>
-                <label className="businessField"><span>State</span><select name="state" defaultValue="Florida"><option>Florida</option><option>California</option><option>New York</option><option>Texas</option></select></label>
-                <label className="businessField"><span>ZIP code</span><input type="text" inputMode="numeric" name="zip" defaultValue="33101" /></label>
-                <label className="businessField radiusField"><span>Service area / radius</span><select name="radius" defaultValue="Within 20 miles"><option>Within 10 miles</option><option>Within 20 miles</option><option>Within 30 miles</option><option>Within 50 miles</option><option>Custom area</option></select></label>
-                <p className="fieldHelper">Your AI will be able to answer questions from customers in this area.</p>
+                <label className="businessField"><span>City</span><input type="text" name="city" defaultValue={profile?.city ?? ""} /></label>
+                <label className="businessField"><span>State</span><input type="text" name="state" defaultValue={profile?.state ?? ""} /></label>
+                <label className="businessField"><span>ZIP / postal code</span><input type="text" name="zip" defaultValue={profile?.postalCode ?? ""} /></label>
+                <label className="businessField radiusField"><span>Service area / radius</span><select name="radius" defaultValue={profile?.serviceRadius ?? "Within 20 miles"}><option>Within 10 miles</option><option>Within 20 miles</option><option>Within 30 miles</option><option>Within 50 miles</option><option>Custom area</option></select></label>
+                <label className="businessField"><span>Country</span><input type="text" name="country" defaultValue={profile?.country ?? ""} /></label>
               </div>
             </section>
 
@@ -125,26 +138,20 @@ export default function BusinessProfilePage() {
                   <span className="sectionIcon purple"><ClockIcon size={22} /></span>
                   <div><h2>Hours of operation</h2><p>Set the days and times your business is open.</p></div>
                 </div>
-                <label className="timezoneField"><span>Timezone</span><select defaultValue="Eastern Time (ET)"><option>Eastern Time (ET)</option><option>Central Time (CT)</option><option>Mountain Time (MT)</option><option>Pacific Time (PT)</option></select></label>
+                <label className="timezoneField"><span>Timezone</span><input name="timezone" defaultValue={profile?.timezone ?? "UTC"} /></label>
               </div>
 
               <div className="hoursTable">
-                {days.map((row) => (
+                {days.map((row, index) => (
                   <div className={`hoursRow ${!row.enabled ? "closed" : ""}`} key={row.day}>
                     <strong>{row.day}</strong>
                     <label className="toggle" aria-label={`${row.day} open`}>
-                      <input type="checkbox" defaultChecked={row.enabled} />
+                      <input name={`hours.${index}.enabled`} type="checkbox" defaultChecked={row.enabled} />
                       <span />
                     </label>
-                    {row.enabled ? (
-                      <>
-                        <select aria-label={`${row.day} opening time`} defaultValue={row.open}><option>8:00 AM</option><option>9:00 AM</option><option>10:00 AM</option></select>
-                        <span className="toLabel">to</span>
-                        <select aria-label={`${row.day} closing time`} defaultValue={row.close}><option>3:00 PM</option><option>5:00 PM</option><option>6:00 PM</option><option>7:00 PM</option></select>
-                      </>
-                    ) : (
-                      <div className="closedField">Closed</div>
-                    )}
+                    <select name={`hours.${index}.openTime`} aria-label={`${row.day} opening time`} defaultValue={row.open || "8:00 AM"}><option>8:00 AM</option><option>9:00 AM</option><option>10:00 AM</option></select>
+                    <span className="toLabel">to</span>
+                    <select name={`hours.${index}.closeTime`} aria-label={`${row.day} closing time`} defaultValue={row.close || "6:00 PM"}><option>3:00 PM</option><option>5:00 PM</option><option>6:00 PM</option><option>7:00 PM</option></select>
                   </div>
                 ))}
               </div>
@@ -153,8 +160,8 @@ export default function BusinessProfilePage() {
             <div className="formFooter">
               <Link className="backLink" href="/welcome">←&nbsp;&nbsp;Back to welcome</Link>
               <div className="formActions">
-                <button type="button" className="outlineAction">Save for later</button>
-                <Link className="continueAction" href="/setup/ai">Save &amp; Continue <ArrowRightIcon size={18} /></Link>
+                <button type="submit" name="intent" value="save" className="outlineAction">Save for later</button>
+                <button type="submit" name="intent" value="continue" className="continueAction">Save &amp; Continue <ArrowRightIcon size={18} /></button>
               </div>
             </div>
           </form>
@@ -164,7 +171,7 @@ export default function BusinessProfilePage() {
           <section className="sidebarCard progressSidebarCard">
             <div className="sidebarProgressTop"><h2>Setup progress</h2><span>Estimated setup time: 7 minutes</span></div>
             <div className="sidebarProgressBar"><span /></div>
-            <div className="sidebarProgressMeta"><span>1 of 6 completed</span><strong>17%</strong></div>
+            <div className="sidebarProgressMeta"><span>Step 1 of 6</span><strong>17%</strong></div>
 
             <div className="sidebarSteps">
               {progressSteps.map((step) => (
