@@ -25,15 +25,37 @@ const input = {
   attendeeEmail: "ada@example.com",
 };
 
+function storedAppointment(overrides: Partial<{
+  id: string;
+  integrationId: string | null;
+  externalEventId: string | null;
+  startsAt: Date;
+  endsAt: Date;
+  timezone: string;
+  status: "PENDING" | "CONFIRMED" | "COMPLETED" | "CANCELLED" | "NO_SHOW";
+}> = {}) {
+  return {
+    id: "appointment-1",
+    integrationId: "integration-1",
+    externalEventId: "event-1",
+    startsAt: input.startsAt,
+    endsAt: input.endsAt,
+    timezone: input.timezone,
+    status: "CONFIRMED" as const,
+    ...overrides,
+  };
+}
+
 describe("calendar booking service", () => {
   it("persists a normalized provider booking against the bound integration", async () => {
     const calendar = provider();
-    const insertAppointment = vi.fn(async (_workspaceId, booking, external) => ({
-      id: "appointment-1",
-      ...booking,
+    const insertAppointment = vi.fn(async (_workspaceId, booking, external) => storedAppointment({
       integrationId: external.integrationId,
       externalEventId: external.externalEventId,
-      status: external.status,
+      startsAt: booking.startsAt,
+      endsAt: booking.endsAt,
+      timezone: booking.timezone,
+      status: external.status ?? "CONFIRMED",
     }));
     const service = createCalendarBookingService({
       resolveCurrent: vi.fn(async () => ({ integrationId: "integration-1", provider: calendar })),
@@ -58,20 +80,16 @@ describe("calendar booking service", () => {
   it("uses the appointment's original integration when rescheduling", async () => {
     const calendar = provider();
     const resolveForIntegration = vi.fn(async () => calendar);
-    const updateAfterReschedule = vi.fn(async (_workspaceId, _id, next) => ({ id: "appointment-1", ...next }));
+    const updateAfterReschedule = vi.fn(async (_workspaceId, _id, next) => storedAppointment({
+      startsAt: next.startsAt,
+      endsAt: next.endsAt,
+      timezone: next.timezone,
+    }));
     const service = createCalendarBookingService({
       resolveCurrent: vi.fn(),
       resolveForIntegration,
       insertAppointment: vi.fn(),
-      getAppointment: vi.fn(async () => ({
-        id: "appointment-1",
-        integrationId: "integration-original",
-        externalEventId: "event-1",
-        startsAt: input.startsAt,
-        endsAt: input.endsAt,
-        timezone: input.timezone,
-        status: "CONFIRMED",
-      })),
+      getAppointment: vi.fn(async () => storedAppointment({ integrationId: "integration-original" })),
       updateAfterReschedule,
       setStatus: vi.fn(),
     });
