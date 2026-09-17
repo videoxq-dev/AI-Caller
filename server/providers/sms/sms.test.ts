@@ -1,7 +1,7 @@
 import { createHmac, generateKeyPairSync, sign } from "node:crypto";
 import { describe, expect, it, vi } from "vitest";
 import { createPlivoSmsProvider } from "./plivo";
-import { createTelnyxSmsProvider } from "./telnyx";
+import { createTelnyxSmsProvider, parseTelnyxWebhookPublicKey } from "./telnyx";
 import { createTwilioSmsProvider } from "./twilio";
 
 function formRequest(url: string, rawBody: string, headers: Record<string, string>) {
@@ -78,6 +78,12 @@ describe("SMS provider adapters", () => {
       externalMessageId: "message-123",
       text: "Book me tomorrow",
     })]);
+  });
+
+  it("rejects non-Ed25519 PEM keys for Telnyx webhook verification", () => {
+    const { publicKey } = generateKeyPairSync("rsa", { modulusLength: 2048 });
+    const pem = publicKey.export({ format: "pem", type: "spki" }).toString();
+    expect(() => parseTelnyxWebhookPublicKey(pem)).toThrow("Ed25519 public key");
   });
 
   it("sends outbound messages through the normalized adapter contract", async () => {
