@@ -1,5 +1,5 @@
 import { resolveWorkspaceContext } from "@/server/auth/workspace-context";
-import { saveVerifiedIntegration } from "@/server/domain/integrations/repository";
+import { bindCapability, saveVerifiedIntegration } from "@/server/domain/integrations/repository";
 import { exchangeOAuthCode, verifyOAuthState, type OAuthProviderId } from "@/server/providers/oauth";
 import { getEnv } from "@/server/env";
 
@@ -43,6 +43,8 @@ export async function GET(request: Request, { params }: { params: Promise<{ prov
       credentials: result.credentials,
       settings: result.settings,
     });
+    await bindCapability(context.workspace.id, "CALENDAR", "BYOP", rawProvider);
+
     return redirectWithStatus(returnTo, rawProvider, "connected");
   } catch (error) {
     return redirectWithStatus(returnTo, provider, "error", error instanceof Error ? error.message : "Calendar connection failed.");
