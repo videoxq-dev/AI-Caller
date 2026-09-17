@@ -33,7 +33,7 @@ type WhatsAppServiceDependencies = {
   sendText: (
     workspaceId: string,
     conversationId: string,
-    input: { senderType: "AI" | "USER"; text: string; beforeProviderSend?: () => void },
+    input: { senderType: "AI" | "USER"; text: string },
   ) => Promise<unknown>;
   enqueueResponseJob: (job: WhatsAppInboundResponseJob) => Promise<string | null>;
 };
