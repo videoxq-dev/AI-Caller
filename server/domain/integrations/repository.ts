@@ -148,12 +148,12 @@ export async function setIntegrationStatus(workspaceId: string, provider: string
   return row ? publicIntegration(row) : null;
 }
 
-export async function testSavedIntegration(workspaceId: string, provider: string) {
+export async function testSavedIntegration(workspaceId: string, provider: string, fetcher: typeof fetch = fetch) {
   const row = await getPrivateIntegration(workspaceId, provider);
   if (!row) throw new Error("Integration not found.");
   const testedAt = new Date();
   try {
-    const result = await testProviderConnection({ provider: row.provider, encryptedCredentials: row.encryptedCredentials, settings: row.settings });
+    const result = await testProviderConnection({ provider: row.provider, encryptedCredentials: row.encryptedCredentials, settings: row.settings }, fetcher);
     const settings = result.metadata ? { ...row.settings, connectionMetadata: result.metadata } : row.settings;
     const [updated] = await db.update(integrations).set({ status: "CONNECTED", lastTestedAt: testedAt, lastError: null, settings, updatedAt: testedAt }).where(and(eq(integrations.workspaceId, workspaceId), eq(integrations.provider, provider))).returning();
     return { ok: true as const, integration: publicIntegration(updated) };
