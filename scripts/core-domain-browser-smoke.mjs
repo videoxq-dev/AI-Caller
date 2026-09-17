@@ -167,7 +167,9 @@ async function verifyDesktop() {
   await waitForText(page, "I need a consultation from web chat.");
   await waitForText(page, "I can help with that. I also recognize your WhatsApp identity.");
   await waitForText(page, "Please confirm the appointment by SMS too.");
-  for (const channel of ["Web Chat", "WhatsApp", "SMS"]) await page.getByText(channel, { exact: true }).first().waitFor({ state: "visible" });
+  for (const channel of ["Web Chat", "WhatsApp", "SMS"]) {
+    await page.locator(".messageMeta .channelBadge").filter({ hasText: channel }).first().waitFor({ state: "visible" });
+  }
 
   const channelFilter = page.getByLabel("Channel filter");
   await channelFilter.selectOption("PHONE");
