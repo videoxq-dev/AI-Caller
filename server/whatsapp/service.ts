@@ -192,7 +192,7 @@ export function createWhatsAppWebhookService(dependencies: WhatsAppServiceDepend
       const claimed = await claimQueuedProviderWebhookEvent(job.workspaceId, job.webhookEventId);
       if (!claimed) return { skipped: true as const };
 
-      let terminalFailure = false;
+      let failClosed = false;
       try {
         const runtime = await dependencies.resolveForWorkspace(job.workspaceId);
         if (runtime.phoneNumberId !== job.phoneNumberId) {
@@ -216,6 +216,9 @@ export function createWhatsAppWebhookService(dependencies: WhatsAppServiceDepend
           },
         });
 
+        // The orchestrator may execute irreversible calendar/provider tools. Once it begins,
+        // retries must fail closed rather than replaying the same customer turn.
+        failClosed = true;
         const orchestrated = await dependencies.respond(job.workspaceId, conversation.id);
         if (!orchestrated.reply) {
           await completeProviderWebhookEvent(job.workspaceId, job.webhookEventId);
@@ -225,13 +228,12 @@ export function createWhatsAppWebhookService(dependencies: WhatsAppServiceDepend
         await dependencies.sendText(job.workspaceId, conversation.id, {
           senderType: "AI",
           text: orchestrated.reply,
-          beforeProviderSend: () => { terminalFailure = true; },
         });
 
         await completeProviderWebhookEvent(job.workspaceId, job.webhookEventId);
         return { skipped: false as const, replied: true as const };
       } catch (error) {
-        if (terminalFailure) await failProviderWebhookEvent(job.workspaceId, job.webhookEventId, error);
+        if (failClosed) await failProviderWebhookEvent(job.workspaceId, job.webhookEventId, error);
         else await releaseProviderWebhookEventForRetry(job.workspaceId, job.webhookEventId, error);
         throw error;
       }
