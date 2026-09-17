@@ -9,6 +9,7 @@
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
     "test:watch": "vitest",
+    "test:browser": "node scripts/core-domain-browser-smoke.mjs",
     "db:migrate": "tsx scripts/migrate.ts",
     "db:studio": "drizzle-kit studio",
     "worker": "tsx worker/index.ts",
@@ -33,6 +34,7 @@
     "@types/react": "^19.0.0",
     "@types/react-dom": "^19.0.0",
     "drizzle-kit": "^0.31.10",
+    "playwright": "^1.55.0",
     "tsx": "^4.23.13",
     "typescript": "^5.7.0",
     "vitest": "^5.0.1"
