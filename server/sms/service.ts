@@ -24,6 +24,9 @@ import {
   updateSmsDeliveryStatus,
 } from "./repository";
 
+const MAX_SMS_WEBHOOK_BYTES = 64 * 1024;
+const MAX_SMS_TEXT_CHARACTERS = 1600;
+
 type SmsOrchestratorResult = Awaited<ReturnType<typeof responseOrchestrator.respond>>;
 
 type SmsServiceDependencies = {
@@ -31,6 +34,41 @@ type SmsServiceDependencies = {
   respond: (workspaceId: string, conversationId: string) => Promise<SmsOrchestratorResult>;
   enqueueResponseJob: (job: SmsInboundResponseJob) => Promise<string | null>;
 };
+
+async function readWebhookBody(request: Request) {
+  const declared = Number(request.headers.get("content-length"));
+  if (Number.isFinite(declared) && declared > MAX_SMS_WEBHOOK_BYTES) {
+    throw new AppError("SMS_WEBHOOK_TOO_LARGE", "SMS webhook payload is too large.", 413);
+  }
+  if (!request.body) return "";
+
+  const reader = request.body.getReader();
+  const chunks: Buffer[] = [];
+  let total = 0;
+  try {
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      if (!value) continue;
+      total += value.byteLength;
+      if (total > MAX_SMS_WEBHOOK_BYTES) {
+        await reader.cancel();
+        throw new AppError("SMS_WEBHOOK_TOO_LARGE", "SMS webhook payload is too large.", 413);
+      }
+      chunks.push(Buffer.from(value));
+    }
+  } finally {
+    reader.releaseLock();
+  }
+  return Buffer.concat(chunks).toString("utf8");
+}
+
+function smsText(value: string) {
+  const text = value.trim();
+  const characters = Array.from(text);
+  if (characters.length <= MAX_SMS_TEXT_CHARACTERS) return text;
+  return `${characters.slice(0, MAX_SMS_TEXT_CHARACTERS - 1).join("")}…`;
+}
 
 function safeEventPayload(event: NormalizedSmsEvent) {
   return event.type === "MESSAGE_RECEIVED"
@@ -110,8 +148,8 @@ export function createSmsWebhookService(dependencies: SmsServiceDependencies) {
 
   return {
     async ingest(request: Request, workspaceId: string, providerName: SmsProviderName) {
+      const rawBody = await readWebhookBody(request);
       const runtime = await dependencies.resolveRuntime(workspaceId, providerName);
-      const rawBody = await request.text();
       const webhookInput: SmsWebhookInput = {
         request,
         rawBody,
@@ -220,13 +258,14 @@ export function createSmsWebhookService(dependencies: SmsServiceDependencies) {
           await completeProviderWebhookEvent(job.workspaceId, job.webhookEventId);
           return { skipped: false as const, replied: false as const };
         }
+        const reply = smsText(orchestrated.reply);
 
         const outbound = await appendMessage(job.workspaceId, job.conversationId, {
           channel: "SMS",
           direction: "OUTBOUND",
           senderType: "AI",
           contentType: "TEXT",
-          body: orchestrated.reply,
+          body: reply,
           provider: job.provider,
           externalMessageId: null,
           status: "SENDING",
@@ -239,7 +278,7 @@ export function createSmsWebhookService(dependencies: SmsServiceDependencies) {
           const sent = await runtime.provider.send({
             to: job.customerNumber,
             from: runtime.senderNumber,
-            text: orchestrated.reply,
+            text: reply,
             statusCallbackUrl: webhookUrl(job.provider, job.workspaceId),
             idempotencyKey: job.webhookEventId,
           });
