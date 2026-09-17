@@ -28,6 +28,7 @@ type CalendlyInvitee = {
 type CalendlyCreateInviteeResponse = {
   resource?: {
     event?: string;
+    uri?: string;
   };
 };
 
@@ -37,6 +38,21 @@ function normalized(value: string | undefined) {
 
 function eventIdFromUri(uri: string | undefined) {
   return uri?.split("/").filter(Boolean).pop();
+}
+
+function scheduledEventIdFromInvitee(response: CalendlyCreateInviteeResponse) {
+  const direct = eventIdFromUri(response.resource?.event);
+  if (direct) return direct;
+
+  const inviteeUri = response.resource?.uri;
+  if (!inviteeUri) return undefined;
+  try {
+    const parts = new URL(inviteeUri).pathname.split("/").filter(Boolean);
+    const eventIndex = parts.indexOf("scheduled_events");
+    return eventIndex >= 0 ? parts[eventIndex + 1] : undefined;
+  } catch {
+    return undefined;
+  }
 }
 
 export class CalendlyCalendarProvider implements CalendarProvider {
@@ -118,7 +134,7 @@ export class CalendlyCalendarProvider implements CalendarProvider {
         },
       }),
     }, this.fetcher);
-    const externalId = eventIdFromUri(response.resource?.event);
+    const externalId = scheduledEventIdFromInvitee(response);
     if (!externalId) throw new Error("Calendly did not return a scheduled event ID.");
     return externalId;
   }
