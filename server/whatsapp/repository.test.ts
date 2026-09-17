@@ -51,4 +51,18 @@ describe("WhatsApp delivery reconciliation", () => {
     expect(stored.metadata).toMatchObject({ whatsappStatusAt: deliveredAt.toISOString() });
     expect(stored.metadata).not.toHaveProperty("deliveryError");
   });
+
+  it("keeps READ as the terminal success state under concurrent status callbacks", async () => {
+    const occurredAt = new Date("2026-09-17T20:01:00.000Z");
+    const callbacks = Array.from({ length: 24 }, (_, index) => {
+      const status = index % 3 === 0 ? "READ" : index % 3 === 1 ? "DELIVERED" : "SENT";
+      return updateWhatsAppDeliveryStatus(workspaceId, "wamid.delivery-order", status, null, occurredAt);
+    });
+
+    await Promise.all(callbacks);
+
+    const [stored] = await db.select().from(messages);
+    expect(stored).toMatchObject({ id: messageId, status: "READ" });
+    expect(stored.metadata).toMatchObject({ whatsappStatusAt: occurredAt.toISOString() });
+  });
 });
