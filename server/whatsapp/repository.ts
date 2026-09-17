@@ -154,15 +154,33 @@ function metadataWhatsAppId(metadata: Record<string, unknown>) {
   return typeof value === "string" && value.trim() ? value.trim() : null;
 }
 
-export async function getWhatsAppConversationRecipient(workspaceId: string, conversationId: string) {
-  const [latestInbound] = await db.select({ metadata: messages.metadata }).from(messages).where(and(
+function providerOccurredAt(metadata: Record<string, unknown>, fallback: Date) {
+  return metadataDate(metadata, "occurredAt") ?? fallback;
+}
+
+async function recentWhatsAppInbound(workspaceId: string, conversationId: string) {
+  return db.select({ createdAt: messages.createdAt, metadata: messages.metadata }).from(messages).where(and(
     eq(messages.workspaceId, workspaceId),
     eq(messages.conversationId, conversationId),
     eq(messages.channel, "WHATSAPP"),
     eq(messages.direction, "INBOUND"),
     eq(messages.senderType, "CUSTOMER"),
-  )).orderBy(desc(messages.createdAt)).limit(1);
-  const activeIdentity = latestInbound ? metadataWhatsAppId(latestInbound.metadata) : null;
+  )).orderBy(desc(messages.createdAt)).limit(100);
+}
+
+export async function getWhatsAppConversationRecipient(workspaceId: string, conversationId: string) {
+  const inboundRows = await recentWhatsAppInbound(workspaceId, conversationId);
+  let activeIdentity: string | null = null;
+  let activeOccurredAt: Date | null = null;
+  for (const row of inboundRows) {
+    const identity = metadataWhatsAppId(row.metadata);
+    if (!identity) continue;
+    const occurredAt = providerOccurredAt(row.metadata, row.createdAt);
+    if (!activeOccurredAt || occurredAt > activeOccurredAt) {
+      activeIdentity = identity;
+      activeOccurredAt = occurredAt;
+    }
+  }
   if (activeIdentity) return activeIdentity;
 
   const rows = await db.select({ externalId: contactIdentities.externalId })
@@ -177,19 +195,8 @@ export async function getWhatsAppConversationRecipient(workspaceId: string, conv
   return rows.length === 1 ? rows[0].externalId : null;
 }
 
-function providerOccurredAt(metadata: Record<string, unknown>, fallback: Date) {
-  return metadataDate(metadata, "occurredAt") ?? fallback;
-}
-
 export async function latestWhatsAppInboundAt(workspaceId: string, conversationId: string) {
-  const rows = await db.select({ createdAt: messages.createdAt, metadata: messages.metadata }).from(messages).where(and(
-    eq(messages.workspaceId, workspaceId),
-    eq(messages.conversationId, conversationId),
-    eq(messages.channel, "WHATSAPP"),
-    eq(messages.direction, "INBOUND"),
-    eq(messages.senderType, "CUSTOMER"),
-  )).orderBy(desc(messages.createdAt)).limit(100);
-
+  const rows = await recentWhatsAppInbound(workspaceId, conversationId);
   let latest: Date | null = null;
   for (const row of rows) {
     const occurredAt = providerOccurredAt(row.metadata, row.createdAt);
