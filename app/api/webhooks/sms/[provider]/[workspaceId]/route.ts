@@ -14,8 +14,8 @@ export async function POST(
   try {
     const parsed = paramsSchema.safeParse(await params);
     if (!parsed.success) throw new AppError("INVALID_SMS_WEBHOOK_ROUTE", "Invalid SMS webhook route.", 404);
-    const result = await smsWebhookService.process(request, parsed.data.workspaceId, parsed.data.provider);
-    return Response.json(result);
+    const result = await smsWebhookService.ingest(request, parsed.data.workspaceId, parsed.data.provider);
+    return Response.json(result, { status: 202 });
   } catch (error) {
     return toErrorResponse(error);
   }
