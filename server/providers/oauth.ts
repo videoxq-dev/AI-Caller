@@ -19,16 +19,23 @@ function signature(payload: string) {
   return createHmac("sha256", getEnv().BETTER_AUTH_SECRET).update(payload).digest("base64url");
 }
 
-function safeReturnTo(value: string | null | undefined) {
-  if (!value || !value.startsWith("/") || value.startsWith("//")) return "/integrations";
-  return value;
+export function normalizeLocalReturnPath(value: string | null | undefined, fallback = "/integrations") {
+  if (!value || !value.startsWith("/") || value.startsWith("//") || value.includes("\\")) return fallback;
+  try {
+    const base = new URL("https://aicaller.local");
+    const parsed = new URL(value, base);
+    if (parsed.origin !== base.origin) return fallback;
+    return `${parsed.pathname}${parsed.search}${parsed.hash}`;
+  } catch {
+    return fallback;
+  }
 }
 
 export function createOAuthState(input: { provider: OAuthProviderId; workspaceId: string; returnTo?: string | null }) {
   const payload: OAuthStatePayload = {
     provider: input.provider,
     workspaceId: input.workspaceId,
-    returnTo: safeReturnTo(input.returnTo),
+    returnTo: normalizeLocalReturnPath(input.returnTo),
     expiresAt: Date.now() + 10 * 60 * 1000,
   };
   const encoded = encode(JSON.stringify(payload));
@@ -45,7 +52,7 @@ export function verifyOAuthState(value: string) {
   const payload = JSON.parse(Buffer.from(encoded, "base64url").toString("utf8")) as OAuthStatePayload;
   if (!payload.workspaceId || !["google", "outlook"].includes(payload.provider)) throw new Error("Invalid OAuth state payload.");
   if (payload.expiresAt < Date.now()) throw new Error("OAuth state expired. Please connect again.");
-  return { ...payload, returnTo: safeReturnTo(payload.returnTo) };
+  return { ...payload, returnTo: normalizeLocalReturnPath(payload.returnTo) };
 }
 
 function callbackUrl(provider: OAuthProviderId) {
