@@ -48,7 +48,7 @@ describe("WhatsApp outbound service", () => {
     await closeDatabase();
   });
 
-  async function addInbound(options: { createdAt?: Date; occurredAt?: Date } = {}) {
+  async function addInbound(options: { createdAt?: Date; occurredAt?: Date; id?: string } = {}) {
     const createdAt = options.createdAt ?? new Date();
     const occurredAt = options.occurredAt ?? createdAt;
     await db.insert(messages).values({
@@ -60,7 +60,7 @@ describe("WhatsApp outbound service", () => {
       contentType: "TEXT",
       body: "Hello",
       provider: "whatsapp",
-      externalMessageId: `wamid.in.${createdAt.getTime()}.${occurredAt.getTime()}`,
+      externalMessageId: options.id ?? `wamid.in.${createdAt.getTime()}.${occurredAt.getTime()}`,
       status: "RECEIVED",
       metadata: { occurredAt: occurredAt.toISOString() },
       createdAt,
@@ -92,6 +92,18 @@ describe("WhatsApp outbound service", () => {
     await expect(service.sendText(workspaceId, conversationId, { senderType: "USER", text: "Checking in" }))
       .rejects.toMatchObject({ code: "WHATSAPP_TEMPLATE_REQUIRED" });
     expect(provider.sendText).not.toHaveBeenCalled();
+  });
+
+  it("keeps the customer window open when an older provider event is persisted after a newer one", async () => {
+    const now = new Date();
+    await addInbound({ createdAt: new Date(now.getTime() - 60_000), occurredAt: new Date(now.getTime() - 5 * 60_000), id: "wamid.newer-provider-event" });
+    await addInbound({ createdAt: now, occurredAt: new Date(now.getTime() - 25 * 60 * 60 * 1000), id: "wamid.delayed-old-event" });
+    await setConversationHandlingMode(workspaceId, conversationId, "HUMAN", null);
+    const service = createWhatsAppOutboundService({ resolveRuntime: async () => runtime });
+
+    await expect(service.sendText(workspaceId, conversationId, { senderType: "USER", text: "Still in window" }))
+      .resolves.toMatchObject({ status: "SENT" });
+    expect(provider.sendText).toHaveBeenCalledTimes(1);
   });
 
   it("blocks free-form text outside 24 hours but allows an approved template path", async () => {
