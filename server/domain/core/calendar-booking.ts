@@ -11,13 +11,36 @@ import {
 } from "./repository";
 import type { AppointmentInput, AppointmentRescheduleInput } from "./schemas";
 
+type StoredAppointment = {
+  id: string;
+  integrationId: string | null;
+  externalEventId: string | null;
+  startsAt: Date;
+  endsAt: Date;
+  timezone: string;
+  status: "PENDING" | "CONFIRMED" | "COMPLETED" | "CANCELLED" | "NO_SHOW";
+};
+
 type BookingDependencies = {
   resolveCurrent: (workspaceId: string) => Promise<{ integrationId: string; provider: CalendarProvider }>;
   resolveForIntegration: (workspaceId: string, integrationId: string) => Promise<CalendarProvider>;
-  insertAppointment: typeof insertAppointment;
-  getAppointment: typeof getAppointment;
-  updateAfterReschedule: typeof updateAppointmentAfterReschedule;
-  setStatus: typeof setAppointmentStatus;
+  insertAppointment: (
+    workspaceId: string,
+    input: AppointmentInput,
+    external: { integrationId: string | null; externalEventId: string | null; status?: "PENDING" | "CONFIRMED" },
+  ) => Promise<StoredAppointment>;
+  getAppointment: (workspaceId: string, appointmentId: string) => Promise<StoredAppointment | null>;
+  updateAfterReschedule: (
+    workspaceId: string,
+    appointmentId: string,
+    input: AppointmentRescheduleInput,
+    externalEventId?: string,
+  ) => Promise<StoredAppointment>;
+  setStatus: (
+    workspaceId: string,
+    appointmentId: string,
+    status: "PENDING" | "CONFIRMED" | "COMPLETED" | "CANCELLED" | "NO_SHOW",
+  ) => Promise<StoredAppointment>;
 };
 
 async function defaultResolveCurrent(workspaceId: string) {
