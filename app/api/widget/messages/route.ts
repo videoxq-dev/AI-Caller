@@ -1,6 +1,7 @@
 import { appendMessage } from "@/server/domain/core/repository";
 import { AppError, toErrorResponse } from "@/server/http/errors";
 import { parseInput } from "@/server/http/validation";
+import { logger } from "@/server/observability/logger";
 import { responseOrchestrator } from "@/server/orchestrator";
 import {
   claimWebchatTurn,
@@ -116,8 +117,11 @@ export async function POST(request: Request) {
           controller.close();
         } catch (error) {
           await failWebchatTurn(workspaceId, claim.turnId, error).catch(() => undefined);
-          const message = error instanceof Error ? error.message : "Unable to process this message.";
-          controller.enqueue(event("error", { message }));
+          logger.error(
+            { err: error, workspaceId, sessionId: resolved.session.id, conversationId: resolved.session.conversationId, turnId: claim.turnId },
+            "Web chat turn processing failed",
+          );
+          controller.enqueue(event("error", { message: "Unable to process this message right now." }));
           controller.close();
         }
       },
