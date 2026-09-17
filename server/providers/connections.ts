@@ -92,9 +92,8 @@ export async function testProviderConnection(input: PrivateIntegration, fetcher:
     case "outlook": {
       const refreshToken = requireValue(values, "refreshToken", "Microsoft OAuth refresh token");
       const token = await refreshMicrosoftToken(refreshToken, fetcher);
-      const list = await providerJson<{ value?: Array<{ id?: string; name?: string }> }>("https://graph.microsoft.com/v1.0/me/calendars?$top=20", { headers: { authorization: `Bearer ${token.access_token}` } }, fetcher);
-      const primary = list.value?.[0];
-      return { ok: true, metadata: { calendarId: primary?.id ?? null, calendarName: primary?.name ?? null } };
+      const primary = await providerJson<{ id?: string; name?: string }>("https://graph.microsoft.com/v1.0/me/calendar", { headers: { authorization: `Bearer ${token.access_token}` } }, fetcher);
+      return { ok: true, metadata: { calendarId: primary.id ?? null, calendarName: primary.name ?? null } };
     }
     case "whatsapp": {
       const token = requireValue(values, "accessToken", "Meta access token");
