@@ -50,13 +50,19 @@ export default function CalendarSetupPage() {
   const [notice, setNotice] = useState<string | null>(null);
 
   useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const returnedProvider = providers.find((item) => item.id === params.get("provider"));
+    if (returnedProvider) setProvider(returnedProvider.id);
+    if (params.get("connection") === "connected") setNotice(`${returnedProvider?.name ?? "Calendar"} connected successfully.`);
+    if (params.get("connection") === "error") setNotice(params.get("message") || "Calendar connection failed. Please try again.");
+
     Promise.all([
       fetch("/api/setup/calendar", { cache: "no-store" }).then((response) => response.ok ? response.json() : null),
       fetch("/api/integrations", { cache: "no-store" }).then((response) => response.ok ? response.json() : null),
     ]).then(([setupPayload, integrationPayload]) => {
       const saved = setupPayload?.settings;
       if (saved) {
-        if (saved.provider) setProvider(saved.provider);
+        if (saved.provider && !returnedProvider) setProvider(saved.provider);
         if (saved.meetingDurationMinutes) setMeetingDuration(saved.meetingDurationMinutes);
         if (saved.bufferBeforeMinutes !== undefined) setBufferBefore(saved.bufferBeforeMinutes);
         if (saved.bufferAfterMinutes !== undefined) setBufferAfter(saved.bufferAfterMinutes);

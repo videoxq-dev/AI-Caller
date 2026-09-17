@@ -24,11 +24,17 @@ export const integrationSaveSchema = z.object({
   provider: providerIdSchema,
   category: integrationCategorySchema,
   mode: integrationModeSchema.default("BYOP"),
-  status: integrationStatusSchema.default("CONNECTED"),
   credentials: z.record(z.string(), z.string()).default({}),
   settings: z.record(z.string(), z.unknown()).default({}),
 });
 
+export const capabilityBindingInputSchema = z.object({
+  capability: capabilitySchema,
+  mode: integrationModeSchema,
+  provider: providerIdSchema.nullable().optional(),
+});
+
+const communicationProviderSchema = z.enum(["plivo", "telnyx", "twilio"]);
 const channelBindingSchema = z.object({
   mode: integrationModeSchema,
   provider: providerIdSchema.nullable().optional(),
@@ -52,22 +58,51 @@ export const communicationSetupSchema = z.object({
     enabled: z.boolean().default(true),
   }).default({ enabled: true }),
   completeStep: z.boolean().default(false),
+}).superRefine((input, ctx) => {
+  for (const [field, channel] of [["voice", input.voice], ["sms", input.sms]] as const) {
+    if (channel.mode === "BYOP") {
+      const parsed = communicationProviderSchema.safeParse(channel.provider);
+      if (!parsed.success) {
+        ctx.addIssue({ code: "custom", path: [field, "provider"], message: "BYOP voice and SMS require Telnyx, Plivo, or Twilio." });
+      }
+    } else if (channel.provider != null) {
+      ctx.addIssue({ code: "custom", path: [field, "provider"], message: "Hosted voice and SMS must not specify a BYOP provider." });
+    }
+  }
+
+  if (input.whatsapp.mode !== "BYOP" || input.whatsapp.provider !== "whatsapp") {
+    ctx.addIssue({ code: "custom", path: ["whatsapp", "provider"], message: "WhatsApp must use the Meta Embedded Signup integration." });
+  }
 });
+
+const timeSchema = z.string().regex(/^(?:[01]\d|2[0-3]):[0-5]\d$/, "Time must use 24-hour HH:MM format.");
+const timeZoneSchema = z.string().min(1).refine((value) => {
+  try {
+    new Intl.DateTimeFormat("en", { timeZone: value }).format();
+    return true;
+  } catch {
+    return false;
+  }
+}, "Timezone must be a valid IANA timezone.");
 
 export const calendarSetupSchema = z.object({
   provider: z.enum(["google", "outlook", "calendly", "calcom"]),
   meetingDurationMinutes: z.number().int().min(5).max(480).default(30),
   bufferBeforeMinutes: z.number().int().min(0).max(240).default(15),
   bufferAfterMinutes: z.number().int().min(0).max(240).default(15),
-  availableDays: z.array(z.enum(["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"])).default(["Mon", "Tue", "Wed", "Thu", "Fri"]),
-  startTime: z.string().default("09:00"),
-  endTime: z.string().default("17:00"),
-  timezone: z.string().min(1).default("Africa/Lagos"),
+  availableDays: z.array(z.enum(["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"])).min(1, "Choose at least one available day.").default(["Mon", "Tue", "Wed", "Thu", "Fri"]),
+  startTime: timeSchema.default("09:00"),
+  endTime: timeSchema.default("17:00"),
+  timezone: timeZoneSchema.default("Africa/Lagos"),
   suggestAlternatives: z.boolean().default(true),
-  eventType: z.string().nullable().optional(),
-  meetingLocation: z.string().nullable().optional(),
+  eventType: z.string().max(200).nullable().optional(),
+  meetingLocation: z.string().max(200).nullable().optional(),
   maxBookingsPerDay: z.number().int().min(1).max(100).default(8),
   completeStep: z.boolean().default(false),
+}).superRefine((input, ctx) => {
+  if (input.startTime >= input.endTime) {
+    ctx.addIssue({ code: "custom", path: ["endTime"], message: "End time must be later than start time." });
+  }
 });
 
 export type IntegrationSaveInput = z.infer<typeof integrationSaveSchema>;
