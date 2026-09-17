@@ -20,7 +20,6 @@ import {
   failProviderWebhookEvent,
   markProviderWebhookQueued,
   markSmsSendFailure,
-  updateProviderWebhookPayload,
   updateSmsDeliveryStatus,
 } from "./repository";
 
@@ -76,13 +75,32 @@ function safeEventPayload(event: NormalizedSmsEvent) {
     : { type: event.type, externalMessageId: event.externalMessageId, status: event.status };
 }
 
+function jobFromEvent(
+  workspaceId: string,
+  provider: SmsProviderName,
+  webhookEventId: string,
+  event: Extract<NormalizedSmsEvent, { type: "MESSAGE_RECEIVED" }>,
+): SmsInboundResponseJob {
+  return smsInboundResponseJobSchema.parse({
+    workspaceId,
+    provider,
+    webhookEventId,
+    externalMessageId: event.externalMessageId,
+    customerNumber: normalizePhone(event.from),
+    destinationNumber: normalizePhone(event.to),
+    text: event.text,
+  });
+}
+
 function queuedJobFromPayload(workspaceId: string, provider: SmsProviderName, eventId: string, payload: Record<string, unknown>) {
   return smsInboundResponseJobSchema.safeParse({
     workspaceId,
     provider,
     webhookEventId: eventId,
-    conversationId: payload.conversationId,
+    externalMessageId: payload.externalMessageId,
     customerNumber: payload.customerNumber,
+    destinationNumber: payload.destinationNumber,
+    text: payload.text,
   });
 }
 
@@ -146,6 +164,19 @@ export function createSmsWebhookService(dependencies: SmsServiceDependencies) {
     return dependencies.enqueueResponseJob(job);
   }
 
+  async function enqueueExistingQueuedEvent(
+    workspaceId: string,
+    providerName: SmsProviderName,
+    eventId: string,
+    payload: Record<string, unknown>,
+  ) {
+    const queuedJob = queuedJobFromPayload(workspaceId, providerName, eventId, payload);
+    if (!queuedJob.success) {
+      throw new AppError("INVALID_QUEUED_SMS_EVENT", "Queued SMS webhook data is incomplete.", 409);
+    }
+    await enqueueInbound(queuedJob.data);
+  }
+
   return {
     async ingest(request: Request, workspaceId: string, providerName: SmsProviderName) {
       const rawBody = await readWebhookBody(request);
@@ -168,10 +199,11 @@ export function createSmsWebhookService(dependencies: SmsServiceDependencies) {
       let deferred = 0;
 
       for (const event of events) {
+        const eventPayload = safeEventPayload(event);
         const claim = await claimProviderWebhookEvent(workspaceId, {
           provider: providerName,
           externalEventId: event.externalEventId,
-          payload: safeEventPayload(event),
+          payload: eventPayload,
         });
 
         if (event.type === "DELIVERY_UPDATED") {
@@ -192,55 +224,32 @@ export function createSmsWebhookService(dependencies: SmsServiceDependencies) {
         }
 
         if (claim.status === "QUEUED") {
-          const queuedJob = queuedJobFromPayload(workspaceId, providerName, claim.eventId, claim.payload);
-          if (queuedJob.success) await enqueueInbound(queuedJob.data);
+          await enqueueExistingQueuedEvent(workspaceId, providerName, claim.eventId, claim.payload);
           duplicates += 1;
           continue;
         }
 
-        if (claim.state === "duplicate") {
-          duplicates += 1;
-          continue;
-        }
+        const job = jobFromEvent(workspaceId, providerName, claim.eventId, event);
+        const queuedEvent = await markProviderWebhookQueued(workspaceId, claim.eventId, {
+          ...eventPayload,
+          ...job,
+        });
 
-        let safelyQueued = false;
-        try {
-          if (normalizePhone(event.to) !== runtime.senderNumber) {
-            throw new AppError("SMS_DESTINATION_MISMATCH", "The inbound SMS destination does not match this workspace's configured SMS number.", 409);
-          }
-
-          const contact = await getOrCreateContactByIdentity(workspaceId, { channel: "SMS", externalId: event.from });
-          const conversation = await getOrCreateOpenConversation(workspaceId, contact.id);
-          await appendMessage(workspaceId, conversation.id, {
-            channel: "SMS",
-            direction: "INBOUND",
-            senderType: "CUSTOMER",
-            contentType: "TEXT",
-            body: event.text,
+        if (!queuedEvent) {
+          const refreshed = await claimProviderWebhookEvent(workspaceId, {
             provider: providerName,
-            externalMessageId: event.externalMessageId,
-            status: "RECEIVED",
-            metadata: { providerEventId: event.externalEventId },
+            externalEventId: event.externalEventId,
+            payload: eventPayload,
           });
-
-          const job: SmsInboundResponseJob = {
-            workspaceId,
-            provider: providerName,
-            webhookEventId: claim.eventId,
-            conversationId: conversation.id,
-            customerNumber: normalizePhone(event.from),
-          };
-          const payloadUpdated = await updateProviderWebhookPayload(workspaceId, claim.eventId, { ...safeEventPayload(event), ...job });
-          if (!payloadUpdated) throw new AppError("WEBHOOK_STATE_CONFLICT", "The SMS webhook state changed before it could be queued.", 409);
-          const queuedEvent = await markProviderWebhookQueued(workspaceId, claim.eventId);
-          if (!queuedEvent) throw new AppError("WEBHOOK_STATE_CONFLICT", "The SMS webhook could not transition to the queue.", 409);
-          safelyQueued = true;
-          await enqueueInbound(job);
-          queued += 1;
-        } catch (error) {
-          if (!safelyQueued) await failProviderWebhookEvent(workspaceId, claim.eventId, error);
-          throw error;
+          if (refreshed.status === "QUEUED") {
+            await enqueueExistingQueuedEvent(workspaceId, providerName, refreshed.eventId, refreshed.payload);
+          }
+          duplicates += 1;
+          continue;
         }
+
+        await enqueueInbound(job);
+        queued += 1;
       }
 
       return { ok: true as const, queued, processed, duplicates, deferred };
@@ -253,14 +262,32 @@ export function createSmsWebhookService(dependencies: SmsServiceDependencies) {
 
       try {
         const runtime = await dependencies.resolveRuntime(job.workspaceId, job.provider);
-        const orchestrated = await dependencies.respond(job.workspaceId, job.conversationId);
+        if (job.destinationNumber !== runtime.senderNumber) {
+          throw new AppError("SMS_DESTINATION_MISMATCH", "The inbound SMS destination does not match this workspace's configured SMS number.", 409);
+        }
+
+        const contact = await getOrCreateContactByIdentity(job.workspaceId, { channel: "SMS", externalId: job.customerNumber });
+        const conversation = await getOrCreateOpenConversation(job.workspaceId, contact.id);
+        await appendMessage(job.workspaceId, conversation.id, {
+          channel: "SMS",
+          direction: "INBOUND",
+          senderType: "CUSTOMER",
+          contentType: "TEXT",
+          body: job.text,
+          provider: job.provider,
+          externalMessageId: job.externalMessageId,
+          status: "RECEIVED",
+          metadata: { providerEventId: job.webhookEventId },
+        });
+
+        const orchestrated = await dependencies.respond(job.workspaceId, conversation.id);
         if (!orchestrated.reply) {
           await completeProviderWebhookEvent(job.workspaceId, job.webhookEventId);
           return { skipped: false as const, replied: false as const };
         }
         const reply = smsText(orchestrated.reply);
 
-        const outbound = await appendMessage(job.workspaceId, job.conversationId, {
+        const outbound = await appendMessage(job.workspaceId, conversation.id, {
           channel: "SMS",
           direction: "OUTBOUND",
           senderType: "AI",
@@ -275,6 +302,12 @@ export function createSmsWebhookService(dependencies: SmsServiceDependencies) {
         let reservedCredits = 0;
         try {
           reservedCredits = await reserveHostedSmsCredits(job.workspaceId, runtime, outbound.id);
+        } catch (error) {
+          await markSmsSendFailure(job.workspaceId, outbound.id, "FAILED", error);
+          throw error;
+        }
+
+        try {
           const sent = await runtime.provider.send({
             to: job.customerNumber,
             from: runtime.senderNumber,
