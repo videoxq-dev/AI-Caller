@@ -68,6 +68,8 @@ export type OrchestratorToolResult = {
   data: Record<string, unknown>;
 };
 
+type LeadStatus = "NEW" | "QUALIFIED" | "BOOKED" | "WON" | "LOST";
+
 function extractJson(text: string) {
   const trimmed = text.trim();
   const unfenced = trimmed.startsWith("```")
@@ -98,7 +100,10 @@ export function parseOrchestratorEnvelope(text: string): OrchestratorEnvelope {
   return { reply: reply.slice(0, 5000), action: { type: "NONE" } };
 }
 
-function qualificationStatus(existingStatus: string | undefined, requestedStatus: "NEW" | "QUALIFIED" | undefined) {
+function qualificationStatus(
+  existingStatus: LeadStatus | undefined,
+  requestedStatus: "NEW" | "QUALIFIED" | undefined,
+): LeadStatus {
   if (existingStatus === "BOOKED" || existingStatus === "WON" || existingStatus === "LOST") return existingStatus;
   if (existingStatus === "QUALIFIED" && requestedStatus === "NEW") return "QUALIFIED";
   return requestedStatus ?? existingStatus ?? "NEW";
