@@ -11,6 +11,12 @@ function redirectWithStatus(path: string, provider: string, status: "connected" 
   return Response.redirect(url);
 }
 
+function publicFailureMessage(provider: string) {
+  if (provider === "google") return "Google Calendar connection failed. Please try again.";
+  if (provider === "outlook") return "Microsoft Outlook connection failed. Please try again.";
+  return "Calendar connection failed. Please try again.";
+}
+
 export async function GET(request: Request, { params }: { params: Promise<{ provider: string }> }) {
   let returnTo = "/integrations";
   let provider = "calendar";
@@ -32,7 +38,7 @@ export async function GET(request: Request, { params }: { params: Promise<{ prov
 
     const code = url.searchParams.get("code");
     if (!code) {
-      throw new Error(url.searchParams.get("error_description") ?? "Calendar authorization was not completed.");
+      return redirectWithStatus(returnTo, provider, "error", "Calendar authorization was not completed.");
     }
 
     const result = await exchangeOAuthCode(rawProvider as OAuthProviderId, code);
@@ -46,7 +52,7 @@ export async function GET(request: Request, { params }: { params: Promise<{ prov
     await bindCapability(context.workspace.id, "CALENDAR", "BYOP", rawProvider);
 
     return redirectWithStatus(returnTo, rawProvider, "connected");
-  } catch (error) {
-    return redirectWithStatus(returnTo, provider, "error", error instanceof Error ? error.message : "Calendar connection failed.");
+  } catch {
+    return redirectWithStatus(returnTo, provider, "error", publicFailureMessage(provider));
   }
 }
