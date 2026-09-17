@@ -1,6 +1,7 @@
 import { createHmac, timingSafeEqual } from "node:crypto";
 import { z } from "zod";
 import { getEnv } from "@/server/env";
+import { AppError } from "@/server/http/errors";
 import { providerJson } from "@/server/providers/http";
 import type {
   NormalizedWhatsAppEvent,
@@ -8,39 +9,41 @@ import type {
   WhatsAppWebhookInput,
 } from "@/server/providers/contracts";
 
-const webhookSchema = z.object({
+const webhookEnvelopeSchema = z.object({
   object: z.literal("whatsapp_business_account"),
   entry: z.array(z.object({
     id: z.string(),
     changes: z.array(z.object({
-      field: z.literal("messages"),
-      value: z.object({
-        metadata: z.object({ phone_number_id: z.string() }),
-        contacts: z.array(z.object({ profile: z.object({ name: z.string().optional() }).optional(), wa_id: z.string() })).optional(),
-        messages: z.array(z.object({
-          id: z.string(),
-          from: z.string(),
-          timestamp: z.string().optional(),
-          type: z.string(),
-          text: z.object({ body: z.string() }).optional(),
-          button: z.object({ text: z.string() }).optional(),
-          interactive: z.object({
-            button_reply: z.object({ title: z.string() }).optional(),
-            list_reply: z.object({ title: z.string() }).optional(),
-          }).optional(),
-        })).optional(),
-        statuses: z.array(z.object({
-          id: z.string(),
-          status: z.enum(["sent", "delivered", "read", "failed"]),
-          timestamp: z.string().optional(),
-          errors: z.array(z.object({ title: z.string().optional(), message: z.string().optional() })).optional(),
-        })).optional(),
-      }).passthrough(),
+      field: z.string(),
+      value: z.unknown(),
     })),
   })),
 });
 
-type WebhookValue = z.infer<typeof webhookSchema>["entry"][number]["changes"][number]["value"];
+const messageValueSchema = z.object({
+  metadata: z.object({ phone_number_id: z.string() }),
+  contacts: z.array(z.object({ profile: z.object({ name: z.string().optional() }).optional(), wa_id: z.string() })).optional(),
+  messages: z.array(z.object({
+    id: z.string(),
+    from: z.string(),
+    timestamp: z.string().optional(),
+    type: z.string(),
+    text: z.object({ body: z.string() }).optional(),
+    button: z.object({ text: z.string() }).optional(),
+    interactive: z.object({
+      button_reply: z.object({ title: z.string() }).optional(),
+      list_reply: z.object({ title: z.string() }).optional(),
+    }).optional(),
+  })).optional(),
+  statuses: z.array(z.object({
+    id: z.string(),
+    status: z.enum(["sent", "delivered", "read", "failed"]),
+    timestamp: z.string().optional(),
+    errors: z.array(z.object({ title: z.string().optional(), message: z.string().optional() })).optional(),
+  })).optional(),
+}).passthrough();
+
+type WebhookValue = z.infer<typeof messageValueSchema>;
 type WebhookMessage = NonNullable<WebhookValue["messages"]>[number];
 
 function occurredAt(timestamp?: string) {
@@ -77,15 +80,23 @@ export function normalizeMetaWhatsAppWebhook(input: WhatsAppWebhookInput) {
   try {
     payload = JSON.parse(input.rawBody);
   } catch {
-    return [] as NormalizedWhatsAppEvent[];
+    throw new AppError("INVALID_WHATSAPP_WEBHOOK", "WhatsApp webhook body is not valid JSON.", 400);
   }
-  const parsed = webhookSchema.safeParse(payload);
-  if (!parsed.success) return [] as NormalizedWhatsAppEvent[];
+
+  const envelope = webhookEnvelopeSchema.safeParse(payload);
+  if (!envelope.success) {
+    throw new AppError("INVALID_WHATSAPP_WEBHOOK", "WhatsApp webhook envelope is invalid.", 400);
+  }
 
   const events: NormalizedWhatsAppEvent[] = [];
-  for (const entry of parsed.data.entry) {
+  for (const entry of envelope.data.entry) {
     for (const change of entry.changes) {
-      const value = change.value;
+      if (change.field !== "messages") continue;
+      const parsedValue = messageValueSchema.safeParse(change.value);
+      if (!parsedValue.success) {
+        throw new AppError("INVALID_WHATSAPP_WEBHOOK", "WhatsApp message webhook payload is invalid.", 400);
+      }
+      const value = parsedValue.data;
       const phoneNumberId = value.metadata.phone_number_id;
       const contactNames = new Map((value.contacts ?? []).map((contact) => [contact.wa_id, contact.profile?.name ?? null]));
 
