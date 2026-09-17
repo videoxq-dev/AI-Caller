@@ -17,7 +17,6 @@ type ChatMessage = {
 
 type SessionResponse = {
   sessionToken: string;
-  visitorId: string;
   history: ChatMessage[];
   widget: WidgetConfig & { publicKey: string; launcherLabel: string };
 };
@@ -30,39 +29,34 @@ export function WebchatWidget({ widgetKey, config }: { widgetKey: string; config
   const [sending, setSending] = useState(false);
   const [status, setStatus] = useState("AI online");
   const scrollerRef = useRef<HTMLDivElement>(null);
-  const storageKeys = useMemo(() => ({
-    visitor: `ai-caller:visitor:${widgetKey}`,
-    session: `ai-caller:session:${widgetKey}`,
-  }), [widgetKey]);
+  const sessionStorageKey = useMemo(() => `ai-caller:session:${widgetKey}`, [widgetKey]);
 
   useEffect(() => {
     let cancelled = false;
     async function start() {
-      const existingVisitor = window.localStorage.getItem(storageKeys.visitor);
-      const existingToken = window.localStorage.getItem(storageKeys.session);
-      const visitorId = existingVisitor ?? `visitor_${window.crypto.randomUUID()}`;
+      const existingToken = window.localStorage.getItem(sessionStorageKey);
       const response = await fetch("/api/widget/session", {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ widgetKey, visitorId, sessionToken: existingToken ?? undefined }),
+        body: JSON.stringify({ widgetKey, sessionToken: existingToken ?? undefined }),
       });
       if (!response.ok) throw new Error("Unable to start chat.");
       const data = await response.json() as SessionResponse;
       if (cancelled) return;
-      window.localStorage.setItem(storageKeys.visitor, data.visitorId);
-      window.localStorage.setItem(storageKeys.session, data.sessionToken);
+      window.localStorage.setItem(sessionStorageKey, data.sessionToken);
       setSessionToken(data.sessionToken);
       setMessages(data.history.length ? data.history : [{ id: "greeting", role: "assistant", text: data.widget.greeting || config.greeting }]);
       setLoading(false);
     }
     start().catch(() => {
       if (!cancelled) {
+        window.localStorage.removeItem(sessionStorageKey);
         setStatus("Chat unavailable");
         setLoading(false);
       }
     });
     return () => { cancelled = true; };
-  }, [config.greeting, storageKeys, widgetKey]);
+  }, [config.greeting, sessionStorageKey, widgetKey]);
 
   useEffect(() => {
     scrollerRef.current?.scrollTo({ top: scrollerRef.current.scrollHeight, behavior: "smooth" });
