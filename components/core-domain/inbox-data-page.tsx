@@ -7,7 +7,7 @@ import { AppNav } from "./app-nav";
 type Channel = "PHONE" | "SMS" | "WHATSAPP" | "WEBCHAT";
 type Contact = { id: string; name: string | null; email: string | null; phone: string | null };
 type Conversation = { id: string; contactId: string; status: "OPEN" | "CLOSED"; handlingMode: "AI" | "HUMAN"; lastMessageAt: string | null; createdAt: string };
-type ConversationRow = { conversation: Conversation; contact: Contact };
+type ConversationRow = { conversation: Conversation; contact: Contact; channels: Channel[] };
 type Message = { id: string; channel: Channel; direction: "INBOUND" | "OUTBOUND" | "INTERNAL"; senderType: "CUSTOMER" | "AI" | "USER" | "SYSTEM"; contentType: string; body: string; createdAt: string };
 type Timeline = { conversation: Conversation; contact: Contact; messages: Message[] };
 
@@ -67,10 +67,14 @@ export function InboxDataPage() {
 
   const visibleRows = useMemo(() => {
     if (channel === "ALL") return rows;
-    return rows.filter((row) => row.conversation.id === timeline?.conversation.id
-      ? timeline.messages.some((message) => message.channel === channel)
-      : true);
-  }, [channel, rows, timeline]);
+    return rows.filter((row) => row.channels.includes(channel));
+  }, [channel, rows]);
+
+  useEffect(() => {
+    if (channel === "ALL") return;
+    if (selectedId && visibleRows.some((row) => row.conversation.id === selectedId)) return;
+    setSelectedId(visibleRows[0]?.conversation.id ?? null);
+  }, [channel, selectedId, visibleRows]);
 
   async function toggleHandling() {
     if (!timeline) return;
@@ -107,16 +111,16 @@ export function InboxDataPage() {
         <div className="unifiedInboxGrid">
           <section className="conversationColumn">
             <div className="conversationColumnHeader"><h1>Inbox</h1></div>
-            <div className="conversationFilters"><label><select value={channel} onChange={(event) => setChannel(event.target.value as "ALL" | Channel)}><option value="ALL">All channels</option><option value="WHATSAPP">WhatsApp</option><option value="SMS">SMS</option><option value="PHONE">Call</option><option value="WEBCHAT">Web Chat</option></select></label></div>
+            <div className="conversationFilters"><label><select aria-label="Channel filter" value={channel} onChange={(event) => setChannel(event.target.value as "ALL" | Channel)}><option value="ALL">All channels</option><option value="WHATSAPP">WhatsApp</option><option value="SMS">SMS</option><option value="PHONE">Call</option><option value="WEBCHAT">Web Chat</option></select></label></div>
             <div className="conversationList">
-              {visibleRows.map(({ conversation, contact }) => (
+              {visibleRows.map(({ conversation, contact, channels }) => (
                 <button key={conversation.id} type="button" className={`conversationItem ${selectedId === conversation.id ? "selected" : ""}`} onClick={() => setSelectedId(conversation.id)}>
                   <span className="contactAvatar">{initials(contact.name)}</span>
-                  <span className="conversationInfo"><span className="conversationNameRow"><strong>{contact.name ?? "Unnamed contact"}</strong><time>{displayTime(conversation.lastMessageAt)}</time></span><span className="conversationPreview">{contact.phone ?? contact.email ?? "Customer conversation"}</span><span className="conversationTags"><span className={`handlingBadge ${conversation.handlingMode === "HUMAN" ? "human" : "ai"}`}>{conversation.handlingMode === "HUMAN" ? "Human" : "AI handled"}</span><span className="smallTag">{conversation.status}</span></span></span>
+                  <span className="conversationInfo"><span className="conversationNameRow"><strong>{contact.name ?? "Unnamed contact"}</strong><time>{displayTime(conversation.lastMessageAt)}</time></span><span className="conversationPreview">{contact.phone ?? contact.email ?? "Customer conversation"}</span><span className="conversationTags"><span className={`handlingBadge ${conversation.handlingMode === "HUMAN" ? "human" : "ai"}`}>{conversation.handlingMode === "HUMAN" ? "Human" : "AI handled"}</span>{channels.slice(0, 3).map((item) => <span key={item} className="smallTag">{channelLabels[item]}</span>)}<span className="smallTag">{conversation.status}</span></span></span>
                 </button>
               ))}
               {loading && <div style={{ padding: 20 }}>Loading conversations…</div>}
-              {!loading && !rows.length && <div style={{ padding: 20 }}>No conversations yet. Web chat, SMS, WhatsApp and voice channels will create conversations here.</div>}
+              {!loading && !visibleRows.length && <div style={{ padding: 20 }}>{rows.length ? "No conversations match this channel." : "No conversations yet. Web chat, SMS, WhatsApp and voice channels will create conversations here."}</div>}
             </div>
           </section>
 
