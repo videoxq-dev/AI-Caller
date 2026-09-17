@@ -49,7 +49,7 @@ describe("BYOP SMS setup readiness", () => {
     await closeDatabase();
   });
 
-  it("requires a sender number and Telnyx webhook public key before completing communication setup", async () => {
+  it("requires a sender number and valid Telnyx webhook public key before completing communication setup", async () => {
     await expect(saveCommunicationSetup(workspaceId, communicationInput())).rejects.toThrow("sender phone number");
 
     await saveIntegration(workspaceId, {
@@ -69,6 +69,18 @@ describe("BYOP SMS setup readiness", () => {
       settings: {
         phone: "+12025550200",
         webhookPublicKey: "A".repeat(64),
+      },
+    });
+    await expect(saveCommunicationSetup(workspaceId, communicationInput())).rejects.toThrow("32-byte Ed25519 key");
+
+    await saveIntegration(workspaceId, {
+      provider: "telnyx",
+      category: "COMMUNICATION",
+      mode: "BYOP",
+      credentials: {},
+      settings: {
+        phone: "+12025550200",
+        webhookPublicKey: Buffer.alloc(32, 7).toString("base64"),
       },
     });
 
