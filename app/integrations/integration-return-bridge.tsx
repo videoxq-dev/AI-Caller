@@ -47,6 +47,7 @@ export function IntegrationReturnBridge() {
 
     let cancelled = false;
     let interval: ReturnType<typeof setInterval> | null = null;
+    let checks = 0;
 
     const onDocumentClick = (event: MouseEvent) => {
       const target = event.target instanceof Element ? event.target.closest("a") : null;
@@ -62,6 +63,12 @@ export function IntegrationReturnBridge() {
     void getProviderStatus(provider).then((initialStatus) => {
       if (cancelled || initialStatus === "CONNECTED") return;
       interval = setInterval(() => {
+        checks += 1;
+        if (checks >= 300) {
+          if (interval) clearInterval(interval);
+          interval = null;
+          return;
+        }
         void getProviderStatus(provider).then((status) => {
           if (cancelled || status !== "CONNECTED") return;
           if (interval) clearInterval(interval);
