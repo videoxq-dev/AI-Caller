@@ -8,7 +8,7 @@ export async function listConversationChannels(workspaceId: string, conversation
   const uniqueIds = Array.from(new Set(conversationIds));
   if (!uniqueIds.length) return new Map<string, ConversationChannel[]>();
 
-  const rows = await db.select({
+  const rows = await db.selectDistinct({
     conversationId: messages.conversationId,
     channel: messages.channel,
   }).from(messages).where(and(
@@ -19,7 +19,7 @@ export async function listConversationChannels(workspaceId: string, conversation
   const channelsByConversation = new Map<string, ConversationChannel[]>();
   for (const row of rows) {
     const channels = channelsByConversation.get(row.conversationId) ?? [];
-    if (!channels.includes(row.channel)) channels.push(row.channel);
+    channels.push(row.channel);
     channelsByConversation.set(row.conversationId, channels);
   }
 
