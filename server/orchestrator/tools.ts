@@ -8,6 +8,14 @@ import {
 } from "@/server/domain/core/repository";
 
 const optionalShortText = z.string().trim().min(1).max(1000).nullable().optional();
+const timezoneSchema = z.string().trim().min(1).max(100).refine((value) => {
+  try {
+    new Intl.DateTimeFormat("en", { timeZone: value }).format();
+    return true;
+  } catch {
+    return false;
+  }
+}, "Timezone must be a valid IANA timezone.");
 
 export const orchestratorActionSchema = z.discriminatedUnion("type", [
   z.object({ type: z.literal("NONE") }),
@@ -15,14 +23,14 @@ export const orchestratorActionSchema = z.discriminatedUnion("type", [
     type: z.literal("CHECK_AVAILABILITY"),
     startsAt: z.string().datetime({ offset: true }),
     endsAt: z.string().datetime({ offset: true }),
-    timezone: z.string().trim().min(1).max(100),
+    timezone: timezoneSchema,
     durationMinutes: z.number().int().min(5).max(480).optional(),
   }),
   z.object({
     type: z.literal("BOOK_APPOINTMENT"),
     startsAt: z.string().datetime({ offset: true }),
     endsAt: z.string().datetime({ offset: true }),
-    timezone: z.string().trim().min(1).max(100),
+    timezone: timezoneSchema,
     title: z.string().trim().min(1).max(500),
     serviceId: z.string().uuid().nullable().optional(),
     notes: z.string().trim().max(2000).nullable().optional(),
@@ -31,7 +39,12 @@ export const orchestratorActionSchema = z.discriminatedUnion("type", [
     type: z.literal("ESCALATE"),
     reason: z.string().trim().min(1).max(1000).optional(),
   }),
-]);
+]).superRefine((action, ctx) => {
+  if (action.type !== "CHECK_AVAILABILITY" && action.type !== "BOOK_APPOINTMENT") return;
+  if (new Date(action.endsAt).getTime() <= new Date(action.startsAt).getTime()) {
+    ctx.addIssue({ code: "custom", path: ["endsAt"], message: "endsAt must be after startsAt." });
+  }
+});
 
 export const orchestratorEnvelopeSchema = z.object({
   reply: z.string().trim().min(1).max(5000).optional(),
@@ -63,12 +76,15 @@ function extractJson(text: string) {
 export function parseOrchestratorEnvelope(text: string): OrchestratorEnvelope {
   const json = extractJson(text);
   if (json) {
+    let decoded: unknown;
     try {
-      const parsed = orchestratorEnvelopeSchema.safeParse(JSON.parse(json));
-      if (parsed.success) return parsed.data;
+      decoded = JSON.parse(json);
     } catch {
-      // Fall through to a safe text-only response.
+      throw new Error("AI provider returned malformed orchestration JSON.");
     }
+    const parsed = orchestratorEnvelopeSchema.safeParse(decoded);
+    if (!parsed.success) throw new Error("AI provider returned an invalid orchestration action.");
+    return parsed.data;
   }
 
   const reply = text.trim();
