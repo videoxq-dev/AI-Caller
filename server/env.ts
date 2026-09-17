@@ -19,7 +19,7 @@ const envSchema = z.object({
   GOOGLE_OAUTH_CLIENT_SECRET: z.string().min(1).optional(),
   MICROSOFT_OAUTH_CLIENT_ID: z.string().min(1).optional(),
   MICROSOFT_OAUTH_CLIENT_SECRET: z.string().min(1).optional(),
-  CALCOM_API_VERSION: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).default("2026-02-25"),
+  CALCOM_API_VERSION: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).default("2024-08-13"),
   META_APP_ID: z.string().min(1).optional(),
   META_APP_SECRET: z.string().min(1).optional(),
   META_EMBEDDED_SIGNUP_CONFIG_ID: z.string().min(1).optional(),
