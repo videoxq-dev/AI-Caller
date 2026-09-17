@@ -1,4 +1,4 @@
-import { appendMessage, getOrCreateContactByIdentity, getOrCreateOpenConversation } from "@/server/domain/core/repository";
+import { appendMessage, getOrCreateOpenConversation } from "@/server/domain/core/repository";
 import { AppError } from "@/server/http/errors";
 import { enqueueUniqueJob } from "@/server/jobs";
 import { WHATSAPP_INBOUND_RESPONSE, whatsappInboundResponseJobSchema, type WhatsAppInboundResponseJob } from "@/server/jobs/queues";
@@ -18,6 +18,7 @@ import {
   markProviderWebhookQueued,
   releaseProviderWebhookEventForRetry,
 } from "@/server/providers/webhooks/repository";
+import { resolveWhatsAppContact } from "./identity";
 import { sendWhatsAppConversationText } from "./outbound";
 import { updateWhatsAppDeliveryStatus } from "./repository";
 
@@ -198,11 +199,7 @@ export function createWhatsAppWebhookService(dependencies: WhatsAppServiceDepend
           throw new AppError("WHATSAPP_DESTINATION_MISMATCH", "The WhatsApp phone number ID does not match this workspace.", 409);
         }
 
-        const contact = await getOrCreateContactByIdentity(job.workspaceId, {
-          channel: "WHATSAPP",
-          externalId: job.customerWaId,
-          name: job.profileName,
-        });
+        const contact = await resolveWhatsAppContact(job.workspaceId, job.customerWaId, job.profileName);
         const conversation = await getOrCreateOpenConversation(job.workspaceId, contact.id);
         await appendMessage(job.workspaceId, conversation.id, {
           channel: "WHATSAPP",
