@@ -15,10 +15,10 @@ function request(body = "{}") {
   });
 }
 
-function orchestratorReply(text: string | null) {
+function orchestratorReply(text: string) {
   return {
     reply: text,
-    handlingMode: text ? "AI" as const : "HUMAN" as const,
+    handlingMode: "AI" as const,
     action: { type: "NONE" as const },
     toolResult: { kind: "none" as const, data: {} },
   };
