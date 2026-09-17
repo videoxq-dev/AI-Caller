@@ -173,8 +173,17 @@ try {
   await page.getByRole("button", { name: /Use my own provider \(BYOP\)/ }).click();
   const callbackInput = page.getByLabel("SMS callback URL");
   await callbackInput.waitFor();
+  const callbackSuffix = `/api/webhooks/sms/telnyx/${workspaceId}`;
+  await page.waitForFunction(
+    (suffix) => {
+      const input = document.querySelector('input[aria-label="SMS callback URL"]');
+      return input instanceof HTMLInputElement && input.value.endsWith(suffix);
+    },
+    callbackSuffix,
+    { timeout: 10_000 },
+  );
   const callbackValue = await callbackInput.inputValue();
-  assert(callbackValue.endsWith(`/api/webhooks/sms/telnyx/${workspaceId}`), `Unexpected Telnyx callback URL: ${callbackValue}`);
+  assert(callbackValue.endsWith(callbackSuffix), `Unexpected Telnyx callback URL: ${callbackValue}`);
   const publicKeyInput = page.getByLabel("Webhook signing public key");
   await publicKeyInput.waitFor();
   await assertNoHorizontalOverflow(page, "BYOP SMS webhook setup desktop");
