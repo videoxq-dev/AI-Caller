@@ -79,7 +79,7 @@ export async function testProviderConnection(input: PrivateIntegration, fetcher:
     }
     case "calcom": {
       const apiKey = requireValue(values, "apiKey", "Cal.com API key");
-      const me = await providerJson<{ data?: { name?: string; email?: string; username?: string } }>("https://api.cal.com/v2/me", { headers: { authorization: `Bearer ${apiKey}`, "cal-api-version": getEnv().CALCOM_API_VERSION } }, fetcher);
+      const me = await providerJson<{ data?: { name?: string; email?: string; username?: string } }>("https://api.cal.com/v2/me", { headers: { authorization: `Bearer ${apiKey}` } }, fetcher);
       return { ok: true, metadata: { accountName: me.data?.name ?? null, accountEmail: me.data?.email ?? null, username: me.data?.username ?? null } };
     }
     case "google": {
