@@ -1,5 +1,5 @@
 import { createHash, randomBytes, randomUUID } from "node:crypto";
-import { and, desc, eq, gt, lt } from "drizzle-orm";
+import { and, count, desc, eq, gt, gte, lt } from "drizzle-orm";
 import { db } from "@/db";
 import {
   aiAgents,
@@ -12,10 +12,15 @@ import {
 } from "@/db/schema";
 import { getConversationTimelinePage } from "@/server/domain/core/conversation-timeline";
 import { getOrCreateContactByIdentity, getOrCreateOpenConversation } from "@/server/domain/core/repository";
+import { AppError } from "@/server/http/errors";
 import type { WebchatSessionInput } from "./schemas";
 
 const SESSION_TTL_MS = 30 * 24 * 60 * 60 * 1000;
 const TURN_LEASE_MS = 2 * 60 * 1000;
+const RATE_WINDOW_MS = 60 * 1000;
+const MAX_NEW_SESSIONS_PER_WORKSPACE = 40;
+const MAX_NEW_TURNS_PER_SESSION = 30;
+const MAX_NEW_TURNS_PER_WORKSPACE = 300;
 
 function tokenHash(token: string) {
   return createHash("sha256").update(token).digest("hex");
@@ -23,6 +28,34 @@ function tokenHash(token: string) {
 
 function publicKey() {
   return `wc_${randomBytes(18).toString("base64url")}`;
+}
+
+async function assertNewSessionCapacity(workspaceId: string) {
+  const since = new Date(Date.now() - RATE_WINDOW_MS);
+  const [row] = await db.select({ value: count() }).from(webchatSessions).where(and(
+    eq(webchatSessions.workspaceId, workspaceId),
+    gte(webchatSessions.createdAt, since),
+  ));
+  if ((row?.value ?? 0) >= MAX_NEW_SESSIONS_PER_WORKSPACE) {
+    throw new AppError("WEBCHAT_RATE_LIMITED", "Too many new web chat sessions. Try again shortly.", 429);
+  }
+}
+
+async function assertNewTurnCapacity(workspaceId: string, sessionId: string) {
+  const since = new Date(Date.now() - RATE_WINDOW_MS);
+  const [workspaceCount, sessionCount] = await Promise.all([
+    db.select({ value: count() }).from(webchatTurns).where(and(
+      eq(webchatTurns.workspaceId, workspaceId),
+      gte(webchatTurns.createdAt, since),
+    )),
+    db.select({ value: count() }).from(webchatTurns).where(and(
+      eq(webchatTurns.sessionId, sessionId),
+      gte(webchatTurns.createdAt, since),
+    )),
+  ]);
+  if ((workspaceCount[0]?.value ?? 0) >= MAX_NEW_TURNS_PER_WORKSPACE || (sessionCount[0]?.value ?? 0) >= MAX_NEW_TURNS_PER_SESSION) {
+    throw new AppError("WEBCHAT_RATE_LIMITED", "Too many chat messages. Try again shortly.", 429);
+  }
 }
 
 export async function ensureWebchatWidget(workspaceId: string) {
@@ -110,6 +143,8 @@ export async function createOrResumeWebchatSession(input: WebchatSessionInput) {
     }
   }
 
+  await assertNewSessionCapacity(widget.workspaceId);
+
   // Visitor IDs are identity hints, not credentials. A fresh session always receives a
   // server-generated visitor identity so a caller cannot claim another visitor's contact
   // or conversation merely by supplying a known identifier.
@@ -146,19 +181,19 @@ export type WebchatTurnClaim =
   | { state: "completed"; turnId: string; responseText: string | null }
   | { state: "in_progress"; turnId: string };
 
-export async function claimWebchatTurn(workspaceId: string, sessionId: string, clientMessageId: string): Promise<WebchatTurnClaim> {
-  const [created] = await db.insert(webchatTurns).values({ workspaceId, sessionId, clientMessageId })
-    .onConflictDoNothing()
-    .returning();
-  if (created) return { state: "claimed", turnId: created.id };
-
-  const [existing] = await db.select().from(webchatTurns).where(and(
+async function findWebchatTurn(workspaceId: string, sessionId: string, clientMessageId: string) {
+  const [turn] = await db.select().from(webchatTurns).where(and(
     eq(webchatTurns.workspaceId, workspaceId),
     eq(webchatTurns.sessionId, sessionId),
     eq(webchatTurns.clientMessageId, clientMessageId),
   )).limit(1);
-  if (!existing) throw new Error("Unable to resolve the web chat turn after a conflict.");
-  if (existing.status === "COMPLETED") return { state: "completed", turnId: existing.id, responseText: existing.responseText };
+  return turn ?? null;
+}
+
+async function claimExistingTurn(workspaceId: string, existing: NonNullable<Awaited<ReturnType<typeof findWebchatTurn>>>): Promise<WebchatTurnClaim> {
+  if (existing.status === "COMPLETED") {
+    return { state: "completed", turnId: existing.id, responseText: existing.responseText };
+  }
 
   if (existing.status === "FAILED") {
     const [reclaimed] = await db.update(webchatTurns).set({ status: "PROCESSING", error: null, updatedAt: new Date() })
@@ -185,6 +220,21 @@ export async function claimWebchatTurn(workspaceId: string, sessionId: string, c
   }
 
   return { state: "in_progress", turnId: existing.id };
+}
+
+export async function claimWebchatTurn(workspaceId: string, sessionId: string, clientMessageId: string): Promise<WebchatTurnClaim> {
+  const existing = await findWebchatTurn(workspaceId, sessionId, clientMessageId);
+  if (existing) return claimExistingTurn(workspaceId, existing);
+
+  await assertNewTurnCapacity(workspaceId, sessionId);
+  const [created] = await db.insert(webchatTurns).values({ workspaceId, sessionId, clientMessageId })
+    .onConflictDoNothing()
+    .returning();
+  if (created) return { state: "claimed", turnId: created.id };
+
+  const raced = await findWebchatTurn(workspaceId, sessionId, clientMessageId);
+  if (!raced) throw new Error("Unable to resolve the web chat turn after a conflict.");
+  return claimExistingTurn(workspaceId, raced);
 }
 
 export async function completeWebchatTurn(workspaceId: string, turnId: string, responseText: string | null) {
