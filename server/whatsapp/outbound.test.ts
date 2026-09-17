@@ -1,6 +1,6 @@
 import { afterAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { closeDatabase, db } from "@/db";
-import { messages, workspaces } from "@/db/schema";
+import { messages, providerWebhookEvents, workspaces } from "@/db/schema";
 import {
   getOrCreateContactByIdentity,
   getOrCreateOpenConversation,
@@ -82,6 +82,34 @@ describe("WhatsApp outbound service", () => {
     const sent = await service.sendText(workspaceId, conversationId, { senderType: "USER", text: "Happy to help." });
     expect(sent).toMatchObject({ senderType: "USER", channel: "WHATSAPP", status: "SENT", externalMessageId: "wamid.staff" });
     expect(provider.sendText).toHaveBeenCalledTimes(1);
+  });
+
+  it("reconciles a delivery callback that arrived before the provider send response was attached", async () => {
+    await addInbound();
+    await setConversationHandlingMode(workspaceId, conversationId, "HUMAN", null);
+    const occurredAt = new Date();
+    await db.insert(providerWebhookEvents).values({
+      workspaceId,
+      provider: "whatsapp",
+      externalEventId: "wamid.staff:delivered:early",
+      status: "RECEIVED",
+      payload: {
+        type: "DELIVERY_UPDATED",
+        externalMessageId: "wamid.staff",
+        phoneNumberId: "phone-id-1",
+        status: "DELIVERED",
+        error: null,
+        occurredAt: occurredAt.toISOString(),
+      },
+    });
+
+    const service = createWhatsAppOutboundService({ resolveRuntime: async () => runtime });
+    await service.sendText(workspaceId, conversationId, { senderType: "USER", text: "Early status" });
+
+    const outbound = (await db.select().from(messages)).find((message) => message.body === "Early status");
+    expect(outbound).toMatchObject({ externalMessageId: "wamid.staff", status: "DELIVERED" });
+    const [webhook] = await db.select().from(providerWebhookEvents);
+    expect(webhook.status).toBe("PROCESSED");
   });
 
   it("uses the provider event timestamp for the 24-hour customer window", async () => {
