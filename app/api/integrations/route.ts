@@ -54,6 +54,12 @@ const credentialKeys: Record<string, readonly string[]> = {
   calcom: ["apiKey"],
 };
 
+const defaultSettingsByProvider: Record<string, Record<string, unknown>> = {
+  openai: { model: "gpt-5.6" },
+  gemini: { model: "gemini-2.5-flash" },
+  openrouter: { model: "openai/gpt-5.6" },
+};
+
 function filterCredentials(provider: string, credentials: Record<string, string>) {
   const allowed = new Set(credentialKeys[provider] ?? []);
   return Object.fromEntries(
@@ -102,7 +108,11 @@ export async function POST(request: Request) {
       category: categoryByProvider[input.provider],
       mode: "BYOP" as const,
       credentials,
-      settings: { ...(existing?.settings ?? {}), ...input.settings },
+      settings: {
+        ...(defaultSettingsByProvider[input.provider] ?? {}),
+        ...(existing?.settings ?? {}),
+        ...input.settings,
+      },
     };
 
     const integration = await saveIntegration(context.workspace.id, normalized);
