@@ -199,6 +199,10 @@ export function createSmsWebhookService(dependencies: SmsServiceDependencies) {
       let deferred = 0;
 
       for (const event of events) {
+        if (event.type === "MESSAGE_RECEIVED" && normalizePhone(event.to) !== runtime.senderNumber) {
+          throw new AppError("SMS_DESTINATION_MISMATCH", "The inbound SMS destination does not match this workspace's configured SMS number.", 409);
+        }
+
         const eventPayload = safeEventPayload(event);
         const claim = await claimProviderWebhookEvent(workspaceId, {
           provider: providerName,
