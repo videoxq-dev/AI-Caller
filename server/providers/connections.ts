@@ -47,7 +47,7 @@ export async function testProviderConnection(input: PrivateIntegration, fetcher:
     }
     case "gemini": {
       const apiKey = requireValue(values, "apiKey", "Gemini API key");
-      await providerJson(`https://generativelanguage.googleapis.com/v1beta/models?key=${encodeURIComponent(apiKey)}`, {}, fetcher);
+      await providerJson("https://generativelanguage.googleapis.com/v1beta/models", { headers: { "x-goog-api-key": apiKey } }, fetcher);
       return { ok: true };
     }
     case "openrouter": {
