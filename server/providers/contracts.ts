@@ -20,7 +20,7 @@ export interface AIProvider {
 }
 
 export interface CalendarProvider {
-  getAvailability(input: { startsAt: Date; endsAt: Date; timezone: string }): Promise<Array<{ startsAt: Date; endsAt: Date }>>;
+  getAvailability(input: { startsAt: Date; endsAt: Date; timezone: string; durationMinutes?: number }): Promise<Array<{ startsAt: Date; endsAt: Date }>>;
   book(input: { startsAt: Date; endsAt: Date; timezone: string; title: string; attendeeName?: string; attendeeEmail?: string }): Promise<{ externalId: string; startsAt: Date; endsAt: Date }>;
   reschedule(input: { externalId: string; startsAt: Date; endsAt: Date; timezone: string }): Promise<{ externalId: string; startsAt: Date; endsAt: Date }>;
   cancel(input: { externalId: string }): Promise<void>;

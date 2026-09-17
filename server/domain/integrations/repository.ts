@@ -13,6 +13,7 @@ import {
   maskSecret,
   type EncryptedSecretEnvelope,
 } from "@/server/security/secrets";
+import { assertProviderSupportsCapability } from "@/server/providers/catalog";
 import { testProviderConnection } from "@/server/providers/connections";
 import type { CalendarSetupInput, CommunicationSetupInput, IntegrationSaveInput } from "./schemas";
 
@@ -152,6 +153,10 @@ async function requireConnectedProvider(workspaceId: string, provider: string, l
 }
 
 export async function bindCapability(workspaceId: string, capability: "AI_TEXT" | "SMS" | "VOICE" | "WHATSAPP" | "CALENDAR", mode: "HOSTED" | "BYOP", provider?: string | null) {
+  if (mode === "BYOP") {
+    if (!provider) throw new Error(`${capability} requires a provider when using BYOP mode.`);
+    assertProviderSupportsCapability(provider, capability);
+  }
   const integration = mode === "BYOP" && provider ? await ensureIntegration(workspaceId, provider) : null;
   const now = new Date();
   const [binding] = await db.insert(capabilityBindings).values({ workspaceId, capability, mode, integrationId: integration?.id ?? null, updatedAt: now }).onConflictDoUpdate({
