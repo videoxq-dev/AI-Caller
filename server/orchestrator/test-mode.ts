@@ -1,21 +1,48 @@
+import { calendarBookingService } from "@/server/domain/core/calendar-booking";
 import type { AIProvider } from "@/server/providers/contracts";
-import { buildConversationContext } from "./context";
+import { buildAgentTestContext, type OrchestratorMessage } from "./context";
 import { createResponseOrchestrator } from "./index";
-import { executeOrchestratorTools, type OrchestratorEnvelope } from "./tools";
+import type { OrchestratorEnvelope, OrchestratorToolResult } from "./tools";
 import { generateAIWithUsage } from "./usage";
 
 type AIMessage = Parameters<AIProvider["generate"]>[0]["messages"][number];
 
 async function executeTestTools(
   workspaceId: string,
-  conversationId: string,
-  contactId: string,
+  _conversationId: string,
+  _contactId: string,
   envelope: OrchestratorEnvelope,
-) {
+): Promise<OrchestratorToolResult> {
+  const lead = envelope.lead ? { lead: envelope.lead, leadUpdateSimulated: true } : {};
+
+  if (envelope.action.type === "NONE") {
+    return { kind: "none", data: lead };
+  }
+
+  if (envelope.action.type === "CHECK_AVAILABILITY") {
+    const slots = await calendarBookingService.getAvailability(workspaceId, {
+      startsAt: new Date(envelope.action.startsAt),
+      endsAt: new Date(envelope.action.endsAt),
+      timezone: envelope.action.timezone,
+      durationMinutes: envelope.action.durationMinutes,
+    });
+    return {
+      kind: "availability",
+      data: {
+        ...lead,
+        slots: slots.slice(0, 12).map((slot) => ({
+          startsAt: slot.startsAt.toISOString(),
+          endsAt: slot.endsAt.toISOString(),
+        })),
+      },
+    };
+  }
+
   if (envelope.action.type === "BOOK_APPOINTMENT") {
     return {
-      kind: "booking" as const,
+      kind: "booking",
       data: {
+        ...lead,
         simulated: true,
         title: envelope.action.title,
         startsAt: envelope.action.startsAt,
@@ -26,25 +53,29 @@ async function executeTestTools(
     };
   }
 
-  if (envelope.action.type === "ESCALATE") {
-    return {
-      kind: "escalation" as const,
-      data: {
-        simulated: true,
-        handlingMode: "HUMAN",
-        reason: envelope.action.reason ?? null,
-      },
-    };
-  }
-
-  return executeOrchestratorTools(workspaceId, conversationId, contactId, envelope);
+  return {
+    kind: "escalation",
+    data: {
+      ...lead,
+      simulated: true,
+      handlingMode: "HUMAN",
+      reason: envelope.action.reason ?? null,
+    },
+  };
 }
 
-export const agentTestOrchestrator = createResponseOrchestrator({
-  buildContext: buildConversationContext,
-  executeTools: executeTestTools,
-  generate: async (workspaceId: string, referenceId: string, messages: AIMessage[]) => {
-    const response = await generateAIWithUsage(workspaceId, `agent-test:${referenceId}`, messages);
-    return { text: response.text };
-  },
-});
+export async function runAgentTest(
+  workspaceId: string,
+  referenceId: string,
+  messages: OrchestratorMessage[],
+) {
+  const orchestrator = createResponseOrchestrator({
+    buildContext: async () => buildAgentTestContext(workspaceId, messages),
+    executeTools: executeTestTools,
+    generate: async (targetWorkspaceId: string, _conversationId: string, providerMessages: AIMessage[]) => {
+      const response = await generateAIWithUsage(targetWorkspaceId, `agent-test:${referenceId}`, providerMessages);
+      return { text: response.text };
+    },
+  });
+  return orchestrator.respond(workspaceId, `agent-test:${referenceId}`);
+}
