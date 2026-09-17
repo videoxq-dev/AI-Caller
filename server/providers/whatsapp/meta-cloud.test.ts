@@ -66,6 +66,23 @@ describe("Meta WhatsApp Cloud adapter", () => {
     await expect(provider.verifyWebhook({ request, rawBody: payload })).resolves.toBe(false);
   });
 
+  it("rejects malformed message payloads but ignores valid non-message WABA changes", async () => {
+    const provider = createMetaWhatsAppProvider(
+      { accessToken: "token" },
+      { appSecret: "app-secret", graphApiVersion: "v22.0" },
+    );
+    const malformed = "{";
+    await expect(provider.normalizeWebhook({ request: requestWithSignature("app-secret", malformed), rawBody: malformed }))
+      .rejects.toMatchObject({ code: "INVALID_WHATSAPP_WEBHOOK", status: 400 });
+
+    const unrelated = JSON.stringify({
+      object: "whatsapp_business_account",
+      entry: [{ id: "waba-1", changes: [{ field: "account_update", value: { event: "verified" } }] }],
+    });
+    await expect(provider.normalizeWebhook({ request: requestWithSignature("app-secret", unrelated), rawBody: unrelated }))
+      .resolves.toEqual([]);
+  });
+
   it("sends text and template messages through the Graph messages endpoint", async () => {
     const fetcher = vi.fn(async (input: Parameters<typeof fetch>[0], init?: Parameters<typeof fetch>[1]) => new Response(JSON.stringify({ messages: [{ id: "wamid.sent" }] }), {
       status: 200,
