@@ -24,6 +24,16 @@ export function stringSetting(settings: RuntimeSettings, ...keys: string[]) {
     const value = settings[key];
     if (typeof value === "string" && value.trim()) return value.trim();
   }
+
+  const metadata = settings.connectionMetadata;
+  if (metadata && typeof metadata === "object" && !Array.isArray(metadata)) {
+    const values = metadata as Record<string, unknown>;
+    for (const key of keys) {
+      const value = values[key];
+      if (typeof value === "string" && value.trim()) return value.trim();
+    }
+  }
+
   return undefined;
 }
 
