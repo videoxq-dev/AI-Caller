@@ -70,7 +70,7 @@ export async function resolveWhatsAppRuntimeByPhoneNumberId(phoneNumberId: strin
   )).where(and(
     eq(integrations.provider, "whatsapp"),
     eq(integrations.status, "CONNECTED"),
-    sql`${integrations.settings} @> ${JSON.stringify({ phoneNumberId })}::jsonb`,
+    sql`${integrations.settings}->>'phoneNumberId' = ${phoneNumberId}`,
   )).limit(2);
 
   if (rows.length === 0) throw new Error("No active WhatsApp integration matches this phone number ID.");
