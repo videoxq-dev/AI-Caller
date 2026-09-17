@@ -209,7 +209,7 @@ export default function CommunicationSetupPage() {
                   <div className="smsSettingsGrid">
                     <label className="communicationField"><span>Callback URL</span><input value={smsConfig.webhookUrl ?? "Loading callback URL..."} readOnly aria-label="SMS callback URL" /></label>
                     {smsProvider === "telnyx" && <label className="communicationField"><span>Webhook signing public key</span><input value={smsWebhookPublicKey} onChange={(event) => setSmsWebhookPublicKey(event.target.value)} placeholder={smsConfig.webhookPublicKeyConfigured ? "Saved — enter a new key only to replace it" : "Paste the Telnyx Ed25519 public key"} /></label>}
-                    <div className="complianceField"><span className="complianceLabel">Webhook status</span><div className="compliancePills"><span><CheckIcon size={13} /> {connected.has(smsProvider) ? "Provider connected" : "Connect provider credentials first"}</span>{smsProvider === "telnyx" && <span><CheckIcon size={13} /> {smsConfig.webhookPublicKeyConfigured ? "Signing key saved" : "Signing key required"}</span>}</div></div>
+                    <div className="complianceField"><span className="complianceLabel">Webhook status</span><div className="compliancePills"><span><CheckIcon size={13} /> {connected.has(smsProvider) ? "Provider credentials connected" : "Connect provider credentials first"}</span>{smsProvider === "telnyx" && <span><CheckIcon size={13} /> {smsConfig.webhookPublicKeyConfigured ? "Signing key saved" : "Signing key required"}</span>}</div></div>
                   </div>
                 </div>
               )}
@@ -248,5 +248,5 @@ export default function CommunicationSetupPage() {
 }
 
 function ProviderChooser({ label, value, onChange, connected }: { label: string; value: string; onChange: (value: string) => void; connected: boolean }) {
-  return <div className="existingNumberEmpty"><PhoneIcon size={22} /><div><strong>{label}</strong><select className="communicationField" value={value} onChange={(event) => onChange(event.target.value)}><option value="telnyx">Telnyx</option><option value="plivo">Plivo</option><option value="twilio">Twilio</option></select><span>{connected ? "Connected and ready to use." : "Credentials are not connected yet."}</span></div><Link className="outlineAction" href={`/integrations?provider=${value}&return=%2Fsetup%2Fcommunication`}>{connected ? "Manage" : "Connect"}</Link></div>;
+  return <div className="existingNumberEmpty"><PhoneIcon size={22} /><div><strong>{label}</strong><select className="communicationField" value={value} onChange={(event) => onChange(event.target.value)}><option value="telnyx">Telnyx</option><option value="plivo">Plivo</option><option value="twilio">Twilio</option></select><span>{connected ? "Provider credentials connected." : "Credentials are not connected yet."}</span></div><Link className="outlineAction" href={`/integrations?provider=${value}&return=%2Fsetup%2Fcommunication`}>{connected ? "Manage" : "Connect"}</Link></div>;
 }
