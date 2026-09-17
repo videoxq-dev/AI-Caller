@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import {
   CalendarIcon,
   DatabaseIcon,
@@ -21,6 +21,12 @@ type TestMessage = {
   id: number;
   role: "customer" | "agent";
   text: string;
+};
+
+type TestResult = {
+  action: string;
+  toolResult: { kind: string; data: Record<string, unknown> };
+  simulated: boolean;
 };
 
 const navItems = [
@@ -49,13 +55,6 @@ const knowledgeItems = [
   { title: "Documents", subtitle: "PDF, DOCX and TXT reference files", state: "4 files", icon: <DocumentIcon /> },
 ];
 
-const defaultMessages: TestMessage[] = [
-  { id: 1, role: "customer", text: "Hi, do you have ginger shots in stock?" },
-  { id: 2, role: "agent", text: "Yes. We currently have Juvi ginger shots available. A pack of 10 is ₦12,500 and delivery is available in Lagos." },
-  { id: 3, role: "customer", text: "Can I book a consultation for tomorrow?" },
-  { id: 4, role: "agent", text: "Absolutely. I can help with that. I have openings at 10:00 AM, 1:30 PM and 3:00 PM. Which works best for you?" },
-];
-
 export default function AIAgentPage() {
   const [tab, setTab] = useState<AgentTab>("overview");
   const [agentOnline, setAgentOnline] = useState(true);
@@ -66,22 +65,10 @@ export default function AIAgentPage() {
   const [whenUnsure, setWhenUnsure] = useState("Escalate to a human");
   const [verbosity, setVerbosity] = useState("Concise");
   const [guardrails, setGuardrails] = useState({ pricing: true, availability: true, approvedInfo: true, collectContact: true });
-  const [testChannel, setTestChannel] = useState<Channel>("Web Chat");
-  const [testMessages, setTestMessages] = useState<TestMessage[]>(defaultMessages);
-  const [testInput, setTestInput] = useState("");
 
   const saveChanges = () => {
     setSaved(true);
     window.setTimeout(() => setSaved(false), 1800);
-  };
-
-  const sendTestMessage = () => {
-    const value = testInput.trim();
-    if (!value) return;
-    const customerMessage: TestMessage = { id: Date.now(), role: "customer", text: value };
-    const response: TestMessage = { id: Date.now() + 1, role: "agent", text: "I can help with that. Based on your business information, I can answer the question or help book the next available appointment." };
-    setTestMessages((current) => [...current, customerMessage, response]);
-    setTestInput("");
   };
 
   return (
@@ -123,7 +110,7 @@ export default function AIAgentPage() {
           {tab === "overview" && <OverviewTab agentOnline={agentOnline} setAgentOnline={setAgentOnline} channels={channels} setChannels={setChannels} setTab={setTab} />}
           {tab === "knowledge" && <KnowledgeTab />}
           {tab === "behavior" && <BehaviorTab tone={tone} setTone={setTone} goal={goal} setGoal={setGoal} whenUnsure={whenUnsure} setWhenUnsure={setWhenUnsure} verbosity={verbosity} setVerbosity={setVerbosity} guardrails={guardrails} setGuardrails={setGuardrails} />}
-          {tab === "test" && <TestTab channel={testChannel} setChannel={setTestChannel} messages={testMessages} input={testInput} setInput={setTestInput} onSend={sendTestMessage} />}
+          {tab === "test" && <TestTab />}
         </div>
       </section>
     </main>
@@ -202,19 +189,99 @@ function BehaviorTab({ tone, setTone, goal, setGoal, whenUnsure, setWhenUnsure, 
   );
 }
 
-function TestTab({ channel, setChannel, messages, input, setInput, onSend }: { channel: Channel; setChannel: (channel: Channel) => void; messages: TestMessage[]; input: string; setInput: (value: string) => void; onSend: () => void }) {
+function TestTab() {
+  const [channel, setChannel] = useState<Channel>("Web Chat");
+  const [messages, setMessages] = useState<TestMessage[]>([]);
+  const [input, setInput] = useState("");
+  const [sending, setSending] = useState(false);
+  const [resetNext, setResetNext] = useState(false);
+  const [lastResult, setLastResult] = useState<TestResult | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [embedCode, setEmbedCode] = useState("");
+  const [copied, setCopied] = useState(false);
+
+  useEffect(() => {
+    let cancelled = false;
+    fetch("/api/widget/config")
+      .then(async (response) => {
+        if (!response.ok) throw new Error("Unable to load embed code.");
+        return response.json() as Promise<{ embedCode: string }>;
+      })
+      .then((data) => { if (!cancelled) setEmbedCode(data.embedCode); })
+      .catch(() => { if (!cancelled) setEmbedCode(""); });
+    return () => { cancelled = true; };
+  }, []);
+
+  const resetTest = () => {
+    setMessages([]);
+    setLastResult(null);
+    setError(null);
+    setResetNext(true);
+  };
+
+  const send = async () => {
+    const value = input.trim();
+    if (!value || sending || channel !== "Web Chat") return;
+    const customerMessage: TestMessage = { id: Date.now(), role: "customer", text: value };
+    setMessages((current) => [...current, customerMessage]);
+    setInput("");
+    setSending(true);
+    setError(null);
+
+    try {
+      const response = await fetch("/api/agent/test", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ message: value, reset: resetNext, clientMessageId: crypto.randomUUID() }),
+      });
+      const payload = await response.json() as {
+        reply?: string | null;
+        action?: string;
+        toolResult?: { kind: string; data: Record<string, unknown> };
+        simulated?: boolean;
+        error?: { message?: string };
+      };
+      if (!response.ok) throw new Error(payload.error?.message ?? "The test request failed.");
+      setResetNext(false);
+      setLastResult({
+        action: payload.action ?? "NONE",
+        toolResult: payload.toolResult ?? { kind: "none", data: {} },
+        simulated: payload.simulated === true,
+      });
+      setMessages((current) => [...current, {
+        id: Date.now() + 1,
+        role: "agent",
+        text: payload.reply ?? "No AI reply was generated because this conversation is in human-handling mode.",
+      }]);
+    } catch (requestError) {
+      setError(requestError instanceof Error ? requestError.message : "The test request failed.");
+    } finally {
+      setSending(false);
+    }
+  };
+
+  const copyEmbed = async () => {
+    if (!embedCode) return;
+    await navigator.clipboard.writeText(embedCode);
+    setCopied(true);
+    window.setTimeout(() => setCopied(false), 1600);
+  };
+
+  const actionLabel = lastResult?.action === "NONE" ? "Answered directly" : lastResult?.action?.replaceAll("_", " ") ?? "No test yet";
+  const toolLabel = lastResult ? `${lastResult.toolResult.kind}${lastResult.simulated ? " (simulated)" : ""}` : "No tool call yet";
+
   return (
     <div className="agentTabContent testLayout">
       <section className="agentCard testPanel">
-        <div className="testHeader"><div><h2>Test your AI</h2><p>Run a sample conversation before customers see it.</p></div><button type="button" onClick={() => window.location.reload()}>Reset test</button></div>
+        <div className="testHeader"><div><h2>Test your AI</h2><p>Run a real AI conversation using your saved business knowledge. Booking and escalation side effects are simulated here.</p></div><button type="button" onClick={resetTest}>Reset test</button></div>
         <div className="testChannelTabs">{(["Web Chat", "WhatsApp", "SMS", "Phone"] as Channel[]).map((item) => <button key={item} type="button" className={channel === item ? "active" : ""} onClick={() => setChannel(item)}>{channelIcon(item)}{item}</button>)}</div>
-        <div className="testConversation"><div className="testConversationTop"><span className={`testChannelIcon ${channelClass(channel)}`}>{channelIcon(channel)}</span><div><strong>Test conversation</strong><small>{channel}</small></div><em><i />AI ready</em></div><div className="testMessages">{messages.map((message) => <div key={message.id} className={`testMessage ${message.role}`}><span>{message.text}</span><small>{message.role === "agent" ? "Juvi AI" : "Test customer"}</small></div>)}</div><div className="testComposer"><input value={input} onChange={(event) => setInput(event.target.value)} onKeyDown={(event) => { if (event.key === "Enter") onSend(); }} placeholder="Type a test message..." /><button type="button" onClick={onSend}><SendIcon /></button></div></div>
+        <div className="testConversation"><div className="testConversationTop"><span className={`testChannelIcon ${channelClass(channel)}`}>{channelIcon(channel)}</span><div><strong>Test conversation</strong><small>{channel === "Web Chat" ? "Live orchestrator" : "Available in a later channel milestone"}</small></div><em><i />{channel === "Web Chat" ? (sending ? "AI thinking" : "AI ready") : "Not wired yet"}</em></div><div className="testMessages">{messages.length === 0 && <div className="testMessage agent"><span>Ask a business question, test lead qualification, or ask to book an appointment.</span><small>AI Caller test mode</small></div>}{messages.map((message) => <div key={message.id} className={`testMessage ${message.role}`}><span>{message.text}</span><small>{message.role === "agent" ? "AI agent" : "Test customer"}</small></div>)}{error && <div className="testMessage agent"><span>{error}</span><small>Test error</small></div>}</div><div className="testComposer"><input disabled={channel !== "Web Chat" || sending} value={input} onChange={(event) => setInput(event.target.value)} onKeyDown={(event) => { if (event.key === "Enter") void send(); }} placeholder={channel === "Web Chat" ? "Type a test message..." : `${channel} testing comes in a later milestone`} /><button disabled={channel !== "Web Chat" || sending || !input.trim()} type="button" onClick={() => void send()}><SendIcon /></button></div></div>
       </section>
 
       <aside className="testSideColumn">
-        <article className="agentCard testChecklist"><h3>Test checklist</h3><ChecklistItem label="Business questions" status="Passed" /><ChecklistItem label="Pricing response" status="Passed" /><ChecklistItem label="Appointment booking" status="Passed" /><ChecklistItem label="Human escalation" status="Ready" /><ChecklistItem label="Unknown question" status="Ready" /></article>
-        <article className="agentCard testInsight"><h3>AI response details</h3><span><small>Knowledge used</small><strong>Services + Pricing</strong></span><span><small>Confidence</small><strong>94%</strong></span><span><small>Detected intent</small><strong>Appointment booking</strong></span><span><small>Action</small><strong>Suggested times</strong></span></article>
-        <article className="agentCard readinessCard"><span className="readinessIcon">✓</span><div><strong>Ready for customers</strong><p>Your agent passed the main test scenarios.</p></div></article>
+        <article className="agentCard testChecklist"><h3>Test checklist</h3><ChecklistItem label="Business questions" status={messages.length > 1 ? "Tested" : "Ready"} /><ChecklistItem label="Lead qualification" status={lastResult ? "Observed" : "Ready"} /><ChecklistItem label="Calendar availability" status={lastResult?.toolResult.kind === "availability" ? "Tested" : "Ready"} /><ChecklistItem label="Appointment booking" status="Safe simulation" /><ChecklistItem label="Human escalation" status="Safe simulation" /></article>
+        <article className="agentCard testInsight"><h3>AI response details</h3><span><small>Channel</small><strong>{channel}</strong></span><span><small>Action</small><strong>{actionLabel}</strong></span><span><small>Server tool</small><strong>{toolLabel}</strong></span><span><small>Side effects</small><strong>{lastResult?.simulated ? "Simulated in Test" : "Normal test behavior"}</strong></span></article>
+        <article className="agentCard readinessCard" style={{ display: "block" }}><div style={{ width: "100%" }}><strong>Web Chat embed code</strong><p>Paste this script before the closing &lt;/body&gt; tag on your website.</p><code style={{ display: "block", marginTop: 10, padding: 10, borderRadius: 8, background: "#f5f7fb", color: "#26344d", fontSize: 11, lineHeight: 1.45, overflowWrap: "anywhere" }}>{embedCode || "Loading embed code…"}</code><button type="button" onClick={() => void copyEmbed()} disabled={!embedCode} style={{ marginTop: 10 }}>{copied ? "Copied" : "Copy embed code"}</button></div></article>
       </aside>
     </div>
   );
