@@ -2,6 +2,7 @@ import { getEnv } from "@/server/env";
 import { decryptIntegrationCredentials, type EncryptedSecretEnvelope } from "@/server/security/secrets";
 import { getCommunicationSetup, getPrivateIntegration } from "@/server/domain/integrations/repository";
 import { normalizePhone } from "@/server/domain/core/schemas";
+import { createE2ESmsProvider, isE2EProviderFixtureMode } from "../e2e-fixtures";
 import { resolveProviderRoute } from "../resolver";
 import type { SMSProvider } from "../contracts";
 import { createPlivoSmsProvider } from "./plivo";
@@ -33,28 +34,33 @@ function credentials(envelope: Record<string, unknown> | null): CredentialMap {
 }
 
 function createProvider(provider: SmsProviderName, secret: Record<string, unknown>, settings: Record<string, unknown>, fetcher: typeof fetch) {
+  let runtimeProvider: SMSProvider;
   switch (provider) {
     case "twilio":
-      return createTwilioSmsProvider({
+      runtimeProvider = createTwilioSmsProvider({
         accountSid: required(secret, "sid", "Twilio Account SID"),
         authToken: required(secret, "authToken", "Twilio Auth Token"),
         fetcher,
       });
+      break;
     case "plivo":
-      return createPlivoSmsProvider({
+      runtimeProvider = createPlivoSmsProvider({
         authId: required(secret, "authId", "Plivo Auth ID"),
         authToken: required(secret, "authToken", "Plivo Auth Token"),
         fetcher,
       });
+      break;
     case "telnyx":
-      return createTelnyxSmsProvider({
+      runtimeProvider = createTelnyxSmsProvider({
         apiKey: required(secret, "apiKey", "Telnyx API key"),
         webhookPublicKey: typeof settings.webhookPublicKey === "string" && settings.webhookPublicKey.trim()
           ? settings.webhookPublicKey
           : required(secret, "webhookPublicKey", "Telnyx webhook public key"),
         fetcher,
       });
+      break;
   }
+  return isE2EProviderFixtureMode() ? createE2ESmsProvider(runtimeProvider) : runtimeProvider;
 }
 
 async function hostedSenderNumber(workspaceId: string) {
