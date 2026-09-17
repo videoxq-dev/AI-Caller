@@ -1,3 +1,4 @@
+import { inArray } from "drizzle-orm";
 import { afterAll, describe, expect, it } from "vitest";
 import { closeDatabase, db } from "@/db";
 import { contacts, conversations, messages, workspaces } from "@/db/schema";
@@ -31,7 +32,7 @@ describe("conversation timeline pagination", () => {
 
       expect(await getConversationTimelinePage(otherWorkspace.id, conversation.id)).toBeNull();
     } finally {
-      await db.delete(workspaces).where((await import("drizzle-orm")).inArray(workspaces.id, [workspace.id, otherWorkspace.id]));
+      await db.delete(workspaces).where(inArray(workspaces.id, [workspace.id, otherWorkspace.id]));
     }
   });
 
