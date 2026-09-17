@@ -1,0 +1,94 @@
+/* Cross-page stability fixes for globally loaded route CSS. */
+
+/* globals.css also uses .agentBody for the auth-page illustration. Scope the
+   actual AI Agent page body so client-side navigation can never inherit those
+   absolute-positioned illustration rules. */
+.agentShell .agentBody {
+  position: static;
+  left: auto;
+  right: auto;
+  top: auto;
+  bottom: auto;
+  width: auto;
+  height: auto;
+  min-width: 0;
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
+  padding: 18px 20px 30px;
+}
+
+/* The switch class is shared by AI Agent and Automations. Keep each page's
+   geometry isolated so route CSS load order cannot move the knob. */
+.agentShell .switch {
+  position: relative;
+  width: 36px;
+  height: 20px;
+  flex: 0 0 36px;
+  padding: 2px;
+  border: 0;
+  border-radius: 999px;
+  background: #cbd5e1;
+  overflow: hidden;
+}
+.agentShell .switch i {
+  position: static;
+  width: 16px;
+  height: 16px;
+  display: block;
+  border-radius: 50%;
+  background: #fff;
+  transform: translateX(0);
+  transition: transform .18s ease;
+  box-shadow: 0 1px 3px rgba(0,0,0,.18);
+}
+.agentShell .switch.on { background: #1769ee; }
+.agentShell .switch.on i { transform: translateX(16px); }
+
+.automationShell .switch {
+  position: relative;
+  width: 42px;
+  height: 24px;
+  flex: 0 0 42px;
+  padding: 0;
+  border: 0;
+  border-radius: 999px;
+  background: #c8d2df;
+  overflow: hidden;
+}
+.automationShell .switch i {
+  position: absolute;
+  top: 3px;
+  left: 3px;
+  width: 18px;
+  height: 18px;
+  display: block;
+  border-radius: 50%;
+  background: #fff;
+  transform: none;
+  transition: left .18s ease;
+  box-shadow: 0 1px 3px rgba(0,0,0,.15);
+}
+.automationShell .switch.on { background: #1769ee; }
+.automationShell .switch.on i { left: 21px; transform: none; }
+
+/* Keep the desktop automation drawer within the established <=30vw rule. */
+@media (min-width: 1051px) {
+  .automationBody.drawerOpen {
+    padding-right: calc(min(30vw, 460px) + 20px);
+  }
+  .automationDrawer,
+  .drawerFooter {
+    width: min(30vw, 460px);
+    max-width: 30vw;
+    min-width: 0;
+  }
+}
+
+@media (max-width: 900px) {
+  .agentShell .agentBody { padding: 14px; }
+}
+
+@media (max-width: 620px) {
+  .agentShell .agentBody { padding: 12px 10px 84px; }
+}
