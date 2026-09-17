@@ -64,7 +64,7 @@ export function IntegrationReturnBridge() {
       if (cancelled || initialStatus === "CONNECTED") return;
       interval = setInterval(() => {
         checks += 1;
-        if (checks >= 300) {
+        if (checks >= 60) {
           if (interval) clearInterval(interval);
           interval = null;
           return;
@@ -74,7 +74,7 @@ export function IntegrationReturnBridge() {
           if (interval) clearInterval(interval);
           window.location.assign(returnTo);
         });
-      }, 900);
+      }, 5000);
     });
 
     return () => {
