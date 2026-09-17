@@ -1,3 +1,4 @@
+import { sql } from "drizzle-orm";
 import {
   index,
   integer,
@@ -106,6 +107,9 @@ export const conversations = pgTable(
   (table) => [
     index("conversations_workspace_activity_idx").on(table.workspaceId, table.lastMessageAt),
     index("conversations_contact_status_idx").on(table.contactId, table.status),
+    uniqueIndex("conversations_one_open_per_contact_uq")
+      .on(table.workspaceId, table.contactId)
+      .where(sql`${table.status} = 'OPEN'`),
   ],
 );
 
