@@ -1,6 +1,7 @@
 import { z } from "zod";
 import { resolveWorkspaceContext } from "@/server/auth/workspace-context";
 import {
+  bindCapability,
   getPrivateIntegration,
   listIntegrations,
   saveIntegration,
@@ -117,7 +118,13 @@ export async function POST(request: Request) {
 
     const integration = await saveIntegration(context.workspace.id, normalized);
     const test = await testSavedIntegration(context.workspace.id, input.provider);
-    return Response.json({ integration: test.integration, test: { ok: test.ok, error: test.ok ? null : test.error } });
+
+    if (test.ok) {
+      if (normalized.category === "AI") await bindCapability(context.workspace.id, "AI_TEXT", "BYOP", input.provider);
+      if (normalized.category === "CALENDAR") await bindCapability(context.workspace.id, "CALENDAR", "BYOP", input.provider);
+    }
+
+    return Response.json({ integration: test.integration ?? integration, test: { ok: test.ok, error: test.ok ? null : test.error } });
   } catch (error) {
     return toErrorResponse(error);
   }
