@@ -10,9 +10,22 @@ import {
   type RuntimeSettings,
 } from "./helpers";
 
+type CalendlyEventType = {
+  active?: boolean;
+  name?: string;
+  slug?: string;
+  uri?: string;
+  scheduling_url?: string;
+};
+
+function normalized(value: string | undefined) {
+  return value?.trim().toLowerCase() ?? "";
+}
+
 export class CalendlyCalendarProvider implements CalendarProvider {
   private readonly credentials: Credentials;
   private readonly settings: RuntimeSettings;
+  private resolvedEventTypeUri?: string;
 
   constructor(input: CalendarInput, private readonly fetcher: typeof fetch = fetch) {
     this.credentials = decryptCredentials(input);
@@ -23,17 +36,53 @@ export class CalendlyCalendarProvider implements CalendarProvider {
     return requireCredential(this.credentials, "token", "Calendly Personal Access Token");
   }
 
-  private eventType() {
-    const value = stringSetting(this.settings, "eventTypeUri", "eventType");
-    if (!value || !value.startsWith("https://api.calendly.com/event_types/")) {
-      throw new Error("Choose a Calendly event type before using calendar booking.");
+  private async eventType() {
+    if (this.resolvedEventTypeUri) return this.resolvedEventTypeUri;
+
+    const configured = stringSetting(this.settings, "eventTypeUri", "eventType");
+    if (configured?.startsWith("https://api.calendly.com/event_types/")) {
+      this.resolvedEventTypeUri = configured;
+      return configured;
     }
-    return value;
+
+    const me = await providerJson<{ resource?: { uri?: string } }>(
+      "https://api.calendly.com/users/me",
+      { headers: { authorization: `Bearer ${this.token()}` } },
+      this.fetcher,
+    );
+    const userUri = me.resource?.uri;
+    if (!userUri) throw new Error("Calendly did not return the connected user URI.");
+
+    const query = new URLSearchParams({ user: userUri, active: "true", count: "100", sort: "name:asc" });
+    const response = await providerJson<{ collection?: CalendlyEventType[] }>(
+      `https://api.calendly.com/event_types?${query.toString()}`,
+      { headers: { authorization: `Bearer ${this.token()}` } },
+      this.fetcher,
+    );
+    const active = (response.collection ?? []).filter((item) => item.active !== false && item.uri);
+    if (!active.length) throw new Error("No active Calendly event types are available for the connected user.");
+
+    let selected: CalendlyEventType | undefined;
+    if (configured) {
+      const target = normalized(configured);
+      selected = active.find((item) => {
+        const schedulingSlug = item.scheduling_url?.split("/").filter(Boolean).pop();
+        const uriId = item.uri?.split("/").filter(Boolean).pop();
+        return [item.name, item.slug, schedulingSlug, item.uri, uriId].some((value) => normalized(value) === target);
+      });
+      if (!selected) throw new Error(`No active Calendly event type matched "${configured}".`);
+    } else {
+      selected = active[0];
+    }
+
+    if (!selected?.uri) throw new Error("Calendly event type could not be resolved.");
+    this.resolvedEventTypeUri = selected.uri;
+    return selected.uri;
   }
 
   async getAvailability(input: { startsAt: Date; endsAt: Date; timezone: string; durationMinutes?: number }) {
     const query = new URLSearchParams({
-      event_type: this.eventType(),
+      event_type: await this.eventType(),
       start_time: input.startsAt.toISOString(),
       end_time: input.endsAt.toISOString(),
     });
@@ -57,7 +106,7 @@ export class CalendlyCalendarProvider implements CalendarProvider {
       method: "POST",
       headers: { authorization: `Bearer ${this.token()}`, "content-type": "application/json" },
       body: JSON.stringify({
-        event_type: this.eventType(),
+        event_type: await this.eventType(),
         start_time: input.startsAt.toISOString(),
         invitee: {
           email: input.attendeeEmail,
