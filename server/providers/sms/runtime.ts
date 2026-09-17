@@ -60,17 +60,14 @@ function createProvider(provider: SmsProviderName, secret: Record<string, unknow
 async function hostedSenderNumber(workspaceId: string) {
   const setup = await getCommunicationSetup(workspaceId) as {
     voice?: { number?: unknown };
-    sms?: { number?: unknown };
+    sms?: { numberMode?: unknown; number?: unknown };
   } | null;
-  const smsNumber = setup?.sms?.number;
-  const voiceNumber = setup?.voice?.number;
-  const selected = typeof smsNumber === "string" && smsNumber.trim()
-    ? smsNumber
-    : typeof voiceNumber === "string" && voiceNumber.trim()
-      ? voiceNumber
-      : null;
-  if (!selected) throw new Error("A hosted SMS sender number has not been assigned to this workspace.");
-  return normalizePhone(selected);
+  const usesSeparateNumber = setup?.sms?.numberMode === "separate";
+  const candidate = usesSeparateNumber ? setup?.sms?.number : setup?.voice?.number;
+  if (typeof candidate !== "string" || !candidate.trim()) {
+    throw new Error("A hosted SMS sender number has not been assigned to this workspace.");
+  }
+  return normalizePhone(candidate);
 }
 
 function hostedProviderConfig(provider: SmsProviderName) {
