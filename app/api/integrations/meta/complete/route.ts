@@ -1,6 +1,6 @@
 import { z } from "zod";
 import { resolveWorkspaceContext } from "@/server/auth/workspace-context";
-import { saveVerifiedIntegration } from "@/server/domain/integrations/repository";
+import { bindCapability, saveVerifiedIntegration } from "@/server/domain/integrations/repository";
 import { completeMetaEmbeddedSignup } from "@/server/providers/meta";
 import { toErrorResponse } from "@/server/http/errors";
 import { parseInput } from "@/server/http/validation";
@@ -24,6 +24,7 @@ export async function POST(request: Request) {
       credentials: result.credentials,
       settings: result.settings,
     });
+    await bindCapability(context.workspace.id, "WHATSAPP", "BYOP", "whatsapp");
     return Response.json({ integration });
   } catch (error) {
     return toErrorResponse(error);
