@@ -47,6 +47,25 @@ export const webchatSessions = pgTable(
   ],
 );
 
+export const webchatTurns = pgTable(
+  "webchat_turns",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    workspaceId: uuid("workspace_id").notNull().references(() => workspaces.id, { onDelete: "cascade" }),
+    sessionId: uuid("session_id").notNull().references(() => webchatSessions.id, { onDelete: "cascade" }),
+    clientMessageId: uuid("client_message_id").notNull(),
+    status: text("status").default("PROCESSING").notNull(),
+    responseText: text("response_text"),
+    error: text("error"),
+    createdAt: timestamp("created_at", { withTimezone: true, mode: "date" }).defaultNow().notNull(),
+    updatedAt: timestamp("updated_at", { withTimezone: true, mode: "date" }).defaultNow().notNull(),
+  },
+  (table) => [
+    uniqueIndex("webchat_turns_session_message_uq").on(table.sessionId, table.clientMessageId),
+    index("webchat_turns_workspace_created_idx").on(table.workspaceId, table.createdAt),
+  ],
+);
+
 export const usageEvents = pgTable(
   "usage_events",
   {
