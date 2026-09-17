@@ -161,6 +161,21 @@ try {
     })],
   );
 
+  await page.goto(`${baseUrl}/setup/communication`, { waitUntil: "networkidle" });
+  await page.locator(".channelTabs button").filter({ hasText: "SMS" }).click();
+  await page.getByRole("button", { name: /Use my own provider \(BYOP\)/ }).click();
+  const callbackInput = page.getByLabel("SMS callback URL");
+  await callbackInput.waitFor();
+  const callbackValue = await callbackInput.inputValue();
+  assert(callbackValue.endsWith(`/api/webhooks/sms/telnyx/${workspaceId}`), `Unexpected Telnyx callback URL: ${callbackValue}`);
+  await page.getByLabel("Webhook signing public key").waitFor();
+  await assertNoHorizontalOverflow(page, "BYOP SMS webhook setup desktop");
+  await page.screenshot({ path: path.join(outputDir, "sms-byop-setup-desktop.png"), fullPage: true });
+  await page.setViewportSize({ width: 390, height: 844 });
+  await assertNoHorizontalOverflow(page, "BYOP SMS webhook setup mobile");
+  await page.screenshot({ path: path.join(outputDir, "sms-byop-setup-mobile.png"), fullPage: true });
+  await page.setViewportSize({ width: 1440, height: 1000 });
+
   const invalid = await sendTwilioWebhook(workspaceId, {
     MessageSid: "SM-invalid-signature",
     From: "+12025550100",
@@ -318,7 +333,7 @@ try {
   await page.screenshot({ path: path.join(outputDir, "inbox-sms-mobile.png"), fullPage: true });
 
   assert(runtimeErrors.length === 0, `Milestone 5 browser runtime errors:\n${runtimeErrors.join("\n")}`);
-  console.log("Milestone 5 browser acceptance passed: signed SMS webhook, provider-compatible TwiML acknowledgement, async worker, knowledge response, contact capture, qualification, availability, booking, hosted credits, duplicate suppression, delivery reconciliation, unified Inbox, and human takeover suppression.");
+  console.log("Milestone 5 browser acceptance passed: BYOP webhook setup UI, signed SMS webhook, provider-compatible TwiML acknowledgement, async worker, knowledge response, contact capture, qualification, availability, booking, hosted credits, duplicate suppression, delivery reconciliation, unified Inbox, and human takeover suppression.");
 } finally {
   await pool.end();
   await browser.close();
