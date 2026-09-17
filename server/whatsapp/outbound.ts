@@ -11,6 +11,7 @@ import {
   getWhatsAppConversationRecipient,
   latestWhatsAppInboundAt,
   markWhatsAppSendFailure,
+  reconcileDeferredWhatsAppDeliveryStatuses,
 } from "./repository";
 
 const CUSTOMER_WINDOW_MS = 24 * 60 * 60 * 1000;
@@ -48,6 +49,17 @@ async function recordUsage(workspaceId: string, referenceId: string, providerUsa
     });
   } catch (error) {
     logger.error({ err: error, workspaceId, referenceId }, "Failed to persist WhatsApp usage event");
+  }
+}
+
+async function reconcileDeliveryAfterConfirmedSend(workspaceId: string, externalMessageId: string) {
+  try {
+    await reconcileDeferredWhatsAppDeliveryStatuses(workspaceId, externalMessageId);
+  } catch (error) {
+    logger.error(
+      { err: error, workspaceId, externalMessageId },
+      "Failed to reconcile deferred WhatsApp delivery status after confirmed send",
+    );
   }
 }
 
@@ -105,6 +117,7 @@ export function createWhatsAppOutboundService(dependencies: OutboundDependencies
         input.beforeProviderSend?.();
         const sent = await runtime.provider.sendText({ phoneNumberId: runtime.phoneNumberId, to, text });
         const updated = await attachWhatsAppProviderMessage(workspaceId, outbound.id, sent.externalId, sent.status);
+        await reconcileDeliveryAfterConfirmedSend(workspaceId, sent.externalId);
         await recordUsage(workspaceId, outbound.id, { messages: 1, type: "text", status: sent.status });
         return updated;
       } catch (error) {
@@ -155,6 +168,7 @@ export function createWhatsAppOutboundService(dependencies: OutboundDependencies
           components: input.components,
         });
         const updated = await attachWhatsAppProviderMessage(workspaceId, outbound.id, sent.externalId, sent.status);
+        await reconcileDeliveryAfterConfirmedSend(workspaceId, sent.externalId);
         await recordUsage(workspaceId, outbound.id, { messages: 1, type: "template", templateName: input.templateName, status: sent.status });
         return updated;
       } catch (error) {
