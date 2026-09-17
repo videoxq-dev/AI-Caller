@@ -1,3 +1,4 @@
+import { sql } from "drizzle-orm";
 import {
   index,
   jsonb,
@@ -35,6 +36,9 @@ export const integrations = pgTable(
   (table) => [
     uniqueIndex("integrations_workspace_provider_uq").on(table.workspaceId, table.provider),
     index("integrations_workspace_category_idx").on(table.workspaceId, table.category),
+    uniqueIndex("integrations_whatsapp_phone_number_id_uq")
+      .on(sql`(${table.settings} ->> 'phoneNumberId')`)
+      .where(sql`${table.provider} = 'whatsapp' AND ${table.settings} ? 'phoneNumberId'`),
   ],
 );
 
