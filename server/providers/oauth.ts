@@ -105,7 +105,6 @@ export async function exchangeOAuthCode(provider: OAuthProviderId, code: string,
   const body = new URLSearchParams({ client_id: env.MICROSOFT_OAUTH_CLIENT_ID, client_secret: env.MICROSOFT_OAUTH_CLIENT_SECRET, code, redirect_uri: callbackUrl("outlook"), grant_type: "authorization_code", scope: "offline_access User.Read Calendars.ReadWrite" });
   const token = await providerJson<{ access_token: string; refresh_token?: string }>("https://login.microsoftonline.com/common/oauth2/v2.0/token", { method: "POST", headers: { "content-type": "application/x-www-form-urlencoded" }, body }, fetcher);
   if (!token.refresh_token) throw new Error("Microsoft did not return an offline refresh token. Please reconnect.");
-  const calendars = await providerJson<{ value?: Array<{ id?: string; name?: string }> }>("https://graph.microsoft.com/v1.0/me/calendars?$top=20", { headers: { authorization: `Bearer ${token.access_token}` } }, fetcher);
-  const primary = calendars.value?.[0];
-  return { credentials: { refreshToken: token.refresh_token }, settings: { calendar: primary?.id ?? "Calendar", connectionMetadata: { calendarName: primary?.name ?? "Calendar" }, authMethod: "OAUTH" } };
+  const primary = await providerJson<{ id?: string; name?: string }>("https://graph.microsoft.com/v1.0/me/calendar", { headers: { authorization: `Bearer ${token.access_token}` } }, fetcher);
+  return { credentials: { refreshToken: token.refresh_token }, settings: { calendar: primary.id ?? "Calendar", connectionMetadata: { calendarName: primary.name ?? "Calendar" }, authMethod: "OAUTH" } };
 }
