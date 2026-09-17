@@ -1,4 +1,4 @@
-import { and, asc, desc, eq, sql } from "drizzle-orm";
+import { and, asc, desc, eq, sql, type SQL } from "drizzle-orm";
 import { db } from "@/db";
 import { contactIdentities, conversations, messages, providerWebhookEvents } from "@/db/schema";
 import { AppError } from "@/server/http/errors";
@@ -50,6 +50,12 @@ const SUCCESS_RANK: Record<Exclude<WhatsAppDeliveryStatus, "FAILED">, number> = 
 };
 
 const DELIVERY_STATUSES = new Set<WhatsAppDeliveryStatus>(["SENT", "DELIVERED", "READ", "FAILED"]);
+const STATUS_RANK_SQL = sql<number>`case ${messages.status}
+  when 'SENT' then 1
+  when 'DELIVERED' then 2
+  when 'READ' then 3
+  else 0
+end`;
 
 function metadataDate(metadata: Record<string, unknown>, key: string) {
   const value = metadata[key];
@@ -65,34 +71,40 @@ export async function updateWhatsAppDeliveryStatus(
   error: string | null,
   occurredAt: Date | null,
 ) {
+  const effectiveOccurredAt = occurredAt ?? new Date();
+  const conditions: SQL[] = [
+    eq(messages.workspaceId, workspaceId),
+    eq(messages.provider, "whatsapp"),
+    eq(messages.externalMessageId, externalMessageId),
+    sql`${messages.status} is distinct from 'FAILED'`,
+    status === "FAILED"
+      ? sql`${STATUS_RANK_SQL} < ${SUCCESS_RANK.DELIVERED}`
+      : sql`${STATUS_RANK_SQL} < ${SUCCESS_RANK[status]}`,
+  ];
+
+  if (occurredAt) {
+    conditions.push(sql`(
+      ${messages.metadata}->>'whatsappStatusAt' is null
+      or (${messages.metadata}->>'whatsappStatusAt')::timestamptz <= ${occurredAt}
+    )`);
+  }
+
+  const metadataPatch = {
+    whatsappStatusAt: effectiveOccurredAt.toISOString(),
+    ...(error ? { deliveryError: error.slice(0, 500) } : {}),
+  };
+  const [updated] = await db.update(messages).set({
+    status,
+    metadata: sql<Record<string, unknown>>`${messages.metadata} || ${JSON.stringify(metadataPatch)}::jsonb`,
+  }).where(and(...conditions)).returning();
+  if (updated) return updated;
+
   const [existing] = await db.select().from(messages).where(and(
     eq(messages.workspaceId, workspaceId),
     eq(messages.provider, "whatsapp"),
     eq(messages.externalMessageId, externalMessageId),
   )).limit(1);
-  if (!existing) return null;
-
-  const current = existing.status as WhatsAppDeliveryStatus | "SEND_UNKNOWN" | null;
-  const currentOccurredAt = metadataDate(existing.metadata, "whatsappStatusAt");
-  if (occurredAt && currentOccurredAt && occurredAt < currentOccurredAt) return existing;
-
-  const currentSuccessRank = current && current in SUCCESS_RANK
-    ? SUCCESS_RANK[current as keyof typeof SUCCESS_RANK]
-    : null;
-  if (current === "FAILED") return existing;
-  if (status === "FAILED" && currentSuccessRank !== null && currentSuccessRank >= SUCCESS_RANK.DELIVERED) return existing;
-  if (status !== "FAILED" && currentSuccessRank !== null && currentSuccessRank >= SUCCESS_RANK[status]) return existing;
-
-  const metadata = {
-    ...existing.metadata,
-    whatsappStatusAt: (occurredAt ?? new Date()).toISOString(),
-    ...(error ? { deliveryError: error.slice(0, 500) } : {}),
-  };
-  const [updated] = await db.update(messages).set({ status, metadata }).where(and(
-    eq(messages.workspaceId, workspaceId),
-    eq(messages.id, existing.id),
-  )).returning();
-  return updated ?? existing;
+  return existing ?? null;
 }
 
 function deferredOccurredAt(value: unknown) {
