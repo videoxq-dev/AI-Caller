@@ -13,10 +13,18 @@ import {
 } from "@/components/icons";
 import "../dashboard/dashboard.css";
 import "./integrations.css";
+import "./provider-connect.css";
 
 type Category = "all" | "communication" | "ai" | "scheduling";
 type ProviderId = "plivo" | "telnyx" | "twilio" | "whatsapp" | "credits" | "openai" | "gemini" | "openrouter" | "google" | "outlook" | "calendly" | "calcom";
-type IntegrationRecord = { provider: ProviderId; status: "CONNECTED" | "ERROR" | "DISCONNECTED"; settings?: Record<string, unknown>; maskedCredentials?: Record<string, string> };
+type IntegrationRecord = {
+  provider: ProviderId;
+  status: "CONNECTED" | "ERROR" | "DISCONNECTED";
+  settings?: Record<string, unknown>;
+  maskedCredentials?: Record<string, string>;
+  lastTestedAt?: string | null;
+  lastError?: string | null;
+};
 
 type Provider = {
   id: ProviderId;
@@ -27,19 +35,31 @@ type Provider = {
   brand: string;
 };
 
+type MetaConfig = { enabled: boolean; appId: string | null; configId: string | null; graphApiVersion: string };
+type MetaSession = { wabaId: string; phoneNumberId: string; businessId?: string | null };
+
+declare global {
+  interface Window {
+    FB?: {
+      init(config: { appId: string; autoLogAppEvents: boolean; xfbml: boolean; version: string }): void;
+      login(callback: (response: { authResponse?: { code?: string } }) => void, options: Record<string, unknown>): void;
+    };
+  }
+}
+
 const providers: Provider[] = [
-  { id: "plivo", name: "Plivo", category: "communication", description: "Voice, SMS and WhatsApp messaging with your own Plivo account.", features: ["Voice calls", "SMS", "WhatsApp"], brand: "PL" },
-  { id: "telnyx", name: "Telnyx", category: "communication", description: "Global communications for voice, messaging and WhatsApp.", features: ["Voice calls", "SMS", "WhatsApp"], brand: "TX" },
-  { id: "twilio", name: "Twilio", category: "communication", description: "Reliable voice, SMS and WhatsApp messaging for your business.", features: ["Voice calls", "SMS", "WhatsApp"], brand: "TW" },
-  { id: "whatsapp", name: "WhatsApp", category: "communication", description: "Connect the official WhatsApp Business Cloud API.", features: ["Messages", "Templates", "Webhooks"], brand: "WA" },
-  { id: "credits", name: "Our Credits", category: "ai", description: "Use AI Caller credits without bringing your own AI provider.", features: ["Pay as you go", "Multiple models", "Usage tracking"], brand: "CR" },
+  { id: "plivo", name: "Plivo", category: "communication", description: "Voice and SMS with your own Plivo account.", features: ["Voice calls", "SMS", "Inbound webhooks"], brand: "PL" },
+  { id: "telnyx", name: "Telnyx", category: "communication", description: "Global communications for voice and messaging.", features: ["Voice calls", "SMS", "Inbound webhooks"], brand: "TX" },
+  { id: "twilio", name: "Twilio", category: "communication", description: "Reliable voice and SMS for your business.", features: ["Voice calls", "SMS", "Inbound webhooks"], brand: "TW" },
+  { id: "whatsapp", name: "WhatsApp", category: "communication", description: "Connect WhatsApp directly through AI Caller's approved Meta Tech Provider app.", features: ["Embedded Signup", "Cloud API", "Webhooks"], brand: "WA" },
+  { id: "credits", name: "Our Credits", category: "ai", description: "Use AI Caller credits without bringing your own AI provider.", features: ["Hosted AI", "Usage tracking", "No API key"], brand: "CR" },
   { id: "openai", name: "OpenAI", category: "ai", description: "Use your own OpenAI API key for AI conversations.", features: ["GPT models", "Structured output", "Tool calling"], brand: "OA" },
   { id: "gemini", name: "Gemini", category: "ai", description: "Use Google Gemini models with your own API key.", features: ["Gemini models", "Multimodal", "Tool calling"], brand: "GM" },
   { id: "openrouter", name: "OpenRouter", category: "ai", description: "Access multiple model providers through one API.", features: ["Many models", "Cost routing", "Unified API"], brand: "OR" },
-  { id: "google", name: "Google Calendar", category: "scheduling", description: "Sync availability and appointments with Google Calendar.", features: ["Availability", "Create events", "Two-way sync"], brand: "GC" },
-  { id: "outlook", name: "Outlook", category: "scheduling", description: "Sync your Microsoft Outlook calendar.", features: ["Availability", "Create events", "Two-way sync"], brand: "OL" },
+  { id: "google", name: "Google Calendar", category: "scheduling", description: "Connect with Google OAuth for availability and appointments.", features: ["OAuth", "Availability", "Create events"], brand: "GC" },
+  { id: "outlook", name: "Outlook", category: "scheduling", description: "Connect Microsoft Outlook Calendar with OAuth.", features: ["OAuth", "Availability", "Create events"], brand: "OL" },
   { id: "calendly", name: "Calendly", category: "scheduling", description: "Use your Calendly event types and availability.", features: ["Event types", "Availability", "Booking links"], brand: "CL" },
-  { id: "calcom", name: "Cal.com", category: "scheduling", description: "Connect Cal.com scheduling and event types.", features: ["Event types", "Availability", "Two-way sync"], brand: "CA" },
+  { id: "calcom", name: "Cal.com", category: "scheduling", description: "Connect Cal.com API v2 scheduling and event types.", features: ["API v2", "Availability", "Bookings"], brand: "CA" },
 ];
 
 const tabs: Array<{ id: Category; label: string }> = [
@@ -69,11 +89,15 @@ export default function IntegrationsPage() {
   const [selectedId, setSelectedId] = useState<ProviderId | null>(null);
   const [connected, setConnected] = useState<Record<ProviderId, boolean>>(emptyConnected);
   const [records, setRecords] = useState<Partial<Record<ProviderId, IntegrationRecord>>>({});
+  const [pageNotice, setPageNotice] = useState<{ tone: "success" | "error"; text: string } | null>(null);
 
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
     const requested = params.get("provider") as ProviderId | null;
     setSelectedId(requested && providers.some((provider) => provider.id === requested) ? requested : "twilio");
+    const connection = params.get("connection");
+    if (connection === "connected") setPageNotice({ tone: "success", text: "Provider connected successfully." });
+    if (connection === "error") setPageNotice({ tone: "error", text: params.get("message") || "Provider connection failed." });
 
     fetch("/api/integrations", { cache: "no-store" })
       .then((response) => response.ok ? response.json() : Promise.reject(new Error("Unable to load integrations")))
@@ -89,7 +113,7 @@ export default function IntegrationsPage() {
         setConnected(nextConnected);
         setRecords(nextRecords);
       })
-      .catch(() => undefined);
+      .catch(() => setPageNotice({ tone: "error", text: "Unable to load saved integrations." }));
   }, []);
 
   const visible = useMemo(() => {
@@ -119,48 +143,28 @@ export default function IntegrationsPage() {
     <main className="appShell integrationsShell">
       <aside className="appSidebar integrationsSidebar">
         <Link className="appBrand" href="/dashboard"><LogoMark size={37} /><strong>AI Caller</strong></Link>
-        <nav className="appNav" aria-label="Main navigation">
-          {navItems.map((item) => (
-            <Link key={item.label} href={item.href} className={`appNavItem ${item.active ? "active" : ""}`}>
-              <span className="appNavIcon">{item.icon}</span><span>{item.label}</span>{item.badge && <b className="navBadge">{item.badge}</b>}
-            </Link>
-          ))}
-        </nav>
+        <nav className="appNav" aria-label="Main navigation">{navItems.map((item) => <Link key={item.label} href={item.href} className={`appNavItem ${item.active ? "active" : ""}`}><span className="appNavIcon">{item.icon}</span><span>{item.label}</span>{item.badge && <b className="navBadge">{item.badge}</b>}</Link>)}</nav>
         <a className="integrationsHelp" href="mailto:support@aicaller.com"><span><HelpIcon size={18} /></span><div><strong>Need help?</strong><small>Contact support</small></div></a>
       </aside>
 
       <section className="appWorkspace integrationsWorkspace">
         <header className="integrationsTopbar">
           <label className="integrationsGlobalSearch"><SearchIcon /><input name="global-integrations-search" autoComplete="off" data-lpignore="true" data-1p-ignore="true" placeholder="Search contacts, appointments, integrations..." /><kbd>⌘ K</kbd></label>
-          <div className="integrationsTopActions">
-            <button className="integrationsAgentStatus" type="button"><i />AI Agent Online <ChevronDown /></button>
-            <button className="integrationsCredit" type="button"><MessageIcon size={15} />2,480 credits</button>
-            <button className="integrationsBell" type="button" aria-label="Notifications">♧<i /></button>
-            <div className="profileBlock integrationsProfile"><span className="avatar">B</span><span className="profileCopy"><strong>Bella</strong><small>Wellness Juvi</small></span><ChevronDown /></div>
-          </div>
+          <div className="integrationsTopActions"><button className="integrationsAgentStatus" type="button"><i />AI Agent Online <ChevronDown /></button><button className="integrationsCredit" type="button"><MessageIcon size={15} />2,480 credits</button><button className="integrationsBell" type="button" aria-label="Notifications">♧<i /></button><div className="profileBlock integrationsProfile"><span className="avatar">B</span><span className="profileCopy"><strong>Bella</strong><small>Wellness Juvi</small></span><ChevronDown /></div></div>
         </header>
 
         <div className={`integrationsBody ${selected ? "drawerOpen" : ""}`}>
           <div className="integrationsTitleRow"><div><h1>Integrations</h1><p>Connect the tools that power your AI agent.</p></div><button className="docsButton" type="button">↗ View integration docs</button></div>
-
-          <div className="integrationTabs" role="tablist" aria-label="Integration categories">
-            {tabs.map((tab) => <button key={tab.id} type="button" className={category === tab.id ? "active" : ""} onClick={() => setCategory(tab.id)}>{tab.label}<span>{counts[tab.id]}</span></button>)}
-          </div>
-
-          <div className="integrationFilters">
-            <label><SearchIcon /><input name="integration-catalog-search" autoComplete="off" data-lpignore="true" data-1p-ignore="true" value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Search integrations..." /></label>
-            <select value={status} onChange={(event) => setStatus(event.target.value)} aria-label="Connection status"><option value="all">All statuses</option><option value="connected">Connected</option><option value="not-connected">Not connected</option></select>
-          </div>
-
+          {pageNotice && <div className={`integrationPageNotice ${pageNotice.tone === "error" ? "error" : ""}`}>{pageNotice.text}</div>}
+          <div className="integrationTabs" role="tablist" aria-label="Integration categories">{tabs.map((tab) => <button key={tab.id} type="button" className={category === tab.id ? "active" : ""} onClick={() => setCategory(tab.id)}>{tab.label}<span>{counts[tab.id]}</span></button>)}</div>
+          <div className="integrationFilters"><label><SearchIcon /><input name="integration-catalog-search" autoComplete="off" data-lpignore="true" data-1p-ignore="true" value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Search integrations..." /></label><select value={status} onChange={(event) => setStatus(event.target.value)} aria-label="Connection status"><option value="all">All statuses</option><option value="connected">Connected</option><option value="not-connected">Not connected</option></select></div>
           {(["communication", "ai", "scheduling"] as const).map((section) => {
             const sectionProviders = visible.filter((provider) => provider.category === section);
             if (!sectionProviders.length) return null;
             return <section className="integrationSection" key={section}><div className="integrationSectionHeading"><h2>{section === "communication" ? "Communication" : section === "ai" ? "AI" : "Scheduling"}</h2><p>{section === "communication" ? "Connect communication providers for calls and messaging." : section === "ai" ? "Choose how your agent processes conversations." : "Connect calendars and scheduling platforms."}</p></div><div className="integrationGrid">{sectionProviders.map((provider) => <IntegrationCard key={provider.id} provider={provider} connected={connected[provider.id]} selected={selectedId === provider.id} onOpen={() => setSelectedId(provider.id)} />)}</div></section>;
           })}
-
           {visible.length === 0 && <div className="emptyIntegrations">No integrations match your filters.</div>}
         </div>
-
         {selected && <IntegrationDrawer key={selected.id} provider={selected} connected={connected[selected.id]} record={records[selected.id]} onClose={() => setSelectedId(null)} onRecordChange={(record) => updateRecord(record, selected.id)} />}
       </section>
     </main>
@@ -182,101 +186,196 @@ const credentialKeys: Partial<Record<ProviderId, string[]>> = {
   plivo: ["authId", "authToken", "phone"],
   telnyx: ["apiKey", "connectionId", "phone"],
   twilio: ["sid", "authToken", "phone", "whatsapp"],
-  whatsapp: ["token", "phoneNumberId", "businessId", "verifyToken"],
-  openai: ["apiKey"],
-  gemini: ["apiKey"],
-  openrouter: ["apiKey"],
-  google: ["refreshToken"],
-  outlook: ["refreshToken"],
-  calendly: ["token"],
-  calcom: ["apiKey"],
+  openai: ["apiKey"], gemini: ["apiKey"], openrouter: ["apiKey"], calendly: ["token"], calcom: ["apiKey"],
 };
 
 function IntegrationDrawer({ provider, connected, record, onClose, onRecordChange }: { provider: Provider; connected: boolean; record?: IntegrationRecord; onClose: () => void; onRecordChange: (record: IntegrationRecord | null) => void }) {
   const [showSecret, setShowSecret] = useState(false);
   const [saving, setSaving] = useState(false);
-  const [notice, setNotice] = useState<string | null>(null);
+  const [notice, setNotice] = useState<{ tone: "success" | "error"; text: string } | null>(null);
   const [values, setValues] = useState<Record<string, string>>(() => Object.fromEntries(Object.entries(record?.settings ?? {}).filter(([, value]) => typeof value === "string")) as Record<string, string>);
   const update = (key: string, value: string) => setValues((current) => ({ ...current, [key]: value }));
   const hasSavedSecret = Boolean(record?.maskedCredentials && Object.keys(record.maskedCredentials).length);
+  const oauthCalendar = provider.id === "google" || provider.id === "outlook";
+
+  async function bindAI(mode: "HOSTED" | "BYOP", providerId?: ProviderId) {
+    const response = await fetch("/api/integrations/capabilities", { method: "PUT", headers: { "content-type": "application/json" }, body: JSON.stringify({ capability: "AI_TEXT", mode, provider: providerId ?? null }) });
+    if (!response.ok) throw new Error("Connection was saved, but AI routing could not be updated.");
+  }
 
   async function save() {
-    setSaving(true);
-    setNotice(null);
+    setSaving(true); setNotice(null);
     try {
       const secretKeys = new Set(credentialKeys[provider.id] ?? []);
       const credentials = Object.fromEntries(Object.entries(values).filter(([key, value]) => secretKeys.has(key) && value.trim()));
       const settings = Object.fromEntries(Object.entries(values).filter(([key]) => !secretKeys.has(key)));
-      if (!hasSavedSecret && provider.id !== "credits" && (credentialKeys[provider.id]?.length ?? 0) > 0 && Object.keys(credentials).length === 0) {
-        throw new Error("Enter the required connection credentials before saving.");
-      }
-      const response = await fetch("/api/integrations", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ provider: provider.id, category: categoryFor(provider), mode: provider.id === "credits" ? "HOSTED" : "BYOP", status: "CONNECTED", credentials, settings }) });
+      if (!hasSavedSecret && (credentialKeys[provider.id]?.length ?? 0) > 0 && Object.keys(credentials).length === 0) throw new Error("Enter the required connection credentials before saving.");
+      const response = await fetch("/api/integrations", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ provider: provider.id, category: categoryFor(provider), mode: "BYOP", credentials, settings }) });
       const payload = await response.json().catch(() => ({}));
       if (!response.ok) throw new Error(payload?.error?.message ?? "Unable to save integration.");
       onRecordChange(payload.integration as IntegrationRecord);
       setValues((current) => Object.fromEntries(Object.entries(current).filter(([key]) => !secretKeys.has(key))));
-      setNotice("Connection saved securely.");
-    } catch (error) {
-      setNotice(error instanceof Error ? error.message : "Unable to save integration.");
-    } finally {
-      setSaving(false);
-    }
+      if (payload?.test?.ok) {
+        if (provider.category === "ai") await bindAI("BYOP", provider.id);
+        setNotice({ tone: "success", text: "Connection verified and saved securely." });
+      } else {
+        setNotice({ tone: "error", text: payload?.test?.error ?? "Credentials were saved, but the provider connection test failed." });
+      }
+    } catch (error) { setNotice({ tone: "error", text: error instanceof Error ? error.message : "Unable to save integration." }); }
+    finally { setSaving(false); }
+  }
+
+  async function testConnection() {
+    setSaving(true); setNotice(null);
+    try {
+      const response = await fetch(`/api/integrations/${provider.id}/test`, { method: "POST" });
+      const payload = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(payload?.error?.message ?? "Unable to test provider connection.");
+      onRecordChange(payload.integration as IntegrationRecord);
+      setNotice(payload.ok ? { tone: "success", text: "Connection test passed." } : { tone: "error", text: payload.error ?? "Connection test failed." });
+    } catch (error) { setNotice({ tone: "error", text: error instanceof Error ? error.message : "Connection test failed." }); }
+    finally { setSaving(false); }
   }
 
   async function disconnect() {
-    setSaving(true);
-    setNotice(null);
+    setSaving(true); setNotice(null);
     try {
       const response = await fetch("/api/integrations", { method: "PATCH", headers: { "content-type": "application/json" }, body: JSON.stringify({ provider: provider.id, status: "DISCONNECTED" }) });
       const payload = await response.json().catch(() => ({}));
       if (!response.ok) throw new Error(payload?.error?.message ?? "Unable to disconnect integration.");
       onRecordChange(payload.integration as IntegrationRecord);
-      setNotice("Integration disconnected.");
-    } catch (error) {
-      setNotice(error instanceof Error ? error.message : "Unable to disconnect integration.");
-    } finally {
-      setSaving(false);
-    }
+      setNotice({ tone: "success", text: "Integration disconnected." });
+    } catch (error) { setNotice({ tone: "error", text: error instanceof Error ? error.message : "Unable to disconnect integration." }); }
+    finally { setSaving(false); }
+  }
+
+  async function useHostedAI() {
+    setSaving(true); setNotice(null);
+    try { await bindAI("HOSTED"); setNotice({ tone: "success", text: "Hosted AI is now the active AI capability." }); }
+    catch (error) { setNotice({ tone: "error", text: error instanceof Error ? error.message : "Unable to update AI routing." }); }
+    finally { setSaving(false); }
   }
 
   return (
     <aside className="integrationDrawer" aria-label={`${provider.name} integration settings`}>
       <button type="button" className="drawerClose" onClick={onClose} aria-label="Close integration panel">×</button>
-      <div className="drawerProviderHeader"><span className={`providerMark large ${provider.id}`}>{provider.brand}</span><div><h2>{provider.name}</h2><span className={`connectionBadge ${connected ? "connected" : ""}`}>{connected ? "● Connected" : "Not connected"}</span><p>{provider.description}</p></div></div>
-      {provider.id === "credits" ? <CreditsPanel /> : provider.category === "communication" ? <CommunicationPanel provider={provider.id} values={values} update={update} showSecret={showSecret} setShowSecret={setShowSecret} hasSavedSecret={hasSavedSecret} /> : provider.category === "ai" ? <AiPanel provider={provider.id} values={values} update={update} showSecret={showSecret} setShowSecret={setShowSecret} hasSavedSecret={hasSavedSecret} /> : <SchedulingPanel provider={provider.id} values={values} update={update} showSecret={showSecret} setShowSecret={setShowSecret} hasSavedSecret={hasSavedSecret} />}
-      {notice && <div className="integrationNotice">{notice}</div>}
-      {provider.id !== "credits" && <div className="drawerActions"><button type="button" className="primaryDrawerAction" disabled={saving} onClick={save}>{saving ? "Saving..." : connected ? "Save changes" : "Connect account"}</button>{connected && <button type="button" className="dangerDrawerAction" disabled={saving} onClick={disconnect}>Disconnect</button>}</div>}
+      <div className="drawerProviderHeader"><span className={`providerMark large ${provider.id}`}>{provider.brand}</span><div><h2>{provider.name}</h2><span className={`connectionBadge ${connected ? "connected" : ""}`}>{connected ? "● Connected" : record?.status === "ERROR" ? "Connection error" : "Not connected"}</span><p>{provider.description}</p></div></div>
+      {provider.id === "credits" ? <CreditsPanel onUseHosted={useHostedAI} busy={saving} /> : provider.id === "whatsapp" ? <MetaEmbeddedSignupPanel record={record} onRecordChange={onRecordChange} setNotice={setNotice} /> : oauthCalendar ? <OAuthCalendarPanel provider={provider.id as "google" | "outlook"} record={record} /> : provider.category === "communication" ? <CommunicationPanel provider={provider.id} values={values} update={update} showSecret={showSecret} setShowSecret={setShowSecret} hasSavedSecret={hasSavedSecret} /> : provider.category === "ai" ? <AiPanel provider={provider.id} values={values} update={update} showSecret={showSecret} setShowSecret={setShowSecret} hasSavedSecret={hasSavedSecret} /> : <SchedulingPanel provider={provider.id} values={values} update={update} showSecret={showSecret} setShowSecret={setShowSecret} hasSavedSecret={hasSavedSecret} />}
+      {record?.lastTestedAt && <div className="providerLastTest">Last tested {new Date(record.lastTestedAt).toLocaleString()}</div>}
+      {record?.lastError && <div className="providerErrorText">{record.lastError}</div>}
+      {notice && <div className={`integrationNotice ${notice.tone}`}>{notice.text}</div>}
+      {provider.id !== "credits" && <div className="providerActionRow">
+        {!oauthCalendar && provider.id !== "whatsapp" && <button type="button" className="primaryDrawerAction" disabled={saving} onClick={save}>{saving ? "Checking..." : connected ? "Save & verify changes" : "Connect & verify"}</button>}
+        {record && <button type="button" className="secondaryDrawerAction" disabled={saving} onClick={testConnection}>Test connection</button>}
+        {connected && <button type="button" className="dangerDrawerAction" disabled={saving} onClick={disconnect}>Disconnect</button>}
+      </div>}
     </aside>
   );
 }
 
-type PanelProps = { provider: ProviderId; values: Record<string, string>; update: (key: string, value: string) => void; showSecret: boolean; setShowSecret: (value: boolean) => void; hasSavedSecret: boolean };
+type NoticeSetter = (notice: { tone: "success" | "error"; text: string } | null) => void;
 
+function MetaEmbeddedSignupPanel({ record, onRecordChange, setNotice }: { record?: IntegrationRecord; onRecordChange: (record: IntegrationRecord) => void; setNotice: NoticeSetter }) {
+  const [config, setConfig] = useState<MetaConfig | null>(null);
+  const [sdkReady, setSdkReady] = useState(false);
+  const [authCode, setAuthCode] = useState<string | null>(null);
+  const [session, setSession] = useState<MetaSession | null>(null);
+  const [connecting, setConnecting] = useState(false);
+
+  useEffect(() => {
+    fetch("/api/integrations/meta/config", { cache: "no-store" }).then((response) => response.ok ? response.json() : Promise.reject(new Error("Unable to load Meta configuration."))).then((payload: MetaConfig) => setConfig(payload)).catch((error) => setNotice({ tone: "error", text: error instanceof Error ? error.message : "Unable to load Meta configuration." }));
+  }, [setNotice]);
+
+  useEffect(() => {
+    if (!config?.enabled || !config.appId) return;
+    const initialize = () => {
+      window.FB?.init({ appId: config.appId!, autoLogAppEvents: true, xfbml: true, version: config.graphApiVersion });
+      setSdkReady(Boolean(window.FB));
+    };
+    if (window.FB) { initialize(); return; }
+    const existing = document.getElementById("facebook-jssdk") as HTMLScriptElement | null;
+    if (existing) { existing.addEventListener("load", initialize, { once: true }); return () => existing.removeEventListener("load", initialize); }
+    const script = document.createElement("script");
+    script.id = "facebook-jssdk";
+    script.async = true;
+    script.defer = true;
+    script.crossOrigin = "anonymous";
+    script.src = "https://connect.facebook.net/en_US/sdk.js";
+    script.addEventListener("load", initialize, { once: true });
+    document.body.appendChild(script);
+    return () => script.removeEventListener("load", initialize);
+  }, [config]);
+
+  useEffect(() => {
+    const handler = (event: MessageEvent) => {
+      try {
+        const origin = new URL(event.origin);
+        if (origin.protocol !== "https:" || (origin.hostname !== "facebook.com" && !origin.hostname.endsWith(".facebook.com"))) return;
+        const payload = typeof event.data === "string" ? JSON.parse(event.data) : event.data;
+        if (!payload || payload.type !== "WA_EMBEDDED_SIGNUP") return;
+        if (payload.event === "FINISH") {
+          const data = payload.data ?? {};
+          if (data.waba_id && data.phone_number_id) setSession({ wabaId: String(data.waba_id), phoneNumberId: String(data.phone_number_id), businessId: data.business_id ? String(data.business_id) : null });
+        }
+        if (payload.event === "CANCEL") setNotice({ tone: "error", text: "Meta Embedded Signup was cancelled before completion." });
+        if (payload.event === "ERROR") setNotice({ tone: "error", text: "Meta reported an error during Embedded Signup." });
+      } catch { return; }
+    };
+    window.addEventListener("message", handler);
+    return () => window.removeEventListener("message", handler);
+  }, [setNotice]);
+
+  useEffect(() => {
+    if (!authCode || !session || connecting) return;
+    setConnecting(true);
+    fetch("/api/integrations/meta/complete", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ code: authCode, wabaId: session.wabaId, phoneNumberId: session.phoneNumberId, businessId: session.businessId ?? null }) })
+      .then(async (response) => { const payload = await response.json().catch(() => ({})); if (!response.ok) throw new Error(payload?.error?.message ?? "Unable to finish WhatsApp connection."); return payload; })
+      .then((payload) => { onRecordChange(payload.integration as IntegrationRecord); setNotice({ tone: "success", text: "WhatsApp connected through Meta Embedded Signup." }); setAuthCode(null); setSession(null); })
+      .catch((error) => setNotice({ tone: "error", text: error instanceof Error ? error.message : "Unable to finish WhatsApp connection." }))
+      .finally(() => setConnecting(false));
+  }, [authCode, session, connecting, onRecordChange, setNotice]);
+
+  function startSignup() {
+    if (!config?.enabled || !config.configId || !window.FB) { setNotice({ tone: "error", text: "Meta Embedded Signup is not configured or ready." }); return; }
+    setNotice(null); setAuthCode(null); setSession(null);
+    window.FB.login((response) => {
+      const code = response.authResponse?.code;
+      if (code) setAuthCode(code);
+      else setNotice({ tone: "error", text: "Meta authorization was not completed." });
+    }, { config_id: config.configId, response_type: "code", override_default_response_type: true, extras: { sessionInfoVersion: "3" } });
+  }
+
+  const settings = record?.settings ?? {};
+  return <section className="providerConnectCard"><span className="metaProviderBadge">Meta Tech Provider connection</span><h3>{record?.status === "CONNECTED" ? "WhatsApp Business connected" : "Connect with Meta"}</h3><p>Customers authorize AI Caller through Meta's Embedded Signup. They never copy API tokens or webhook secrets into AI Caller.</p><ul className="providerConnectBenefits"><li>Official Meta Cloud API connection</li><li>WABA and phone-number discovery</li><li>Automatic webhook subscription</li><li>Access token stays encrypted server-side</li></ul>{record?.status === "CONNECTED" && <div className="connectedMetadata"><div><span>Business</span><strong>{String(settings.verifiedName ?? settings.wabaName ?? "Connected business")}</strong></div><div><span>WhatsApp number</span><strong>{String(settings.displayPhoneNumber ?? "Connected")}</strong></div><div><span>WABA ID</span><strong>{String(settings.wabaId ?? "—")}</strong></div></div>}<button className="metaConnectButton" type="button" disabled={!config?.enabled || !sdkReady || connecting} onClick={startSignup}>{connecting ? "Finishing connection..." : record?.status === "CONNECTED" ? "Reconnect with Meta" : "Connect with Meta"}</button>{config && !config.enabled && <p className="providerErrorText">Set the Meta Tech Provider environment variables before connecting customer accounts.</p>}</section>;
+}
+
+function OAuthCalendarPanel({ provider, record }: { provider: "google" | "outlook"; record?: IntegrationRecord }) {
+  const settings = record?.settings ?? {};
+  const label = provider === "google" ? "Google Calendar" : "Microsoft Outlook";
+  const href = `/api/integrations/oauth/${provider}/start?return=${encodeURIComponent(`/integrations?provider=${provider}`)}`;
+  return <section className="providerConnectCard"><h3>{record?.status === "CONNECTED" ? `${label} connected` : `Connect ${label}`}</h3><p>Authorization happens directly with {provider === "google" ? "Google" : "Microsoft"}. AI Caller stores the refresh token encrypted and never returns it to the browser.</p>{record?.status === "CONNECTED" && <div className="connectedMetadata"><div><span>Calendar</span><strong>{String((settings.connectionMetadata as Record<string, unknown> | undefined)?.calendarName ?? settings.calendar ?? "Connected")}</strong></div><div><span>Auth method</span><strong>OAuth 2.0</strong></div></div>}<a className={`oauthConnectLink ${provider === "outlook" ? "microsoft" : ""}`} href={href}>{record?.status === "CONNECTED" ? `Reconnect ${label}` : `Connect ${label}`}</a></section>;
+}
+
+type PanelProps = { provider: ProviderId; values: Record<string, string>; update: (key: string, value: string) => void; showSecret: boolean; setShowSecret: (value: boolean) => void; hasSavedSecret: boolean };
 function SavedSecretNote({ saved }: { saved: boolean }) { return saved ? <div className="credentialSavedNote">Credentials are already saved. Leave secret fields blank to keep the existing values.</div> : null; }
 
 function CommunicationPanel({ provider, values, update, showSecret, setShowSecret, hasSavedSecret }: PanelProps) {
   if (provider === "plivo") return <CredentialForm title="Plivo credentials" note="Enter the credentials from your Plivo console."><SavedSecretNote saved={hasSavedSecret} /><Field id="plivo-auth-id" label="Auth ID" value={values.authId || ""} onChange={(value) => update("authId", value)} placeholder="MA..." /><SecretField id="plivo-auth-token" label="Auth Token" value={values.authToken || ""} onChange={(value) => update("authToken", value)} show={showSecret} setShow={setShowSecret} /><Field id="plivo-phone" label="Phone number" value={values.phone || ""} onChange={(value) => update("phone", value)} placeholder="+1 234 567 8900" /></CredentialForm>;
   if (provider === "telnyx") return <CredentialForm title="Telnyx credentials" note="Use your Telnyx API key and connection details."><SavedSecretNote saved={hasSavedSecret} /><SecretField id="telnyx-api-key" label="API Key" value={values.apiKey || ""} onChange={(value) => update("apiKey", value)} show={showSecret} setShow={setShowSecret} /><Field id="telnyx-connection-id" label="Connection ID" value={values.connectionId || ""} onChange={(value) => update("connectionId", value)} placeholder="123456789" /><Field id="telnyx-phone" label="Phone number" value={values.phone || ""} onChange={(value) => update("phone", value)} placeholder="+1 234 567 8900" /></CredentialForm>;
-  if (provider === "whatsapp") return <CredentialForm title="WhatsApp Cloud API" note="Enter credentials from Meta Business Manager."><SavedSecretNote saved={hasSavedSecret} /><SecretField id="whatsapp-access-token" label="Permanent access token" value={values.token || ""} onChange={(value) => update("token", value)} show={showSecret} setShow={setShowSecret} /><Field id="whatsapp-phone-id" label="Phone Number ID" value={values.phoneNumberId || ""} onChange={(value) => update("phoneNumberId", value)} placeholder="123456789012345" /><Field id="whatsapp-business-id" label="WhatsApp Business Account ID" value={values.businessId || ""} onChange={(value) => update("businessId", value)} placeholder="123456789012345" /><SecretField id="whatsapp-verify-token" label="Webhook verify token" value={values.verifyToken || ""} onChange={(value) => update("verifyToken", value)} show={showSecret} setShow={setShowSecret} /></CredentialForm>;
-  return <CredentialForm title="Twilio credentials" note="Enter the credentials from your Twilio console."><SavedSecretNote saved={hasSavedSecret} /><Field id="twilio-account-sid" label="Account SID" value={values.sid || ""} onChange={(value) => update("sid", value)} placeholder="ACXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX" /><SecretField id="twilio-auth-token" label="Auth Token" value={values.authToken || ""} onChange={(value) => update("authToken", value)} show={showSecret} setShow={setShowSecret} /><Field id="twilio-phone" label="Phone number" value={values.phone || ""} onChange={(value) => update("phone", value)} placeholder="+1 234 567 8900" /><Field id="twilio-whatsapp" label="WhatsApp number" value={values.whatsapp || ""} onChange={(value) => update("whatsapp", value)} placeholder="+1 234 567 8900" /><SelectField label="Region" value={values.region || "US1 (Virginia)"} onChange={(value) => update("region", value)} options={["US1 (Virginia)", "AU1 (Australia)", "IE1 (Ireland)"]} /></CredentialForm>;
+  return <CredentialForm title="Twilio credentials" note="Enter the credentials from your Twilio console."><SavedSecretNote saved={hasSavedSecret} /><Field id="twilio-account-sid" label="Account SID" value={values.sid || ""} onChange={(value) => update("sid", value)} placeholder="ACXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX" /><SecretField id="twilio-auth-token" label="Auth Token" value={values.authToken || ""} onChange={(value) => update("authToken", value)} show={showSecret} setShow={setShowSecret} /><Field id="twilio-phone" label="Phone number" value={values.phone || ""} onChange={(value) => update("phone", value)} placeholder="+1 234 567 8900" /></CredentialForm>;
 }
 
 function AiPanel({ provider, values, update, showSecret, setShowSecret, hasSavedSecret }: PanelProps) {
   const config = provider === "openai" ? { title: "OpenAI API", key: "openai", placeholder: "sk-...", models: ["gpt-5.6", "gpt-5.6-mini", "gpt-4.1-mini"] } : provider === "gemini" ? { title: "Gemini API", key: "gemini", placeholder: "AIza...", models: ["gemini-2.5-flash", "gemini-2.5-pro", "gemini-2.0-flash"] } : { title: "OpenRouter API", key: "openrouter", placeholder: "sk-or-...", models: ["openai/gpt-5.6", "google/gemini-2.5-flash", "anthropic/claude-sonnet-4"] };
-  return <CredentialForm title={config.title} note="Your key is encrypted and is never returned to the browser after save."><SavedSecretNote saved={hasSavedSecret} /><SecretField id={`${config.key}-api-key`} label="API Key" value={values.apiKey || ""} onChange={(value) => update("apiKey", value)} show={showSecret} setShow={setShowSecret} placeholder={config.placeholder} /><SelectField label="Default model" value={values.model || config.models[0]} onChange={(value) => update("model", value)} options={config.models} />{provider === "openrouter" && <Field id="openrouter-site-url" label="Site URL (optional)" value={values.siteUrl || ""} onChange={(value) => update("siteUrl", value)} placeholder="https://yourdomain.com" />}<ToggleRow title="Use provider for new conversations" subtitle="Existing conversations keep their current provider." /></CredentialForm>;
+  return <CredentialForm title={config.title} note="Your key is encrypted, verified with the provider, and never returned after save."><SavedSecretNote saved={hasSavedSecret} /><SecretField id={`${config.key}-api-key`} label="API Key" value={values.apiKey || ""} onChange={(value) => update("apiKey", value)} show={showSecret} setShow={setShowSecret} placeholder={config.placeholder} /><SelectField label="Default model" value={values.model || config.models[0]} onChange={(value) => update("model", value)} options={config.models} />{provider === "openrouter" && <Field id="openrouter-site-url" label="Site URL (optional)" value={values.siteUrl || ""} onChange={(value) => update("siteUrl", value)} placeholder="https://yourdomain.com" />}<ToggleRow title="Use provider for new conversations" subtitle="A successful connection makes this the active AI capability." /></CredentialForm>;
 }
 
 function SchedulingPanel({ provider, values, update, showSecret, setShowSecret, hasSavedSecret }: PanelProps) {
-  if (provider === "google") return <CredentialForm title="Google Calendar connection" note="Until OAuth is enabled, store a refresh token from your Google OAuth app. This is encrypted and can later be replaced by the normal OAuth flow."><SavedSecretNote saved={hasSavedSecret} /><SecretField id="google-refresh-token" label="OAuth refresh token" value={values.refreshToken || ""} onChange={(value) => update("refreshToken", value)} show={showSecret} setShow={setShowSecret} /><Field id="google-calendar-id" label="Calendar ID" value={values.calendar || ""} onChange={(value) => update("calendar", value)} placeholder="primary" /><ToggleRow title="Two-way sync" subtitle="Keep AI Caller and Google Calendar in sync." /></CredentialForm>;
-  if (provider === "outlook") return <CredentialForm title="Microsoft Outlook connection" note="Until OAuth is enabled, store a Microsoft OAuth refresh token. It is encrypted and never returned after save."><SavedSecretNote saved={hasSavedSecret} /><SecretField id="outlook-refresh-token" label="OAuth refresh token" value={values.refreshToken || ""} onChange={(value) => update("refreshToken", value)} show={showSecret} setShow={setShowSecret} /><Field id="outlook-calendar-id" label="Calendar ID" value={values.calendar || ""} onChange={(value) => update("calendar", value)} placeholder="Calendar" /><ToggleRow title="Two-way sync" subtitle="Keep AI Caller and Outlook in sync." /></CredentialForm>;
-  if (provider === "calendly") return <CredentialForm title="Calendly credentials" note="Use a Calendly personal access token for this connection."><SavedSecretNote saved={hasSavedSecret} /><SecretField id="calendly-access-token" label="Personal Access Token" value={values.token || ""} onChange={(value) => update("token", value)} show={showSecret} setShow={setShowSecret} placeholder="eyJ..." /><Field id="calendly-org-uri" label="Organization URI (optional)" value={values.org || ""} onChange={(value) => update("org", value)} placeholder="https://api.calendly.com/organizations/..." /><ToggleRow title="Sync event types" subtitle="Import active Calendly event types." /></CredentialForm>;
-  return <CredentialForm title="Cal.com credentials" note="Enter your Cal.com API key."><SavedSecretNote saved={hasSavedSecret} /><SecretField id="calcom-api-key" label="API Key" value={values.apiKey || ""} onChange={(value) => update("apiKey", value)} show={showSecret} setShow={setShowSecret} placeholder="cal_live_..." /><Field id="calcom-slug" label="Username / team slug" value={values.slug || ""} onChange={(value) => update("slug", value)} placeholder="your-team" /><ToggleRow title="Sync event types" subtitle="Import Cal.com event types and availability." /></CredentialForm>;
+  if (provider === "calendly") return <CredentialForm title="Calendly credentials" note="Use a Calendly personal access token. AI Caller validates it against your Calendly profile."><SavedSecretNote saved={hasSavedSecret} /><SecretField id="calendly-access-token" label="Personal Access Token" value={values.token || ""} onChange={(value) => update("token", value)} show={showSecret} setShow={setShowSecret} placeholder="eyJ..." /><Field id="calendly-org-uri" label="Organization URI (optional)" value={values.org || ""} onChange={(value) => update("org", value)} placeholder="https://api.calendly.com/organizations/..." /><ToggleRow title="Sync event types" subtitle="Import active Calendly event types." /></CredentialForm>;
+  return <CredentialForm title="Cal.com API v2" note="Enter your Cal.com API key. AI Caller validates it with the v2 /me endpoint."><SavedSecretNote saved={hasSavedSecret} /><SecretField id="calcom-api-key" label="API Key" value={values.apiKey || ""} onChange={(value) => update("apiKey", value)} show={showSecret} setShow={setShowSecret} placeholder="cal_live_..." /><Field id="calcom-slug" label="Username / team slug" value={values.slug || ""} onChange={(value) => update("slug", value)} placeholder="your-team" /><ToggleRow title="Sync event types" subtitle="Import Cal.com event types and availability." /></CredentialForm>;
 }
 
-function CreditsPanel() {
-  return <div className="credentialsCard"><div className="creditsHero"><span>Hosted AI</span><small>Uses your AI Caller credit wallet</small></div><div className="creditUsage"><div><strong>Active</strong><small>No provider key required</small></div></div><Link href="/settings" className="secondaryDrawerAction">View usage &amp; credits</Link></div>;
-}
-
+function CreditsPanel({ onUseHosted, busy }: { onUseHosted: () => void; busy: boolean }) { return <div className="credentialsCard"><div className="creditsHero"><span>Hosted AI</span><small>Uses your AI Caller credit wallet</small></div><div className="creditUsage"><div><strong>Available</strong><small>No provider key required</small></div></div><button type="button" className="primaryDrawerAction" disabled={busy} onClick={onUseHosted}>Use hosted AI</button><Link href="/settings" className="secondaryDrawerAction">View usage &amp; credits</Link></div>; }
 function CredentialForm({ title, note, children }: { title: string; note: string; children: ReactNode }) { return <div className="credentialsCard"><div className="credentialIntro"><strong>{title}</strong><p>{note}</p></div><div className="credentialFields">{children}</div></div>; }
 function Field({ id, label, value, onChange, placeholder }: { id: string; label: string; value: string; onChange: (value: string) => void; placeholder?: string }) { return <label className="integrationField" htmlFor={id}><span>{label}</span><input id={id} name={`integration-${id}`} autoComplete="off" data-lpignore="true" data-1p-ignore="true" value={value} onChange={(event) => onChange(event.target.value)} placeholder={placeholder} /></label>; }
 function SecretField({ id, label, value, onChange, show, setShow, placeholder = "••••••••••••••••" }: { id: string; label: string; value: string; onChange: (value: string) => void; show: boolean; setShow: (value: boolean) => void; placeholder?: string }) { return <label className="integrationField" htmlFor={id}><span>{label}</span><div className="secretInput"><input id={id} name={`integration-secret-${id}`} type={show ? "text" : "password"} autoComplete="new-password" data-lpignore="true" data-1p-ignore="true" value={value} onChange={(event) => onChange(event.target.value)} placeholder={placeholder} /><button type="button" onClick={() => setShow(!show)}>{show ? "Hide" : "Show"}</button></div></label>; }
