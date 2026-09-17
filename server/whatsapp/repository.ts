@@ -149,8 +149,23 @@ export async function reconcileDeferredWhatsAppDeliveryStatuses(
   return reconciled;
 }
 
+function metadataWhatsAppId(metadata: Record<string, unknown>) {
+  const value = metadata.whatsappWaId;
+  return typeof value === "string" && value.trim() ? value.trim() : null;
+}
+
 export async function getWhatsAppConversationRecipient(workspaceId: string, conversationId: string) {
-  const [row] = await db.select({ externalId: contactIdentities.externalId })
+  const [latestInbound] = await db.select({ metadata: messages.metadata }).from(messages).where(and(
+    eq(messages.workspaceId, workspaceId),
+    eq(messages.conversationId, conversationId),
+    eq(messages.channel, "WHATSAPP"),
+    eq(messages.direction, "INBOUND"),
+    eq(messages.senderType, "CUSTOMER"),
+  )).orderBy(desc(messages.createdAt)).limit(1);
+  const activeIdentity = latestInbound ? metadataWhatsAppId(latestInbound.metadata) : null;
+  if (activeIdentity) return activeIdentity;
+
+  const rows = await db.select({ externalId: contactIdentities.externalId })
     .from(conversations)
     .innerJoin(contactIdentities, and(
       eq(contactIdentities.workspaceId, workspaceId),
@@ -158,8 +173,8 @@ export async function getWhatsAppConversationRecipient(workspaceId: string, conv
       eq(contactIdentities.channel, "WHATSAPP"),
     ))
     .where(and(eq(conversations.workspaceId, workspaceId), eq(conversations.id, conversationId)))
-    .limit(1);
-  return row?.externalId ?? null;
+    .limit(2);
+  return rows.length === 1 ? rows[0].externalId : null;
 }
 
 function providerOccurredAt(metadata: Record<string, unknown>, fallback: Date) {
