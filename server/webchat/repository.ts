@@ -188,6 +188,7 @@ export async function createOrResumeWebchatSession(input: WebchatSessionInput) {
 export type WebchatTurnClaim =
   | { state: "claimed"; turnId: string }
   | { state: "completed"; turnId: string; responseText: string | null }
+  | { state: "failed"; turnId: string }
   | { state: "in_progress"; turnId: string };
 
 async function findWebchatTurn(workspaceId: string, sessionId: string, clientMessageId: string) {
@@ -203,29 +204,25 @@ async function claimExistingTurn(workspaceId: string, existing: NonNullable<Awai
   if (existing.status === "COMPLETED") {
     return { state: "completed", turnId: existing.id, responseText: existing.responseText };
   }
-
   if (existing.status === "FAILED") {
-    const [reclaimed] = await db.update(webchatTurns).set({ status: "PROCESSING", error: null, updatedAt: new Date() })
-      .where(and(
-        eq(webchatTurns.workspaceId, workspaceId),
-        eq(webchatTurns.id, existing.id),
-        eq(webchatTurns.status, "FAILED"),
-      ))
-      .returning();
-    if (reclaimed) return { state: "claimed", turnId: reclaimed.id };
+    return { state: "failed", turnId: existing.id };
   }
 
   if (existing.status === "PROCESSING") {
     const staleBefore = new Date(Date.now() - TURN_LEASE_MS);
-    const [reclaimed] = await db.update(webchatTurns).set({ error: null, updatedAt: new Date() })
-      .where(and(
+    if (existing.updatedAt < staleBefore) {
+      await db.update(webchatTurns).set({
+        status: "FAILED",
+        error: "Processing lease expired; automatic retry disabled to prevent duplicate external side effects.",
+        updatedAt: new Date(),
+      }).where(and(
         eq(webchatTurns.workspaceId, workspaceId),
         eq(webchatTurns.id, existing.id),
         eq(webchatTurns.status, "PROCESSING"),
         lt(webchatTurns.updatedAt, staleBefore),
-      ))
-      .returning();
-    if (reclaimed) return { state: "claimed", turnId: reclaimed.id };
+      ));
+      return { state: "failed", turnId: existing.id };
+    }
   }
 
   return { state: "in_progress", turnId: existing.id };
