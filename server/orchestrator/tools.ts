@@ -1,6 +1,7 @@
 import { z } from "zod";
 import { calendarBookingService } from "@/server/domain/core/calendar-booking";
 import { updateContactProfile } from "@/server/domain/core/contact-profile";
+import { getActiveConversationChannel, type ConversationChannel } from "@/server/domain/core/conversation-channels";
 import {
   appendMessage,
   getContactDetail,
@@ -113,6 +114,7 @@ async function updateLeadFromEnvelope(
   workspaceId: string,
   contactId: string,
   lead: NonNullable<OrchestratorEnvelope["lead"]>,
+  channel: ConversationChannel,
 ) {
   const detail = await getContactDetail(workspaceId, contactId);
   if (!detail) throw new Error("The conversation contact no longer exists.");
@@ -121,7 +123,7 @@ async function updateLeadFromEnvelope(
     status: qualificationStatus(existing?.status, lead.status),
     intent: lead.intent !== undefined ? lead.intent : existing?.intent ?? null,
     serviceRequested: lead.serviceRequested !== undefined ? lead.serviceRequested : existing?.serviceRequested ?? null,
-    source: existing?.source ?? "WEBCHAT",
+    source: existing?.source ?? channel,
     estimatedValue: existing?.estimatedValue ?? null,
     assignedUserId: existing?.assignedUserId ?? null,
   });
@@ -133,8 +135,9 @@ export async function executeOrchestratorTools(
   contactId: string,
   envelope: OrchestratorEnvelope,
 ): Promise<OrchestratorToolResult> {
+  const channel = await getActiveConversationChannel(workspaceId, conversationId) ?? "WEBCHAT";
   if (envelope.contact) await updateContactProfile(workspaceId, contactId, envelope.contact);
-  if (envelope.lead) await updateLeadFromEnvelope(workspaceId, contactId, envelope.lead);
+  if (envelope.lead) await updateLeadFromEnvelope(workspaceId, contactId, envelope.lead, channel);
 
   if (envelope.action.type === "NONE") return { kind: "none", data: {} };
 
@@ -167,7 +170,7 @@ export async function executeOrchestratorTools(
       startsAt: new Date(envelope.action.startsAt),
       endsAt: new Date(envelope.action.endsAt),
       timezone: envelope.action.timezone,
-      bookingSource: "WEBCHAT_AI",
+      bookingSource: `${channel}_AI`,
       notes: envelope.action.notes ?? null,
       attendeeName: detail.name,
       attendeeEmail: detail.email,
@@ -178,12 +181,12 @@ export async function executeOrchestratorTools(
       status: "BOOKED",
       intent: existingLead?.intent ?? "Appointment booking",
       serviceRequested: existingLead?.serviceRequested ?? envelope.action.title,
-      source: existingLead?.source ?? "WEBCHAT",
+      source: existingLead?.source ?? channel,
       estimatedValue: existingLead?.estimatedValue ?? null,
       assignedUserId: existingLead?.assignedUserId ?? null,
     });
     await appendMessage(workspaceId, conversationId, {
-      channel: "WEBCHAT",
+      channel,
       direction: "INTERNAL",
       senderType: "SYSTEM",
       contentType: "APPOINTMENT_EVENT",
@@ -209,7 +212,7 @@ export async function executeOrchestratorTools(
 
   const conversation = await setConversationHandlingMode(workspaceId, conversationId, "HUMAN", null);
   await appendMessage(workspaceId, conversationId, {
-    channel: "WEBCHAT",
+    channel,
     direction: "INTERNAL",
     senderType: "SYSTEM",
     contentType: "SYSTEM_EVENT",
