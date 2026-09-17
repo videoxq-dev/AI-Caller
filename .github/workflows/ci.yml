@@ -28,6 +28,7 @@ jobs:
       INTEGRATION_ENCRYPTION_KEY: AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=
       PG_BOSS_SCHEMA: pgboss
       LOG_LEVEL: silent
+      AI_CALLER_E2E_FIXTURES: "1"
 
     services:
       postgres:
@@ -84,15 +85,27 @@ jobs:
           cat /tmp/ai-caller-next.log
           exit 1
 
-      - name: Browser smoke verification
+      - name: Milestone 3 browser regression verification
         run: npm run test:browser
 
-      - name: Upload browser verification screenshots
+      - name: Milestone 4 browser acceptance verification
+        run: npm run test:browser:m4
+
+      - name: Upload Milestone 3 browser screenshots
         if: always()
         uses: actions/upload-artifact@v4
         with:
           name: core-domain-browser-verification
           path: artifacts/core-domain-browser
+          if-no-files-found: warn
+          retention-days: 14
+
+      - name: Upload Milestone 4 browser screenshots
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: milestone4-browser-verification
+          path: artifacts/milestone4-browser
           if-no-files-found: warn
           retention-days: 14
 

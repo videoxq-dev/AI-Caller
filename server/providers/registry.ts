@@ -6,9 +6,11 @@ import type { AIProvider, CalendarProvider } from "./contracts";
 import { createAIProvider, createHostedAIProvider } from "./ai";
 import { createCalendarProvider } from "./calendar";
 import { assertProviderSupportsCapability } from "./catalog";
+import { createE2EAIProvider, createE2ECalendarProvider, isE2EProviderFixtureMode } from "./e2e-fixtures";
 import { resolveProviderRoute } from "./resolver";
 
 export async function resolveAIProvider(workspaceId: string, fetcher: typeof fetch = fetch): Promise<AIProvider> {
+  if (isE2EProviderFixtureMode()) return createE2EAIProvider();
   const route = await resolveProviderRoute(workspaceId, "AI_TEXT");
   if (!route) return createHostedAIProvider(fetcher);
   if (route.mode === "HOSTED") return createHostedAIProvider(fetcher);
@@ -29,6 +31,7 @@ export async function resolveCalendarProvider(workspaceId: string, fetcher: type
   const integration = await getPrivateIntegration(workspaceId, route.provider);
   if (!integration) throw new Error(`The ${route.provider} calendar integration no longer exists.`);
   if (integration.status !== "CONNECTED") throw new Error(`The ${route.provider} calendar integration is not connected.`);
+  if (isE2EProviderFixtureMode()) return createE2ECalendarProvider();
   const setup = await getCalendarSetup(workspaceId);
   return createCalendarProvider({ ...integration, runtimeSettings: setup ?? {} }, fetcher);
 }
@@ -46,6 +49,7 @@ export async function resolveCalendarProviderForIntegration(
   if (!integration) throw new Error("The appointment's calendar integration no longer exists.");
   assertProviderSupportsCapability(integration.provider, "CALENDAR");
   if (integration.status !== "CONNECTED") throw new Error(`The ${integration.provider} calendar integration is not connected.`);
+  if (isE2EProviderFixtureMode()) return createE2ECalendarProvider();
   const setup = await getCalendarSetup(workspaceId);
   return createCalendarProvider({ ...integration, runtimeSettings: setup ?? {} }, fetcher);
 }

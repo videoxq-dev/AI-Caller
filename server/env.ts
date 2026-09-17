@@ -15,6 +15,7 @@ const envSchema = z.object({
   HOSTED_AI_PROVIDER: z.enum(["openai", "gemini", "openrouter"]).default("openai"),
   HOSTED_AI_API_KEY: z.string().min(1).optional(),
   HOSTED_AI_MODEL: z.string().min(1).optional(),
+  HOSTED_AI_CREDITS_PER_CALL: z.coerce.number().int().positive().default(1),
   GOOGLE_OAUTH_CLIENT_ID: z.string().min(1).optional(),
   GOOGLE_OAUTH_CLIENT_SECRET: z.string().min(1).optional(),
   MICROSOFT_OAUTH_CLIENT_ID: z.string().min(1).optional(),
