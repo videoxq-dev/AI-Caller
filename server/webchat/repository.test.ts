@@ -27,7 +27,7 @@ describe("web chat persistence", () => {
   });
 
   it("requires the secret session token before returning prior conversation history", async () => {
-    const first = await createOrResumeWebchatSession({ widgetKey, visitorId: "visitor_client_hint_123" });
+    const first = await createOrResumeWebchatSession({ widgetKey });
     expect(first).not.toBeNull();
     if (!first) throw new Error("Expected a web chat session.");
 
@@ -46,15 +46,11 @@ describe("web chat persistence", () => {
     const resumed = await createOrResumeWebchatSession({
       widgetKey,
       sessionToken: first.sessionToken,
-      visitorId: first.visitorId,
     });
     expect(resumed?.visitorId).toBe(first.visitorId);
     expect(resumed?.history.map((message) => message.text)).toContain("This is private history.");
 
-    const unauthenticated = await createOrResumeWebchatSession({
-      widgetKey,
-      visitorId: first.visitorId,
-    });
+    const unauthenticated = await createOrResumeWebchatSession({ widgetKey });
     expect(unauthenticated?.visitorId).not.toBe(first.visitorId);
     expect(unauthenticated?.conversationId).not.toBe(first.conversationId);
     expect(unauthenticated?.history).toEqual([]);
