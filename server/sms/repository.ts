@@ -16,15 +16,16 @@ export async function claimProviderWebhookEvent(workspaceId: string, input: Prov
     provider: input.provider,
     externalEventId: input.externalEventId,
     payload: input.payload,
-    status: "PROCESSING",
+    status: "RECEIVED",
   }).onConflictDoNothing().returning({ id: providerWebhookEvents.id });
 
-  if (created) return { state: "claimed" as const, eventId: created.id, status: "PROCESSING" as const };
+  if (created) return { state: "claimed" as const, eventId: created.id, status: "RECEIVED" as const, payload: input.payload };
 
   const [existing] = await db.select({
     id: providerWebhookEvents.id,
     workspaceId: providerWebhookEvents.workspaceId,
     status: providerWebhookEvents.status,
+    payload: providerWebhookEvents.payload,
   }).from(providerWebhookEvents).where(and(
     eq(providerWebhookEvents.provider, input.provider),
     eq(providerWebhookEvents.externalEventId, input.externalEventId),
@@ -34,14 +35,23 @@ export async function claimProviderWebhookEvent(workspaceId: string, input: Prov
   if (existing.workspaceId !== workspaceId) {
     throw new AppError("WEBHOOK_WORKSPACE_MISMATCH", "The provider webhook does not belong to this workspace.", 409);
   }
-  return { state: "duplicate" as const, eventId: existing.id, status: existing.status };
+  return { state: "duplicate" as const, eventId: existing.id, status: existing.status, payload: existing.payload };
+}
+
+export async function updateProviderWebhookPayload(workspaceId: string, eventId: string, payload: Record<string, unknown>) {
+  const [updated] = await db.update(providerWebhookEvents).set({ payload }).where(and(
+    eq(providerWebhookEvents.workspaceId, workspaceId),
+    eq(providerWebhookEvents.id, eventId),
+    eq(providerWebhookEvents.status, "RECEIVED"),
+  )).returning();
+  return updated ?? null;
 }
 
 export async function markProviderWebhookQueued(workspaceId: string, eventId: string) {
   const [updated] = await db.update(providerWebhookEvents).set({ status: "QUEUED", error: null, processedAt: null }).where(and(
     eq(providerWebhookEvents.workspaceId, workspaceId),
     eq(providerWebhookEvents.id, eventId),
-    eq(providerWebhookEvents.status, "PROCESSING"),
+    eq(providerWebhookEvents.status, "RECEIVED"),
   )).returning();
   return updated ?? null;
 }
