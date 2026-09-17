@@ -7,6 +7,13 @@ import type { PrivateIntegration } from "./connections";
 type Credentials = Record<string, string>;
 type Message = { role: "system" | "user" | "assistant"; content: string };
 
+type OpenAIResponse = {
+  output?: Array<{
+    type?: string;
+    content?: Array<{ type?: string; text?: string }>;
+  }>;
+};
+
 type OpenAICompatibleResponse = {
   choices?: Array<{ message?: { content?: string } }>;
 };
@@ -30,6 +37,35 @@ function requireCredential(values: Credentials, key: string, label: string) {
 function settingString(settings: Record<string, unknown>, key: string) {
   const value = settings[key];
   return typeof value === "string" && value.trim() ? value.trim() : undefined;
+}
+
+class OpenAIResponsesProvider implements AIProvider {
+  constructor(
+    private readonly apiKey: string,
+    private readonly defaultModel: string,
+    private readonly fetcher: typeof fetch = fetch,
+  ) {}
+
+  async generate(input: { messages: Message[]; model?: string }) {
+    const model = input.model?.trim() || this.defaultModel;
+    const instructions = input.messages.filter((message) => message.role === "system").map((message) => message.content).join("\n\n").trim();
+    const messages = input.messages.filter((message) => message.role !== "system").map((message) => ({ role: message.role, content: message.content }));
+    const response = await providerJson<OpenAIResponse>("https://api.openai.com/v1/responses", {
+      method: "POST",
+      headers: { authorization: `Bearer ${this.apiKey}`, "content-type": "application/json" },
+      body: JSON.stringify({ model, ...(instructions ? { instructions } : {}), input: messages, store: false }),
+    }, this.fetcher);
+
+    const text = (response.output ?? [])
+      .filter((item) => item.type === "message")
+      .flatMap((item) => item.content ?? [])
+      .filter((part) => part.type === "output_text" && typeof part.text === "string")
+      .map((part) => part.text ?? "")
+      .join("")
+      .trim();
+    if (!text) throw new Error("OpenAI returned an empty response.");
+    return { text, raw: response };
+  }
 }
 
 class OpenAICompatibleProvider implements AIProvider {
@@ -71,16 +107,13 @@ class GeminiProvider implements AIProvider {
     const systemText = input.messages.filter((message) => message.role === "system").map((message) => message.content).join("\n\n").trim();
     const contents = input.messages
       .filter((message) => message.role !== "system")
-      .map((message) => ({
-        role: message.role === "assistant" ? "model" : "user",
-        parts: [{ text: message.content }],
-      }));
+      .map((message) => ({ role: message.role === "assistant" ? "model" : "user", parts: [{ text: message.content }] }));
 
     const response = await providerJson<GeminiResponse>(
-      `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:generateContent?key=${encodeURIComponent(this.apiKey)}`,
+      `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:generateContent`,
       {
         method: "POST",
-        headers: { "content-type": "application/json" },
+        headers: { "content-type": "application/json", "x-goog-api-key": this.apiKey },
         body: JSON.stringify({
           ...(systemText ? { systemInstruction: { parts: [{ text: systemText }] } } : {}),
           contents,
@@ -100,35 +133,22 @@ export function createAIProvider(input: PrivateIntegration, fetcher: typeof fetc
   const model = settingString(input.settings, "model");
 
   if (input.provider === "openai") {
-    return new OpenAICompatibleProvider(
-      requireCredential(values, "apiKey", "OpenAI API key"),
-      model ?? "gpt-4.1-mini",
-      "https://api.openai.com/v1/chat/completions",
-      {},
-      fetcher,
-    );
+    return new OpenAIResponsesProvider(requireCredential(values, "apiKey", "OpenAI API key"), model ?? "gpt-5.6", fetcher);
   }
 
   if (input.provider === "openrouter") {
     const siteUrl = settingString(input.settings, "siteUrl");
     return new OpenAICompatibleProvider(
       requireCredential(values, "apiKey", "OpenRouter API key"),
-      model ?? "openai/gpt-4.1-mini",
+      model ?? "openai/gpt-5.6",
       "https://openrouter.ai/api/v1/chat/completions",
-      {
-        ...(siteUrl ? { "HTTP-Referer": siteUrl } : {}),
-        "X-Title": "AI Caller",
-      },
+      { ...(siteUrl ? { "HTTP-Referer": siteUrl } : {}), "X-Title": "AI Caller" },
       fetcher,
     );
   }
 
   if (input.provider === "gemini") {
-    return new GeminiProvider(
-      requireCredential(values, "apiKey", "Gemini API key"),
-      model ?? "gemini-2.5-flash",
-      fetcher,
-    );
+    return new GeminiProvider(requireCredential(values, "apiKey", "Gemini API key"), model ?? "gemini-3.8-flash", fetcher);
   }
 
   throw new Error(`AI generation is not supported by provider ${input.provider}.`);
@@ -139,24 +159,18 @@ export function createHostedAIProvider(fetcher: typeof fetch = fetch): AIProvide
   if (!env.HOSTED_AI_API_KEY) throw new Error("Hosted AI is not configured on the server.");
 
   if (env.HOSTED_AI_PROVIDER === "gemini") {
-    return new GeminiProvider(env.HOSTED_AI_API_KEY, env.HOSTED_AI_MODEL ?? "gemini-2.5-flash", fetcher);
+    return new GeminiProvider(env.HOSTED_AI_API_KEY, env.HOSTED_AI_MODEL ?? "gemini-3.8-flash", fetcher);
   }
 
   if (env.HOSTED_AI_PROVIDER === "openrouter") {
     return new OpenAICompatibleProvider(
       env.HOSTED_AI_API_KEY,
-      env.HOSTED_AI_MODEL ?? "openai/gpt-4.1-mini",
+      env.HOSTED_AI_MODEL ?? "openai/gpt-5.6",
       "https://openrouter.ai/api/v1/chat/completions",
       { "X-Title": "AI Caller Hosted" },
       fetcher,
     );
   }
 
-  return new OpenAICompatibleProvider(
-    env.HOSTED_AI_API_KEY,
-    env.HOSTED_AI_MODEL ?? "gpt-4.1-mini",
-    "https://api.openai.com/v1/chat/completions",
-    {},
-    fetcher,
-  );
+  return new OpenAIResponsesProvider(env.HOSTED_AI_API_KEY, env.HOSTED_AI_MODEL ?? "gpt-5.6-luna", fetcher);
 }
