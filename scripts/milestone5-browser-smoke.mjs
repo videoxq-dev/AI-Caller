@@ -72,13 +72,30 @@ async function api(context, method, route, data, label) {
 }
 
 async function assertNoHorizontalOverflow(page, label) {
-  const metrics = await page.evaluate(() => ({
-    scrollWidth: document.documentElement.scrollWidth,
-    clientWidth: document.documentElement.clientWidth,
-    bodyScrollWidth: document.body.scrollWidth,
-  }));
+  const metrics = await page.evaluate(() => {
+    const clientWidth = document.documentElement.clientWidth;
+    const offenders = Array.from(document.querySelectorAll("*")).map((element) => {
+      const rect = element.getBoundingClientRect();
+      return {
+        tag: element.tagName.toLowerCase(),
+        id: element.id || null,
+        className: typeof element.className === "string" ? element.className : null,
+        left: Math.round(rect.left * 10) / 10,
+        right: Math.round(rect.right * 10) / 10,
+        width: Math.round(rect.width * 10) / 10,
+      };
+    }).filter((rect) => rect.right > clientWidth + 2 || rect.left < -2)
+      .sort((left, right) => Math.max(right.right - clientWidth, -right.left) - Math.max(left.right - clientWidth, -left.left))
+      .slice(0, 8);
+    return {
+      scrollWidth: document.documentElement.scrollWidth,
+      clientWidth,
+      bodyScrollWidth: document.body.scrollWidth,
+      offenders,
+    };
+  });
   const overflow = Math.max(metrics.scrollWidth, metrics.bodyScrollWidth) - metrics.clientWidth;
-  assert(overflow <= 2, `${label} has ${overflow}px of horizontal overflow.`);
+  assert(overflow <= 2, `${label} has ${overflow}px of horizontal overflow. Offenders: ${JSON.stringify(metrics.offenders)}`);
 }
 
 const browser = await chromium.launch({ headless: true });
@@ -189,8 +206,8 @@ try {
   await assertNoHorizontalOverflow(page, "BYOP SMS webhook setup desktop");
   await page.screenshot({ path: path.join(outputDir, "sms-byop-setup-desktop.png"), fullPage: true });
   await page.setViewportSize({ width: 390, height: 844 });
-  await assertNoHorizontalOverflow(page, "BYOP SMS webhook setup mobile");
   await page.screenshot({ path: path.join(outputDir, "sms-byop-setup-mobile.png"), fullPage: true });
+  await assertNoHorizontalOverflow(page, "BYOP SMS webhook setup mobile");
   await page.setViewportSize({ width: 1440, height: 1000 });
 
   const telnyxPublicKey = Buffer.alloc(32, 7).toString("base64");
