@@ -6,6 +6,7 @@ import { getEnv } from "@/server/env";
 import { AppError, toErrorResponse } from "@/server/http/errors";
 import { parseInput } from "@/server/http/validation";
 import { resolveProviderRoute } from "@/server/providers/resolver";
+import { decryptIntegrationCredentials, type EncryptedSecretEnvelope } from "@/server/security/secrets";
 
 const providerSchema = z.enum(["telnyx", "twilio", "plivo"]);
 const updateSchema = z.object({
@@ -18,6 +19,15 @@ const updateSchema = z.object({
 
 function callbackUrl(provider: string, workspaceId: string) {
   return `${getEnv().BETTER_AUTH_URL.replace(/\/$/, "")}/api/webhooks/sms/${provider}/${workspaceId}`;
+}
+
+function legacyPublicSettings(encryptedCredentials: Record<string, unknown> | null | undefined) {
+  if (!encryptedCredentials) return {} as Record<string, string>;
+  try {
+    return decryptIntegrationCredentials<Record<string, string>>(encryptedCredentials as EncryptedSecretEnvelope);
+  } catch {
+    return {} as Record<string, string>;
+  }
 }
 
 export async function GET(request: Request) {
@@ -35,6 +45,10 @@ export async function GET(request: Request) {
     const settings = integration?.settings && typeof integration.settings === "object"
       ? integration.settings as Record<string, unknown>
       : {};
+    const legacy = legacyPublicSettings(integration?.encryptedCredentials);
+    const senderNumber = typeof settings.phone === "string" && settings.phone.trim()
+      ? settings.phone
+      : legacy.phone ?? null;
     const active = activeProvider === provider;
     const hosted = active && route?.mode === "HOSTED";
 
@@ -43,9 +57,9 @@ export async function GET(request: Request) {
       mode: active ? route?.mode ?? null : null,
       provider,
       webhookUrl: callbackUrl(provider, context.workspace.id),
-      senderNumber: typeof settings.phone === "string" ? settings.phone : null,
+      senderNumber,
       webhookPublicKeyConfigured: provider === "telnyx"
-        ? (hosted ? Boolean(getEnv().HOSTED_SMS_TELNYX_WEBHOOK_PUBLIC_KEY) : Boolean(settings.webhookPublicKey))
+        ? (hosted ? Boolean(getEnv().HOSTED_SMS_TELNYX_WEBHOOK_PUBLIC_KEY) : Boolean(settings.webhookPublicKey || legacy.webhookPublicKey))
         : null,
     });
   } catch (error) {
@@ -65,6 +79,7 @@ export async function PUT(request: Request) {
       throw new AppError("BAD_REQUEST", "Only Telnyx uses a configured Ed25519 webhook public key.", 400);
     }
 
+    const legacy = legacyPublicSettings(integration.encryptedCredentials);
     const settings = {
       ...integration.settings,
       ...(input.phone !== undefined ? { phone: normalizePhone(input.phone) } : {}),
@@ -80,8 +95,8 @@ export async function PUT(request: Request) {
     return Response.json({
       integration: updated,
       webhookUrl: callbackUrl(input.provider, context.workspace.id),
-      senderNumber: settings.phone ?? null,
-      webhookPublicKeyConfigured: input.provider === "telnyx" ? Boolean(settings.webhookPublicKey) : null,
+      senderNumber: typeof settings.phone === "string" ? settings.phone : legacy.phone ?? null,
+      webhookPublicKeyConfigured: input.provider === "telnyx" ? Boolean(settings.webhookPublicKey || legacy.webhookPublicKey) : null,
     });
   } catch (error) {
     return toErrorResponse(error);
