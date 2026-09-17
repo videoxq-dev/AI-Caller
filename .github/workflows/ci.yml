@@ -29,6 +29,10 @@ jobs:
       PG_BOSS_SCHEMA: pgboss
       LOG_LEVEL: silent
       AI_CALLER_E2E_FIXTURES: "1"
+      HOSTED_SMS_PROVIDER: twilio
+      HOSTED_SMS_TWILIO_ACCOUNT_SID: AC11111111111111111111111111111111
+      HOSTED_SMS_TWILIO_AUTH_TOKEN: ci-twilio-signature-secret
+      HOSTED_SMS_CREDITS_PER_MESSAGE: "1"
 
     services:
       postgres:
@@ -85,11 +89,24 @@ jobs:
           cat /tmp/ai-caller-next.log
           exit 1
 
+      - name: Start background worker
+        run: |
+          npm run worker > /tmp/ai-caller-worker.log 2>&1 &
+          echo $! > /tmp/ai-caller-worker.pid
+          sleep 2
+          if ! kill -0 "$(cat /tmp/ai-caller-worker.pid)" 2>/dev/null; then
+            cat /tmp/ai-caller-worker.log
+            exit 1
+          fi
+
       - name: Milestone 3 browser regression verification
         run: npm run test:browser
 
       - name: Milestone 4 browser acceptance verification
         run: npm run test:browser:m4
+
+      - name: Milestone 5 SMS browser acceptance verification
+        run: npm run test:browser:m5
 
       - name: Upload Milestone 3 browser screenshots
         if: always()
@@ -108,6 +125,22 @@ jobs:
           path: artifacts/milestone4-browser
           if-no-files-found: warn
           retention-days: 14
+
+      - name: Upload Milestone 5 browser screenshots
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: milestone5-browser-verification
+          path: artifacts/milestone5-browser
+          if-no-files-found: warn
+          retention-days: 14
+
+      - name: Stop background worker
+        if: always()
+        run: |
+          if [ -f /tmp/ai-caller-worker.pid ]; then
+            kill "$(cat /tmp/ai-caller-worker.pid)" || true
+          fi
 
       - name: Stop production app
         if: always()
