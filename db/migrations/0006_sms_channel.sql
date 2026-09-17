@@ -9,6 +9,6 @@ CREATE TABLE "provider_webhook_events" (
   "received_at" timestamptz DEFAULT now() NOT NULL,
   "processed_at" timestamptz
 );
-CREATE UNIQUE INDEX "provider_webhook_events_provider_external_uq" ON "provider_webhook_events" ("provider", "external_event_id");
+CREATE UNIQUE INDEX "provider_webhook_events_workspace_provider_external_uq" ON "provider_webhook_events" ("workspace_id", "provider", "external_event_id");
 CREATE INDEX "provider_webhook_events_workspace_received_idx" ON "provider_webhook_events" ("workspace_id", "received_at");
 CREATE INDEX "provider_webhook_events_workspace_status_idx" ON "provider_webhook_events" ("workspace_id", "status");
