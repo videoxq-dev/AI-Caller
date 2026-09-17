@@ -58,6 +58,21 @@ export async function claimQueuedProviderWebhookEvent(workspaceId: string, event
   return updated ?? null;
 }
 
+export async function releaseProviderWebhookEventForRetry(workspaceId: string, eventId: string, error: unknown) {
+  const message = error instanceof Error ? error.message : "Provider webhook processing failed.";
+  const [updated] = await db.update(providerWebhookEvents).set({
+    status: "QUEUED",
+    error: message.slice(0, 500),
+    processedAt: null,
+  }).where(and(
+    eq(providerWebhookEvents.workspaceId, workspaceId),
+    eq(providerWebhookEvents.id, eventId),
+    eq(providerWebhookEvents.status, "PROCESSING"),
+  )).returning();
+  if (!updated) throw new AppError("WEBHOOK_RETRY_CONFLICT", "Provider webhook event could not be released for retry.", 409);
+  return updated;
+}
+
 export async function completeProviderWebhookEvent(workspaceId: string, eventId: string) {
   const [updated] = await db.update(providerWebhookEvents).set({
     status: "PROCESSED",
