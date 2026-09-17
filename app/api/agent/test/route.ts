@@ -49,6 +49,8 @@ export async function POST(request: Request) {
     });
 
     const result = await agentTestOrchestrator.respond(context.workspace.id, conversation.id);
+    const simulated = "simulated" in result.toolResult.data && result.toolResult.data.simulated === true;
+
     if (result.reply) {
       await appendMessage(context.workspace.id, conversation.id, {
         channel: "WEBCHAT",
@@ -63,7 +65,7 @@ export async function POST(request: Request) {
           testMode: true,
           action: result.action.type,
           toolResult: result.toolResult.kind,
-          simulated: result.toolResult.data.simulated === true,
+          simulated,
         },
       });
     }
@@ -74,7 +76,7 @@ export async function POST(request: Request) {
       handlingMode: result.handlingMode,
       action: result.action.type,
       toolResult: result.toolResult,
-      simulated: result.toolResult.data.simulated === true,
+      simulated,
     });
   } catch (error) {
     return toErrorResponse(error);
