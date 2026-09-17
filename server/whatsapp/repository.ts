@@ -92,13 +92,20 @@ export async function getWhatsAppConversationRecipient(workspaceId: string, conv
   return row?.externalId ?? null;
 }
 
+function providerOccurredAt(metadata: Record<string, unknown>, fallback: Date) {
+  const value = metadata.occurredAt;
+  if (typeof value !== "string") return fallback;
+  const parsed = new Date(value);
+  return Number.isNaN(parsed.getTime()) ? fallback : parsed;
+}
+
 export async function latestWhatsAppInboundAt(workspaceId: string, conversationId: string) {
-  const [row] = await db.select({ createdAt: messages.createdAt }).from(messages).where(and(
+  const [row] = await db.select({ createdAt: messages.createdAt, metadata: messages.metadata }).from(messages).where(and(
     eq(messages.workspaceId, workspaceId),
     eq(messages.conversationId, conversationId),
     eq(messages.channel, "WHATSAPP"),
     eq(messages.direction, "INBOUND"),
     eq(messages.senderType, "CUSTOMER"),
   )).orderBy(desc(messages.createdAt)).limit(1);
-  return row?.createdAt ?? null;
+  return row ? providerOccurredAt(row.metadata, row.createdAt) : null;
 }
