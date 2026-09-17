@@ -277,7 +277,7 @@ try {
   assert(lead.rows[0]?.source === "WHATSAPP", `Expected WhatsApp lead source, got ${lead.rows[0]?.source}.`);
   const appointment = await pool.query(`SELECT status, booking_source FROM appointments WHERE workspace_id = $1 LIMIT 1`, [workspaceId]);
   assert(appointment.rows[0]?.status === "CONFIRMED", `Expected confirmed WhatsApp appointment, got ${appointment.rows[0]?.status}.`);
-  assert(appointment.rows[0]?.booking_source === "WHATSAPP", `Expected WhatsApp booking source, got ${appointment.rows[0]?.booking_source}.`);
+  assert(appointment.rows[0]?.booking_source === "WHATSAPP_AI", `Expected WHATSAPP_AI booking source, got ${appointment.rows[0]?.booking_source}.`);
 
   const statusBase = Math.floor(Date.now() / 1000);
   for (const [offset, status] of [[1, "sent"], [2, "delivered"], [3, "read"]]) {
