@@ -56,6 +56,17 @@ async function executeTestTools(
     };
   }
 
+  if (envelope.action.type === "QUALIFY_LEAD") {
+    return {
+      kind: "qualification",
+      data: {
+        ...captured,
+        simulated: true,
+        answers: envelope.action.answers,
+      },
+    };
+  }
+
   return {
     kind: "escalation",
     data: {
