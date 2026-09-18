@@ -150,16 +150,30 @@ try {
   await page.goto(`${baseUrl}/ai-agent`, { waitUntil: "networkidle" });
   await page.getByRole("heading", { name: "AI Agent", exact: true }).waitFor({ timeout: 10_000 });
   assert(await page.getByLabel("Active workspace").inputValue() === workspaceId, "AI Agent did not use shared AppNav.");
+  await assertNoHorizontalOverflow(page, "AI Agent shared AppNav desktop");
+  await page.screenshot({ path: path.join(outputDir, "ai-agent-appnav-desktop.png"), fullPage: true });
 
   await page.goto(`${baseUrl}/integrations`, { waitUntil: "networkidle" });
   await page.getByRole("heading", { name: "Integrations", exact: true }).waitFor({ timeout: 10_000 });
   assert(await page.getByLabel("Active workspace").inputValue() === workspaceId, "Integrations did not use shared AppNav.");
+  await assertNoHorizontalOverflow(page, "Integrations shared AppNav desktop");
+  await page.screenshot({ path: path.join(outputDir, "integrations-appnav-desktop.png"), fullPage: true });
 
   await page.setViewportSize({ width: 390, height: 844 });
   await page.goto(`${baseUrl}/dashboard`, { waitUntil: "networkidle" });
   await page.getByRole("heading", { name: "Dashboard", exact: true }).waitFor({ timeout: 10_000 });
   await assertNoHorizontalOverflow(page, "Live dashboard mobile");
   await page.screenshot({ path: path.join(outputDir, "dashboard-mobile.png"), fullPage: true });
+
+  await page.goto(`${baseUrl}/ai-agent`, { waitUntil: "networkidle" });
+  await page.getByRole("heading", { name: "AI Agent", exact: true }).waitFor({ timeout: 10_000 });
+  await assertNoHorizontalOverflow(page, "AI Agent shared AppNav mobile");
+  await page.screenshot({ path: path.join(outputDir, "ai-agent-appnav-mobile.png"), fullPage: true });
+
+  await page.goto(`${baseUrl}/integrations`, { waitUntil: "networkidle" });
+  await page.getByRole("heading", { name: "Integrations", exact: true }).waitFor({ timeout: 10_000 });
+  await assertNoHorizontalOverflow(page, "Integrations shared AppNav mobile");
+  await page.screenshot({ path: path.join(outputDir, "integrations-appnav-mobile.png"), fullPage: true });
 
   assert(runtimeErrors.length === 0, `Browser/runtime errors detected: ${runtimeErrors.join(" | ")}`);
   console.log("Milestone 9 browser verification passed for live workspace dashboard metrics, activity, responsive layout, and shared AppNav on Dashboard, AI Agent, and Integrations.");
