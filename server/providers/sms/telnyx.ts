@@ -1,5 +1,6 @@
 import { createPublicKey, verify } from "node:crypto";
 import { providerJson } from "../http";\nimport { parseTelnyxWebhookPublicKey, verifyTelnyxWebhookSignature } from "../telnyx-webhook";
+export { parseTelnyxWebhookPublicKey } from "../telnyx-webhook";
 import type { NormalizedSmsEvent, SMSProvider, SmsWebhookInput } from "../contracts";
 import { mapSmsDeliveryStatus, normalizeOccurredAt, requiredString } from "./common";
 
