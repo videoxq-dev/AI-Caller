@@ -384,6 +384,7 @@ async function assignPlanInTx(
   planId: "PERSONAL" | "GROWTH",
   source: string,
 ) {
+  await tx.execute(sql`select pg_advisory_xact_lock(hashtext('plan-entitlements'))`);
   await tx.execute(sql`select pg_advisory_xact_lock(hashtext(${`plan-seat:${workspaceId}`}))`);
   const [target] = await tx.select().from(plans).where(eq(plans.id, planId)).limit(1);
   if (!target || !target.active) throw new AppError("PLAN_NOT_AVAILABLE", "That plan is not available.", 409);
@@ -497,6 +498,7 @@ export async function updateAdminPlan(input: {
   }
 
   return db.transaction(async (tx) => {
+    await tx.execute(sql`select pg_advisory_xact_lock(hashtext('plan-entitlements'))`);
     const [plan] = await tx.select().from(plans).where(eq(plans.id, input.planId)).limit(1);
     if (!plan) throw new AppError("PLAN_NOT_FOUND", "Plan not found.", 404);
 

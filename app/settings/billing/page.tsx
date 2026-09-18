@@ -46,7 +46,6 @@ type Usage = {
   provider: string;
   mode: "HOSTED" | "BYOP";
   creditsCharged: number;
-  billedUnits: Record<string, number>;
   createdAt: string;
 };
 

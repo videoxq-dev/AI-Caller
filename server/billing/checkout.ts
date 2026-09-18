@@ -144,11 +144,7 @@ export async function getBillingOverview(workspaceId: string) {
       capability: usageEvents.capability,
       provider: usageEvents.provider,
       mode: usageEvents.mode,
-      providerUsage: usageEvents.providerUsage,
       creditsCharged: usageEvents.creditsCharged,
-      billedUnits: usageEvents.billedUnits,
-      referenceType: usageEvents.referenceType,
-      referenceId: usageEvents.referenceId,
       createdAt: usageEvents.createdAt,
     }).from(usageEvents)
       .where(eq(usageEvents.workspaceId, workspaceId))

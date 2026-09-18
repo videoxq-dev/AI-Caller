@@ -68,6 +68,7 @@ export async function grantStarterCredits(workspaceId: string, referenceId: stri
   const amount = getEnv().STARTER_CREDITS;
 
   return db.transaction(async (tx) => {
+    await lockWallet(tx, workspaceId);
     const existing = await tx
       .select({ id: creditLedger.id, balanceAfter: creditLedger.balanceAfter })
       .from(creditLedger)
@@ -185,8 +186,53 @@ export async function settleCreditReservation(
       if (!entry) throw new AppError("CREDIT_SETTLEMENT_INCOMPLETE", "Credit settlement ledger entry is missing.", 409);
       return entry.balanceAfter;
     }
+    if (reservation.status === "RELEASED") {
+      const [existing] = await tx.select({ balanceAfter: creditLedger.balanceAfter }).from(creditLedger).where(and(
+        eq(creditLedger.workspaceId, workspaceId),
+        eq(creditLedger.type, "DEBIT"),
+        eq(creditLedger.referenceType, input.referenceType),
+        eq(creditLedger.referenceId, input.referenceId),
+      )).limit(1);
+      if (existing) return existing.balanceAfter;
+
+      const [wallet] = await tx.select({ balance: creditWallets.balance }).from(creditWallets)
+        .where(eq(creditWallets.workspaceId, workspaceId)).limit(1);
+      if (!wallet) throw new AppError("CREDIT_WALLET_NOT_FOUND", "Hosted credit wallet not found.", 409);
+      if (actualAmount === 0) {
+        await tx.update(creditReservations).set({
+          status: "SETTLED",
+          actualAmount: 0,
+          settledAt: new Date(),
+          updatedAt: new Date(),
+        }).where(eq(creditReservations.id, reservation.id));
+        return wallet.balance;
+      }
+
+      const [charged] = await tx.update(creditWallets).set({
+        balance: sql`${creditWallets.balance} - ${actualAmount}`,
+        updatedAt: new Date(),
+      }).where(eq(creditWallets.workspaceId, workspaceId)).returning({ balance: creditWallets.balance });
+      if (!charged) throw new AppError("CREDIT_WALLET_NOT_FOUND", "Hosted credit wallet not found.", 409);
+
+      await tx.insert(creditLedger).values({
+        workspaceId,
+        type: "DEBIT",
+        amount: -actualAmount,
+        balanceAfter: charged.balance,
+        reason: input.reason,
+        referenceType: input.referenceType,
+        referenceId: input.referenceId,
+      });
+      await tx.update(creditReservations).set({
+        status: "SETTLED",
+        actualAmount,
+        settledAt: new Date(),
+        updatedAt: new Date(),
+      }).where(eq(creditReservations.id, reservation.id));
+      return charged.balance;
+    }
     if (reservation.status !== "ACTIVE") {
-      throw new AppError("CREDIT_RESERVATION_RELEASED", "Credit reservation is no longer active.", 409);
+      throw new AppError("CREDIT_RESERVATION_INVALID", "Credit reservation cannot be settled.", 409);
     }
 
     const difference = reservation.amount - actualAmount;

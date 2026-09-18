@@ -6,6 +6,10 @@ import { AppError } from "@/server/http/errors";
 export type PlanCode = "PERSONAL" | "GROWTH";
 type Tx = Parameters<Parameters<typeof db.transaction>[0]>[0];
 
+async function lockPlanEntitlements(tx: Tx) {
+  await tx.execute(sql`select pg_advisory_xact_lock(hashtext('plan-entitlements'))`);
+}
+
 async function lockSeats(tx: Tx, workspaceId: string) {
   await tx.execute(sql`select pg_advisory_xact_lock(hashtext(${`plan-seat:${workspaceId}`}))`);
 }
@@ -75,6 +79,7 @@ export async function assignWorkspacePlan(
   source: string,
 ) {
   return db.transaction(async (tx) => {
+    await lockPlanEntitlements(tx);
     await lockSeats(tx, workspaceId);
     const [target] = await tx.select().from(plans).where(eq(plans.id, planId)).limit(1);
     if (!target || !target.active) throw new AppError("PLAN_NOT_AVAILABLE", "That plan is not available.", 409);
@@ -147,6 +152,7 @@ function seatLimitError(plan: { name: string; subUserLimit: number }) {
 }
 
 export async function assertCanCreateWorkspaceInvitation(tx: Tx, workspaceId: string) {
+  await lockPlanEntitlements(tx);
   await lockSeats(tx, workspaceId);
   const now = new Date();
   const plan = await getWorkspacePlanInTransaction(tx, workspaceId);
@@ -165,6 +171,7 @@ export async function assertCanAcceptWorkspaceInvitation(
   workspaceId: string,
   userId: string,
 ) {
+  await lockPlanEntitlements(tx);
   await lockSeats(tx, workspaceId);
   const [existing] = await tx
     .select({ userId: memberships.userId })

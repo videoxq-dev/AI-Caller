@@ -264,17 +264,32 @@ try {
   }, "target user sign up");
   const targetRow = await waitFor(
     pool,
-    `SELECT id FROM "user" WHERE email = $1 LIMIT 1`,
+    `SELECT u.id, m.workspace_id
+       FROM "user" u
+       JOIN memberships m ON m.user_id = u.id AND m.role = 'OWNER'
+      WHERE u.email = $1
+      ORDER BY m.created_at
+      LIMIT 1`,
     [targetEmail],
     (rows) => rows.rowCount === 1,
     "target user provisioning",
   );
   const targetUserId = targetRow.rows[0].id;
+  const targetWorkspaceId = targetRow.rows[0].workspace_id;
   await api(adminContext, "PATCH", `/api/admin/users/${targetUserId}`, {
     status: "SUSPENDED",
     suspensionReason: "Milestone 10 acceptance",
   }, "suspend user");
-  await api(userContext, "GET", "/api/workspaces", undefined, "suspended user workspace access", 401);
+  await api(userContext, "GET", "/api/workspaces", undefined, "revoked suspended-user session", 401);
+
+  await api(userContext, "POST", "/api/auth/sign-in/email", {
+    email: targetEmail,
+    password,
+  }, "suspended user re-login");
+  await api(userContext, "GET", "/api/workspaces", undefined, "suspended user workspace access after re-login", 403);
+  await api(userContext, "POST", "/api/workspaces", {
+    workspaceId: targetWorkspaceId,
+  }, "suspended user direct workspace switch", 403);
 
   await page.goto(`${baseUrl}/admin`, { waitUntil: "networkidle" });
   await page.getByRole("button", { name: "Users", exact: true }).click();
@@ -299,7 +314,7 @@ try {
   await page.screenshot({ path: path.join(outputDir, "admin-overview-mobile.png"), fullPage: true });
 
   assert(runtimeErrors.length === 0, `Browser/runtime errors detected: ${runtimeErrors.join(" | ")}`);
-  console.log("Milestone 10 browser verification passed for live Billing, signed/idempotent Stripe credit fulfillment, Personal/Growth plan enforcement, platform admin controls, audit history, suspension enforcement, and responsive Billing/Admin layouts.");
+  console.log("Milestone 10 browser verification passed for live Billing, signed/idempotent Stripe credit fulfillment, Personal/Growth plan enforcement, platform admin controls, audit history, session revocation plus post-login suspension enforcement, and responsive Billing/Admin layouts.");
 } finally {
   await pool.end();
   await adminContext.close();

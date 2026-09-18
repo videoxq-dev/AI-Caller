@@ -76,8 +76,23 @@ ON CONFLICT ("id") DO UPDATE SET
   "updated_at" = now();
 
 INSERT INTO "workspace_plans" ("workspace_id", "plan_id", "source")
-SELECT "id", 'PERSONAL', 'MIGRATION'
-FROM "workspaces"
+SELECT
+  w."id",
+  CASE
+    WHEN EXISTS (
+      SELECT 1 FROM "memberships" m
+      WHERE m."workspace_id" = w."id" AND m."role" <> 'OWNER'
+    ) OR EXISTS (
+      SELECT 1 FROM "workspace_invitations" wi
+      WHERE wi."workspace_id" = w."id"
+        AND wi."status" = 'PENDING'
+        AND wi."expires_at" > now()
+    )
+    THEN 'GROWTH'
+    ELSE 'PERSONAL'
+  END,
+  'MIGRATION'
+FROM "workspaces" w
 ON CONFLICT ("workspace_id") DO NOTHING;
 
 INSERT INTO "hosted_api_rate_cards"

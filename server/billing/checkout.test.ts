@@ -78,10 +78,13 @@ describe("customer billing projection", () => {
     expect(usage).toMatchObject({
       provider: "openai",
       creditsCharged: 3,
-      billedUnits: { AI_INPUT_TOKEN: 100, AI_OUTPUT_TOKEN: 20 },
     });
     expect(usage).not.toHaveProperty("providerCostMicros");
     expect(usage).not.toHaveProperty("pricingDetails");
+    expect(usage).not.toHaveProperty("referenceId");
+    expect(usage).not.toHaveProperty("referenceType");
+    expect(usage).not.toHaveProperty("billedUnits");
+    expect(usage).not.toHaveProperty("providerUsage");
     expect(JSON.stringify(usage)).not.toContain("must-not-leak");
 
     expect(topup).toMatchObject({
