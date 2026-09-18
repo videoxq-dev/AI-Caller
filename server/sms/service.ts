@@ -1,31 +1,24 @@
-import { db } from "@/db";
-import { usageEvents } from "@/db/schema";
-import { debitCredits, refundCredits } from "@/server/credits/service";
 import { appendMessage, getOrCreateContactByIdentity, getOrCreateOpenConversation } from "@/server/domain/core/repository";
 import { normalizePhone } from "@/server/domain/core/schemas";
 import { getEnv } from "@/server/env";
 import { AppError } from "@/server/http/errors";
 import { enqueueUniqueJob } from "@/server/jobs";
 import { SMS_INBOUND_RESPONSE, smsInboundResponseJobSchema, type SmsInboundResponseJob } from "@/server/jobs/queues";
-import { logger } from "@/server/observability/logger";
 import { responseOrchestrator } from "@/server/orchestrator";
 import type { NormalizedSmsEvent, SmsWebhookInput } from "@/server/providers/contracts";
-import { ProviderRequestError } from "@/server/providers/http";
 import { resolveSmsRuntime, type SmsProviderName, type SmsRuntime } from "@/server/providers/sms/runtime";
 import {
-  attachSmsProviderMessage,
   claimProviderWebhookEvent,
   claimQueuedProviderWebhookEvent,
   completeProviderWebhookEvent,
   failProviderWebhookEvent,
   markProviderWebhookQueued,
-  markSmsSendFailure,
   releaseProviderWebhookEventForRetry,
   updateSmsDeliveryStatus,
 } from "./repository";
+import { sendSmsConversationTextWithRuntime } from "./outbound";
 
 const MAX_SMS_WEBHOOK_BYTES = 64 * 1024;
-const MAX_SMS_TEXT_CHARACTERS = 1600;
 
 type SmsOrchestratorResult = Awaited<ReturnType<typeof responseOrchestrator.respond>>;
 
@@ -63,13 +56,6 @@ async function readWebhookBody(request: Request) {
   return Buffer.concat(chunks).toString("utf8");
 }
 
-function smsText(value: string) {
-  const text = value.trim();
-  const characters = Array.from(text);
-  if (characters.length <= MAX_SMS_TEXT_CHARACTERS) return text;
-  return `${characters.slice(0, MAX_SMS_TEXT_CHARACTERS - 1).join("")}…`;
-}
-
 function safeEventPayload(event: NormalizedSmsEvent) {
   return event.type === "MESSAGE_RECEIVED"
     ? { type: event.type, externalMessageId: event.externalMessageId, from: normalizePhone(event.from), to: normalizePhone(event.to) }
@@ -102,57 +88,6 @@ function queuedJobFromPayload(workspaceId: string, provider: SmsProviderName, ev
     customerNumber: payload.customerNumber,
     destinationNumber: payload.destinationNumber,
     text: payload.text,
-  });
-}
-
-async function recordSmsUsage(
-  workspaceId: string,
-  runtime: SmsRuntime,
-  referenceId: string,
-  creditsCharged: number,
-  providerUsage: Record<string, unknown>,
-) {
-  try {
-    await db.insert(usageEvents).values({
-      workspaceId,
-      capability: "SMS",
-      provider: runtime.providerName,
-      mode: runtime.mode,
-      providerUsage,
-      creditsCharged,
-      referenceType: "MESSAGE",
-      referenceId,
-    });
-  } catch (error) {
-    logger.error({ err: error, workspaceId, provider: runtime.providerName, referenceId }, "Failed to persist SMS usage event");
-  }
-}
-
-function uncertainProviderFailure(error: unknown) {
-  return !(error instanceof ProviderRequestError) || error.status >= 500;
-}
-
-function definitiveProviderRejection(error: unknown) {
-  return error instanceof ProviderRequestError && error.status >= 400 && error.status < 500;
-}
-
-async function reserveHostedSmsCredits(workspaceId: string, runtime: SmsRuntime, messageId: string) {
-  if (runtime.mode !== "HOSTED") return 0;
-  const amount = getEnv().HOSTED_SMS_CREDITS_PER_MESSAGE;
-  await debitCredits(workspaceId, amount, {
-    reason: "Hosted SMS message",
-    referenceType: "SMS_MESSAGE",
-    referenceId: messageId,
-  });
-  return amount;
-}
-
-async function refundHostedSmsCredits(workspaceId: string, amount: number, messageId: string) {
-  if (amount <= 0) return;
-  await refundCredits(workspaceId, amount, {
-    reason: "Hosted SMS provider rejected message",
-    referenceType: "SMS_MESSAGE",
-    referenceId: messageId,
   });
 }
 
@@ -291,53 +226,25 @@ export function createSmsWebhookService(dependencies: SmsServiceDependencies) {
           await completeProviderWebhookEvent(job.workspaceId, job.webhookEventId);
           return { skipped: false as const, replied: false as const };
         }
-        const reply = smsText(orchestrated.reply);
-
-        const outbound = await appendMessage(job.workspaceId, conversation.id, {
-          channel: "SMS",
-          direction: "OUTBOUND",
-          senderType: "AI",
-          contentType: "TEXT",
-          body: reply,
-          provider: job.provider,
-          externalMessageId: null,
-          status: "SENDING",
-          metadata: { inReplyToProviderEventId: job.webhookEventId, mode: runtime.mode },
-        });
-
-        let reservedCredits = 0;
-        try {
-          reservedCredits = await reserveHostedSmsCredits(job.workspaceId, runtime, outbound.id);
-        } catch (error) {
-          terminalFailure = true;
-          await markSmsSendFailure(job.workspaceId, outbound.id, "FAILED", error);
-          throw error;
-        }
-
         terminalFailure = true;
         try {
-          const sent = await runtime.provider.send({
+          const outbound = await sendSmsConversationTextWithRuntime(job.workspaceId, conversation.id, runtime, {
+            senderType: "AI",
+            text: orchestrated.reply,
             to: job.customerNumber,
-            from: runtime.senderNumber,
-            text: reply,
-            statusCallbackUrl: webhookUrl(job.provider, job.workspaceId),
             idempotencyKey: job.webhookEventId,
+            metadata: { inReplyToProviderEventId: job.webhookEventId },
           });
-          await attachSmsProviderMessage(job.workspaceId, outbound.id, job.provider, sent.externalId, sent.status);
-          await recordSmsUsage(job.workspaceId, runtime, outbound.id, reservedCredits, { messages: 1, status: sent.status });
+
+          await completeProviderWebhookEvent(job.workspaceId, job.webhookEventId);
+          return { skipped: false as const, replied: true as const, messageId: outbound.id };
         } catch (error) {
-          const uncertain = uncertainProviderFailure(error);
-          await markSmsSendFailure(job.workspaceId, outbound.id, uncertain ? "SEND_UNKNOWN" : "FAILED", error);
-          if (reservedCredits > 0 && definitiveProviderRejection(error)) {
-            await refundHostedSmsCredits(job.workspaceId, reservedCredits, outbound.id);
-          } else if (reservedCredits > 0 && uncertain) {
-            await recordSmsUsage(job.workspaceId, runtime, outbound.id, reservedCredits, { messages: 0, outcome: "unknown" });
+          if (error instanceof AppError && error.code === "AI_HANDLING_PAUSED") {
+            await completeProviderWebhookEvent(job.workspaceId, job.webhookEventId);
+            return { skipped: false as const, replied: false as const };
           }
           throw error;
         }
-
-        await completeProviderWebhookEvent(job.workspaceId, job.webhookEventId);
-        return { skipped: false as const, replied: true as const, messageId: outbound.id };
       } catch (error) {
         if (terminalFailure) {
           await failProviderWebhookEvent(job.workspaceId, job.webhookEventId, error);

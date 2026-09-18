@@ -2,13 +2,23 @@ import { z } from "zod";
 
 export const AUTH_PASSWORD_RESET_EMAIL = "auth.password-reset-email";
 export const COMMERCE_WELCOME_EMAIL = "commerce.welcome-email";
+export const TEAM_INVITATION_EMAIL = "team.invitation-email";
 export const SMS_INBOUND_RESPONSE = "sms.inbound-response";
 export const WHATSAPP_INBOUND_RESPONSE = "whatsapp.inbound-response";
+export const AUTOMATION_DISPATCH_EVENT = "automation.dispatch-event";
+export const AUTOMATION_EXECUTE_RUN = "automation.execute-run";
 
 export const passwordResetEmailJobSchema = z.object({
   to: z.string().email(),
   name: z.string().min(1),
   url: z.string().url(),
+});
+
+export const teamInvitationEmailJobSchema = z.object({
+  to: z.string().email(),
+  inviterName: z.string().min(1).max(200),
+  workspaceName: z.string().min(1).max(200),
+  acceptUrl: z.string().url(),
 });
 
 export const welcomeEmailJobSchema = z.object({
@@ -28,6 +38,16 @@ export const smsInboundResponseJobSchema = z.object({
   text: z.string().min(1).max(10_000),
 });
 
+export const automationDispatchEventJobSchema = z.object({
+  workspaceId: z.string().uuid(),
+  eventId: z.string().uuid(),
+});
+
+export const automationExecuteRunJobSchema = z.object({
+  workspaceId: z.string().uuid(),
+  runId: z.string().uuid(),
+});
+
 export const whatsappInboundResponseJobSchema = z.object({
   workspaceId: z.string().uuid(),
   webhookEventId: z.string().uuid(),
@@ -41,5 +61,8 @@ export const whatsappInboundResponseJobSchema = z.object({
 
 export type PasswordResetEmailJob = z.infer<typeof passwordResetEmailJobSchema>;
 export type WelcomeEmailJob = z.infer<typeof welcomeEmailJobSchema>;
+export type TeamInvitationEmailJob = z.infer<typeof teamInvitationEmailJobSchema>;
 export type SmsInboundResponseJob = z.infer<typeof smsInboundResponseJobSchema>;
 export type WhatsAppInboundResponseJob = z.infer<typeof whatsappInboundResponseJobSchema>;
+export type AutomationDispatchEventJob = z.infer<typeof automationDispatchEventJobSchema>;
+export type AutomationExecuteRunJob = z.infer<typeof automationExecuteRunJobSchema>;

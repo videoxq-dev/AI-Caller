@@ -2,14 +2,19 @@
 
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { useState, type FormEvent } from "react";
+import { useEffect, useState, type FormEvent } from "react";
 import { AuthShell } from "@/components/auth-shell";
 import { ArrowRightIcon, CheckIcon, LockIcon, RocketIcon } from "@/components/icons";
 import { PasswordField } from "@/components/password-field";
 import { authClient } from "@/lib/auth-client";
+import { safeReturnPath } from "@/lib/safe-return-path";
 
 export default function SignUpPage() {
   const router = useRouter();
+  const [returnTo, setReturnTo] = useState("/welcome");
+  useEffect(() => {
+    setReturnTo(safeReturnPath(new URLSearchParams(window.location.search).get("returnTo"), "/welcome"));
+  }, []);
   const [pending, setPending] = useState(false);
   const [error, setError] = useState("");
 
@@ -30,7 +35,7 @@ export default function SignUpPage() {
       return;
     }
 
-    router.replace("/welcome");
+    router.replace(returnTo);
   }
 
   return (
@@ -43,7 +48,7 @@ export default function SignUpPage() {
 
         <div className="purchaseBanner">
           <span className="successIcon"><CheckIcon size={22} /></span>
-          <div><strong>Purchase confirmed</strong><span>Your Core license is ready to activate.</span></div>
+          <div><strong>{returnTo.startsWith("/team/invite") ? "Team invitation" : "Purchase confirmed"}</strong><span>{returnTo.startsWith("/team/invite") ? "Create your account, then accept the workspace invitation." : "Your Core license is ready to activate."}</span></div>
         </div>
 
         <form className="authForm" onSubmit={handleSubmit}>
@@ -74,7 +79,7 @@ export default function SignUpPage() {
           </button>
         </form>
 
-        <div className="switchRow"><span>Already have an account?</span><Link href="/sign-in">Sign in</Link></div>
+        <div className="switchRow"><span>Already have an account?</span><Link href={`/sign-in?returnTo=${encodeURIComponent(returnTo)}`}>Sign in</Link></div>
 
         <div className="pathHint">
           <RocketIcon size={21} />

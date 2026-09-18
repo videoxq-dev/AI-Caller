@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import type { ReactNode } from "react";
 import {
   CalendarIcon,
@@ -20,6 +20,9 @@ import "./settings.css";
 
 type SettingsTab = "general" | "team" | "channels" | "usage" | "billing";
 type ChannelId = "voice" | "sms" | "whatsapp" | "webchat";
+type WorkspaceRole = "OWNER" | "ADMIN" | "STAFF";
+type TeamMember = { userId: string; name: string; email: string; image: string | null; role: WorkspaceRole; joinedAt: string };
+type TeamInvitation = { id: string; email: string; role: "ADMIN" | "STAFF"; status: "PENDING"; expiresAt: string; createdAt: string; invitedByUserId: string };
 
 const navItems = [
   { label: "Dashboard", href: "/dashboard", icon: <HomeIcon /> },
@@ -62,26 +65,115 @@ export default function SettingsPage() {
   const [language, setLanguage] = useState("English");
   const [notificationEmail, setNotificationEmail] = useState("bella@wellnessjuvi.com");
   const [inviteEmail, setInviteEmail] = useState("");
-  const [team, setTeam] = useState([
-    { id: 1, name: "Bella", email: "bella@wellnessjuvi.com", role: "Owner", status: "Active" },
-    { id: 2, name: "Tunde A.", email: "tunde@wellnessjuvi.com", role: "Agent", status: "Active" },
-    { id: 3, name: "Chioma O.", email: "chioma@wellnessjuvi.com", role: "Manager", status: "Invited" },
-  ]);
+  const [inviteRole, setInviteRole] = useState<"ADMIN" | "STAFF">("STAFF");
+  const [team, setTeam] = useState<TeamMember[]>([]);
+  const [pendingInvitations, setPendingInvitations] = useState<TeamInvitation[]>([]);
+  const [currentRole, setCurrentRole] = useState<WorkspaceRole | null>(null);
+  const [teamLoading, setTeamLoading] = useState(false);
+  const [teamError, setTeamError] = useState<string | null>(null);
+  const [teamActionPending, setTeamActionPending] = useState(false);
   const [channels, setChannels] = useState<Record<ChannelId, boolean>>({ voice: true, sms: true, whatsapp: true, webchat: true });
 
-  const activeMembers = useMemo(() => team.filter((member) => member.status === "Active").length, [team]);
+  const activeMembers = team.length;
+  const canManageTeam = currentRole === "OWNER" || currentRole === "ADMIN";
 
   const save = () => {
     setSaved(true);
     window.setTimeout(() => setSaved(false), 1600);
   };
 
-  const invite = () => {
+  async function loadTeam() {
+    setTeamLoading(true);
+    setTeamError(null);
+    try {
+      const response = await fetch("/api/team", { cache: "no-store" });
+      const data = await response.json().catch(() => null) as { members?: TeamMember[]; invitations?: TeamInvitation[]; currentRole?: WorkspaceRole; error?: { message?: string } } | null;
+      if (!response.ok) throw new Error(data?.error?.message ?? "Unable to load team.");
+      setTeam(data?.members ?? []);
+      setPendingInvitations(data?.invitations ?? []);
+      setCurrentRole(data?.currentRole ?? null);
+    } catch (error) {
+      setTeamError(error instanceof Error ? error.message : "Unable to load team.");
+    } finally {
+      setTeamLoading(false);
+    }
+  }
+
+  useEffect(() => {
+    if (tab === "team") void loadTeam();
+  }, [tab]);
+
+  async function invite() {
     const email = inviteEmail.trim();
-    if (!email) return;
-    setTeam((current) => [...current, { id: Date.now(), name: email.split("@")[0], email, role: "Agent", status: "Invited" }]);
-    setInviteEmail("");
-  };
+    if (!email || !canManageTeam) return;
+    setTeamActionPending(true);
+    setTeamError(null);
+    try {
+      const response = await fetch("/api/team/invitations", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ email, role: inviteRole }),
+      });
+      const data = await response.json().catch(() => null) as { error?: { message?: string } } | null;
+      if (!response.ok) throw new Error(data?.error?.message ?? "Unable to invite team member.");
+      setInviteEmail("");
+      setInviteRole("STAFF");
+      await loadTeam();
+    } catch (error) {
+      setTeamError(error instanceof Error ? error.message : "Unable to invite team member.");
+    } finally {
+      setTeamActionPending(false);
+    }
+  }
+
+  async function changeMemberRole(member: TeamMember, role: "ADMIN" | "STAFF") {
+    setTeamActionPending(true);
+    setTeamError(null);
+    try {
+      const response = await fetch(`/api/team/members/${member.userId}`, {
+        method: "PATCH",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ role }),
+      });
+      const data = await response.json().catch(() => null) as { error?: { message?: string } } | null;
+      if (!response.ok) throw new Error(data?.error?.message ?? "Unable to update team member.");
+      await loadTeam();
+    } catch (error) {
+      setTeamError(error instanceof Error ? error.message : "Unable to update team member.");
+    } finally {
+      setTeamActionPending(false);
+    }
+  }
+
+  async function removeMember(member: TeamMember) {
+    setTeamActionPending(true);
+    setTeamError(null);
+    try {
+      const response = await fetch(`/api/team/members/${member.userId}`, { method: "DELETE" });
+      const data = await response.json().catch(() => null) as { error?: { message?: string } } | null;
+      if (!response.ok) throw new Error(data?.error?.message ?? "Unable to remove team member.");
+      await loadTeam();
+    } catch (error) {
+      setTeamError(error instanceof Error ? error.message : "Unable to remove team member.");
+    } finally {
+      setTeamActionPending(false);
+    }
+  }
+
+  async function revokeInvitation(invitation: TeamInvitation) {
+    setTeamActionPending(true);
+    setTeamError(null);
+    try {
+      const response = await fetch(`/api/team/invitations/${invitation.id}`, { method: "DELETE" });
+      const data = await response.json().catch(() => null) as { error?: { message?: string } } | null;
+      if (!response.ok) throw new Error(data?.error?.message ?? "Unable to revoke invitation.");
+      await loadTeam();
+    } catch (error) {
+      setTeamError(error instanceof Error ? error.message : "Unable to revoke invitation.");
+    } finally {
+      setTeamActionPending(false);
+    }
+  }
 
   return (
     <main className="appShell settingsShell">
@@ -113,7 +205,7 @@ export default function SettingsPage() {
         <div className="settingsBody">
           <div className="settingsTitleRow">
             <div><h1>Settings</h1><p>Manage your account, team, channels and billing.</p></div>
-            {tab !== "usage" && <button className="settingsSaveButton" type="button" onClick={save}>{saved ? "Saved" : "Save changes"}</button>}
+            {tab !== "usage" && tab !== "team" && <button className="settingsSaveButton" type="button" onClick={save}>{saved ? "Saved" : "Save changes"}</button>}
           </div>
 
           <div className="settingsTabs" role="tablist" aria-label="Settings sections">
@@ -127,23 +219,41 @@ export default function SettingsPage() {
           {tab === "team" && (
             <section className="settingsGrid settingsGridTeam">
               <article className="settingsCard">
-                <div className="sectionHeading"><div><h2>Team</h2><p>{activeMembers} active members</p></div><span className="statusPill">{team.length} total</span></div>
-                <div className="inviteRow"><input value={inviteEmail} onChange={(event) => setInviteEmail(event.target.value)} placeholder="name@business.com" type="email" /><button type="button" onClick={invite}>Invite member</button></div>
+                <div className="sectionHeading"><div><h2>Team</h2><p>{activeMembers} active members</p></div><span className="statusPill">{team.length + pendingInvitations.length} total</span></div>
+                {teamError && <p className="teamSettingsError" role="alert">{teamError}</p>}
+                {canManageTeam && <div className="inviteRow"><input value={inviteEmail} onChange={(event) => setInviteEmail(event.target.value)} placeholder="name@business.com" type="email" /><select aria-label="Invitation role" value={inviteRole} onChange={(event) => setInviteRole(event.target.value as "ADMIN" | "STAFF")}><option value="STAFF">Staff</option>{currentRole === "OWNER" && <option value="ADMIN">Admin</option>}</select><button type="button" disabled={teamActionPending || !inviteEmail.trim()} onClick={() => void invite()}>Invite member</button></div>}
                 <div className="teamTable">
-                  {team.map((member) => (
-                    <div className="teamRow" key={member.id}>
-                      <span className="teamAvatar">{member.name.slice(0, 1).toUpperCase()}</span>
-                      <div><strong>{member.name}</strong><small>{member.email}</small></div>
-                      <select value={member.role} onChange={(event) => setTeam((current) => current.map((item) => item.id === member.id ? { ...item, role: event.target.value } : item))} disabled={member.role === "Owner"}>
-                        <option>Owner</option><option>Manager</option><option>Agent</option>
-                      </select>
-                      <span className={`memberStatus ${member.status.toLowerCase()}`}>{member.status}</span>
-                      <button type="button" className="rowMenu">•••</button>
+                  {teamLoading && !team.length && <div className="teamEmpty">Loading team…</div>}
+                  {team.map((member) => {
+                    const protectedMember = member.role === "OWNER" || (currentRole === "ADMIN" && member.role === "ADMIN");
+                    const editable = canManageTeam && !protectedMember;
+                    return (
+                      <div className="teamRow" key={member.userId}>
+                        <span className="teamAvatar">{member.name.slice(0, 1).toUpperCase()}</span>
+                        <div><strong>{member.name}</strong><small>{member.email}</small></div>
+                        <select value={member.role} onChange={(event) => void changeMemberRole(member, event.target.value as "ADMIN" | "STAFF")} disabled={!editable || teamActionPending}>
+                          {member.role === "OWNER" && <option value="OWNER">Owner</option>}
+                          {currentRole === "OWNER" && <option value="ADMIN">Admin</option>}
+                          <option value="STAFF">Staff</option>
+                        </select>
+                        <span className="memberStatus active">Active</span>
+                        {editable ? <button type="button" className="rowMenu teamRemove" disabled={teamActionPending} onClick={() => void removeMember(member)}>Remove</button> : <span className="rowMenuPlaceholder" />}
+                      </div>
+                    );
+                  })}
+                  {pendingInvitations.map((invitation) => (
+                    <div className="teamRow pendingTeamRow" key={invitation.id}>
+                      <span className="teamAvatar">?</span>
+                      <div><strong>{invitation.email}</strong><small>Invitation expires {new Date(invitation.expiresAt).toLocaleDateString()}</small></div>
+                      <span className="teamRoleText">{invitation.role === "ADMIN" ? "Admin" : "Staff"}</span>
+                      <span className="memberStatus invited">Invited</span>
+                      {canManageTeam ? <button type="button" className="rowMenu teamRemove" disabled={teamActionPending} onClick={() => void revokeInvitation(invitation)}>Revoke</button> : <span className="rowMenuPlaceholder" />}
                     </div>
                   ))}
+                  {!teamLoading && !team.length && !pendingInvitations.length && <div className="teamEmpty">No team members yet.</div>}
                 </div>
               </article>
-              <aside className="settingsCard compactCard"><h2>Roles</h2><RoleLine title="Owner" text="Full account access" /><RoleLine title="Manager" text="Manage team and conversations" /><RoleLine title="Agent" text="Inbox and customer handling" /></aside>
+              <aside className="settingsCard compactCard"><h2>Roles</h2><RoleLine title="Owner" text="Full workspace and billing access" /><RoleLine title="Admin" text="Manage team, conversations and automations" /><RoleLine title="Staff" text="Inbox, takeover, replies and self-assignment" /></aside>
             </section>
           )}
 

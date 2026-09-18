@@ -154,3 +154,19 @@ export async function resolveSmsRuntime(
     provider: createProvider(requestedProvider, secret, settings, fetcher),
   };
 }
+
+
+function isSmsProviderName(value: string): value is SmsProviderName {
+  return value === "telnyx" || value === "twilio" || value === "plivo";
+}
+
+export async function resolveSmsRuntimeForWorkspace(
+  workspaceId: string,
+  fetcher: typeof fetch = fetch,
+): Promise<SmsRuntime> {
+  const route = await resolveProviderRoute(workspaceId, "SMS");
+  if (!route) throw new Error("No SMS provider route is configured for this workspace.");
+  const providerName = route.mode === "HOSTED" ? getEnv().HOSTED_SMS_PROVIDER : route.provider;
+  if (!isSmsProviderName(providerName)) throw new Error("The active SMS provider is not supported.");
+  return resolveSmsRuntime(workspaceId, providerName, fetcher);
+}

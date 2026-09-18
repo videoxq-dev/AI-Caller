@@ -1,6 +1,7 @@
 import nodemailer from "nodemailer";
 import type { Transporter } from "nodemailer";
 import { getEnv } from "@/server/env";
+import { isGuardedE2EFixtureMode } from "@/server/e2e-mode";
 
 let transporter: Transporter | undefined;
 
@@ -52,5 +53,21 @@ export async function sendWelcomeEmail(input: { to: string; name: string; tempor
     subject: "Welcome to AI Caller — your account is ready",
     text: `Hi ${input.name},\n\nYour AI Caller account has been created from your JVZoo purchase.\n\nLogin: ${input.to}\nTemporary password: ${input.temporaryPassword}\nSign in: ${input.signInUrl}\n\nFor security, use Forgot password after your first login to choose a private password.`,
     html: `<p>Hi ${safeName},</p><p>Your AI Caller account has been created from your JVZoo purchase.</p><p><strong>Login:</strong> ${safeEmail}<br/><strong>Temporary password:</strong> ${safePassword}</p><p><a href="${safeUrl}">Sign in to AI Caller</a></p><p>For security, use <strong>Forgot password</strong> after your first login to choose a private password.</p>`,
+  });
+}
+
+
+export async function sendTeamInvitationEmail(input: { to: string; inviterName: string; workspaceName: string; acceptUrl: string }) {
+  if (isGuardedE2EFixtureMode()) return;
+  const safeInviter = escapeHtml(input.inviterName);
+  const safeWorkspace = escapeHtml(input.workspaceName);
+  const safeUrl = escapeHtml(input.acceptUrl);
+
+  await getTransporter().sendMail({
+    from: fromAddress(),
+    to: input.to,
+    subject: `Join ${input.workspaceName} on AI Caller`,
+    text: `${input.inviterName} invited you to join ${input.workspaceName} on AI Caller.\n\nAccept invitation: ${input.acceptUrl}\n\nThis invitation expires in 7 days.`,
+    html: `<p><strong>${safeInviter}</strong> invited you to join <strong>${safeWorkspace}</strong> on AI Caller.</p><p><a href="${safeUrl}">Accept invitation</a></p><p>This invitation expires in 7 days.</p>`,
   });
 }

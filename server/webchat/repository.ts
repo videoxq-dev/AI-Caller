@@ -10,7 +10,6 @@ import {
   webchatWidgets,
   workspaces,
 } from "@/db/schema";
-import { getConversationTimelinePage } from "@/server/domain/core/conversation-timeline";
 import { getOrCreateContactByIdentity, getOrCreateOpenConversation } from "@/server/domain/core/repository";
 import { AppError } from "@/server/http/errors";
 import type { WebchatSessionInput } from "./schemas";
@@ -101,7 +100,7 @@ export async function getPublicWebchatWidget(widgetKey: string) {
   };
 }
 
-export async function resolveWebchatSession(token: string, expectedWidgetKey?: string) {
+export async function resolveWebchatSession(token: string, expectedWidgetKey?: string, touch = true) {
   const hash = tokenHash(token);
   const [row] = await db.select({ session: webchatSessions, widget: webchatWidgets })
     .from(webchatSessions)
@@ -114,17 +113,25 @@ export async function resolveWebchatSession(token: string, expectedWidgetKey?: s
     .limit(1);
   if (!row || (expectedWidgetKey && row.widget.publicKey !== expectedWidgetKey)) return null;
 
-  await db.update(webchatSessions).set({ lastSeenAt: new Date() }).where(eq(webchatSessions.id, row.session.id));
+  if (touch) {
+    await db.update(webchatSessions).set({ lastSeenAt: new Date() }).where(eq(webchatSessions.id, row.session.id));
+  }
   return row;
 }
 
-async function sessionHistory(workspaceId: string, conversationId: string): Promise<WebchatHistoryMessage[]> {
-  const timeline = await getConversationTimelinePage(workspaceId, conversationId, { limit: 30, offset: 0 });
-  if (!timeline) return [];
+export async function sessionHistory(workspaceId: string, conversationId: string): Promise<WebchatHistoryMessage[]> {
+  const rows = await db.select({
+    id: messages.id,
+    senderType: messages.senderType,
+    body: messages.body,
+  }).from(messages).where(and(
+    eq(messages.workspaceId, workspaceId),
+    eq(messages.conversationId, conversationId),
+    eq(messages.contentType, "TEXT"),
+  )).orderBy(desc(messages.createdAt), desc(messages.id)).limit(30);
 
   const history: WebchatHistoryMessage[] = [];
-  for (const message of timeline.messages) {
-    if (message.contentType !== "TEXT") continue;
+  for (const message of rows.reverse()) {
     if (message.senderType === "CUSTOMER") {
       history.push({ id: message.id, role: "customer", text: message.body });
     } else if (message.senderType === "AI" || message.senderType === "USER") {
@@ -265,4 +272,15 @@ export async function findWebchatAIResponse(workspaceId: string, externalMessage
     eq(messages.externalMessageId, externalMessageId),
   )).orderBy(desc(messages.createdAt)).limit(1);
   return message ?? null;
+}
+
+
+export async function getWebchatSessionHistory(token: string) {
+  const resolved = await resolveWebchatSession(token, undefined, false);
+  if (!resolved) return null;
+  return {
+    history: await sessionHistory(resolved.session.workspaceId, resolved.session.conversationId),
+    workspaceId: resolved.session.workspaceId,
+    conversationId: resolved.session.conversationId,
+  };
 }

@@ -14,6 +14,7 @@ import {
 import { db } from "@/db";
 import {
   appointments,
+  automationEvents,
   contactIdentities,
   contacts,
   contactTags,
@@ -250,36 +251,58 @@ export async function getOrCreateContactByIdentity(
 
 export async function upsertLead(workspaceId: string, contactId: string, input: LeadInput) {
   await ensureContactInWorkspace(workspaceId, contactId);
-  const now = new Date();
-  const [lead] = await db.insert(leads).values({
-    workspaceId,
-    contactId,
-    status: input.status,
-    intent: input.intent ?? null,
-    serviceRequested: input.serviceRequested ?? null,
-    source: input.source ?? null,
-    estimatedValue: input.estimatedValue ?? null,
-    qualificationData: input.qualificationData ?? {},
-    qualificationScore: input.qualificationScore ?? 0,
-    qualificationCompletedAt: input.qualificationCompletedAt ?? null,
-    assignedUserId: input.assignedUserId ?? null,
-    updatedAt: now,
-  }).onConflictDoUpdate({
-    target: [leads.workspaceId, leads.contactId],
-    set: {
+  return db.transaction(async (tx) => {
+    const [before] = await tx.select({ id: leads.id, status: leads.status }).from(leads).where(and(
+      eq(leads.workspaceId, workspaceId),
+      eq(leads.contactId, contactId),
+    )).limit(1);
+    const now = new Date();
+    const [lead] = await tx.insert(leads).values({
+      workspaceId,
+      contactId,
       status: input.status,
       intent: input.intent ?? null,
       serviceRequested: input.serviceRequested ?? null,
       source: input.source ?? null,
       estimatedValue: input.estimatedValue ?? null,
-      ...(input.qualificationData !== undefined ? { qualificationData: input.qualificationData } : {}),
-      ...(input.qualificationScore !== undefined ? { qualificationScore: input.qualificationScore } : {}),
-      ...(input.qualificationCompletedAt !== undefined ? { qualificationCompletedAt: input.qualificationCompletedAt } : {}),
+      qualificationData: input.qualificationData ?? {},
+      qualificationScore: input.qualificationScore ?? 0,
+      qualificationCompletedAt: input.qualificationCompletedAt ?? null,
       assignedUserId: input.assignedUserId ?? null,
       updatedAt: now,
-    },
-  }).returning();
-  return lead;
+    }).onConflictDoUpdate({
+      target: [leads.workspaceId, leads.contactId],
+      set: {
+        status: input.status,
+        intent: input.intent ?? null,
+        serviceRequested: input.serviceRequested ?? null,
+        source: input.source ?? null,
+        estimatedValue: input.estimatedValue ?? null,
+        ...(input.qualificationData !== undefined ? { qualificationData: input.qualificationData } : {}),
+        ...(input.qualificationScore !== undefined ? { qualificationScore: input.qualificationScore } : {}),
+        ...(input.qualificationCompletedAt !== undefined ? { qualificationCompletedAt: input.qualificationCompletedAt } : {}),
+        assignedUserId: input.assignedUserId ?? null,
+        updatedAt: now,
+      },
+    }).returning();
+
+    if (lead.status === "QUALIFIED" && before?.status !== "QUALIFIED") {
+      await tx.insert(automationEvents).values({
+        workspaceId,
+        type: "LEAD_QUALIFIED",
+        aggregateType: "LEAD",
+        aggregateId: lead.id,
+        payload: {
+          leadId: lead.id,
+          contactId,
+          qualificationScore: lead.qualificationScore,
+        },
+        occurredAt: lead.qualificationCompletedAt ?? now,
+      }).onConflictDoNothing();
+    }
+
+    return lead;
+  });
 }
 
 export async function getOrCreateOpenConversation(workspaceId: string, contactId: string) {
@@ -331,6 +354,22 @@ export async function appendMessage(workspaceId: string, conversationId: string,
     if (inserted) {
       await tx.update(conversations).set({ lastMessageAt: now, updatedAt: now })
         .where(and(eq(conversations.workspaceId, workspaceId), eq(conversations.id, conversationId)));
+      if (inserted.direction === "INBOUND" && inserted.senderType === "CUSTOMER" && inserted.contentType === "TEXT") {
+        await tx.insert(automationEvents).values({
+          workspaceId,
+          type: "INQUIRY_RECEIVED",
+          aggregateType: "MESSAGE",
+          aggregateId: inserted.id,
+          payload: {
+            messageId: inserted.id,
+            conversationId,
+            contactId: conversation.contactId,
+            channel: inserted.channel,
+            receivedAt: now.toISOString(),
+          },
+          occurredAt: now,
+        }).onConflictDoNothing();
+      }
       return inserted;
     }
 
@@ -360,9 +399,20 @@ export async function setConversationHandlingMode(
     assignedUserId,
     aiPausedAt: mode === "HUMAN" ? now : null,
     updatedAt: now,
-  }).where(and(eq(conversations.workspaceId, workspaceId), eq(conversations.id, conversationId))).returning();
+  }).where(and(
+    eq(conversations.workspaceId, workspaceId),
+    eq(conversations.id, conversationId),
+  )).returning();
   if (!conversation) throw new AppError("CONVERSATION_NOT_FOUND", "Conversation not found.", 404);
   return conversation;
+}
+
+export async function getConversationById(workspaceId: string, conversationId: string) {
+  const [conversation] = await db.select().from(conversations).where(and(
+    eq(conversations.workspaceId, workspaceId),
+    eq(conversations.id, conversationId),
+  )).limit(1);
+  return conversation ?? null;
 }
 
 export async function closeConversation(workspaceId: string, conversationId: string) {
@@ -435,22 +485,38 @@ export async function insertAppointment(
   external: { integrationId: string | null; externalEventId: string | null; status?: "PENDING" | "CONFIRMED" },
 ) {
   await ensureContactInWorkspace(workspaceId, input.contactId);
-  const [appointment] = await db.insert(appointments).values({
-    workspaceId,
-    contactId: input.contactId,
-    conversationId: input.conversationId ?? null,
-    integrationId: external.integrationId,
-    externalEventId: external.externalEventId,
-    serviceId: input.serviceId ?? null,
-    title: input.title,
-    startsAt: input.startsAt,
-    endsAt: input.endsAt,
-    timezone: input.timezone,
-    status: external.status ?? "CONFIRMED",
-    bookingSource: input.bookingSource ?? null,
-    notes: input.notes ?? null,
-  }).returning();
-  return appointment;
+  return db.transaction(async (tx) => {
+    const [appointment] = await tx.insert(appointments).values({
+      workspaceId,
+      contactId: input.contactId,
+      conversationId: input.conversationId ?? null,
+      integrationId: external.integrationId,
+      externalEventId: external.externalEventId,
+      serviceId: input.serviceId ?? null,
+      title: input.title,
+      startsAt: input.startsAt,
+      endsAt: input.endsAt,
+      timezone: input.timezone,
+      status: external.status ?? "CONFIRMED",
+      bookingSource: input.bookingSource ?? null,
+      notes: input.notes ?? null,
+    }).returning();
+    if (appointment.status === "CONFIRMED") {
+      await tx.insert(automationEvents).values({
+        workspaceId,
+        type: "APPOINTMENT_CONFIRMED",
+        aggregateType: "APPOINTMENT",
+        aggregateId: appointment.id,
+        payload: {
+          appointmentId: appointment.id,
+          contactId: appointment.contactId,
+          conversationId: appointment.conversationId,
+          startsAt: appointment.startsAt.toISOString(),
+        },
+      }).onConflictDoNothing();
+    }
+    return appointment;
+  });
 }
 
 export async function updateAppointmentAfterReschedule(
@@ -459,16 +525,31 @@ export async function updateAppointmentAfterReschedule(
   input: AppointmentRescheduleInput,
   externalEventId?: string,
 ) {
-  const [appointment] = await db.update(appointments).set({
-    startsAt: input.startsAt,
-    endsAt: input.endsAt,
-    timezone: input.timezone,
-    externalEventId: externalEventId,
-    status: "CONFIRMED",
-    updatedAt: new Date(),
-  }).where(and(eq(appointments.workspaceId, workspaceId), eq(appointments.id, appointmentId))).returning();
-  if (!appointment) throw new AppError("APPOINTMENT_NOT_FOUND", "Appointment not found.", 404);
-  return appointment;
+  return db.transaction(async (tx) => {
+    const [appointment] = await tx.update(appointments).set({
+      startsAt: input.startsAt,
+      endsAt: input.endsAt,
+      timezone: input.timezone,
+      externalEventId: externalEventId,
+      status: "CONFIRMED",
+      updatedAt: new Date(),
+    }).where(and(eq(appointments.workspaceId, workspaceId), eq(appointments.id, appointmentId))).returning();
+    if (!appointment) throw new AppError("APPOINTMENT_NOT_FOUND", "Appointment not found.", 404);
+    await tx.insert(automationEvents).values({
+      workspaceId,
+      type: "APPOINTMENT_RESCHEDULED",
+      aggregateType: "APPOINTMENT",
+      aggregateId: appointment.id,
+      occurrenceKey: appointment.startsAt.toISOString(),
+      payload: {
+        appointmentId: appointment.id,
+        contactId: appointment.contactId,
+        conversationId: appointment.conversationId,
+        startsAt: appointment.startsAt.toISOString(),
+      },
+    }).onConflictDoNothing();
+    return appointment;
+  });
 }
 
 export async function setAppointmentStatus(
@@ -476,8 +557,19 @@ export async function setAppointmentStatus(
   appointmentId: string,
   status: "PENDING" | "CONFIRMED" | "COMPLETED" | "CANCELLED" | "NO_SHOW",
 ) {
-  const [appointment] = await db.update(appointments).set({ status, updatedAt: new Date() })
-    .where(and(eq(appointments.workspaceId, workspaceId), eq(appointments.id, appointmentId))).returning();
-  if (!appointment) throw new AppError("APPOINTMENT_NOT_FOUND", "Appointment not found.", 404);
-  return appointment;
+  return db.transaction(async (tx) => {
+    const [appointment] = await tx.update(appointments).set({ status, updatedAt: new Date() })
+      .where(and(eq(appointments.workspaceId, workspaceId), eq(appointments.id, appointmentId))).returning();
+    if (!appointment) throw new AppError("APPOINTMENT_NOT_FOUND", "Appointment not found.", 404);
+    if (status === "CANCELLED") {
+      await tx.insert(automationEvents).values({
+        workspaceId,
+        type: "APPOINTMENT_CANCELLED",
+        aggregateType: "APPOINTMENT",
+        aggregateId: appointment.id,
+        payload: { appointmentId: appointment.id, startsAt: appointment.startsAt.toISOString() },
+      }).onConflictDoNothing();
+    }
+    return appointment;
+  });
 }

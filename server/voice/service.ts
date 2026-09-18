@@ -6,6 +6,7 @@ import { db } from "@/db";
 import { usageEvents } from "@/db/schema";
 import {
   appendMessage,
+  getConversationById,
   getOrCreateOpenConversation,
 } from "@/server/domain/core/repository";
 import { normalizePhone } from "@/server/domain/core/schemas";
@@ -437,6 +438,12 @@ export function createVoiceWebhookService(dependencies: VoiceServiceDependencies
       const result = await dependencies.respond(workspaceId, call.conversationId);
       if (!result.reply) {
         await updateVoiceCall(workspaceId, call.id, {}, { phase: result.handlingMode === "HUMAN" ? "HUMAN" : "ACTIVE" });
+        return;
+      }
+
+      const latestConversation = await getConversationById(workspaceId, call.conversationId);
+      if (!latestConversation || latestConversation.handlingMode !== "AI") {
+        await updateVoiceCall(workspaceId, call.id, {}, { phase: "HUMAN" });
         return;
       }
 
