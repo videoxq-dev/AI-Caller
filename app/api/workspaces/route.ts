@@ -1,0 +1,36 @@
+import { z } from "zod";
+import { auth } from "@/server/auth";
+import { activeWorkspaceCookie } from "@/server/auth/active-workspace";
+import { getMembership, listMembershipsForUser } from "@/server/auth/workspace-repository";
+import { getEnv } from "@/server/env";
+import { AppError, toErrorResponse } from "@/server/http/errors";
+import { parseInput } from "@/server/http/validation";
+
+const inputSchema = z.object({ workspaceId: z.string().uuid() });
+
+export async function GET(request: Request) {
+  try {
+    const session = await auth.api.getSession({ headers: request.headers });
+    if (!session) throw new AppError("UNAUTHORIZED", "You must be signed in.", 401);
+    const memberships = await listMembershipsForUser(session.user.id);
+    return Response.json({ workspaces: memberships });
+  } catch (error) {
+    return toErrorResponse(error);
+  }
+}
+
+export async function POST(request: Request) {
+  try {
+    const session = await auth.api.getSession({ headers: request.headers });
+    if (!session) throw new AppError("UNAUTHORIZED", "You must be signed in.", 401);
+    const input = parseInput(inputSchema, await request.json());
+    const membership = await getMembership(session.user.id, input.workspaceId);
+    if (!membership) throw new AppError("WORKSPACE_NOT_FOUND", "You are not a member of that workspace.", 404);
+    if (membership.workspaceStatus === "SUSPENDED") throw new AppError("WORKSPACE_SUSPENDED", "This workspace is suspended.", 403);
+    const headers = new Headers({ "content-type": "application/json" });
+    headers.append("set-cookie", activeWorkspaceCookie(membership.workspaceId, getEnv().NODE_ENV === "production"));
+    return new Response(JSON.stringify({ workspace: membership }), { status: 200, headers });
+  } catch (error) {
+    return toErrorResponse(error);
+  }
+}
