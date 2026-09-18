@@ -1,6 +1,6 @@
 import { afterAll, beforeEach, describe, expect, it } from "vitest";
 import { db, closeDatabase } from "@/db";
-import { contacts, conversations, leads, memberships, user, workspaceInvitations, workspaces } from "@/db/schema";
+import { automationSettings, contacts, conversations, leads, memberships, user, workspaceInvitations, workspaces } from "@/db/schema";
 import {
   acceptWorkspaceInvitation,
   createWorkspaceInvitation,
@@ -103,6 +103,20 @@ describe("workspace team invitations", () => {
       contactId: contact.id,
       assignedUserId: staffId,
     }).returning();
+    await db.insert(automationSettings).values([
+      {
+        workspaceId,
+        key: "QUALIFIED_LEAD_ASSIGNMENT",
+        enabled: true,
+        config: { assignedUserId: staffId, notifyInApp: true },
+      },
+      {
+        workspaceId,
+        key: "HUMAN_ESCALATION",
+        enabled: true,
+        config: { assignedUserId: staffId, notifyInApp: true },
+      },
+    ]);
 
     await removeWorkspaceMember(workspaceId, staffId);
 
@@ -112,6 +126,9 @@ describe("workspace team invitations", () => {
     expect(storedConversation.assignedUserId).toBeNull();
     expect(storedLead.id).toBe(lead.id);
     expect(storedLead.assignedUserId).toBeNull();
+    const settings = await db.select().from(automationSettings);
+    expect(settings).toHaveLength(2);
+    expect(settings.every((setting) => setting.config.assignedUserId === null)).toBe(true);
   });
 
   it("does not accept an expired token", async () => {
