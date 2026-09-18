@@ -375,6 +375,11 @@ async function failProvisioning(
   }).where(eq(hostedPhoneNumbers.id, row.id));
 }
 
+function ownedNumberIsUsable(owned: { id?: string; status?: string } | null | undefined) {
+  const status = owned?.status?.trim().toLowerCase();
+  return Boolean(owned?.id && (status === "active" || status === "success"));
+}
+
 async function reconcileProvisioningRow(row: typeof hostedPhoneNumbers.$inferSelect) {
   if (row.status !== "PROVISIONING" && row.status !== "RECONCILING") return row;
 
@@ -382,9 +387,8 @@ async function reconcileProvisioningRow(row: typeof hostedPhoneNumbers.$inferSel
   try {
     if (!row.providerOrderId) {
       const owned = await findOwnedTelnyxNumber(row.phoneNumber);
-      const ownedStatus = owned?.status?.trim().toLowerCase() ?? null;
-      if (owned?.id && (ownedStatus === "active" || ownedStatus === "success")) {
-        return activateProvisionedNumber(row, owned.id, "reconciled");
+      if (ownedNumberIsUsable(owned)) {
+        return activateProvisionedNumber(row, owned!.id!, "reconciled");
       }
       const [pending] = await db.update(hostedPhoneNumbers).set({
         status: "RECONCILING",
@@ -433,19 +437,21 @@ async function reconcileProvisioningRow(row: typeof hostedPhoneNumbers.$inferSel
     }
 
     const owned = await findOwnedTelnyxNumber(row.phoneNumber);
-    if (!owned?.id) {
+    if (!ownedNumberIsUsable(owned)) {
       const [pending] = await db.update(hostedPhoneNumbers).set({
         providerOrderStatus: outcome.orderStatus,
         status: "PROVISIONING",
         provisioningLastCheckedAt: now,
         reconcileAfter: new Date(now.getTime() + PROVISIONING_RECONCILE_DELAY_MS),
-        failureReason: "The carrier completed the order and is still publishing the phone number to account inventory.",
+        failureReason: owned?.id
+          ? "The carrier completed the order, but the owned phone number is not active yet."
+          : "The carrier completed the order and is still publishing the phone number to account inventory.",
         updatedAt: now,
       }).where(eq(hostedPhoneNumbers.id, row.id)).returning();
       return pending;
     }
 
-    return activateProvisionedNumber(row, owned.id, outcome.orderStatus);
+    return activateProvisionedNumber(row, owned!.id!, outcome.orderStatus);
   } catch (error) {
     const [pending] = await db.update(hostedPhoneNumbers).set({
       status: "RECONCILING",
