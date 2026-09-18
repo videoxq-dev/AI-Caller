@@ -5,7 +5,6 @@ import { useEffect, useState } from "react";
 import type { ReactNode } from "react";
 import {
   MessageIcon,
-  PhoneIcon,
   UsersIcon,
 } from "@/components/icons";
 import { AppNav } from "@/components/core-domain/app-nav";
