@@ -195,6 +195,8 @@ export function DashboardDataPage() {
   );
   const yLabels = [chartMax, Math.round(chartMax * 0.75), Math.round(chartMax * 0.5), Math.round(chartMax * 0.25), 0];
   const appointmentMax = Math.max(1, ...chartSeries.map((item) => item.appointments));
+  const hasConversationActivity = data.metrics.inquiries.value > 0 || data.metrics.aiConversations.value > 0;
+  const hasAppointmentActivity = data.metrics.appointments.value > 0;
   const creditTotal = data.credit.balance + data.credit.usedInPeriod;
   const remainingPercent = creditTotal > 0 ? Math.round((data.credit.balance / creditTotal) * 100) : 0;
   const attentionTotal = data.attention.unansweredInquiries + data.attention.pendingAppointments + data.attention.qualifiedFollowups;
@@ -291,7 +293,7 @@ export function DashboardDataPage() {
                 <div><h2>Inquiries &amp; Conversations</h2><p className="cardSubcopy">Workspace activity for the selected period</p></div>
                 <div className="chartLegend"><span><i className="blueDot" />New inquiries</span><span><i className="purpleDot" />AI conversations</span></div>
               </div>
-              {chartSeries.length ? (
+              {hasConversationActivity ? (
                 <div className="lineChart">
                   <div className="yLabels">{yLabels.map((value, index) => <span key={index}>{value}</span>)}</div>
                   <div className="chartCanvas">
@@ -317,7 +319,7 @@ export function DashboardDataPage() {
                 <span><i className="greenDot" />Completed <b>{formatNumber(data.appointmentStatus.completed)}</b></span>
                 <span><i className="redDot" />Cancelled <b>{formatNumber(data.appointmentStatus.cancelled)}</b></span>
               </div>
-              {chartSeries.length ? <>
+              {hasAppointmentActivity ? <>
                 <div className="barChart" aria-label="Appointments booked over time">
                   {chartSeries.map((item) => {
                     const height = item.appointments ? Math.max(8, Math.round((item.appointments / appointmentMax) * 110)) : 2;
