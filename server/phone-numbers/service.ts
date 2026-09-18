@@ -67,7 +67,11 @@ function publicNumber(row: typeof hostedPhoneNumbers.$inferSelect | null | undef
 
 export async function getManagedPhoneNumber(workspaceId: string) {
   const [row] = await db.select().from(hostedPhoneNumbers)
-    .where(and(eq(hostedPhoneNumbers.workspaceId, workspaceId), isNull(hostedPhoneNumbers.releasedAt)))
+    .where(and(
+      eq(hostedPhoneNumbers.workspaceId, workspaceId),
+      isNull(hostedPhoneNumbers.releasedAt),
+      inArray(hostedPhoneNumbers.status, ["PROVISIONING", "ACTIVE", "PAST_DUE", "SUSPENDED"]),
+    ))
     .orderBy(desc(hostedPhoneNumbers.createdAt))
     .limit(1);
   return publicNumber(row);
@@ -75,7 +79,11 @@ export async function getManagedPhoneNumber(workspaceId: string) {
 
 async function privateManagedPhoneNumber(workspaceId: string) {
   const [row] = await db.select().from(hostedPhoneNumbers)
-    .where(and(eq(hostedPhoneNumbers.workspaceId, workspaceId), isNull(hostedPhoneNumbers.releasedAt)))
+    .where(and(
+      eq(hostedPhoneNumbers.workspaceId, workspaceId),
+      isNull(hostedPhoneNumbers.releasedAt),
+      inArray(hostedPhoneNumbers.status, ["PROVISIONING", "ACTIVE", "PAST_DUE", "SUSPENDED"]),
+    ))
     .orderBy(desc(hostedPhoneNumbers.createdAt))
     .limit(1);
   return row ?? null;
@@ -127,13 +135,22 @@ async function findFreshQuote(phoneNumber: string) {
     throw new AppError("INVALID_PHONE_NUMBER", "Choose a valid US phone number from the current search results.", 422);
   }
   const national = phoneNumber.slice(2);
-  const numbers = await searchTelnyxNumbers({
+  const localNumbers = await searchTelnyxNumbers({
     countryCode: "US",
     startsWith: national,
     numberType: "local",
     limit: 20,
   });
-  const match = numbers.find((number) => number.phoneNumber === phoneNumber);
+  let match = localNumbers.find((number) => number.phoneNumber === phoneNumber);
+  if (!match) {
+    const tollFreeNumbers = await searchTelnyxNumbers({
+      countryCode: "US",
+      startsWith: national,
+      numberType: "toll_free",
+      limit: 20,
+    });
+    match = tollFreeNumbers.find((number) => number.phoneNumber === phoneNumber);
+  }
   if (!match) throw new AppError("PHONE_NUMBER_UNAVAILABLE", "That phone number is no longer available. Search again and choose another number.", 409);
   return { match, quote: quoteHostedPhoneNumber(match) };
 }
@@ -181,7 +198,11 @@ async function createProvisioningRecord(
   return db.transaction(async (tx) => {
     await tx.execute(sql`select pg_advisory_xact_lock(hashtext(${`managed-phone:${workspaceId}`}))`);
     const [latest] = await tx.select().from(hostedPhoneNumbers)
-      .where(and(eq(hostedPhoneNumbers.workspaceId, workspaceId), isNull(hostedPhoneNumbers.releasedAt)))
+      .where(and(
+        eq(hostedPhoneNumbers.workspaceId, workspaceId),
+        isNull(hostedPhoneNumbers.releasedAt),
+        inArray(hostedPhoneNumbers.status, ["PROVISIONING", "ACTIVE", "PAST_DUE", "SUSPENDED"]),
+      ))
       .orderBy(desc(hostedPhoneNumbers.createdAt))
       .limit(1);
 
@@ -397,6 +418,19 @@ export async function releaseManagedPhoneNumber(workspaceId: string, phoneNumber
   return publicNumber(released);
 }
 
+async function clearHostedTelephonyBindingsIfUnused(workspaceId: string) {
+  const [active] = await db.select({ id: hostedPhoneNumbers.id }).from(hostedPhoneNumbers).where(and(
+    eq(hostedPhoneNumbers.workspaceId, workspaceId),
+    isNull(hostedPhoneNumbers.releasedAt),
+    inArray(hostedPhoneNumbers.status, ["PROVISIONING", "ACTIVE", "PAST_DUE", "SUSPENDED"]),
+  )).limit(1);
+  if (active) return;
+  await db.delete(capabilityBindings).where(and(
+    eq(capabilityBindings.workspaceId, workspaceId),
+    inArray(capabilityBindings.capability, ["VOICE", "SMS"]),
+  ));
+}
+
 export async function processPendingPhoneNumberReleases(limit = 50) {
   const rows = await db.select().from(hostedPhoneNumbers).where(and(
     isNull(hostedPhoneNumbers.releasedAt),
@@ -407,6 +441,7 @@ export async function processPendingPhoneNumberReleases(limit = 50) {
   for (const row of rows) {
     try {
       await finalizeRelease(row);
+      await clearHostedTelephonyBindingsIfUnused(row.workspaceId);
       released += 1;
     } catch (error) {
       logger.error({ err: error, workspaceId: row.workspaceId, phoneNumber: row.phoneNumber }, "Managed phone number release retry failed");
