@@ -4,6 +4,7 @@ import path from "node:path";
 import { Readable } from "node:stream";
 import { GetObjectCommand, PutObjectCommand, S3Client } from "@aws-sdk/client-s3";
 import { getEnv } from "@/server/env";
+import { isE2EProviderFixtureMode } from "@/server/providers/e2e-fixtures";
 
 export type RecordingRange = { start: number; end?: number };
 export type RecordingObject = {
@@ -71,7 +72,7 @@ export async function putVoiceRecording(key: string, bytes: Uint8Array, contentT
     return;
   }
 
-  if (env.NODE_ENV === "production") {
+  if (env.NODE_ENV === "production" && !isE2EProviderFixtureMode()) {
     throw new Error("Filesystem voice recording storage is not allowed in production.");
   }
   const target = filesystemPath(env.VOICE_RECORDING_DIR, key);
