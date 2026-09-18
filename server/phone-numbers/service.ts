@@ -290,6 +290,7 @@ export async function provisionManagedPhoneNumber(workspaceId: string, input: {
     purchased = true;
 
     const orderedNumber = order.phone_numbers?.find((number) => number.phone_number === match.phoneNumber);
+    providerNumberId = orderedNumber?.id ?? null;
     if (order.status === "failure" || orderedNumber?.status === "failure") {
       throw new AppError("PHONE_NUMBER_ORDER_FAILED", "The carrier could not provision that phone number. Search again and choose another number.", 409);
     }
@@ -297,8 +298,10 @@ export async function provisionManagedPhoneNumber(workspaceId: string, input: {
       throw new AppError("PHONE_NUMBER_REQUIREMENTS", "That number requires additional regulatory information and cannot be activated in self-service yet. Choose another number.", 409);
     }
 
-    const owned = await waitForOwnedNumber(match.phoneNumber);
-    providerNumberId = owned?.id ?? null;
+    if (!providerNumberId) {
+      const owned = await waitForOwnedNumber(match.phoneNumber);
+      providerNumberId = owned?.id ?? null;
+    }
     if (!providerNumberId) {
       throw new AppError("PHONE_NUMBER_ACTIVATION_PENDING", "The carrier did not finish activating this number in time. No credits were charged; please try again.", 503);
     }
