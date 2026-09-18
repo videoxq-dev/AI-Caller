@@ -201,6 +201,10 @@ async function requireVoiceIntegrationReady(workspaceId: string, provider: strin
     ? settings.phone.trim()
     : credentials.phone?.trim();
   if (!phone) throw new Error("Telnyx voice needs an inbound phone number before setup can be completed.");
+  const connectionId = typeof settings.connectionId === "string" && settings.connectionId.trim()
+    ? settings.connectionId.trim()
+    : credentials.connectionId?.trim();
+  if (!connectionId) throw new Error("Telnyx voice needs a Call Control connection ID before setup can be completed.");
   const publicKey = typeof settings.webhookPublicKey === "string" && settings.webhookPublicKey.trim()
     ? settings.webhookPublicKey.trim()
     : credentials.webhookPublicKey?.trim();
