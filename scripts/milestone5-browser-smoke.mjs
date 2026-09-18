@@ -1,4 +1,4 @@
-import { createHmac } from "node:crypto";
+import { createPrivateKey, sign } from "node:crypto";
 import { mkdir } from "node:fs/promises";
 import path from "node:path";
 import pg from "pg";
@@ -7,9 +7,11 @@ import { chromium } from "playwright";
 const { Pool } = pg;
 const baseUrl = process.env.BETTER_AUTH_URL ?? "http://127.0.0.1:3000";
 const databaseUrl = process.env.DATABASE_URL;
-const twilioToken = process.env.HOSTED_SMS_TWILIO_AUTH_TOKEN;
 if (!databaseUrl) throw new Error("DATABASE_URL is required for Milestone 5 browser verification.");
-if (!twilioToken) throw new Error("HOSTED_SMS_TWILIO_AUTH_TOKEN is required for Milestone 5 browser verification.");
+
+const telnyxPrivateKey = createPrivateKey(`-----BEGIN PRIVATE KEY-----
+MC4CAQAwBQYDK2VwBCIEIOgDv5zaVsY5ojeyMYHRlFb2ZKLJp62/+AxAzM+9lRMB
+-----END PRIVATE KEY-----`);
 
 const outputDir = path.join(process.cwd(), "artifacts", "milestone5-browser");
 await mkdir(outputDir, { recursive: true });
@@ -18,33 +20,36 @@ function assert(condition, message) {
   if (!condition) throw new Error(message);
 }
 
-function twilioSignature(url, rawBody, token) {
-  const pairs = Array.from(new URLSearchParams(rawBody).entries()).sort(([ak, av], [bk, bv]) => ak.localeCompare(bk) || av.localeCompare(bv));
-  return createHmac("sha1", token).update(`${url}${pairs.map(([key, value]) => `${key}${value}`).join("")}`, "utf8").digest("base64");
+function telnyxEvent(eventType, eventId, payload) {
+  return {
+    data: {
+      event_type: eventType,
+      id: eventId,
+      occurred_at: new Date().toISOString(),
+      payload,
+    },
+  };
 }
 
-async function sendTwilioWebhook(workspaceId, values, signature = true) {
-  const url = `${baseUrl}/api/webhooks/sms/twilio/${workspaceId}`;
-  const body = new URLSearchParams(values).toString();
+async function sendTelnyxWebhook(workspaceId, event, validSignature = true) {
+  const url = `${baseUrl}/api/webhooks/sms/telnyx/${workspaceId}`;
+  const body = JSON.stringify(event);
+  const timestamp = String(Math.floor(Date.now() / 1000));
+  const signature = validSignature
+    ? sign(null, Buffer.from(`${timestamp}|${body}`, "utf8"), telnyxPrivateKey).toString("base64")
+    : Buffer.alloc(64).toString("base64");
   const response = await fetch(url, {
     method: "POST",
     headers: {
-      "content-type": "application/x-www-form-urlencoded",
-      "x-twilio-signature": signature ? twilioSignature(url, body, twilioToken) : "invalid",
+      "content-type": "application/json",
+      "telnyx-timestamp": timestamp,
+      "telnyx-signature-ed25519": signature,
     },
     body,
   });
   const text = await response.text();
   let payload = null;
   try { payload = text ? JSON.parse(text) : null; } catch {}
-  if (!payload && response.headers.get("content-type")?.includes("text/xml")) {
-    payload = {
-      queued: Number(response.headers.get("x-ai-caller-queued") ?? 0),
-      processed: Number(response.headers.get("x-ai-caller-processed") ?? 0),
-      duplicates: Number(response.headers.get("x-ai-caller-duplicates") ?? 0),
-      deferred: Number(response.headers.get("x-ai-caller-deferred") ?? 0),
-    };
-  }
   return { response, payload, text };
 }
 
@@ -157,10 +162,7 @@ try {
   await pool.query(
     `INSERT INTO hosted_api_rate_cards
        (capability, provider, model, unit, cost_micros, units_per_cost, target_margin_bps, effective_from, metadata)
-     VALUES ('SMS', 'twilio', '', 'SMS_SEGMENT', 450, 1, 5500, '2026-01-01T00:00:00Z', '{"fixture":"milestone5"}'::jsonb)
-     ON CONFLICT (capability, provider, model, unit, effective_from)
-     DO UPDATE SET cost_micros = EXCLUDED.cost_micros, units_per_cost = EXCLUDED.units_per_cost,
-       target_margin_bps = EXCLUDED.target_margin_bps, enabled = true, effective_to = NULL, updated_at = now()`,
+     VALUES ('SMS', 'telnyx', '', 'SMS_SEGMENT', 450, 1, 5000, now(), '{"fixture":"milestone5"}'::jsonb)`,
   );
   const calendarIntegration = await pool.query(
     `INSERT INTO integrations (workspace_id, category, provider, mode, status, settings)
@@ -176,7 +178,7 @@ try {
   );
   const hostedCommunicationSettings = {
     voice: { mode: "HOSTED", provider: null, numberMode: "new", number: "+12025550200" },
-    sms: { mode: "HOSTED", provider: null, numberMode: "same", number: null, displayName: "Milestone Five Auto Spa", replyWindow: "Always respond", afterHoursBehavior: "Auto-reply + collect details" },
+    sms: { mode: "HOSTED", provider: null, numberMode: "same", number: "+12025550200", displayName: "Milestone Five Auto Spa", replyWindow: "Always respond", afterHoursBehavior: "Auto-reply + collect details" },
     whatsapp: { mode: "BYOP", provider: "whatsapp", accountMode: "existing" },
     webchat: { enabled: true },
   };
@@ -187,66 +189,36 @@ try {
     [workspaceId, JSON.stringify(hostedCommunicationSettings)],
   );
   await pool.query(
-    `INSERT INTO integrations (workspace_id, category, provider, mode, status, settings)
-     VALUES ($1, 'COMMUNICATION', 'telnyx', 'BYOP', 'CONNECTED', $2::jsonb)
-     ON CONFLICT (workspace_id, provider) DO UPDATE SET category = 'COMMUNICATION', mode = 'BYOP', status = 'CONNECTED', settings = EXCLUDED.settings, updated_at = now()`,
-    [workspaceId, JSON.stringify({ phone: "+12025550299" })],
+    `INSERT INTO hosted_phone_numbers
+       (workspace_id, provider, provider_number_id, phone_number, country_code, number_type, status,
+        provider_monthly_cost_micros, provider_upfront_cost_micros, monthly_credits, purchase_credits,
+        current_period_start, current_period_end, next_billing_at)
+     VALUES ($1, 'telnyx', 'm5-managed-number', '+12025550200', 'US', 'local', 'ACTIVE',
+       1000000, 0, 2000, 2000, now(), now() + interval '30 days', now() + interval '30 days')`,
+    [workspaceId],
   );
 
   await page.goto(`${baseUrl}/setup/communication`, { waitUntil: "networkidle" });
-  await page.locator(".channelTabs button").filter({ hasText: "SMS" }).click();
-  await page.getByRole("button", { name: /Use my own provider \(BYOP\)/ }).click();
-  const callbackInput = page.getByLabel("SMS callback URL");
-  await callbackInput.waitFor();
-  const callbackSuffix = `/api/webhooks/sms/telnyx/${workspaceId}`;
-  await page.waitForFunction(
-    (suffix) => {
-      const input = document.querySelector('input[aria-label="SMS callback URL"]');
-      return input instanceof HTMLInputElement && input.value.endsWith(suffix);
-    },
-    callbackSuffix,
-    { timeout: 10_000 },
-  );
-  const callbackValue = await callbackInput.inputValue();
-  assert(callbackValue.endsWith(callbackSuffix), `Unexpected Telnyx callback URL: ${callbackValue}`);
-  const publicKeyInput = page.getByLabel("Webhook signing public key");
-  await publicKeyInput.waitFor();
-  await assertNoHorizontalOverflow(page, "BYOP SMS webhook setup desktop");
-  await page.screenshot({ path: path.join(outputDir, "sms-byop-setup-desktop.png"), fullPage: true });
+  await page.getByRole("button", { name: /Phone & SMS/ }).waitFor();
+  await page.getByText("+1 (202) 555-0200", { exact: true }).waitFor({ timeout: 10_000 });
+  await page.getByText("Calls + SMS", { exact: true }).waitFor();
+  await assertNoHorizontalOverflow(page, "Managed phone and SMS setup desktop");
+  await page.screenshot({ path: path.join(outputDir, "sms-managed-setup-desktop.png"), fullPage: true });
   await page.setViewportSize({ width: 390, height: 844 });
-  await page.screenshot({ path: path.join(outputDir, "sms-byop-setup-mobile.png"), fullPage: true });
-  await assertNoHorizontalOverflow(page, "BYOP SMS webhook setup mobile");
+  await assertNoHorizontalOverflow(page, "Managed phone and SMS setup mobile");
+  await page.screenshot({ path: path.join(outputDir, "sms-managed-setup-mobile.png"), fullPage: true });
   await page.setViewportSize({ width: 1440, height: 1000 });
 
-  const telnyxPublicKey = Buffer.alloc(32, 7).toString("base64");
-  await publicKeyInput.fill(telnyxPublicKey);
-  await page.getByRole("button", { name: "Save for later" }).click();
-  await page.getByText("Communication settings saved.", { exact: true }).waitFor({ timeout: 10_000 });
-  const telnyxSettings = await pool.query(
-    `SELECT settings FROM integrations WHERE workspace_id = $1 AND provider = 'telnyx' LIMIT 1`,
-    [workspaceId],
-  );
-  assert(telnyxSettings.rows[0]?.settings?.webhookPublicKey === telnyxPublicKey, "Telnyx signing public key was not persisted through the SMS setup UI.");
-  const publicConfig = await api(context, "GET", "/api/integrations/sms/config?provider=telnyx", undefined, "load public Telnyx SMS config");
-  assert(publicConfig?.webhookPublicKeyConfigured === true, "Public SMS config did not report the saved Telnyx signing key.");
-  assert(!JSON.stringify(publicConfig).includes(telnyxPublicKey), "Public SMS config exposed the Telnyx signing public key value.");
-
-  await pool.query(
-    `UPDATE capability_bindings SET mode = 'HOSTED', integration_id = NULL, updated_at = now() WHERE workspace_id = $1 AND capability = 'SMS'`,
-    [workspaceId],
-  );
-  await pool.query(
-    `UPDATE communication_setup_settings SET settings = $2::jsonb, updated_at = now() WHERE workspace_id = $1`,
-    [workspaceId, JSON.stringify(hostedCommunicationSettings)],
-  );
-
-  const invalid = await sendTwilioWebhook(workspaceId, {
-    MessageSid: "SM-invalid-signature",
-    From: "+12025550100",
-    To: "+12025550200",
-    Body: "Should be rejected",
-    SmsStatus: "received",
-  }, false);
+  const invalid = await sendTelnyxWebhook(workspaceId, telnyxEvent(
+    "message.received",
+    "evt-invalid-signature",
+    {
+      id: "SM-invalid-signature",
+      from: { phone_number: "+12025550100" },
+      to: [{ phone_number: "+12025550200" }],
+      text: "Should be rejected",
+    },
+  ), false);
   assert(invalid.response.status === 401, `Expected invalid SMS signature to return 401, received ${invalid.response.status}.`);
 
   const turns = [
@@ -257,16 +229,13 @@ try {
 
   let conversationId;
   for (const turn of turns) {
-    const webhook = await sendTwilioWebhook(workspaceId, {
-      MessageSid: turn.sid,
-      From: "+12025550100",
-      To: "+12025550200",
-      Body: turn.body,
-      SmsStatus: "received",
-    });
-    assert(webhook.response.status === 200, `Expected Twilio SMS webhook 200 for ${turn.sid}, received ${webhook.response.status}: ${webhook.text}`);
-    assert(webhook.response.headers.get("content-type")?.includes("text/xml"), `Expected Twilio SMS webhook XML response for ${turn.sid}.`);
-    assert(webhook.text.includes("<Response>"), `Expected Twilio SMS webhook TwiML response for ${turn.sid}.`);
+    const webhook = await sendTelnyxWebhook(workspaceId, telnyxEvent("message.received", `evt-${turn.sid}-received`, {
+      id: turn.sid,
+      from: { phone_number: "+12025550100" },
+      to: [{ phone_number: "+12025550200" }],
+      text: turn.body,
+    }));
+    assert(webhook.response.status === 202, `Expected Telnyx SMS webhook 202 for ${turn.sid}, received ${webhook.response.status}: ${webhook.text}`);
     assert(webhook.payload?.queued === 1, `Expected ${turn.sid} to queue one SMS response.`);
 
     const result = await waitFor(
@@ -284,14 +253,13 @@ try {
   }
   assert(conversationId, "SMS flow did not create a conversation.");
 
-  const duplicate = await sendTwilioWebhook(workspaceId, {
-    MessageSid: "SM-m5-3",
-    From: "+12025550100",
-    To: "+12025550200",
-    Body: turns[2].body,
-    SmsStatus: "received",
-  });
-  assert(duplicate.response.status === 200, "Duplicate SMS webhook was not safely acknowledged with TwiML.");
+  const duplicate = await sendTelnyxWebhook(workspaceId, telnyxEvent("message.received", "evt-SM-m5-3-received", {
+    id: "SM-m5-3",
+    from: { phone_number: "+12025550100" },
+    to: [{ phone_number: "+12025550200" }],
+    text: turns[2].body,
+  }));
+  assert(duplicate.response.status === 202, "Duplicate SMS webhook was not safely acknowledged.");
   assert(duplicate.payload?.duplicates === 1, "Duplicate SMS webhook was not identified as a duplicate.");
   const messageCountAfterDuplicate = (await pool.query(`SELECT count(*)::int AS count FROM messages WHERE workspace_id = $1 AND conversation_id = $2`, [workspaceId, conversationId])).rows[0].count;
 
@@ -339,15 +307,15 @@ try {
 
   const lastOutbound = [...timeline.rows].reverse().find((row) => row.direction === "OUTBOUND");
   assert(lastOutbound?.external_message_id, "SMS outbound provider message id was not persisted.");
-  const delivery = await sendTwilioWebhook(workspaceId, {
-    MessageSid: lastOutbound.external_message_id,
-    MessageStatus: "delivered",
-  });
-  assert(delivery.response.status === 200, `Delivery callback failed with ${delivery.response.status}: ${delivery.text}`);
-  assert(delivery.response.headers.get("content-type")?.includes("text/xml"), "Twilio delivery callback did not receive an XML acknowledgement.");
+  const delivery = await sendTelnyxWebhook(workspaceId, telnyxEvent("message.finalized", "evt-m5-delivered", {
+    id: lastOutbound.external_message_id,
+    to: [{ phone_number: "+12025550100", status: "delivered" }],
+    errors: [],
+  }));
+  assert(delivery.response.status === 202, `Delivery callback failed with ${delivery.response.status}: ${delivery.text}`);
   await waitFor(
     pool,
-    `SELECT status FROM messages WHERE workspace_id = $1 AND provider = 'twilio' AND external_message_id = $2 LIMIT 1`,
+    `SELECT status FROM messages WHERE workspace_id = $1 AND provider = 'telnyx' AND external_message_id = $2 LIMIT 1`,
     [workspaceId, lastOutbound.external_message_id],
     (rows) => rows.rows[0]?.status === "DELIVERED",
     "SMS delivery status",
@@ -355,7 +323,7 @@ try {
 
   const smsUsage = await pool.query(`SELECT mode, provider, credits_charged FROM usage_events WHERE workspace_id = $1 AND capability = 'SMS' ORDER BY created_at`, [workspaceId]);
   assert(smsUsage.rowCount === 6, `Expected 6 hosted SMS usage events (3 inbound + 3 outbound), received ${smsUsage.rowCount}.`);
-  assert(smsUsage.rows.every((row) => row.mode === "HOSTED" && row.provider === "twilio" && row.credits_charged === 1), "Hosted SMS usage attribution/credits are incorrect.");
+  assert(smsUsage.rows.every((row) => row.mode === "HOSTED" && row.provider === "telnyx" && row.credits_charged === 1), "Hosted SMS usage attribution/credits are incorrect.");
 
   const balance = (await pool.query(`SELECT balance FROM credit_wallets WHERE workspace_id = $1`, [workspaceId])).rows[0].balance;
   assert(balance === 89, `Expected 11 total hosted credits consumed (5 AI + 3 inbound SMS + 3 outbound SMS); received balance ${balance}.`);
@@ -370,17 +338,16 @@ try {
 
   const outboundBeforeHuman = (await pool.query(`SELECT count(*)::int AS count FROM messages WHERE workspace_id = $1 AND conversation_id = $2 AND direction = 'OUTBOUND'`, [workspaceId, conversationId])).rows[0].count;
   await pool.query(`UPDATE conversations SET handling_mode = 'HUMAN', ai_paused_at = now(), updated_at = now() WHERE workspace_id = $1 AND id = $2`, [workspaceId, conversationId]);
-  const humanWebhook = await sendTwilioWebhook(workspaceId, {
-    MessageSid: "SM-m5-human",
-    From: "+12025550100",
-    To: "+12025550200",
-    Body: "A human is helping me now",
-    SmsStatus: "received",
-  });
-  assert(humanWebhook.response.status === 200 && humanWebhook.payload?.queued === 1, "Human-mode inbound SMS was not safely queued/persisted with a TwiML acknowledgement.");
+  const humanWebhook = await sendTelnyxWebhook(workspaceId, telnyxEvent("message.received", "evt-SM-m5-human-received", {
+    id: "SM-m5-human",
+    from: { phone_number: "+12025550100" },
+    to: [{ phone_number: "+12025550200" }],
+    text: "A human is helping me now",
+  }));
+  assert(humanWebhook.response.status === 202 && humanWebhook.payload?.queued === 1, "Human-mode inbound SMS was not safely queued/persisted.");
   await waitFor(
     pool,
-    `SELECT status FROM provider_webhook_events WHERE workspace_id = $1 AND provider = 'twilio' AND external_event_id = 'SM-m5-human:received' LIMIT 1`,
+    `SELECT status FROM provider_webhook_events WHERE workspace_id = $1 AND provider = 'telnyx' AND external_event_id = 'evt-SM-m5-human-received' LIMIT 1`,
     [workspaceId],
     (rows) => rows.rows[0]?.status === "PROCESSED",
     "human-mode SMS worker completion",
@@ -397,7 +364,7 @@ try {
   await page.screenshot({ path: path.join(outputDir, "inbox-sms-mobile.png"), fullPage: true });
 
   assert(runtimeErrors.length === 0, `Milestone 5 browser runtime errors:\n${runtimeErrors.join("\n")}`);
-  console.log("Milestone 5 browser acceptance passed: BYOP webhook setup UI and metadata privacy, signed SMS webhook, provider-compatible TwiML acknowledgement, async worker, knowledge response, contact capture, qualification, availability, booking, inbound/outbound hosted credit metering, duplicate suppression, delivery reconciliation, unified Inbox, and human takeover suppression.");
+  console.log("Milestone 5 browser acceptance passed: managed Telnyx number UI, signed SMS webhooks, async worker, knowledge response, contact capture, qualification, availability, booking, inbound/outbound hosted credit metering, duplicate suppression, delivery reconciliation, unified Inbox, and human takeover suppression.");
 } finally {
   await pool.end();
   await browser.close();
