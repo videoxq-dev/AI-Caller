@@ -78,6 +78,21 @@ export async function ensureWebchatWidget(workspaceId: string) {
   throw new Error("Unable to create a public web chat widget key.");
 }
 
+export async function updateWebchatWidget(
+  workspaceId: string,
+  input: { greeting?: string | null; launcherLabel?: string },
+) {
+  await ensureWebchatWidget(workspaceId);
+  const patch: Partial<typeof webchatWidgets.$inferInsert> = { updatedAt: new Date() };
+  if (input.greeting !== undefined) patch.greeting = input.greeting?.trim() || null;
+  if (input.launcherLabel !== undefined) patch.launcherLabel = input.launcherLabel.trim();
+  const [updated] = await db.update(webchatWidgets)
+    .set(patch)
+    .where(eq(webchatWidgets.workspaceId, workspaceId))
+    .returning();
+  return updated;
+}
+
 export async function getPublicWebchatWidget(widgetKey: string) {
   const [row] = await db.select({
     widget: webchatWidgets,
