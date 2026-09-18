@@ -26,6 +26,8 @@ import {
   finishAutomationDelivery,
   getAutomationEvent,
   getAutomationSetting,
+  listAutomationDeliveries,
+  releaseAutomationRunForRetry,
 } from "./repository";
 import type {
   AppointmentConfirmationConfig,
@@ -35,12 +37,6 @@ import type {
 } from "./schemas";
 
 type DeliverySummary = { sent: number; skipped: number; failed: number };
-
-function addSummary(target: DeliverySummary, source: DeliverySummary) {
-  target.sent += source.sent;
-  target.skipped += source.skipped;
-  target.failed += source.failed;
-}
 
 function renderTemplate(template: string, values: Record<string, string>) {
   return template.replace(/{{([a-z_]+)}}/g, (_match, key: string) => values[key] ?? "");
@@ -86,6 +82,22 @@ function deliveryFailureStatus(error: unknown): "FAILED" | "UNKNOWN" | "SKIPPED"
   return "UNKNOWN";
 }
 
+async function existingDeliverySummary(
+  workspaceId: string,
+  delivery: { id: string; status: "PENDING" | "SENT" | "SKIPPED" | "FAILED" | "UNKNOWN" },
+): Promise<DeliverySummary> {
+  if (delivery.status === "SENT") return { sent: 1, skipped: 0, failed: 0 };
+  if (delivery.status === "SKIPPED") return { sent: 0, skipped: 1, failed: 0 };
+  if (delivery.status === "PENDING") {
+    await finishAutomationDelivery(workspaceId, delivery.id, {
+      status: "UNKNOWN",
+      errorCode: "INTERRUPTED_DELIVERY",
+      errorMessage: "A previous worker stopped after claiming this delivery. It was not retried to avoid sending a duplicate message.",
+    });
+  }
+  return { sent: 0, skipped: 0, failed: 1 };
+}
+
 async function deliverInApp(input: {
   workspaceId: string;
   runId: string;
@@ -104,9 +116,7 @@ async function deliverInApp(input: {
     recipient,
   });
   if (!claimed.created) {
-    return claimed.delivery.status === "SENT"
-      ? { sent: 1, skipped: 0, failed: 0 }
-      : { sent: 0, skipped: 1, failed: 0 };
+    return existingDeliverySummary(input.workspaceId, claimed.delivery);
   }
 
   const [notice] = await db.insert(notifications).values({
@@ -146,8 +156,10 @@ async function deliverCustomerChannels(input: {
       recipient: input.conversationId,
     });
     if (!claimed.created) {
-      if (claimed.delivery.status === "SENT") summary.sent += 1;
-      else summary.skipped += 1;
+      const existing = await existingDeliverySummary(input.workspaceId, claimed.delivery);
+      summary.sent += existing.sent;
+      summary.skipped += existing.skipped;
+      summary.failed += existing.failed;
       continue;
     }
 
@@ -427,7 +439,13 @@ export async function executeAutomationRun(workspaceId: string, runId: string) {
     }
     return { claimed: true as const, status: finalStatus, summary };
   } catch (error) {
-    await failAutomationRun(workspaceId, runId, error);
+    const deliveries = await listAutomationDeliveries(workspaceId, runId).catch(() => []);
+    if (deliveries.length === 0) {
+      await releaseAutomationRunForRetry(workspaceId, runId).catch(() => undefined);
+      throw error;
+    }
+
+    await failAutomationRun(workspaceId, runId, error).catch(() => undefined);
     return {
       claimed: true as const,
       status: "FAILED" as const,
