@@ -4,6 +4,7 @@ CREATE TABLE IF NOT EXISTS "hosted_phone_numbers" (
   "provider" text DEFAULT 'telnyx' NOT NULL,
   "provider_number_id" text,
   "provider_order_id" text,
+  "provider_order_phone_number_id" text,
   "provider_order_status" text,
   "provision_request_id" uuid,
   "phone_number" text NOT NULL,
