@@ -100,7 +100,7 @@ describe("SMS webhook service", () => {
       suppressed: 1,
     });
     expect(provider.verifyWebhook).toHaveBeenCalledTimes(1);
-    expect(provider.normalizeWebhook).not.toHaveBeenCalled();
+    expect(provider.normalizeWebhook).toHaveBeenCalledTimes(1);
     expect(jobs).toHaveLength(0);
   });
 
