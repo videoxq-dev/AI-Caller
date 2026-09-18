@@ -103,7 +103,7 @@ export async function sendSmsConversationTextWithRuntime(
   conversationId: string,
   runtime: SmsRuntime,
   input: {
-    senderType: "AI" | "USER";
+    senderType: "AI" | "USER" | "SYSTEM";
     text: string;
     to?: string;
     idempotencyKey?: string;
@@ -177,7 +177,7 @@ export async function sendSmsConversationTextWithRuntime(
 export async function sendSmsConversationText(
   workspaceId: string,
   conversationId: string,
-  input: { senderType: "AI" | "USER"; text: string; idempotencyKey?: string; metadata?: Record<string, unknown> },
+  input: { senderType: "AI" | "USER" | "SYSTEM"; text: string; idempotencyKey?: string; metadata?: Record<string, unknown> },
 ) {
   const runtime = await resolveSmsRuntimeForWorkspace(workspaceId);
   return sendSmsConversationTextWithRuntime(workspaceId, conversationId, runtime, input);
