@@ -4,6 +4,7 @@ CREATE TABLE IF NOT EXISTS "hosted_phone_numbers" (
   "provider" text DEFAULT 'telnyx' NOT NULL,
   "provider_number_id" text,
   "provider_order_id" text,
+  "provision_request_id" uuid,
   "phone_number" text NOT NULL,
   "country_code" text NOT NULL,
   "administrative_area" text,
@@ -33,6 +34,9 @@ CREATE INDEX IF NOT EXISTS "hosted_phone_numbers_due_idx"
 CREATE UNIQUE INDEX IF NOT EXISTS "hosted_phone_numbers_provider_id_uq"
   ON "hosted_phone_numbers" ("provider", "provider_number_id")
   WHERE "provider_number_id" IS NOT NULL;
+CREATE UNIQUE INDEX IF NOT EXISTS "hosted_phone_numbers_provision_request_uq"
+  ON "hosted_phone_numbers" ("workspace_id", "provision_request_id")
+  WHERE "provision_request_id" IS NOT NULL;
 CREATE UNIQUE INDEX IF NOT EXISTS "hosted_phone_numbers_active_number_uq"
   ON "hosted_phone_numbers" ("phone_number")
   WHERE "released_at" IS NULL;
