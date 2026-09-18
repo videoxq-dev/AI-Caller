@@ -18,7 +18,7 @@ export async function attachWhatsAppProviderMessage(
     provider: "whatsapp",
     externalMessageId,
     status,
-    metadata: { provider: "meta" },
+    metadata: sql<Record<string, unknown>>`${messages.metadata} || ${JSON.stringify({ provider: "meta" })}::jsonb`,
   }).where(and(eq(messages.workspaceId, workspaceId), eq(messages.id, messageId))).returning();
   if (!updated) throw new AppError("MESSAGE_NOT_FOUND", "WhatsApp message not found.", 404);
   return updated;
@@ -199,7 +199,8 @@ export async function latestWhatsAppInboundAt(workspaceId: string, conversationI
   const rows = await recentWhatsAppInbound(workspaceId, conversationId);
   let latest: Date | null = null;
   for (const row of rows) {
-    const occurredAt = providerOccurredAt(row.metadata, row.createdAt);
+    const occurredAt = metadataDate(row.metadata, "occurredAt");
+    if (!occurredAt) continue;
     if (!latest || occurredAt > latest) latest = occurredAt;
   }
   return latest;
