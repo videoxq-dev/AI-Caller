@@ -116,7 +116,7 @@ export async function listUndispatchedAutomationEvents(limit = 100) {
 
 export async function claimAutomationRun(workspaceId: string, runId: string) {
   const now = new Date();
-  const staleBefore = new Date(now.getTime() - 10 * 60_000);
+  const staleBefore = new Date(now.getTime() - 2 * 60_000);
   const [run] = await db.update(automationRuns).set({
     status: "RUNNING",
     startedAt: now,
