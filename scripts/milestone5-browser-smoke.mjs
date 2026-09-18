@@ -1,4 +1,4 @@
-import { createPrivateKey, sign } from "node:crypto";
+import { createPrivateKey, randomUUID, sign } from "node:crypto";
 import { mkdir } from "node:fs/promises";
 import path from "node:path";
 import pg from "pg";
@@ -155,8 +155,8 @@ try {
     [workspaceId],
   );
   await pool.query(
-    `INSERT INTO credit_wallets (workspace_id, balance) VALUES ($1, 100)
-     ON CONFLICT (workspace_id) DO UPDATE SET balance = 100, updated_at = now()`,
+    `INSERT INTO credit_wallets (workspace_id, balance) VALUES ($1, 5000)
+     ON CONFLICT (workspace_id) DO UPDATE SET balance = 5000, updated_at = now()`,
     [workspaceId],
   );
   await pool.query(
@@ -172,7 +172,7 @@ try {
   );
   await pool.query(
     `INSERT INTO capability_bindings (workspace_id, capability, integration_id, mode)
-     VALUES ($1, 'CALENDAR', $2, 'BYOP'), ($1, 'SMS', NULL, 'HOSTED')
+     VALUES ($1, 'CALENDAR', $2, 'BYOP')
      ON CONFLICT (workspace_id, capability) DO UPDATE SET integration_id = EXCLUDED.integration_id, mode = EXCLUDED.mode, updated_at = now()`,
     [workspaceId, calendarIntegration.rows[0].id],
   );
@@ -188,21 +188,43 @@ try {
      ON CONFLICT (workspace_id) DO UPDATE SET settings = EXCLUDED.settings, updated_at = now()`,
     [workspaceId, JSON.stringify(hostedCommunicationSettings)],
   );
-  await pool.query(
-    `INSERT INTO hosted_phone_numbers
-       (workspace_id, provider, provider_number_id, phone_number, country_code, number_type, status,
-        provider_monthly_cost_micros, provider_upfront_cost_micros, monthly_credits, purchase_credits,
-        current_period_start, current_period_end, next_billing_at)
-     VALUES ($1, 'telnyx', 'm5-managed-number', '+12025550200', 'US', 'local', 'ACTIVE',
-       1000000, 0, 2000, 2000, now(), now() + interval '30 days', now() + interval '30 days')`,
-    [workspaceId],
+  const search = await api(context, "GET", "/api/phone-numbers/search?country=US&areaCode=202&type=local", undefined, "search managed phone numbers");
+  const availableNumber = search?.items?.find((item) => item.phoneNumber === "+12025550200");
+  assert(availableNumber, "Managed-number search did not return the guarded Telnyx fixture number.");
+
+  const provisionRequestId = randomUUID();
+  const provisioned = await api(context, "POST", "/api/phone-numbers", {
+    phoneNumber: availableNumber.phoneNumber,
+    requestId: provisionRequestId,
+    replaceCurrent: false,
+  }, "provision managed phone number");
+  assert(provisioned?.number?.status === "ACTIVE", `Managed number did not reach ACTIVE after carrier reconciliation: ${JSON.stringify(provisioned?.number)}`);
+  assert(provisioned?.number?.messagingReadiness === "NOT_REGISTERED", "Fresh managed number incorrectly reported outbound SMS as ready.");
+
+  const provisionedRow = await pool.query(
+    `SELECT status, provider_order_id, provider_order_phone_number_id, provider_order_status,
+            provider_number_id, messaging_readiness
+       FROM hosted_phone_numbers WHERE workspace_id = $1 AND provision_request_id = $2 LIMIT 1`,
+    [workspaceId, provisionRequestId],
   );
+  assert(provisionedRow.rows[0]?.status === "ACTIVE", "Provisioning lifecycle did not persist ACTIVE after final carrier success.");
+  assert(provisionedRow.rows[0]?.provider_order_status === "success", "Final Telnyx order status was not persisted.");
+  assert(Boolean(provisionedRow.rows[0]?.provider_order_phone_number_id), "Telnyx order-phone-number id was not persisted separately.");
+  assert(Boolean(provisionedRow.rows[0]?.provider_number_id), "Owned Telnyx phone-number id was not reconciled.");
 
   await page.goto(`${baseUrl}/setup/communication`, { waitUntil: "networkidle" });
   await page.getByRole("button", { name: /Phone & SMS/ }).waitFor();
   await page.getByText("+1 (202) 555-0200", { exact: true }).waitFor({ timeout: 10_000 });
-  await page.getByText("Calls + SMS", { exact: true }).waitFor();
+  await page.getByText("Registration required", { exact: true }).waitFor();
   await assertNoHorizontalOverflow(page, "Managed phone and SMS setup desktop");
+
+  await pool.query(
+    `UPDATE hosted_phone_numbers SET messaging_readiness = 'READY', updated_at = now()
+      WHERE workspace_id = $1 AND provision_request_id = $2`,
+    [workspaceId, provisionRequestId],
+  );
+  await page.reload({ waitUntil: "networkidle" });
+  await page.getByText("Ready", { exact: true }).waitFor({ timeout: 10_000 });
   await page.screenshot({ path: path.join(outputDir, "sms-managed-setup-desktop.png"), fullPage: true });
   await page.setViewportSize({ width: 390, height: 844 });
   await assertNoHorizontalOverflow(page, "Managed phone and SMS setup mobile");
@@ -326,7 +348,7 @@ try {
   assert(smsUsage.rows.every((row) => row.mode === "HOSTED" && row.provider === "telnyx" && row.credits_charged === 1), "Hosted SMS usage attribution/credits are incorrect.");
 
   const balance = (await pool.query(`SELECT balance FROM credit_wallets WHERE workspace_id = $1`, [workspaceId])).rows[0].balance;
-  assert(balance === 89, `Expected 11 total hosted credits consumed (5 AI + 3 inbound SMS + 3 outbound SMS); received balance ${balance}.`);
+  assert(balance === 2989, `Expected 2,011 total hosted credits consumed (2,000 number purchase + 5 AI + 3 inbound SMS + 3 outbound SMS); received balance ${balance}.`);
 
   await page.goto(`${baseUrl}/inbox`, { waitUntil: "networkidle" });
   await page.getByRole("heading", { name: "Inbox", level: 1 }).waitFor();
@@ -364,7 +386,7 @@ try {
   await page.screenshot({ path: path.join(outputDir, "inbox-sms-mobile.png"), fullPage: true });
 
   assert(runtimeErrors.length === 0, `Milestone 5 browser runtime errors:\n${runtimeErrors.join("\n")}`);
-  console.log("Milestone 5 browser acceptance passed: managed Telnyx number UI, signed SMS webhooks, async worker, knowledge response, contact capture, qualification, availability, booking, inbound/outbound hosted credit metering, duplicate suppression, delivery reconciliation, unified Inbox, and human takeover suppression.");
+  console.log("Milestone 5 browser acceptance passed: managed Telnyx search/order/pending-to-final activation lifecycle, outbound-SMS readiness gating, signed SMS webhooks, async worker, knowledge response, contact capture, qualification, availability, booking, hosted credit metering, duplicate suppression, delivery reconciliation, unified Inbox, and human takeover suppression.");
 } finally {
   await pool.end();
   await browser.close();
