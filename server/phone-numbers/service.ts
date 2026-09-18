@@ -1,4 +1,4 @@
-import { and, desc, eq, inArray, isNull, lte, ne, sql } from "drizzle-orm";
+import { and, desc, eq, inArray, isNull, lte, ne, or, sql } from "drizzle-orm";
 import { db } from "@/db";
 import { capabilityBindings, hostedPhoneNumbers, usageEvents } from "@/db/schema";
 import { bindCapability } from "@/server/domain/integrations/repository";
@@ -683,7 +683,7 @@ export async function processPendingPhoneNumberProvisioning(limit = 50) {
   const rows = await db.select().from(hostedPhoneNumbers).where(and(
     isNull(hostedPhoneNumbers.releasedAt),
     inArray(hostedPhoneNumbers.status, ["PROVISIONING", "RECONCILING"]),
-    lte(hostedPhoneNumbers.reconcileAfter, now),
+    or(isNull(hostedPhoneNumbers.reconcileAfter), lte(hostedPhoneNumbers.reconcileAfter, now)),
   )).orderBy(hostedPhoneNumbers.reconcileAfter).limit(Math.min(Math.max(limit, 1), 100));
 
   let activated = 0;
