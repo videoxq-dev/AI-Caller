@@ -636,6 +636,30 @@ async function clearHostedTelephonyBindingsIfUnused(workspaceId: string) {
   ));
 }
 
+export async function processPendingPhoneNumberProvisioning(limit = 50) {
+  const now = new Date();
+  const rows = await db.select().from(hostedPhoneNumbers).where(and(
+    isNull(hostedPhoneNumbers.releasedAt),
+    inArray(hostedPhoneNumbers.status, ["PROVISIONING", "RECONCILING"]),
+    lte(hostedPhoneNumbers.reconcileAfter, now),
+  )).orderBy(hostedPhoneNumbers.reconcileAfter).limit(Math.min(Math.max(limit, 1), 100));
+
+  let activated = 0;
+  let pending = 0;
+  let failed = 0;
+  let releasePending = 0;
+
+  for (const row of rows) {
+    const next = await reconcileProvisioningRow(row);
+    if (next.status === "ACTIVE") activated += 1;
+    else if (next.status === "FAILED") failed += 1;
+    else if (next.status === "RELEASE_PENDING") releasePending += 1;
+    else pending += 1;
+  }
+
+  return { checked: rows.length, activated, pending, failed, releasePending };
+}
+
 export async function processPendingPhoneNumberReleases(limit = 50) {
   const rows = await db.select().from(hostedPhoneNumbers).where(and(
     isNull(hostedPhoneNumbers.releasedAt),
