@@ -403,7 +403,15 @@ try {
   await page.goto(`${baseUrl}/ai-agent`, { waitUntil: "networkidle" });
   await page.getByRole("button", { name: "Behavior" }).click();
   await page.getByText("Lead qualification", { exact: true }).waitFor({ timeout: 10_000 });
-  await page.getByDisplayValue("Ava — warm & professional").waitFor({ timeout: 10_000 }).catch(() => undefined);
+  await page.getByLabel("Phone voice").selectOption("marcus-us-1");
+  await page.getByRole("button", { name: "Save changes", exact: true }).click();
+  await page.getByRole("button", { name: "Saved", exact: true }).waitFor({ timeout: 10_000 });
+  const savedAgentSettings = await pool.query(
+    `SELECT behavior_settings FROM ai_agents WHERE workspace_id = $1 LIMIT 1`,
+    [workspaceId],
+  );
+  assert(savedAgentSettings.rows[0]?.behavior_settings?.voice?.profileKey === "marcus-us-1", "AI Agent voice setting did not persist through /api/agent.");
+  assert(savedAgentSettings.rows[0]?.behavior_settings?.qualification?.criteria?.length === 3, "AI Agent qualification settings were not preserved on save.");
   await page.screenshot({ path: path.join(outputDir, "voice-settings-desktop.png"), fullPage: true });
 
   await page.goto(`${baseUrl}/inbox`, { waitUntil: "networkidle" });
