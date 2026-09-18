@@ -1,8 +1,9 @@
 import { z } from "zod";
 import { resolveWorkspaceContext } from "@/server/auth/workspace-context";
 import { requireWorkspacePermission } from "@/server/auth/permissions";
-import { createWorkspaceInvitation } from "@/server/auth/team-repository";
+import { createWorkspaceInvitation, revokeWorkspaceInvitation } from "@/server/auth/team-repository";
 import { getEnv } from "@/server/env";
+import { isGuardedE2EFixtureMode } from "@/server/e2e-mode";
 import { enqueueUniqueJob } from "@/server/jobs";
 import { TEAM_INVITATION_EMAIL } from "@/server/jobs/queues";
 import { AppError, toErrorResponse } from "@/server/http/errors";
@@ -18,6 +19,11 @@ export async function POST(request: Request) {
     const context = await resolveWorkspaceContext(request.headers);
     requireWorkspacePermission(context.membership.role, "team.manage");
     const input = parseInput(inputSchema, await request.json());
+    const env = getEnv();
+    const e2e = isGuardedE2EFixtureMode();
+    if (!e2e && (!env.SMTP_URL || !env.SMTP_FROM)) {
+      throw new AppError("TEAM_EMAIL_NOT_CONFIGURED", "Configure SMTP before inviting team members.", 409);
+    }
 
     if (context.membership.role === "ADMIN" && input.role === "ADMIN") {
       throw new AppError("FORBIDDEN_ROLE_ASSIGNMENT", "Only the workspace owner can invite another admin.", 403);
@@ -30,17 +36,25 @@ export async function POST(request: Request) {
       role: input.role,
     });
 
-    const baseUrl = getEnv().BETTER_AUTH_URL;
-    const acceptUrl = new URL("/team/invite", baseUrl);
+    const acceptUrl = new URL("/team/invite", env.BETTER_AUTH_URL);
     acceptUrl.searchParams.set("token", created.token);
-    await enqueueUniqueJob(TEAM_INVITATION_EMAIL, created.invitation.id, {
-      to: created.invitation.email,
-      inviterName: context.session.user.name,
-      workspaceName: context.workspace.name,
-      acceptUrl: acceptUrl.toString(),
-    });
+    try {
+      const jobId = await enqueueUniqueJob(TEAM_INVITATION_EMAIL, created.invitation.id, {
+        to: created.invitation.email,
+        inviterName: context.session.user.name,
+        workspaceName: context.workspace.name,
+        acceptUrl: acceptUrl.toString(),
+      });
+      if (!jobId) throw new Error("Invitation email could not be queued.");
+    } catch (error) {
+      await revokeWorkspaceInvitation(context.workspace.id, created.invitation.id).catch(() => undefined);
+      throw error;
+    }
 
-    return Response.json({ invitation: created.invitation }, { status: 201 });
+    return Response.json({
+      invitation: created.invitation,
+      ...(e2e ? { e2eToken: created.token } : {}),
+    }, { status: 201 });
   } catch (error) {
     return toErrorResponse(error);
   }
