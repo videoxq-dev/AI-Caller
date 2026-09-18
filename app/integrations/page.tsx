@@ -48,9 +48,9 @@ declare global {
 }
 
 const providers: Provider[] = [
-  { id: "plivo", name: "Plivo", category: "communication", description: "Voice and SMS with your own Plivo account.", features: ["Voice calls", "SMS", "Inbound webhooks"], brand: "PL" },
+  { id: "plivo", name: "Plivo", category: "communication", description: "SMS with your own Plivo account. Voice support is planned after the Telnyx inbound milestone.", features: ["SMS", "Inbound SMS webhooks", "BYOP credentials"], brand: "PL" },
   { id: "telnyx", name: "Telnyx", category: "communication", description: "Global communications for voice and messaging.", features: ["Voice calls", "SMS", "Inbound webhooks"], brand: "TX" },
-  { id: "twilio", name: "Twilio", category: "communication", description: "Reliable voice and SMS for your business.", features: ["Voice calls", "SMS", "Inbound webhooks"], brand: "TW" },
+  { id: "twilio", name: "Twilio", category: "communication", description: "SMS with your own Twilio account. Voice support is planned after the Telnyx inbound milestone.", features: ["SMS", "Inbound SMS webhooks", "BYOP credentials"], brand: "TW" },
   { id: "whatsapp", name: "WhatsApp", category: "communication", description: "Connect WhatsApp directly through AI Caller's approved Meta Tech Provider app.", features: ["Embedded Signup", "Cloud API", "Webhooks"], brand: "WA" },
   { id: "credits", name: "Our Credits", category: "ai", description: "Use AI Caller credits without bringing your own AI provider.", features: ["Hosted AI", "Usage tracking", "No API key"], brand: "CR" },
   { id: "openai", name: "OpenAI", category: "ai", description: "Use your own OpenAI API key for AI conversations.", features: ["GPT models", "Structured output", "Tool calling"], brand: "OA" },
