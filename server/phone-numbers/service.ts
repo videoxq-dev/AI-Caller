@@ -1,6 +1,6 @@
-import { and, desc, eq, inArray, isNull, lte } from "drizzle-orm";
+import { and, desc, eq, inArray, isNull, lte, sql } from "drizzle-orm";
 import { db } from "@/db";
-import { hostedPhoneNumbers } from "@/db/schema";
+import { capabilityBindings, hostedPhoneNumbers } from "@/db/schema";
 import { bindCapability } from "@/server/domain/integrations/repository";
 import { getEnv } from "@/server/env";
 import { AppError } from "@/server/http/errors";
@@ -16,6 +16,7 @@ import {
   searchTelnyxNumbers,
 } from "@/server/providers/telnyx-platform";
 import {
+  refundCredits,
   releaseCreditReservation,
   reserveCredits,
   settleCreditReservation,
@@ -34,14 +35,12 @@ export type ManagedNumberSearch = {
   upfrontCostMicros: number;
 };
 
-function addBillingMonth(value: Date) {
+export function addBillingMonth(value: Date) {
   const source = new Date(value);
   const day = source.getUTCDate();
-  const year = source.getUTCFullYear();
-  const month = source.getUTCMonth() + 1;
-  const lastDay = new Date(Date.UTC(year, month + 1, 0)).getUTCDate();
   source.setUTCDate(1);
-  source.setUTCMonth(month);
+  source.setUTCMonth(source.getUTCMonth() + 1);
+  const lastDay = new Date(Date.UTC(source.getUTCFullYear(), source.getUTCMonth() + 1, 0)).getUTCDate();
   source.setUTCDate(Math.min(day, lastDay));
   return source;
 }
@@ -155,18 +154,68 @@ async function cleanupProviderResources(input: {
   messagingProfileId?: string | null;
 }) {
   let providerNumberId = input.providerNumberId ?? null;
-  try {
-    if (!providerNumberId && input.phoneNumber) {
-      providerNumberId = (await findOwnedTelnyxNumber(input.phoneNumber))?.id ?? null;
-    }
-    if (providerNumberId) await releaseTelnyxNumber(providerNumberId);
-  } catch (error) {
-    logger.error({ err: error, phoneNumber: input.phoneNumber }, "Failed to release managed Telnyx phone number");
+  if (!providerNumberId && input.phoneNumber) {
+    providerNumberId = (await findOwnedTelnyxNumber(input.phoneNumber))?.id ?? null;
   }
-  await Promise.allSettled([
+  if (input.phoneNumber && !providerNumberId) {
+    throw new Error("The carrier phone number could not be located for release.");
+  }
+  if (providerNumberId) await releaseTelnyxNumber(providerNumberId);
+
+  const cleanup = await Promise.allSettled([
     input.voiceConnectionId ? deleteTelnyxCallControlApplication(input.voiceConnectionId) : Promise.resolve(),
     input.messagingProfileId ? deleteTelnyxMessagingProfile(input.messagingProfileId) : Promise.resolve(),
   ]);
+  for (const result of cleanup) {
+    if (result.status === "rejected") {
+      logger.warn({ err: result.reason, phoneNumber: input.phoneNumber }, "Managed Telnyx auxiliary resource cleanup failed");
+    }
+  }
+}
+
+async function createProvisioningRecord(
+  workspaceId: string,
+  expectedCurrentId: string | null,
+  values: Omit<typeof hostedPhoneNumbers.$inferInsert, "workspaceId" | "id" | "createdAt" | "updatedAt">,
+) {
+  return db.transaction(async (tx) => {
+    await tx.execute(sql`select pg_advisory_xact_lock(hashtext(${`managed-phone:${workspaceId}`}))`);
+    const [latest] = await tx.select().from(hostedPhoneNumbers)
+      .where(and(eq(hostedPhoneNumbers.workspaceId, workspaceId), isNull(hostedPhoneNumbers.releasedAt)))
+      .orderBy(desc(hostedPhoneNumbers.createdAt))
+      .limit(1);
+
+    if (latest?.status === "PROVISIONING") {
+      throw new AppError("PHONE_NUMBER_PROVISIONING_IN_PROGRESS", "A phone number is already being activated for this workspace.", 409);
+    }
+    if ((latest?.id ?? null) !== expectedCurrentId) {
+      throw new AppError("PHONE_NUMBER_CHANGED", "Your phone number changed while this request was being prepared. Refresh and try again.", 409);
+    }
+
+    const [row] = await tx.insert(hostedPhoneNumbers).values({
+      ...values,
+      workspaceId,
+    }).returning();
+    return row;
+  });
+}
+
+async function markReleasePending(row: typeof hostedPhoneNumbers.$inferSelect) {
+  await db.update(hostedPhoneNumbers).set({
+    status: "RELEASE_PENDING",
+    failureReason: "Carrier release is pending and will be retried automatically.",
+    updatedAt: new Date(),
+  }).where(eq(hostedPhoneNumbers.id, row.id));
+}
+
+async function finalizeRelease(row: typeof hostedPhoneNumbers.$inferSelect) {
+  await cleanupProviderResources(row);
+  await db.update(hostedPhoneNumbers).set({
+    status: "RELEASED",
+    releasedAt: new Date(),
+    failureReason: null,
+    updatedAt: new Date(),
+  }).where(eq(hostedPhoneNumbers.id, row.id));
 }
 
 export async function provisionManagedPhoneNumber(workspaceId: string, input: {
@@ -192,21 +241,22 @@ export async function provisionManagedPhoneNumber(workspaceId: string, input: {
   let providerOrderId: string | null = null;
   let providerNumberId: string | null = null;
   let purchased = false;
+  let creditsSettled = false;
 
   try {
-    [row] = await db.insert(hostedPhoneNumbers).values({
-      workspaceId,
+    row = await createProvisioningRecord(workspaceId, current?.id ?? null, {
       phoneNumber: match.phoneNumber,
       countryCode: "US",
       administrativeArea: match.administrativeArea,
       locality: match.locality,
       numberType: match.numberType,
       status: "PROVISIONING",
+      provider: "telnyx",
       providerMonthlyCostMicros: quote.monthlyCostMicros,
       providerUpfrontCostMicros: quote.upfrontCostMicros,
       monthlyCredits: quote.monthlyCredits,
       purchaseCredits: quote.purchaseCredits,
-    }).returning();
+    });
 
     const baseUrl = getEnv().BETTER_AUTH_URL.replace(/\/$/, "");
     voiceConnectionId = await createTelnyxCallControlApplication(
@@ -237,6 +287,9 @@ export async function provisionManagedPhoneNumber(workspaceId: string, input: {
 
     const owned = await waitForOwnedNumber(match.phoneNumber);
     providerNumberId = owned?.id ?? null;
+    if (!providerNumberId) {
+      throw new AppError("PHONE_NUMBER_ACTIVATION_PENDING", "The carrier did not finish activating this number in time. No credits were charged; please try again.", 503);
+    }
     const now = new Date();
     const nextBillingAt = addBillingMonth(now);
 
@@ -254,35 +307,42 @@ export async function provisionManagedPhoneNumber(workspaceId: string, input: {
       updatedAt: now,
     }).where(eq(hostedPhoneNumbers.id, row.id)).returning();
 
-    await Promise.all([
-      bindCapability(workspaceId, "VOICE", "HOSTED"),
-      bindCapability(workspaceId, "SMS", "HOSTED"),
-    ]);
-
     await settleCreditReservation(workspaceId, reservation.id, quote.purchaseCredits, {
       reason: "Managed phone number purchase and first month",
       referenceType: "PHONE_NUMBER_PURCHASE",
       referenceId: input.requestId,
     });
+    creditsSettled = true;
+
+    await Promise.all([
+      bindCapability(workspaceId, "VOICE", "HOSTED"),
+      bindCapability(workspaceId, "SMS", "HOSTED"),
+    ]);
 
     if (current && current.id !== activated.id) {
-      await cleanupProviderResources(current);
-      await db.update(hostedPhoneNumbers).set({
-        status: "RELEASED",
-        releasedAt: new Date(),
-        updatedAt: new Date(),
-      }).where(eq(hostedPhoneNumbers.id, current.id));
+      await markReleasePending(current);
+      try {
+        await finalizeRelease(current);
+      } catch (cleanupError) {
+        logger.error({ err: cleanupError, workspaceId, phoneNumber: current.phoneNumber }, "Old managed phone number release will be retried");
+      }
     }
 
     return publicNumber(activated);
   } catch (error) {
+    let released = !purchased;
     if (purchased) {
-      await cleanupProviderResources({
-        providerNumberId,
-        phoneNumber: match.phoneNumber,
-        voiceConnectionId,
-        messagingProfileId,
-      });
+      try {
+        await cleanupProviderResources({
+          providerNumberId,
+          phoneNumber: match.phoneNumber,
+          voiceConnectionId,
+          messagingProfileId,
+        });
+        released = true;
+      } catch (cleanupError) {
+        logger.error({ err: cleanupError, workspaceId, phoneNumber: match.phoneNumber }, "Failed provisioning number release will be retried");
+      }
     } else {
       await Promise.allSettled([
         voiceConnectionId ? deleteTelnyxCallControlApplication(voiceConnectionId) : Promise.resolve(),
@@ -292,17 +352,25 @@ export async function provisionManagedPhoneNumber(workspaceId: string, input: {
 
     if (row) {
       await db.update(hostedPhoneNumbers).set({
-        status: "FAILED",
+        status: released ? "FAILED" : "RELEASE_PENDING",
         providerNumberId,
         providerOrderId,
         voiceConnectionId,
         messagingProfileId,
         failureReason: error instanceof Error ? error.message.slice(0, 500) : "Phone provisioning failed.",
-        releasedAt: new Date(),
+        releasedAt: released ? new Date() : null,
         updatedAt: new Date(),
       }).where(eq(hostedPhoneNumbers.id, row.id));
     }
-    await releaseCreditReservation(workspaceId, reservation.id).catch(() => undefined);
+    if (creditsSettled) {
+      await refundCredits(workspaceId, quote.purchaseCredits, {
+        reason: "Managed phone number activation failed",
+        referenceType: "PHONE_NUMBER_PURCHASE_REFUND",
+        referenceId: input.requestId,
+      }).catch((refundError) => logger.error({ err: refundError, workspaceId }, "Failed to refund phone number purchase credits"));
+    } else {
+      await releaseCreditReservation(workspaceId, reservation.id).catch(() => undefined);
+    }
     throw error;
   }
 }
@@ -315,13 +383,36 @@ export async function releaseManagedPhoneNumber(workspaceId: string, phoneNumber
   )).limit(1);
   if (!row) throw new AppError("PHONE_NUMBER_NOT_FOUND", "Managed phone number not found.", 404);
 
-  await cleanupProviderResources(row);
-  const [released] = await db.update(hostedPhoneNumbers).set({
-    status: "RELEASED",
-    releasedAt: new Date(),
-    updatedAt: new Date(),
-  }).where(eq(hostedPhoneNumbers.id, row.id)).returning();
+  await markReleasePending(row);
+  try {
+    await finalizeRelease(row);
+  } catch (error) {
+    throw new AppError("PHONE_NUMBER_RELEASE_PENDING", "The carrier could not release this number immediately. AI Caller will retry automatically.", 503);
+  }
+  await db.delete(capabilityBindings).where(and(
+    eq(capabilityBindings.workspaceId, workspaceId),
+    inArray(capabilityBindings.capability, ["VOICE", "SMS"]),
+  ));
+  const [released] = await db.select().from(hostedPhoneNumbers).where(eq(hostedPhoneNumbers.id, row.id)).limit(1);
   return publicNumber(released);
+}
+
+export async function processPendingPhoneNumberReleases(limit = 50) {
+  const rows = await db.select().from(hostedPhoneNumbers).where(and(
+    isNull(hostedPhoneNumbers.releasedAt),
+    eq(hostedPhoneNumbers.status, "RELEASE_PENDING"),
+  )).orderBy(hostedPhoneNumbers.updatedAt).limit(Math.min(Math.max(limit, 1), 100));
+
+  let released = 0;
+  for (const row of rows) {
+    try {
+      await finalizeRelease(row);
+      released += 1;
+    } catch (error) {
+      logger.error({ err: error, workspaceId: row.workspaceId, phoneNumber: row.phoneNumber }, "Managed phone number release retry failed");
+    }
+  }
+  return { checked: rows.length, released };
 }
 
 export async function processDuePhoneNumberRenewals(limit = 100) {
