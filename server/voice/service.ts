@@ -251,6 +251,7 @@ async function recordVoiceUsage(
     }).onConflictDoNothing();
   } catch (error) {
     logger.error({ err: error, workspaceId, callId: call.id }, "Failed to meter voice usage");
+    throw error;
   }
 }
 
