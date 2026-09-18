@@ -164,6 +164,35 @@ describe("managed phone provisioning lifecycle", () => {
     expect((await db.select().from(creditWallets))[0].balance).toBe(8_000);
   });
 
+  it("returns an error when a pending carrier order later fails during activation polling", async () => {
+    platform.retrieveTelnyxNumberOrder.mockResolvedValue({
+      id: "order-1",
+      status: "failure",
+      requirements_met: true,
+    });
+    platform.retrieveTelnyxOrderPhoneNumber.mockResolvedValue({
+      id: "order-number-1",
+      phone_number: "+12025550200",
+      status: "failure",
+      requirements_met: true,
+    });
+    platform.findOwnedTelnyxNumber.mockResolvedValue(null);
+
+    await expect(provisionManagedPhoneNumber(workspaceId, {
+      phoneNumber: "+12025550200",
+      requestId,
+      expectedPurchaseCredits: 2000,
+      expectedMonthlyCredits: 2000,
+    })).rejects.toMatchObject({
+      code: "PHONE_NUMBER_ORDER_FAILED",
+      status: 409,
+    });
+
+    expect((await db.select().from(hostedPhoneNumbers))[0].status).toBe("FAILED");
+    expect((await db.select().from(creditWallets))[0].balance).toBe(10_000);
+    expect(await db.select().from(usageEvents)).toHaveLength(0);
+  });
+
   it("keeps carrier requirement orders non-active until requirements are actually satisfied", async () => {
     platform.retrieveTelnyxNumberOrder.mockResolvedValue({
       id: "order-1",
