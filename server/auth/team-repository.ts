@@ -1,5 +1,5 @@
 import { createHash, randomBytes } from "node:crypto";
-import { and, asc, eq, gt, lte } from "drizzle-orm";
+import { and, asc, eq, gt, lte, sql } from "drizzle-orm";
 import { db } from "@/db";
 import { memberships, user, workspaceInvitations } from "@/db/schema";
 import { AppError } from "@/server/http/errors";
@@ -74,7 +74,7 @@ export async function createWorkspaceInvitation(input: {
   const existingMember = await db.select({ userId: memberships.userId })
     .from(memberships)
     .innerJoin(user, eq(memberships.userId, user.id))
-    .where(and(eq(memberships.workspaceId, input.workspaceId), eq(user.email, email)))
+    .where(and(eq(memberships.workspaceId, input.workspaceId), sql`lower(${user.email}) = ${email}`))
     .limit(1);
   if (existingMember.length) throw new AppError("ALREADY_MEMBER", "That email already belongs to this workspace.", 409);
 
