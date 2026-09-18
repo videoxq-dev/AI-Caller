@@ -49,7 +49,7 @@
 .aiIntro h1 {
   margin: 8px 0 2px;
   color: #101d34;
-  font-size: clamp(34px, 3.1vw, 43px);
+  font-size: clamp(32px, 2.6vw, 38px);
   line-height: 1.02;
   letter-spacing: -1.65px;
 }
@@ -121,6 +121,7 @@
   font-size: 12px;
   font-weight: 750;
 }
+.aiField small { color: #7b8aa1; font-size: 9.5px; font-weight: 500; line-height: 1.35; }
 .aiField input,
 .aiField select,
 .aiField textarea {
@@ -382,7 +383,7 @@
   .aiSetupPage { padding: 16px 16px 28px; }
   .aiSetupHeader { margin-bottom: 8px; }
   .aiFormCard { padding: 16px 12px 10px; }
-  .aiIntro h1 { font-size: 34px; }
+  .aiIntro h1 { font-size: 32px; }
   .desktopBreak { display: none; }
   .aiFieldGrid.twoColumns,
   .knowledgeGrid,

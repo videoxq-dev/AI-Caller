@@ -7,156 +7,107 @@ import {
   CheckIcon,
   ChevronRightIcon,
   HelpIcon,
-  InfoIcon,
   LogoMark,
   MessageIcon,
   PhoneIcon,
 } from "@/components/icons";
+import { showToast } from "@/components/toast";
 import { SetupProgressPanel } from "../setup-progress";
+import { PhoneNumberManager, type ManagedPhoneNumber } from "@/components/phone-number-manager";
 import { WebChatSetup, WebChatSidebar } from "./webchat";
 import "./communication.css";
 
-type Channel = "phone" | "sms" | "whatsapp" | "webchat";
-type Mode = "HOSTED" | "BYOP";
-type VoiceProvider = "telnyx" | "plivo" | "twilio";
-type SMSProvider = VoiceProvider;
+type Channel = "phone" | "whatsapp" | "webchat";
 type IntegrationSummary = { provider: string; status: "CONNECTED" | "ERROR" | "DISCONNECTED" };
-type SmsConfig = {
-  webhookUrl: string | null;
-  senderNumber: string | null;
-  webhookPublicKeyConfigured: boolean | null;
-};
-type VoiceConfig = {
-  configured: boolean;
-  webhookUrl: string | null;
-  receiverNumber: string | null;
-  webhookPublicKeyConfigured: boolean;
-  connectionIdConfigured: boolean;
-};
+function responseError(payload: unknown, fallback: string) {
+  if (!payload || typeof payload !== "object") return fallback;
+  const error = (payload as { error?: unknown }).error;
+  if (!error || typeof error !== "object") return fallback;
+  const value = error as { message?: unknown; details?: unknown };
+  const details = value.details;
+  if (details && typeof details === "object") {
+    const fieldErrors = (details as { fieldErrors?: unknown }).fieldErrors;
+    if (fieldErrors && typeof fieldErrors === "object") {
+      for (const messages of Object.values(fieldErrors as Record<string, unknown>)) {
+        if (Array.isArray(messages)) {
+          const first = messages.find((message): message is string => typeof message === "string" && Boolean(message.trim()));
+          if (first) return first;
+        }
+      }
+    }
+    const formErrors = (details as { formErrors?: unknown }).formErrors;
+    if (Array.isArray(formErrors)) {
+      const first = formErrors.find((message): message is string => typeof message === "string" && Boolean(message.trim()));
+      if (first) return first;
+    }
+  }
+  return typeof value.message === "string" && value.message !== "The request contains invalid data."
+    ? value.message
+    : fallback;
+}
 
 export default function CommunicationSetupPage() {
   const router = useRouter();
   const [channel, setChannel] = useState<Channel>("phone");
-  const [voiceConfig, setVoiceConfig] = useState<VoiceConfig>({
-    configured: false,
-    webhookUrl: null,
-    receiverNumber: null,
-    webhookPublicKeyConfigured: false,
-    connectionIdConfigured: false,
-  });
-  const [smsMode, setSmsMode] = useState<Mode>("HOSTED");
-  const [smsProvider, setSmsProvider] = useState<SMSProvider>("telnyx");
-  const [smsNumberMode, setSmsNumberMode] = useState<"same" | "separate">("same");
-  const [displayName, setDisplayName] = useState("");
-  const [replyWindow, setReplyWindow] = useState("Always respond");
-  const [afterHoursBehavior, setAfterHoursBehavior] = useState("Auto-reply + collect details");
-  const [smsConfig, setSmsConfig] = useState<SmsConfig>({ webhookUrl: null, senderNumber: null, webhookPublicKeyConfigured: null });
-  const [smsWebhookPublicKey, setSmsWebhookPublicKey] = useState("");
+  const [managedNumber, setManagedNumber] = useState<ManagedPhoneNumber | null>(null);
   const [integrations, setIntegrations] = useState<IntegrationSummary[]>([]);
   const [saving, setSaving] = useState(false);
-  const [notice, setNotice] = useState<string | null>(null);
 
   useEffect(() => {
-    Promise.all([
-      fetch("/api/setup/communication", { cache: "no-store" }).then((response) => response.ok ? response.json() : null),
-      fetch("/api/integrations", { cache: "no-store" }).then((response) => response.ok ? response.json() : null),
-      fetch("/api/integrations/voice/config", { cache: "no-store" }).then((response) => response.ok ? response.json() : null),
-    ]).then(([setupPayload, integrationPayload, voicePayload]) => {
-      const saved = setupPayload?.settings;
-      if (voicePayload) {
-        setVoiceConfig({
-          configured: voicePayload.configured === true,
-          webhookUrl: typeof voicePayload.webhookUrl === "string" ? voicePayload.webhookUrl : null,
-          receiverNumber: typeof voicePayload.receiverNumber === "string" ? voicePayload.receiverNumber : null,
-          webhookPublicKeyConfigured: voicePayload.webhookPublicKeyConfigured === true,
-          connectionIdConfigured: voicePayload.connectionIdConfigured === true,
-        });
-      }
-      if (saved?.sms) {
-        setSmsMode(saved.sms.mode ?? "HOSTED");
-        if (saved.sms.provider) setSmsProvider(saved.sms.provider);
-        setSmsNumberMode(saved.sms.numberMode ?? "same");
-        setDisplayName(saved.sms.displayName ?? "");
-        setReplyWindow(saved.sms.replyWindow ?? "Always respond");
-        setAfterHoursBehavior(saved.sms.afterHoursBehavior ?? "Auto-reply + collect details");
-      }
-      if (Array.isArray(integrationPayload?.integrations)) setIntegrations(integrationPayload.integrations);
-    }).catch(() => undefined);
+    fetch("/api/integrations", { cache: "no-store" })
+      .then((response) => response.ok ? response.json() : null)
+      .then((payload) => {
+        if (Array.isArray(payload?.integrations)) setIntegrations(payload.integrations);
+      })
+      .catch(() => showToast("Some communication settings could not be loaded. You can still continue setup.", "error"));
   }, []);
 
-  useEffect(() => {
-    if (smsMode !== "BYOP") {
-      setSmsConfig({ webhookUrl: null, senderNumber: null, webhookPublicKeyConfigured: null });
-      setSmsWebhookPublicKey("");
-      return;
-    }
-
-    const controller = new AbortController();
-    fetch(`/api/integrations/sms/config?provider=${encodeURIComponent(smsProvider)}`, { cache: "no-store", signal: controller.signal })
-      .then((response) => response.ok ? response.json() : Promise.reject(new Error("Unable to load SMS webhook configuration.")))
-      .then((payload) => {
-        setSmsConfig({
-          webhookUrl: typeof payload?.webhookUrl === "string" ? payload.webhookUrl : null,
-          senderNumber: typeof payload?.senderNumber === "string" ? payload.senderNumber : null,
-          webhookPublicKeyConfigured: typeof payload?.webhookPublicKeyConfigured === "boolean" ? payload.webhookPublicKeyConfigured : null,
-        });
-        setSmsWebhookPublicKey("");
-      })
-      .catch((error) => {
-        if (error instanceof Error && error.name === "AbortError") return;
-        setSmsConfig({ webhookUrl: null, senderNumber: null, webhookPublicKeyConfigured: null });
-      });
-    return () => controller.abort();
-  }, [smsMode, smsProvider]);
-
-  const connected = useMemo(() => new Set(integrations.filter((item) => item.status === "CONNECTED").map((item) => item.provider)), [integrations]);
+  const connected = useMemo(
+    () => new Set(integrations.filter((item) => item.status === "CONNECTED").map((item) => item.provider)),
+    [integrations],
+  );
   const whatsappConnected = connected.has("whatsapp");
 
-  async function saveSmsWebhookConfig() {
-    if (smsMode !== "BYOP" || smsProvider !== "telnyx" || !smsWebhookPublicKey.trim()) return;
-    const response = await fetch("/api/integrations/sms/config", {
-      method: "PUT",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({ provider: smsProvider, webhookPublicKey: smsWebhookPublicKey.trim() }),
-    });
-    const payload = await response.json().catch(() => ({}));
-    if (!response.ok) throw new Error(payload?.error?.message ?? "Unable to save the Telnyx webhook signing key.");
-    setSmsConfig({
-      webhookUrl: typeof payload?.webhookUrl === "string" ? payload.webhookUrl : smsConfig.webhookUrl,
-      senderNumber: typeof payload?.senderNumber === "string" ? payload.senderNumber : smsConfig.senderNumber,
-      webhookPublicKeyConfigured: true,
-    });
-    setSmsWebhookPublicKey("");
-  }
-
   async function save(completeStep: boolean) {
+    if (completeStep && managedNumber?.status !== "ACTIVE") {
+      setChannel("phone");
+      showToast("Choose and activate your AI Caller phone number before continuing.", "error");
+      return;
+    }
     setSaving(true);
-    setNotice(null);
     try {
-      if (smsMode === "BYOP" && smsProvider === "telnyx") {
-        if (completeStep && !smsConfig.webhookPublicKeyConfigured && !smsWebhookPublicKey.trim()) {
-          throw new Error("Enter the Telnyx webhook signing public key before completing SMS setup.");
-        }
-        await saveSmsWebhookConfig();
-      }
-
       const response = await fetch("/api/setup/communication", {
         method: "PUT",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({
-          voice: { mode: "BYOP", provider: "telnyx", numberMode: "existing", number: voiceConfig.receiverNumber },
-          sms: { mode: smsMode, provider: smsMode === "BYOP" ? smsProvider : null, numberMode: smsNumberMode, displayName, replyWindow, afterHoursBehavior },
+          voice: { mode: "HOSTED", provider: null, numberMode: "new", number: managedNumber?.phoneNumber ?? null },
+          sms: {
+            mode: "HOSTED",
+            provider: null,
+            numberMode: "same",
+            number: managedNumber?.phoneNumber ?? null,
+            displayName: "",
+            replyWindow: "Always respond",
+            afterHoursBehavior: "Auto-reply + collect details",
+          },
+          // Embedded Signup authorizes customer-owned WhatsApp assets through the platform app.
           whatsapp: { mode: "BYOP", provider: "whatsapp", accountMode: "existing" },
           webchat: { enabled: true },
           completeStep,
         }),
       });
-      const payload = await response.json().catch(() => ({}));
-      if (!response.ok) throw new Error(payload?.error?.message ?? "Unable to save communication settings.");
-      if (completeStep) router.push("/setup/calendar");
-      else setNotice("Communication settings saved.");
+      const payload = await response.json().catch(() => null);
+      if (!response.ok) {
+        throw new Error(responseError(payload, "We could not save your communication setup. Check the highlighted channel and try again."));
+      }
+      if (completeStep) {
+        showToast("Communication setup saved. You can finish optional channel connections later.", "success");
+        router.push("/setup/calendar");
+      } else {
+        showToast("Communication settings saved.", "success");
+      }
     } catch (error) {
-      setNotice(error instanceof Error ? error.message : "Unable to save communication settings.");
+      showToast(error instanceof Error ? error.message : "Unable to save communication settings.", "error");
     } finally {
       setSaving(false);
     }
@@ -174,92 +125,42 @@ export default function CommunicationSetupPage() {
           <div className="communicationIntro">
             <span className="stepBadge">STEP 3 OF 6</span>
             <h1>Connect your communication channels</h1>
-            <p>Link the channels your AI assistant will use to talk with your customers.</p>
-            <span className="introHelper">Inbound voice uses your connected Telnyx account in Milestone 7. SMS can use hosted or BYOP routing, and WhatsApp connects through Meta.</span>
+            <p>Choose a voice + SMS-capable business number, connect WhatsApp, and add web chat to your website. Outbound US business SMS unlocks after the required carrier registration is approved.</p>
           </div>
 
-          <div className="channelTabs" role="tablist" aria-label="Communication channels">
-            <button className={channel === "phone" ? "active" : ""} onClick={() => setChannel("phone")} type="button"><span className="channelTabIcon blue"><PhoneIcon size={21} /></span><span><strong>Phone &amp; Voice</strong><small>Receive inbound calls</small></span></button>
-            <button className={channel === "sms" ? "active" : ""} onClick={() => setChannel("sms")} type="button"><span className="channelTabIcon purple"><MessageIcon size={20} /></span><span><strong>SMS</strong><small>Send text messages</small></span></button>
-            <button className={channel === "whatsapp" ? "active" : ""} onClick={() => setChannel("whatsapp")} type="button"><span className="channelTabIcon green"><MessageIcon size={20} /></span><span><strong>WhatsApp</strong><small>Connect with Meta</small></span></button>
+          <div className="channelTabs channelTabsThree" role="tablist" aria-label="Communication channels">
+            <button className={channel === "phone" ? "active" : ""} onClick={() => setChannel("phone")} type="button"><span className="channelTabIcon blue"><PhoneIcon size={21} /></span><span><strong>Phone &amp; SMS</strong><small>One managed business number</small></span></button>
+            <button className={channel === "whatsapp" ? "active" : ""} onClick={() => setChannel("whatsapp")} type="button"><span className="channelTabIcon green"><MessageIcon size={20} /></span><span><strong>WhatsApp</strong><small>Connect your account</small></span></button>
             <button className={channel === "webchat" ? "active" : ""} onClick={() => setChannel("webchat")} type="button"><span className="channelTabIcon orange"><MessageIcon size={20} /></span><span><strong>Web Chat</strong><small>Add to your website</small></span></button>
           </div>
 
           {channel === "phone" && (
             <section className="channelSetupCard">
-              <div className="communicationSectionHeading"><span className="sectionCircle blue"><PhoneIcon size={23} /></span><div><h2>Phone &amp; Voice Setup</h2><p>Connect Telnyx for inbound AI calls. Outbound AI calling is not enabled.</p></div></div>
-              <div className="voiceM7Banner"><strong>Telnyx inbound voice</strong><span>Milestone 7 uses your own Telnyx Call Control number. Hosted, Plivo and Twilio voice adapters are intentionally deferred.</span></div>
-              <div className="existingNumberEmpty voiceConnectionSummary">
-                <PhoneIcon size={24} />
-                <div>
-                  <strong>{voiceConfig.receiverNumber ?? "No inbound Telnyx number configured"}</strong>
-                  <span>{voiceConfig.configured ? "Telnyx is connected and bound to inbound voice." : "Connect Telnyx and finish its voice configuration before completing setup."}</span>
-                </div>
-                <Link className="outlineAction" href="/integrations?provider=telnyx&return=%2Fsetup%2Fcommunication">{voiceConfig.configured ? "Manage" : "Connect Telnyx"}</Link>
-              </div>
-              <div className="smsBlock messagingSettingsBlock voiceWebhookBlock">
-                <h3>Inbound Call Control webhook</h3>
-                <div className="smsSettingsGrid">
-                  <label className="communicationField"><span>Callback URL</span><input value={voiceConfig.webhookUrl ?? "Loading callback URL..."} readOnly aria-label="Voice callback URL" /></label>
-                  <div className="complianceField"><span className="complianceLabel">Readiness</span><div className="compliancePills"><span><CheckIcon size={13} /> {voiceConfig.receiverNumber ? "Inbound number configured" : "Inbound number required"}</span><span><CheckIcon size={13} /> {voiceConfig.webhookPublicKeyConfigured ? "Webhook signing key configured" : "Webhook signing key required"}</span><span><CheckIcon size={13} /> {voiceConfig.connectionIdConfigured ? "Call Control connection configured" : "Call Control connection required"}</span></div></div>
-                </div>
-              </div>
-              <div className="editableNote communicationEditableNote"><span className="infoBubble"><InfoIcon size={18} /></span><div><strong>Configure this callback URL on the Telnyx Call Control application attached to your inbound number.</strong><p>AI Caller verifies Telnyx webhook signatures before any call state is created.</p></div></div>
-            </section>
-          )}
-
-          {channel === "sms" && (
-            <section className="channelSetupCard smsSetupCard">
-              <div className="communicationSectionHeading"><span className="sectionCircle purple"><MessageIcon size={23} /></span><div><h2>SMS Setup</h2><p>Choose the provider and messaging behavior for text conversations.</p></div></div>
-              <div className="choiceGrid providerChoiceGrid">
-                <button type="button" className={`choiceCard ${smsMode === "HOSTED" ? "selected" : ""}`} onClick={() => setSmsMode("HOSTED")}><span className="radioDot" /><span className="choiceText"><strong>Use our provider</strong><small>Hosted SMS uses your AI Caller credits</small></span><span className="providerBrand smsAiCaller"><LogoMark size={25} /> AI Caller</span></button>
-                <button type="button" className={`choiceCard ${smsMode === "BYOP" ? "selected" : ""}`} onClick={() => setSmsMode("BYOP")}><span className="radioDot" /><span className="choiceText"><strong>Use my own provider (BYOP)</strong><small>Use your existing messaging provider</small></span><span className="providerLogos"><b>telnyx</b><b>plivo</b><b>twilio</b></span></button>
-              </div>
-              {smsMode === "BYOP" && <ProviderChooser label="SMS provider" value={smsProvider} onChange={(value) => setSmsProvider(value as SMSProvider)} connected={connected.has(smsProvider)} />}
-              {smsMode === "BYOP" && (
-                <div className="smsBlock messagingSettingsBlock">
-                  <h3>Inbound webhook</h3>
-                  <div className="smsSettingsGrid">
-                    <label className="communicationField"><span>Callback URL</span><input value={smsConfig.webhookUrl ?? "Loading callback URL..."} readOnly aria-label="SMS callback URL" /></label>
-                    {smsProvider === "telnyx" && <label className="communicationField"><span>Webhook signing public key</span><input value={smsWebhookPublicKey} onChange={(event) => setSmsWebhookPublicKey(event.target.value)} placeholder={smsConfig.webhookPublicKeyConfigured ? "Saved — enter a new key only to replace it" : "Paste the Telnyx Ed25519 public key"} /></label>}
-                    <div className="complianceField"><span className="complianceLabel">Webhook status</span><div className="compliancePills"><span><CheckIcon size={13} /> {connected.has(smsProvider) ? "Provider credentials connected" : "Connect provider credentials first"}</span>{smsProvider === "telnyx" && <span><CheckIcon size={13} /> {smsConfig.webhookPublicKeyConfigured ? "Signing key saved" : "Signing key required"}</span>}</div></div>
-                  </div>
-                </div>
-              )}
-              {smsMode === "HOSTED" ? <div className="smsBlock"><h3>Choose an SMS number</h3><div className="choiceGrid numberChoiceGrid"><button type="button" className={`choiceCard compact ${smsNumberMode === "same" ? "selected" : ""}`} onClick={() => setSmsNumberMode("same")}><span className="radioDot" /><span className="choiceText"><strong>Use the same business number</strong><small>{voiceConfig.receiverNumber ?? "Connect Telnyx voice first"}</small></span></button><button type="button" className={`choiceCard compact ${smsNumberMode === "separate" ? "selected" : ""}`} onClick={() => setSmsNumberMode("separate")}><span className="radioDot" /><span className="choiceText"><strong>Use a separate SMS number</strong><small>Choose a dedicated text number later</small></span></button></div></div> : <div className="smsBlock"><h3>SMS sender number</h3><div className="existingNumberEmpty"><PhoneIcon size={24} /><div><strong>{smsConfig.senderNumber ?? "No provider SMS number configured"}</strong><span>{smsConfig.senderNumber ? `Messages will be sent from this ${smsProvider} number.` : "Add the SMS phone number in the connected provider integration before completing setup."}</span></div><Link className="outlineAction" href={`/integrations?provider=${smsProvider}&return=%2Fsetup%2Fcommunication`}>Manage</Link></div></div>}
-              <div className="smsBlock messagingSettingsBlock"><h3>Messaging settings</h3><div className="smsSettingsGrid"><label className="communicationField"><span>Display business name</span><input value={displayName} onChange={(event) => setDisplayName(event.target.value)} placeholder="Your business name" /></label><label className="communicationField"><span>Reply window</span><select value={replyWindow} onChange={(event) => setReplyWindow(event.target.value)}><option>Always respond</option><option>Business hours only</option><option>After-hours only</option></select></label><label className="communicationField"><span>After-hours behavior</span><select value={afterHoursBehavior} onChange={(event) => setAfterHoursBehavior(event.target.value)}><option>Auto-reply + collect details</option><option>Auto-reply only</option><option>Hold for next business day</option></select></label><div className="complianceField"><span className="complianceLabel">Compliance</span><div className="compliancePills"><span><CheckIcon size={13} /> STOP / HELP enabled</span><span><CheckIcon size={13} /> Consent reminder included</span></div></div></div></div>
+              <div className="communicationSectionHeading"><span className="sectionCircle blue"><PhoneIcon size={23} /></span><div><h2>Phone &amp; SMS</h2><p>Use one AI Caller-managed voice + SMS-capable number. Search by state, city or area code; outbound SMS remains gated until carrier registration is approved.</p></div></div>
+              <PhoneNumberManager onNumberChange={setManagedNumber} />
             </section>
           )}
 
           {channel === "whatsapp" && (
             <section className="channelSetupCard whatsappSetupCard">
-              <div className="communicationSectionHeading"><span className="sectionCircle green"><MessageIcon size={23} /></span><div><h2>WhatsApp Setup</h2><p>Connect your business directly through AI Caller&apos;s approved Meta Tech Provider app.</p></div></div>
+              <div className="communicationSectionHeading"><span className="sectionCircle green"><MessageIcon size={23} /></span><div><h2>WhatsApp Setup</h2><p>Connect your WhatsApp Business assets through the secure embedded signup flow.</p></div></div>
               <div className="whatsappBlock">
-                <h3>Meta Embedded Signup</h3>
-                <div className="existingNumberEmpty"><MessageIcon size={24} /><div><strong>{whatsappConnected ? "WhatsApp Business is connected" : "Connect WhatsApp with Meta"}</strong><span>{whatsappConnected ? "Your Meta business assets are authorized and ready for this workspace." : "Sign in with Meta to select or create your business portfolio, WhatsApp Business Account and phone number. No API keys need to be copied into AI Caller."}</span></div><Link className="outlineAction" href="/integrations?provider=whatsapp&return=%2Fsetup%2Fcommunication">{whatsappConnected ? "Manage" : "Connect with Meta"}</Link></div>
-              </div>
-              <div className="whatsappBlock">
-                <h3>How the connection works</h3>
-                <div className="compliancePills"><span><CheckIcon size={13} /> Official Meta Cloud API</span><span><CheckIcon size={13} /> Customer-owned WhatsApp assets</span><span><CheckIcon size={13} /> Access token encrypted server-side</span><span><CheckIcon size={13} /> Webhook subscription handled automatically</span></div>
+                <h3>WhatsApp Business</h3>
+                <div className="existingNumberEmpty"><MessageIcon size={24} /><div><strong>{whatsappConnected ? "WhatsApp Business is connected" : "Connect WhatsApp"}</strong><span>{whatsappConnected ? "Your business assets are authorized and ready for this workspace." : "Sign in to select or create your business portfolio, WhatsApp Business Account and phone number. No API keys need to be copied into AI Caller."}</span></div><Link className="outlineAction noWrapAction" href="/integrations?provider=whatsapp&return=%2Fsetup%2Fcommunication">{whatsappConnected ? "Manage" : "Connect with Meta"}</Link></div>
               </div>
             </section>
           )}
 
           {channel === "webchat" && <WebChatSetup />}
 
-          {notice && <div className="editableNote communicationEditableNote"><span className="infoBubble"><InfoIcon size={18} /></span><div><strong>{notice}</strong></div></div>}
           <div className="communicationFooter"><Link className="backLink" href="/setup/ai">←&nbsp;&nbsp;Back to AI setup</Link><div className="formActions"><button type="button" className="outlineAction" disabled={saving} onClick={() => save(false)}>{saving ? "Saving..." : "Save for later"}</button><button type="button" className="continueAction" disabled={saving} onClick={() => save(true)}>Save &amp; Continue <ChevronRightIcon size={18} /></button></div></div>
         </section>
 
         <aside className="communicationSidebar">
           <SetupProgressPanel currentStep={3} estimated="7 minutes" className="sidebarCard communicationProgressCard" progressClassName="sidebarProgressBar communicationProgressBar" />
-          {channel === "webchat" ? <WebChatSidebar /> : <section className="sidebarCard communicationWhyCard"><h2>One setup, one routing layer</h2><p>Voice uses Telnyx BYOP for the current inbound milestone; SMS can use hosted or BYOP routing. WhatsApp connects directly through Meta Embedded Signup and is stored as the workspace&apos;s WhatsApp capability.</p><div className="communicationBenefits"><div className="communicationBenefit"><span className="benefitIcon green"><CheckIcon size={16} /></span><div><strong>Provider-independent</strong><small>Switch voice or SMS providers without changing conversation logic.</small></div></div><div className="communicationBenefit"><span className="benefitIcon blue"><PhoneIcon size={16} /></span><div><strong>Inbound voice only</strong><small>Voice setup remains aligned with the MVP boundary.</small></div></div></div></section>}
+          {channel === "webchat" ? <WebChatSidebar /> : <section className="sidebarCard communicationWhyCard"><h2>Connect what you need</h2><p>Your AI Caller number is provisioned for voice and SMS routing. Outbound US business SMS is enabled only after the required carrier registration is approved. Number setup and renewals are billed from your credit balance.</p><div className="communicationBenefits"><div className="communicationBenefit"><span className="benefitIcon green"><CheckIcon size={16} /></span><div><strong>One managed voice + SMS number</strong><small>No carrier account, provider credentials or callback URLs are required.</small></div></div><div className="communicationBenefit"><span className="benefitIcon blue"><PhoneIcon size={16} /></span><div><strong>Local number search</strong><small>Filter by state, city or area code and AI Caller configures the number automatically.</small></div></div></div></section>}
         </aside>
       </div>
     </main>
   );
-}
-
-function ProviderChooser({ label, value, onChange, connected }: { label: string; value: string; onChange: (value: string) => void; connected: boolean }) {
-  return <div className="existingNumberEmpty"><PhoneIcon size={22} /><div><strong>{label}</strong><select className="communicationField" value={value} onChange={(event) => onChange(event.target.value)}><option value="telnyx">Telnyx</option><option value="plivo">Plivo</option><option value="twilio">Twilio</option></select><span>{connected ? "Provider credentials connected." : "Credentials are not connected yet."}</span></div><Link className="outlineAction" href={`/integrations?provider=${value}&return=%2Fsetup%2Fcommunication`}>{connected ? "Manage" : "Connect"}</Link></div>;
 }

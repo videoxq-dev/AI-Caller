@@ -13,6 +13,7 @@ import { getEnv } from "@/server/env";
 import { AppError } from "@/server/http/errors";
 import { logger } from "@/server/observability/logger";
 import { ProviderRequestError } from "@/server/providers/http";
+import { outboundSmsReady } from "@/server/phone-numbers/lifecycle";
 import { resolveSmsRuntimeForWorkspace, type SmsRuntime } from "@/server/providers/sms/runtime";
 import { attachSmsProviderMessage, markSmsSendFailure } from "./repository";
 
@@ -147,6 +148,14 @@ export async function sendSmsConversationTextWithRuntime(
     metadata?: Record<string, unknown>;
   },
 ) {
+  if (runtime.mode === "HOSTED" && !outboundSmsReady(runtime.messagingReadiness)) {
+    const code = runtime.messagingReadiness === "REJECTED" ? "SMS_REGISTRATION_REJECTED" : "SMS_REGISTRATION_REQUIRED";
+    const message = runtime.messagingReadiness === "REJECTED"
+      ? "Outbound SMS registration was rejected and must be corrected before sending."
+      : "Outbound SMS is not ready yet. Carrier registration must be approved before sending.";
+    throw new AppError(code, message, 409);
+  }
+
   const conversation = await conversationState(workspaceId, conversationId);
   if (input.senderType === "USER" && conversation.handlingMode !== "HUMAN") {
     throw new AppError("HUMAN_TAKEOVER_REQUIRED", "Take over this conversation before sending a staff SMS reply.", 409);

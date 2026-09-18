@@ -49,10 +49,10 @@ type AdminPlan = {
 
 type AdminRate = {
   id: string;
-  capability: "AI_TEXT" | "SMS";
+  capability: "AI_TEXT" | "SMS" | "VOICE";
   provider: string;
   model: string;
-  unit: "AI_INPUT_TOKEN" | "AI_CACHED_INPUT_TOKEN" | "AI_OUTPUT_TOKEN" | "SMS_SEGMENT";
+  unit: "AI_INPUT_TOKEN" | "AI_CACHED_INPUT_TOKEN" | "AI_OUTPUT_TOKEN" | "SMS_SEGMENT" | "VOICE_MINUTE";
   costMicros: number;
   unitsPerCost: number;
   targetMarginBps: number;
@@ -112,13 +112,13 @@ export default function AdminPage() {
   const [workspaceSearch, setWorkspaceSearch] = useState("");
   const [newUser, setNewUser] = useState({ name: "", email: "" });
   const [newRate, setNewRate] = useState({
-    capability: "AI_TEXT" as "AI_TEXT" | "SMS",
+    capability: "AI_TEXT" as "AI_TEXT" | "SMS" | "VOICE",
     provider: "openai",
     model: "gpt-5.6-luna",
     unit: "AI_INPUT_TOKEN" as AdminRate["unit"],
     costMicros: "200000",
     unitsPerCost: "1000000",
-    targetMarginBps: "5500",
+    targetMarginBps: "5000",
     effectiveFrom: new Date().toISOString().slice(0, 16),
   });
 
@@ -421,19 +421,19 @@ export default function AdminPage() {
                 <div className="adminPanelHeading"><div><h2>Create rate version</h2><p>Existing versions are never overwritten; the prior active interval is closed automatically.</p></div></div>
                 <div className="rateForm">
                   <label><span>Capability</span><select value={newRate.capability} onChange={(event) => {
-                    const capability = event.target.value as "AI_TEXT" | "SMS";
+                    const capability = event.target.value as "AI_TEXT" | "SMS" | "VOICE";
                     setNewRate((value) => ({
                       ...value,
                       capability,
-                      unit: capability === "SMS" ? "SMS_SEGMENT" : "AI_INPUT_TOKEN",
-                      provider: capability === "SMS" ? "telnyx" : "openai",
-                      model: capability === "SMS" ? "" : value.model || "gpt-5.6-luna",
-                      unitsPerCost: capability === "SMS" ? "1" : "1000000",
+                      unit: capability === "SMS" ? "SMS_SEGMENT" : capability === "VOICE" ? "VOICE_MINUTE" : "AI_INPUT_TOKEN",
+                      provider: capability === "AI_TEXT" ? "openai" : "telnyx",
+                      model: capability === "AI_TEXT" ? value.model || "gpt-5.6-luna" : "",
+                      unitsPerCost: capability === "AI_TEXT" ? "1000000" : "1",
                     }));
-                  }}><option value="AI_TEXT">AI text</option><option value="SMS">SMS</option></select></label>
+                  }}><option value="AI_TEXT">AI text</option><option value="SMS">SMS</option><option value="VOICE">Voice</option></select></label>
                   <label><span>Provider</span><input value={newRate.provider} onChange={(event) => setNewRate((value) => ({ ...value, provider: event.target.value }))} /></label>
-                  <label><span>Model</span><input value={newRate.model} disabled={newRate.capability === "SMS"} onChange={(event) => setNewRate((value) => ({ ...value, model: event.target.value }))} /></label>
-                  <label><span>Unit</span><select value={newRate.unit} onChange={(event) => setNewRate((value) => ({ ...value, unit: event.target.value as AdminRate["unit"] }))}>{newRate.capability === "SMS" ? <option value="SMS_SEGMENT">SMS segment</option> : <><option value="AI_INPUT_TOKEN">AI input token</option><option value="AI_CACHED_INPUT_TOKEN">AI cached input token</option><option value="AI_OUTPUT_TOKEN">AI output token</option></>}</select></label>
+                  <label><span>Model</span><input value={newRate.model} disabled={newRate.capability !== "AI_TEXT"} onChange={(event) => setNewRate((value) => ({ ...value, model: event.target.value }))} /></label>
+                  <label><span>Unit</span><select value={newRate.unit} onChange={(event) => setNewRate((value) => ({ ...value, unit: event.target.value as AdminRate["unit"] }))}>{newRate.capability === "SMS" ? <option value="SMS_SEGMENT">SMS segment</option> : newRate.capability === "VOICE" ? <option value="VOICE_MINUTE">Voice minute</option> : <><option value="AI_INPUT_TOKEN">AI input token</option><option value="AI_CACHED_INPUT_TOKEN">AI cached input token</option><option value="AI_OUTPUT_TOKEN">AI output token</option></>}</select></label>
                   <label><span>Provider cost (micro-USD)</span><input type="number" value={newRate.costMicros} onChange={(event) => setNewRate((value) => ({ ...value, costMicros: event.target.value }))} /></label>
                   <label><span>Units per cost</span><input type="number" value={newRate.unitsPerCost} onChange={(event) => setNewRate((value) => ({ ...value, unitsPerCost: event.target.value }))} /></label>
                   <label><span>Margin (bps)</span><input type="number" value={newRate.targetMarginBps} onChange={(event) => setNewRate((value) => ({ ...value, targetMarginBps: event.target.value }))} /></label>

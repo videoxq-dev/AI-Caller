@@ -1,4 +1,5 @@
 import { resolveWorkspaceContext } from "@/server/auth/workspace-context";
+import { requireWorkspacePermission } from "@/server/auth/permissions";
 import { bindCapability } from "@/server/domain/integrations/repository";
 import { capabilityBindingInputSchema } from "@/server/domain/integrations/schemas";
 import { resolveProviderRoute } from "@/server/providers/resolver";
@@ -20,6 +21,7 @@ export async function GET(request: Request) {
 export async function PUT(request: Request) {
   try {
     const context = await resolveWorkspaceContext(request.headers);
+    requireWorkspacePermission(context.membership.role, "integration.manage");
     const input = parseInput(capabilityBindingInputSchema, await request.json());
     await bindCapability(context.workspace.id, input.capability, input.mode, input.provider ?? null);
     return Response.json({ route: await resolveProviderRoute(context.workspace.id, input.capability) });

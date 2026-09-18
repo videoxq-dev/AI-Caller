@@ -43,6 +43,8 @@ function runtimeFor(workspaceId: string, provider: SMSProvider, mode: "HOSTED" |
     providerName: "twilio",
     integrationId: mode === "BYOP" ? "22222222-2222-4222-8222-222222222222" : null,
     senderNumber: "+12025550200",
+    serviceStatus: mode === "HOSTED" ? "ACTIVE" : null,
+    messagingReadiness: mode === "HOSTED" ? "READY" : null,
     provider,
   };
 }
@@ -82,6 +84,25 @@ describe("SMS webhook service", () => {
 
   afterAll(async () => {
     await closeDatabase();
+  });
+
+  it("authenticates and acknowledges suspended hosted webhooks without queuing work", async () => {
+    const provider: SMSProvider = {
+      send: vi.fn(async () => ({ externalId: "unused", status: "QUEUED" as const })),
+      verifyWebhook: vi.fn(async () => true),
+      normalizeWebhook: vi.fn(async () => [inboundEvent("suspended")]),
+    };
+    const runtime = { ...runtimeFor(workspaceId, provider, "HOSTED"), serviceStatus: "SUSPENDED" as const };
+    const { service, jobs } = serviceHarness(runtime, async () => orchestratorReply("Should not run"));
+
+    await expect(service.ingest(request(), workspaceId, "twilio")).resolves.toMatchObject({
+      queued: 0,
+      processed: 0,
+      suppressed: 1,
+    });
+    expect(provider.verifyWebhook).toHaveBeenCalledTimes(1);
+    expect(provider.normalizeWebhook).toHaveBeenCalledTimes(1);
+    expect(jobs).toHaveLength(0);
   });
 
   it("queues once, persists one inbound/outbound pair, and does not replay duplicate inbound events", async () => {
@@ -170,6 +191,27 @@ describe("SMS webhook service", () => {
     const outbound = stored.find((message) => message.direction === "OUTBOUND");
     expect(outbound?.externalMessageId).toBe("msg-out-2");
     expect(outbound?.status).toBe("DELIVERED");
+  });
+
+  it("blocks hosted outbound SMS until carrier registration is ready", async () => {
+    const provider: SMSProvider = {
+      send: vi.fn(async () => ({ externalId: "should-not-send", status: "QUEUED" as const })),
+      verifyWebhook: vi.fn(async () => true),
+      normalizeWebhook: vi.fn(async () => [inboundEvent("registration-gate", "+12025550105")]),
+    };
+    const runtime = { ...runtimeFor(workspaceId, provider, "HOSTED"), messagingReadiness: "NOT_REGISTERED" as const };
+    const { service, jobs } = serviceHarness(runtime, async () => orchestratorReply("This reply must be gated."));
+
+    await service.ingest(request(), workspaceId, "twilio");
+    await expect(service.processInboundJob(jobs[0])).resolves.toMatchObject({
+      replied: false,
+      outboundBlocked: true,
+      messagingReadiness: "NOT_REGISTERED",
+    });
+    expect(provider.send).not.toHaveBeenCalled();
+    expect((await db.select().from(messages)).filter((message) => message.direction === "OUTBOUND")).toHaveLength(0);
+    expect((await db.select().from(messages)).filter((message) => message.direction === "INBOUND")).toHaveLength(1);
+    expect((await db.select().from(providerWebhookEvents))[0].status).toBe("PROCESSED");
   });
 
   it("charges hosted credits once after a successful worker send", async () => {

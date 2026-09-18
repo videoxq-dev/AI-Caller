@@ -24,4 +24,10 @@ describe("voice business-hour routing", () => {
     expect(isWithinBusinessHours(hours, 2, 9 * 60)).toBe(true);
     expect(isWithinBusinessHours(hours, 2, 17 * 60)).toBe(false);
   });
+
+  it("continues to honor legacy 12-hour values saved by the original onboarding UI", () => {
+    const hours = [{ dayOfWeek: 3, enabled: true, openTime: "8:00 AM", closeTime: "6:00 PM" }];
+    expect(isWithinBusinessHours(hours, 3, 8 * 60)).toBe(true);
+    expect(isWithinBusinessHours(hours, 3, 18 * 60)).toBe(false);
+  });
 });

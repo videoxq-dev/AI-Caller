@@ -1,0 +1,60 @@
+.toastViewport {
+  position: fixed;
+  z-index: 10000;
+  top: 22px;
+  right: 22px;
+  width: min(380px, calc(100vw - 32px));
+  display: grid;
+  gap: 10px;
+  pointer-events: none;
+}
+
+.appToast {
+  min-height: 52px;
+  display: grid;
+  grid-template-columns: 28px 1fr 28px;
+  align-items: center;
+  gap: 10px;
+  padding: 11px 10px 11px 12px;
+  border: 1px solid #cbdcf5;
+  border-radius: 10px;
+  color: #253a57;
+  background: #fff;
+  box-shadow: 0 14px 34px rgba(31, 54, 87, .18);
+  font-size: 13px;
+  line-height: 1.4;
+  pointer-events: auto;
+}
+
+.appToast.error { border-color: #f0b9bd; background: #fff8f8; color: #812d35; }
+.appToast.success { border-color: #b9e6ce; background: #f6fff9; color: #17633e; }
+
+.toastMarker {
+  width: 26px;
+  height: 26px;
+  display: grid;
+  place-items: center;
+  border-radius: 50%;
+  color: #fff;
+  background: #1769ee;
+  font-weight: 800;
+}
+
+.appToast.error .toastMarker { background: #d6404d; }
+.appToast.success .toastMarker { background: #18a765; }
+.appToast button {
+  width: 28px;
+  height: 28px;
+  border: 0;
+  border-radius: 6px;
+  color: currentColor;
+  background: transparent;
+  font-size: 20px;
+  line-height: 1;
+  cursor: pointer;
+}
+.appToast button:hover { background: rgba(46, 68, 97, .08); }
+
+@media (max-width: 600px) {
+  .toastViewport { top: 12px; right: 12px; width: calc(100vw - 24px); }
+}
