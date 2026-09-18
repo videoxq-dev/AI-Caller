@@ -4,6 +4,8 @@ import { isIP } from "node:net";
 import { and, eq } from "drizzle-orm";
 import { db } from "@/db";
 import { usageEvents } from "@/db/schema";
+import { loadHostedRateSnapshot, quoteHostedUsage } from "@/server/billing/pricing";
+import { chargeUnavoidableCredits } from "@/server/credits/service";
 import {
   appendMessage,
   getConversationById,
@@ -197,23 +199,58 @@ async function recordingBytes(initialUrl: string, fetcher: typeof fetch) {
   };
 }
 
-async function recordVoiceUsage(workspaceId: string, call: NonNullable<Awaited<ReturnType<typeof getVoiceCallByExternalId>>>) {
+async function recordVoiceUsage(
+  workspaceId: string,
+  runtime: VoiceRuntime,
+  call: NonNullable<Awaited<ReturnType<typeof getVoiceCallByExternalId>>>,
+) {
   try {
+    const durationSeconds = Math.max(0, call.durationSeconds ?? 0);
+    let creditsCharged = 0;
+    let providerCostMicros = 0;
+    let billedUnits: Record<string, number> = {};
+    let pricingDetails: Record<string, unknown> = {};
+
+    if (runtime.mode === "HOSTED" && durationSeconds > 0) {
+      const minutes = Math.max(1, Math.ceil(durationSeconds / 60));
+      const rates = await loadHostedRateSnapshot({
+        capability: "VOICE",
+        provider: runtime.providerName,
+        model: "",
+        units: ["VOICE_MINUTE"],
+      });
+      const quote = quoteHostedUsage(rates, [{ unit: "VOICE_MINUTE", units: minutes }]);
+      creditsCharged = quote.credits;
+      providerCostMicros = quote.providerCostMicros;
+      billedUnits = quote.billedUnits;
+      pricingDetails = quote.pricingDetails;
+      if (creditsCharged > 0) {
+        await chargeUnavoidableCredits(workspaceId, creditsCharged, {
+          reason: "Hosted inbound voice call",
+          referenceType: "VOICE_CALL",
+          referenceId: call.id,
+        });
+      }
+    }
+
     await db.insert(usageEvents).values({
       workspaceId,
       capability: "VOICE",
       provider: call.provider,
-      mode: "BYOP",
+      mode: runtime.mode,
       providerUsage: {
-        durationSeconds: call.durationSeconds ?? 0,
+        durationSeconds,
         voiceMode: call.mode,
       },
-      creditsCharged: 0,
+      creditsCharged,
+      providerCostMicros,
+      billedUnits,
+      pricingDetails,
       referenceType: "VOICE_CALL",
       referenceId: call.id,
     }).onConflictDoNothing();
   } catch (error) {
-    logger.error({ err: error, workspaceId, callId: call.id }, "Failed to persist voice usage event");
+    logger.error({ err: error, workspaceId, callId: call.id }, "Failed to meter voice usage");
   }
 }
 
@@ -532,7 +569,7 @@ export function createVoiceWebhookService(dependencies: VoiceServiceDependencies
         phase: "ENDED",
         hangupCause: event.cause,
       });
-      await recordVoiceUsage(workspaceId, updated);
+      await recordVoiceUsage(workspaceId, runtime, updated);
     }
   }
 
