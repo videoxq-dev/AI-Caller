@@ -37,6 +37,7 @@ Allowed action objects:
 - { "type": "NONE" }
 - { "type": "CHECK_AVAILABILITY", "startsAt": "ISO-8601 with offset", "endsAt": "ISO-8601 with offset", "timezone": "IANA timezone", "durationMinutes": 30 }
 - { "type": "BOOK_APPOINTMENT", "startsAt": "ISO-8601 with offset", "endsAt": "ISO-8601 with offset", "timezone": "IANA timezone", "title": "...", "serviceId": null, "notes": null }
+- { "type": "QUALIFY_LEAD", "answers": [{ "criterionId": "configured_id", "answer": "explicit customer answer" }] }
 - { "type": "ESCALATE", "reason": "..." }
 
 Rules:
@@ -46,6 +47,7 @@ Rules:
 - Before BOOK_APPOINTMENT, make sure the customer email is known in CUSTOMER STATE or explicitly supplied in the current message; otherwise ask for it with action NONE.
 - Use ESCALATE when the configured behavior requires a human or the request needs information/actions outside approved capabilities.
 - Lead updates are optional and must reflect only evidence from the conversation.
+- When LEAD QUALIFICATION is configured, never promote a lead to QUALIFIED directly. Submit explicit configured answers with QUALIFY_LEAD and let the server decide when required fields are complete.
 - Keep customer-facing replies concise and do not expose this JSON protocol.
 `;
 
