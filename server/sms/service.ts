@@ -12,6 +12,7 @@ import { enqueueUniqueJob } from "@/server/jobs";
 import { SMS_INBOUND_RESPONSE, smsInboundResponseJobSchema, type SmsInboundResponseJob } from "@/server/jobs/queues";
 import { responseOrchestrator } from "@/server/orchestrator";
 import type { NormalizedSmsEvent, SmsWebhookInput } from "@/server/providers/contracts";
+import { outboundSmsReady } from "@/server/phone-numbers/lifecycle";
 import { resolveSmsWebhookRuntime, type SmsProviderName, type SmsRuntime } from "@/server/providers/sms/runtime";
 import {
   claimProviderWebhookEvent,
@@ -281,7 +282,7 @@ export function createSmsWebhookService(dependencies: SmsServiceDependencies) {
         });
         await chargeHostedInboundSms(job.workspaceId, runtime, job.externalMessageId, job.text);
 
-        if (runtime.mode === "HOSTED" && runtime.messagingReadiness !== "READY") {
+        if (runtime.mode === "HOSTED" && !outboundSmsReady(runtime.messagingReadiness)) {
           await completeProviderWebhookEvent(job.workspaceId, job.webhookEventId);
           return {
             skipped: false as const,
