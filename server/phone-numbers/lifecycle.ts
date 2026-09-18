@@ -30,7 +30,7 @@ export function carrierProvisioningOutcome(
     return { kind: "REQUIREMENTS", orderStatus, numberStatus };
   }
   if (numberStatus && FINAL_SUCCESS.has(numberStatus)) {
-    return { kind: "READY", orderStatus ?? "pending", numberStatus };
+    return { kind: "READY", orderStatus: orderStatus ?? "pending", numberStatus };
   }
   return { kind: "PENDING", orderStatus, numberStatus };
 }
