@@ -231,6 +231,23 @@ export async function provisionManagedPhoneNumber(workspaceId: string, input: {
   requestId: string;
   replaceCurrent?: boolean;
 }) {
+  const [priorRequest] = await db.select().from(hostedPhoneNumbers).where(and(
+    eq(hostedPhoneNumbers.workspaceId, workspaceId),
+    eq(hostedPhoneNumbers.provisionRequestId, input.requestId),
+  )).limit(1);
+  if (priorRequest) {
+    if (priorRequest.phoneNumber !== input.phoneNumber) {
+      throw new AppError("PHONE_NUMBER_IDEMPOTENCY_CONFLICT", "This provisioning request was already used for a different phone number.", 409);
+    }
+    if (priorRequest.status === "PROVISIONING") {
+      throw new AppError("PHONE_NUMBER_PROVISIONING_IN_PROGRESS", "This phone number is still being activated. Refresh in a moment.", 409);
+    }
+    if (["ACTIVE", "PAST_DUE", "SUSPENDED"].includes(priorRequest.status)) {
+      return publicNumber(priorRequest);
+    }
+    throw new AppError("PHONE_NUMBER_REQUEST_COMPLETE", "This provisioning request has already completed. Start a new phone-number request.", 409);
+  }
+
   const current = await privateManagedPhoneNumber(workspaceId);
   if (current?.phoneNumber === input.phoneNumber) {
     if (current.status === "PROVISIONING") {
@@ -265,6 +282,7 @@ export async function provisionManagedPhoneNumber(workspaceId: string, input: {
       numberType: match.numberType,
       status: "PROVISIONING",
       provider: "telnyx",
+      provisionRequestId: input.requestId,
       providerMonthlyCostMicros: quote.monthlyCostMicros,
       providerUpfrontCostMicros: quote.upfrontCostMicros,
       monthlyCredits: quote.monthlyCredits,
