@@ -88,6 +88,19 @@ export function normalizeTelnyxVoiceWebhook(input: VoiceWebhookInput): Normalize
     return [{ type: "SPEAK_ENDED", externalEventId, externalCallId, callControlId, occurredAt }];
   }
 
+  if (eventType === "call.gather.ended") {
+    if (!externalCallId || !callControlId) return [];
+    return [{
+      type: "DTMF_GATHERED",
+      externalEventId,
+      externalCallId,
+      callControlId,
+      digits: typeof payload.digits === "string" ? payload.digits : "",
+      status: stringValue(payload.status),
+      occurredAt,
+    }];
+  }
+
   if (eventType === "call.transcription") {
     const transcription = record(payload.transcription_data);
     const transcript = stringValue(transcription?.transcript);
@@ -188,17 +201,25 @@ export function createTelnyxVoiceProvider(config: TelnyxVoiceConfig): VoiceProvi
       });
     },
 
+    async gatherConsent(input) {
+      await action(input.callControlId, "gather_using_speak", {
+        command_id: commandId(input.commandId),
+        payload: input.text,
+        voice: input.voice,
+        language: input.language,
+        minimum_digits: 1,
+        maximum_digits: 1,
+        maximum_tries: 1,
+        timeout_millis: 10_000,
+        valid_digits: "12",
+      });
+    },
+
     async startTranscription(input) {
       await action(input.callControlId, "transcription_start", {
         command_id: commandId(input.commandId),
         language: languageForTranscription(input.language),
         transcription_engine: "Telnyx",
-      });
-    },
-
-    async stopTranscription(input) {
-      await action(input.callControlId, "transcription_stop", {
-        command_id: commandId(input.commandId),
       });
     },
 
