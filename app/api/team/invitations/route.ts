@@ -5,7 +5,7 @@ import { createWorkspaceInvitation } from "@/server/auth/team-repository";
 import { getEnv } from "@/server/env";
 import { enqueueUniqueJob } from "@/server/jobs";
 import { TEAM_INVITATION_EMAIL } from "@/server/jobs/queues";
-import { toErrorResponse } from "@/server/http/errors";
+import { AppError, toErrorResponse } from "@/server/http/errors";
 import { parseInput } from "@/server/http/validation";
 
 const inputSchema = z.object({
@@ -20,7 +20,6 @@ export async function POST(request: Request) {
     const input = parseInput(inputSchema, await request.json());
 
     if (context.membership.role === "ADMIN" && input.role === "ADMIN") {
-      const { AppError } = await import("@/server/http/errors");
       throw new AppError("FORBIDDEN_ROLE_ASSIGNMENT", "Only the workspace owner can invite another admin.", 403);
     }
 
