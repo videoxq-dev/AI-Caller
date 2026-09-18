@@ -12,7 +12,7 @@ import { enqueueUniqueJob } from "@/server/jobs";
 import { SMS_INBOUND_RESPONSE, smsInboundResponseJobSchema, type SmsInboundResponseJob } from "@/server/jobs/queues";
 import { responseOrchestrator } from "@/server/orchestrator";
 import type { NormalizedSmsEvent, SmsWebhookInput } from "@/server/providers/contracts";
-import { resolveSmsRuntime, type SmsProviderName, type SmsRuntime } from "@/server/providers/sms/runtime";
+import { resolveSmsWebhookRuntime, type SmsProviderName, type SmsRuntime } from "@/server/providers/sms/runtime";
 import {
   claimProviderWebhookEvent,
   claimQueuedProviderWebhookEvent,
@@ -182,6 +182,10 @@ export function createSmsWebhookService(dependencies: SmsServiceDependencies) {
         throw new AppError("INVALID_WEBHOOK_SIGNATURE", "Invalid SMS webhook signature.", 401);
       }
 
+      if (runtime.mode === "HOSTED" && runtime.serviceStatus === "SUSPENDED") {
+        return { ok: true as const, queued: 0, processed: 0, duplicates: 0, deferred: 0, suppressed: 1 };
+      }
+
       const events = await runtime.provider.normalizeWebhook(webhookInput);
       let queued = 0;
       let processed = 0;
@@ -313,7 +317,7 @@ export function createSmsWebhookService(dependencies: SmsServiceDependencies) {
 }
 
 export const smsWebhookService = createSmsWebhookService({
-  resolveRuntime: resolveSmsRuntime,
+  resolveRuntime: resolveSmsWebhookRuntime,
   respond: (workspaceId, conversationId) => responseOrchestrator.respond(workspaceId, conversationId),
   enqueueResponseJob: (job) => enqueueUniqueJob(SMS_INBOUND_RESPONSE, job.webhookEventId, job),
 });
