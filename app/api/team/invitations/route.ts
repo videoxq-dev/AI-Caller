@@ -47,7 +47,11 @@ export async function POST(request: Request) {
       });
       if (!jobId) throw new Error("Invitation email could not be queued.");
     } catch (error) {
-      await revokeWorkspaceInvitation(context.workspace.id, created.invitation.id).catch(() => undefined);
+      await revokeWorkspaceInvitation(
+        context.workspace.id,
+        created.invitation.id,
+        context.membership.role as "OWNER" | "ADMIN",
+      ).catch(() => undefined);
       throw error;
     }
 
