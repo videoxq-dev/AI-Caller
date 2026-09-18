@@ -182,17 +182,18 @@ export function createSmsWebhookService(dependencies: SmsServiceDependencies) {
         throw new AppError("INVALID_WEBHOOK_SIGNATURE", "Invalid SMS webhook signature.", 401);
       }
 
-      if (runtime.mode === "HOSTED" && runtime.serviceStatus === "SUSPENDED") {
-        return { ok: true as const, queued: 0, processed: 0, duplicates: 0, deferred: 0, suppressed: 1 };
-      }
-
       const events = await runtime.provider.normalizeWebhook(webhookInput);
       let queued = 0;
       let processed = 0;
       let duplicates = 0;
       let deferred = 0;
+      let suppressed = 0;
 
       for (const event of events) {
+        if (runtime.mode === "HOSTED" && runtime.serviceStatus === "SUSPENDED" && event.type === "MESSAGE_RECEIVED") {
+          suppressed += 1;
+          continue;
+        }
         if (event.type === "MESSAGE_RECEIVED" && normalizePhone(event.to) !== runtime.senderNumber) {
           throw new AppError("SMS_DESTINATION_MISMATCH", "The inbound SMS destination does not match this workspace's configured SMS number.", 409);
         }
@@ -250,7 +251,7 @@ export function createSmsWebhookService(dependencies: SmsServiceDependencies) {
         queued += 1;
       }
 
-      return { ok: true as const, queued, processed, duplicates, deferred };
+      return { ok: true as const, queued, processed, duplicates, deferred, suppressed };
     },
 
     async processInboundJob(input: SmsInboundResponseJob) {
