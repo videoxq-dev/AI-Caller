@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { evaluateQualification, getQualificationConfig } from "./qualification";
 import { calendarBookingService } from "@/server/domain/core/calendar-booking";
 import { updateContactProfile } from "@/server/domain/core/contact-profile";
 import { getActiveConversationChannel, type ConversationChannel } from "@/server/domain/core/conversation-channels";
@@ -122,6 +123,7 @@ async function updateLeadFromEnvelope(
   contactId: string,
   lead: NonNullable<OrchestratorEnvelope["lead"]>,
   channel: ConversationChannel,
+  qualificationEnabled = false,
 ) {
   const detail = await getContactDetail(workspaceId, contactId);
   if (!detail) throw new Error("The conversation contact no longer exists.");
