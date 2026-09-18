@@ -21,7 +21,7 @@ export const conversationStatus = pgEnum("conversation_status", ["OPEN", "CLOSED
 export const handlingMode = pgEnum("handling_mode", ["AI", "HUMAN"]);
 export const messageDirection = pgEnum("message_direction", ["INBOUND", "OUTBOUND", "INTERNAL"]);
 export const messageSenderType = pgEnum("message_sender_type", ["CUSTOMER", "AI", "USER", "SYSTEM"]);
-export const messageContentType = pgEnum("message_content_type", ["TEXT", "CALL_TRANSCRIPT", "APPOINTMENT_EVENT", "SYSTEM_EVENT"]);
+export const messageContentType = pgEnum("message_content_type", ["TEXT", "CALL_TRANSCRIPT", "CALL_RECORDING", "APPOINTMENT_EVENT", "SYSTEM_EVENT"]);
 export const appointmentStatus = pgEnum("appointment_status", ["PENDING", "CONFIRMED", "COMPLETED", "CANCELLED", "NO_SHOW"]);
 
 export const contacts = pgTable(
