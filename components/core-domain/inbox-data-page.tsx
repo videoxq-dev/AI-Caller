@@ -251,7 +251,7 @@ export function InboxDataPage() {
   const latestChannel = timeline?.messages.at(-1)?.channel ?? "WEBCHAT";
   const canReplyOnStaffChannel = Boolean(
     timeline
-    && (latestChannel === "WHATSAPP" || latestChannel === "SMS")
+    && (latestChannel === "WHATSAPP" || latestChannel === "SMS" || latestChannel === "WEBCHAT")
     && timeline.conversation.handlingMode === "HUMAN",
   );
 
@@ -260,7 +260,11 @@ export function InboxDataPage() {
     setSendingReply(true);
     setError(null);
     try {
-      const endpoint = latestChannel === "WHATSAPP" ? "whatsapp-reply" : "sms-reply";
+      const endpoint = latestChannel === "WHATSAPP"
+        ? "whatsapp-reply"
+        : latestChannel === "SMS"
+          ? "sms-reply"
+          : "webchat-reply";
       const response = await fetch(`/api/conversations/${timeline.conversation.id}/${endpoint}`, {
         method: "POST",
         headers: { "content-type": "application/json" },
@@ -314,7 +318,7 @@ export function InboxDataPage() {
                   return <div key={message.id} className={`messageRow ${customer ? "customer" : "agent"}`}>{customer && <span className="miniAvatar">{initials(timeline.contact.name)}</span>}<div className={`messageBubble ${customer ? "incoming" : "outgoing"}`}><div className="messageMeta"><span className={`channelBadge ${channelLabels[message.channel].toLowerCase().replace(" ", "-")}`}>{message.channel === "PHONE" ? <PhoneIcon size={13} /> : <MessageIcon size={13} />}{channelLabels[message.channel]}</span><time>{displayTime(message.createdAt)}</time></div><p>{message.body}</p></div>{!customer && <span className="botAvatar">{message.senderType === "USER" ? <UsersIcon size={16} /> : "✦"}</span>}</div>;
                 })}
               </div>
-              <div className="composerWrap"><div className="composerTabs"><button className="active" type="button">Message</button></div><textarea aria-label="Conversation reply" value={draft} onChange={(event) => setDraft(event.target.value)} disabled={!canReplyOnStaffChannel || sendingReply} placeholder={canReplyOnStaffChannel ? `Reply by ${channelLabels[latestChannel]}…` : latestChannel === "WHATSAPP" || latestChannel === "SMS" ? `Take over this conversation to reply by ${channelLabels[latestChannel]}.` : `Staff outbound ${channelLabels[latestChannel]} replies are not enabled yet.`} /><div className="composerFooter"><span>{canReplyOnStaffChannel ? latestChannel === "WHATSAPP" ? "Free-form WhatsApp replies require an active 24-hour customer window." : "Staff SMS replies use the workspace's active SMS provider." : "Take over a supported messaging conversation to reply as staff."}</span>{canReplyOnStaffChannel && <button className="sendButton" type="button" disabled={sendingReply || !draft.trim()} onClick={() => void sendStaffReply()}>{sendingReply ? "Sending…" : "Send"}</button>}</div></div>
+              <div className="composerWrap"><div className="composerTabs"><button className="active" type="button">Message</button></div><textarea aria-label="Conversation reply" value={draft} onChange={(event) => setDraft(event.target.value)} disabled={!canReplyOnStaffChannel || sendingReply} placeholder={canReplyOnStaffChannel ? `Reply by ${channelLabels[latestChannel]}…` : latestChannel === "WHATSAPP" || latestChannel === "SMS" || latestChannel === "WEBCHAT" ? `Take over this conversation to reply by ${channelLabels[latestChannel]}.` : `Staff outbound ${channelLabels[latestChannel]} replies are not enabled yet.`} /><div className="composerFooter"><span>{canReplyOnStaffChannel ? latestChannel === "WHATSAPP" ? "Free-form WhatsApp replies require an active 24-hour customer window." : latestChannel === "SMS" ? "Staff SMS replies use the workspace's active SMS provider." : "Web Chat replies appear in the customer's active widget session." : "Take over a supported messaging conversation to reply as staff."}</span>{canReplyOnStaffChannel && <button className="sendButton" type="button" disabled={sendingReply || !draft.trim()} onClick={() => void sendStaffReply()}>{sendingReply ? "Sending…" : "Send"}</button>}</div></div>
             </> : <div style={{ display: "grid", placeItems: "center", height: "100%", minHeight: 420 }}>Select a conversation to view its timeline.</div>}
           </section>
 
