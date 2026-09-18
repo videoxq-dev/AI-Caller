@@ -2,6 +2,7 @@ import { z } from "zod";
 
 export const AUTH_PASSWORD_RESET_EMAIL = "auth.password-reset-email";
 export const COMMERCE_WELCOME_EMAIL = "commerce.welcome-email";
+export const TEAM_INVITATION_EMAIL = "team.invitation-email";
 export const SMS_INBOUND_RESPONSE = "sms.inbound-response";
 export const WHATSAPP_INBOUND_RESPONSE = "whatsapp.inbound-response";
 
@@ -9,6 +10,13 @@ export const passwordResetEmailJobSchema = z.object({
   to: z.string().email(),
   name: z.string().min(1),
   url: z.string().url(),
+});
+
+export const teamInvitationEmailJobSchema = z.object({
+  to: z.string().email(),
+  inviterName: z.string().min(1).max(200),
+  workspaceName: z.string().min(1).max(200),
+  acceptUrl: z.string().url(),
 });
 
 export const welcomeEmailJobSchema = z.object({
@@ -41,5 +49,6 @@ export const whatsappInboundResponseJobSchema = z.object({
 
 export type PasswordResetEmailJob = z.infer<typeof passwordResetEmailJobSchema>;
 export type WelcomeEmailJob = z.infer<typeof welcomeEmailJobSchema>;
+export type TeamInvitationEmailJob = z.infer<typeof teamInvitationEmailJobSchema>;
 export type SmsInboundResponseJob = z.infer<typeof smsInboundResponseJobSchema>;
 export type WhatsAppInboundResponseJob = z.infer<typeof whatsappInboundResponseJobSchema>;
