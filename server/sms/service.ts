@@ -281,6 +281,16 @@ export function createSmsWebhookService(dependencies: SmsServiceDependencies) {
         });
         await chargeHostedInboundSms(job.workspaceId, runtime, job.externalMessageId, job.text);
 
+        if (runtime.mode === "HOSTED" && runtime.messagingReadiness !== "READY") {
+          await completeProviderWebhookEvent(job.workspaceId, job.webhookEventId);
+          return {
+            skipped: false as const,
+            replied: false as const,
+            outboundBlocked: true as const,
+            messagingReadiness: runtime.messagingReadiness,
+          };
+        }
+
         const orchestrated = await dependencies.respond(job.workspaceId, conversation.id);
         if (!orchestrated.reply) {
           await completeProviderWebhookEvent(job.workspaceId, job.webhookEventId);
