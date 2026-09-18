@@ -50,7 +50,7 @@ export const automationSettings = pgTable(
     id: uuid("id").defaultRandom().primaryKey(),
     workspaceId: uuid("workspace_id").notNull().references(() => workspaces.id, { onDelete: "cascade" }),
     key: automationKey("key").notNull(),
-    enabled: boolean("enabled").default(true).notNull(),
+    enabled: boolean("enabled").default(false).notNull(),
     config: jsonb("config").$type<Record<string, unknown>>().default({}).notNull(),
     createdAt: timestamp("created_at", { withTimezone: true, mode: "date" }).defaultNow().notNull(),
     updatedAt: timestamp("updated_at", { withTimezone: true, mode: "date" }).defaultNow().notNull(),
