@@ -134,6 +134,13 @@ export type NormalizedVoiceEvent =
       occurredAt: Date | null;
     }
   | {
+      type: "SPEAK_ENDED";
+      externalEventId: string;
+      externalCallId: string;
+      callControlId: string;
+      occurredAt: Date | null;
+    }
+  | {
       type: "RECORDING_SAVED";
       externalEventId: string;
       externalCallId: string;
@@ -166,5 +173,6 @@ export interface VoiceProvider {
   answer(input: { callControlId: string; streamUrl?: string | null }): Promise<void>;
   startTranscription(input: { callControlId: string; language: string }): Promise<void>;
   startRecording(input: { callControlId: string }): Promise<void>;
-  speak(input: { callControlId: string; text: string; voice: string; language: string; speakingRate?: number }): Promise<void>;
+  speak(input: { callControlId: string; text: string; voice: string; language: string; speakingRate?: number; commandId?: string }): Promise<void>;
+  hangup(input: { callControlId: string; commandId?: string }): Promise<void>;
 }
