@@ -40,8 +40,8 @@ const timezones = ["UTC", ...Intl.supportedValuesOf("timeZone").filter((zone) =>
 
 function normalizeStoredTime(value: string | null | undefined, fallback: string) {
   if (!value) return fallback;
-  if (/^(?:[01]\\d|2[0-3]):00$/.test(value)) return value;
-  const match = /^(\\d{1,2}):00\\s*(AM|PM)$/i.exec(value.trim());
+  if (/^(?:[01]\d|2[0-3]):00$/.test(value)) return value;
+  const match = /^(\d{1,2}):00\s*(AM|PM)$/i.exec(value.trim());
   if (!match) return fallback;
   let hour = Number(match[1]) % 12;
   if (match[2].toUpperCase() === "PM") hour += 12;
