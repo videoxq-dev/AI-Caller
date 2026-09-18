@@ -172,6 +172,8 @@ try {
 
   await page.goto(`${baseUrl}/integrations`, { waitUntil: "networkidle" });
   await page.getByRole("heading", { name: "Integrations", exact: true }).waitFor({ timeout: 10_000 });
+  const closeIntegrationPanel = page.getByRole("button", { name: "Close integration panel" });
+  if (await closeIntegrationPanel.isVisible()) await closeIntegrationPanel.click();
   await assertNoHorizontalOverflow(page, "Integrations shared AppNav mobile");
   for (const destination of ["Automations", "Integrations", "Settings"]) {
     assert(await page.getByRole("link", { name: destination, exact: true }).isVisible(), `${destination} is hidden from the mobile AppNav.`);
