@@ -11,6 +11,7 @@ import {
 import {
   claimAutomationRun,
   createAutomationRun,
+  listRecoverableAutomationRuns,
   releaseAutomationRunForRetry,
 } from "./repository";
 
@@ -75,5 +76,21 @@ describe("automation run claiming", () => {
       startedAt: new Date(Date.now() - 3 * 60_000),
     });
     expect((await claimAutomationRun(workspaceId, run.id))?.status).toBe("RUNNING");
+    const recoverable = await listRecoverableAutomationRuns();
+    expect(recoverable.some((item) => item.id === run.id)).toBe(false);
+  });
+
+  it("surfaces stale running runs to the worker recovery sweep", async () => {
+    const run = await createAutomationRun({
+      workspaceId,
+      eventId,
+      key: "QUALIFIED_LEAD_ASSIGNMENT",
+    });
+    await db.update(automationRuns).set({
+      status: "RUNNING",
+      startedAt: new Date(Date.now() - 3 * 60_000),
+    });
+    const recoverable = await listRecoverableAutomationRuns();
+    expect(recoverable.some((item) => item.id === run.id)).toBe(true);
   });
 });
