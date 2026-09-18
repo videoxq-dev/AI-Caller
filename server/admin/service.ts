@@ -6,6 +6,7 @@ import {
   eq,
   gt,
   ilike,
+  isNotNull,
   isNull,
   or,
   sql,
@@ -33,7 +34,7 @@ import { getEnv } from "@/server/env";
 import { isGuardedE2EFixtureMode } from "@/server/e2e-mode";
 import { AppError } from "@/server/http/errors";
 import { enqueueJob } from "@/server/jobs";
-import { COMMERCE_WELCOME_EMAIL } from "@/server/jobs/queues";
+import { ADMIN_USER_WELCOME_EMAIL } from "@/server/jobs/queues";
 
 type Tx = Parameters<Parameters<typeof db.transaction>[0]>[0];
 
@@ -58,9 +59,11 @@ async function audit(
 }
 
 function boundedPage(limit = 50, offset = 0) {
+  const safeLimit = Number.isFinite(limit) ? Math.trunc(limit) : 50;
+  const safeOffset = Number.isFinite(offset) ? Math.trunc(offset) : 0;
   return {
-    limit: Math.min(Math.max(Math.trunc(limit), 1), 200),
-    offset: Math.max(Math.trunc(offset), 0),
+    limit: Math.min(Math.max(safeLimit, 1), 200),
+    offset: Math.max(safeOffset, 0),
   };
 }
 
@@ -71,7 +74,7 @@ export async function getAdminOverview() {
     db.select({
       count: sql<number>`count(*)::int`,
       amountCents: sql<number>`coalesce(sum(${creditTopups.amountCents}), 0)::int`,
-    }).from(creditTopups).where(eq(creditTopups.status, "PAID")),
+    }).from(creditTopups).where(isNotNull(creditTopups.paidAt)),
     db.select({
       credits: sql<number>`coalesce(sum(${usageEvents.creditsCharged}), 0)::int`,
       providerCostMicros: sql<number>`coalesce(sum(${usageEvents.providerCostMicros}), 0)::bigint`,
@@ -122,8 +125,15 @@ export async function listAdminUsers(input: { limit?: number; offset?: number; s
     .offset(offset);
 
   const [{ count }] = await db.select({ count: sql<number>`count(*)::int` }).from(user).where(where);
+  const bootstrapEmails = new Set(
+    getEnv().PLATFORM_ADMIN_EMAILS.split(",").map((value) => value.trim().toLowerCase()).filter(Boolean),
+  );
   return {
-    items: rows.map((row) => ({ ...row, status: row.status ?? "ACTIVE", platformAdminActive: row.platformAdminActive ?? false })),
+    items: rows.map((row) => ({
+      ...row,
+      status: row.status ?? "ACTIVE",
+      platformAdminActive: row.platformAdminActive ?? bootstrapEmails.has(row.email.trim().toLowerCase()),
+    })),
     total: count ?? 0,
     limit,
     offset,
@@ -151,6 +161,29 @@ export async function createAdminUser(input: {
   const [created] = await db.select().from(user).where(eq(user.email, email)).limit(1);
   if (!created) throw new Error("Admin user creation did not persist the new user.");
 
+  try {
+    await enqueueJob(ADMIN_USER_WELCOME_EMAIL, {
+      to: created.email,
+      name: created.name,
+      temporaryPassword,
+      signInUrl: `${env.BETTER_AUTH_URL.replace(/\/$/, "")}/sign-in`,
+    });
+  } catch (error) {
+    // Better Auth provisions a default workspace in its user-create hook.
+    // If the welcome message cannot be queued, remove the incomplete account and its owned default workspace
+    // so an admin can retry creation without leaving an inaccessible user behind.
+    await db.transaction(async (tx) => {
+      const owned = await tx.select({ workspaceId: memberships.workspaceId })
+        .from(memberships)
+        .where(and(eq(memberships.userId, created.id), eq(memberships.role, "OWNER")));
+      for (const membership of owned) {
+        await tx.delete(workspaces).where(eq(workspaces.id, membership.workspaceId));
+      }
+      await tx.delete(user).where(eq(user.id, created.id));
+    }).catch(() => undefined);
+    throw error;
+  }
+
   await db.transaction(async (tx) => {
     await audit(tx, {
       actorUserId: input.actorUserId,
@@ -159,13 +192,6 @@ export async function createAdminUser(input: {
       targetId: created.id,
       details: { email: created.email },
     });
-  });
-
-  await enqueueJob(COMMERCE_WELCOME_EMAIL, {
-    to: created.email,
-    name: created.name,
-    temporaryPassword,
-    signInUrl: `${env.BETTER_AUTH_URL.replace(/\/$/, "")}/sign-in`,
   });
 
   return {
@@ -196,7 +222,14 @@ export async function updateAdminUser(input: {
 
     const patch: Partial<typeof user.$inferInsert> = {};
     if (input.name !== undefined) patch.name = input.name.trim();
-    if (input.email !== undefined) patch.email = input.email.trim().toLowerCase();
+    if (input.email !== undefined) {
+      const email = input.email.trim().toLowerCase();
+      const [conflict] = await tx.select({ id: user.id }).from(user).where(eq(user.email, email)).limit(1);
+      if (conflict && conflict.id !== input.userId) {
+        throw new AppError("USER_EXISTS", "A user with that email already exists.", 409);
+      }
+      patch.email = email;
+    }
     if (Object.keys(patch).length) {
       patch.updatedAt = new Date();
       await tx.update(user).set(patch).where(eq(user.id, input.userId));
@@ -283,8 +316,8 @@ export async function deleteAdminUser(input: {
       );
     }
 
-    if (owned.length) {
-      await tx.delete(workspaces).where(sql`${workspaces.id} in (${sql.join(owned.map((row) => sql`${row.workspaceId}`), sql`, `)})`);
+    for (const membership of owned) {
+      await tx.delete(workspaces).where(eq(workspaces.id, membership.workspaceId));
     }
 
     await audit(tx, {

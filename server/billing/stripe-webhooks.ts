@@ -105,7 +105,7 @@ function proportionalCredits(credits: number, lostCents: number, amountCents: nu
 }
 
 function topupStatus(topup: typeof creditTopups.$inferSelect, refunded: number, disputed: number) {
-  if (disputed > 0) return "DISPUTED";
+  if (disputed > 0) return topup.status === "CHARGEBACK" ? "CHARGEBACK" : "DISPUTED";
   if (refunded >= topup.amountCents) return "REFUNDED";
   if (refunded > 0) return "PARTIALLY_REFUNDED";
   return "PAID";

@@ -46,7 +46,6 @@ type Usage = {
   provider: string;
   mode: "HOSTED" | "BYOP";
   creditsCharged: number;
-  providerCostMicros: number;
   billedUnits: Record<string, number>;
   createdAt: string;
 };
@@ -118,7 +117,7 @@ export default function BillingPage() {
     [data],
   );
   const creditsUsed = hostedUsage.reduce((sum, item) => sum + item.creditsCharged, 0);
-  const providerCostMicros = hostedUsage.reduce((sum, item) => sum + item.providerCostMicros, 0);
+  const paidTopups = (data?.topups ?? []).filter((item) => Boolean(item.paidAt)).length;
   const aiCredits = hostedUsage.filter((item) => item.capability === "AI_TEXT").reduce((sum, item) => sum + item.creditsCharged, 0);
   const smsCredits = hostedUsage.filter((item) => item.capability === "SMS").reduce((sum, item) => sum + item.creditsCharged, 0);
 
@@ -179,9 +178,9 @@ export default function BillingPage() {
               <small>Across the most recent {data?.usage.length ?? 0} recorded usage events</small>
             </article>
             <article className="billingCard">
-              <span className="billingCardLabel">Recorded provider cost</span>
-              <strong>{money(Math.round(providerCostMicros / 10_000))}</strong>
-              <small>Historical COGS from immutable rate snapshots</small>
+              <span className="billingCardLabel">Completed top-ups</span>
+              <strong>{number(paidTopups)}</strong>
+              <small>Verified Stripe payments credited to this workspace</small>
             </article>
           </section>
 

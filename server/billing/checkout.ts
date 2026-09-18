@@ -112,15 +112,45 @@ export async function createCreditTopupCheckout(input: {
 export async function getBillingOverview(workspaceId: string) {
   const [packs, ledger, topups, usage] = await Promise.all([
     listActiveCreditPacks(),
-    db.select().from(creditLedger)
+    db.select({
+      id: creditLedger.id,
+      type: creditLedger.type,
+      amount: creditLedger.amount,
+      balanceAfter: creditLedger.balanceAfter,
+      reason: creditLedger.reason,
+      createdAt: creditLedger.createdAt,
+    }).from(creditLedger)
       .where(eq(creditLedger.workspaceId, workspaceId))
       .orderBy(desc(creditLedger.createdAt))
       .limit(100),
-    db.select().from(creditTopups)
+    db.select({
+      id: creditTopups.id,
+      packCode: creditTopups.packCode,
+      credits: creditTopups.credits,
+      amountCents: creditTopups.amountCents,
+      currency: creditTopups.currency,
+      status: creditTopups.status,
+      refundedAmountCents: creditTopups.refundedAmountCents,
+      disputedAmountCents: creditTopups.disputedAmountCents,
+      reversedCredits: creditTopups.reversedCredits,
+      paidAt: creditTopups.paidAt,
+      createdAt: creditTopups.createdAt,
+    }).from(creditTopups)
       .where(eq(creditTopups.workspaceId, workspaceId))
       .orderBy(desc(creditTopups.createdAt))
       .limit(50),
-    db.select().from(usageEvents)
+    db.select({
+      id: usageEvents.id,
+      capability: usageEvents.capability,
+      provider: usageEvents.provider,
+      mode: usageEvents.mode,
+      providerUsage: usageEvents.providerUsage,
+      creditsCharged: usageEvents.creditsCharged,
+      billedUnits: usageEvents.billedUnits,
+      referenceType: usageEvents.referenceType,
+      referenceId: usageEvents.referenceId,
+      createdAt: usageEvents.createdAt,
+    }).from(usageEvents)
       .where(eq(usageEvents.workspaceId, workspaceId))
       .orderBy(desc(usageEvents.createdAt))
       .limit(200),
