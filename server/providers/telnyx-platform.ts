@@ -59,15 +59,16 @@ export async function searchTelnyxNumbers(input: {
   const { apiKey } = telnyxConfig();
   const params = new URLSearchParams();
   params.set("filter[country_code]", input.countryCode);
-  params.set("filter[features]", "voice,sms");
-  params.set("filter[phone_number_type]", input.numberType ?? "local");
+  // Telnyx documents this filter as a feature list; requiring SMS narrows inventory, and we verify both SMS + voice on every returned row below.
+  params.set("filter[features]", "sms");
+  params.set("filter[phone_number_type]", input.numberType === "toll_free" ? "toll-free" : "local");
   params.set("filter[limit]", String(Math.min(Math.max(input.limit ?? 12, 1), 30)));
   params.set("filter[best_effort]", "false");
   params.set("filter[exclude_held_numbers]", "true");
   if (input.administrativeArea?.trim()) params.set("filter[administrative_area]", input.administrativeArea.trim().toUpperCase());
   if (input.locality?.trim()) params.set("filter[locality]", input.locality.trim());
   if (input.areaCode?.trim()) params.set("filter[national_destination_code]", input.areaCode.replace(/\D/g, ""));
-  if (input.startsWith?.trim()) params.set("filter[phone_number][starts_with]", input.startsWith.replace(/\D/g, ""));
+  if (input.startsWith?.trim()) params.set("filter[starts_with]", input.startsWith.replace(/\D/g, ""));
 
   const response = await providerJson<{
     data?: Array<{
