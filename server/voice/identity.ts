@@ -11,16 +11,25 @@ export async function resolveVoiceContact(workspaceId: string, externalId: strin
   const existing = await findContactByIdentity(workspaceId, "PHONE", externalId);
   if (existing) return existing;
 
-  const matches = await db.select({ contactId: contactIdentities.contactId })
-    .from(contactIdentities)
-    .where(and(
-      eq(contactIdentities.workspaceId, workspaceId),
-      inArray(contactIdentities.channel, PHONE_IDENTITY_CHANNELS),
-      eq(contactIdentities.normalizedValue, identity.normalizedValue),
-    ))
-    .limit(3);
+  const [identityMatches, phoneMatches] = await Promise.all([
+    db.select({ contactId: contactIdentities.contactId })
+      .from(contactIdentities)
+      .where(and(
+        eq(contactIdentities.workspaceId, workspaceId),
+        inArray(contactIdentities.channel, PHONE_IDENTITY_CHANNELS),
+        eq(contactIdentities.normalizedValue, identity.normalizedValue),
+      ))
+      .limit(3),
+    db.select({ contactId: contacts.id })
+      .from(contacts)
+      .where(and(
+        eq(contacts.workspaceId, workspaceId),
+        eq(contacts.phone, identity.normalizedValue),
+      ))
+      .limit(3),
+  ]);
 
-  const contactIds = [...new Set(matches.map((match) => match.contactId))];
+  const contactIds = [...new Set([...identityMatches, ...phoneMatches].map((match) => match.contactId))];
   if (contactIds.length === 1) {
     await db.insert(contactIdentities).values({
       workspaceId,
