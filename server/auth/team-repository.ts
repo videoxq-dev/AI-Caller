@@ -2,6 +2,10 @@ import { createHash, randomBytes } from "node:crypto";
 import { and, asc, eq, gt, lte, sql } from "drizzle-orm";
 import { db } from "@/db";
 import { automationSettings, conversations, leads, memberships, user, workspaceInvitations } from "@/db/schema";
+import {
+  assertCanAcceptWorkspaceInvitation,
+  assertCanCreateWorkspaceInvitation,
+} from "@/server/billing/plans";
 import { AppError } from "@/server/http/errors";
 
 export type InviteRole = "ADMIN" | "STAFF";
@@ -71,40 +75,46 @@ export async function createWorkspaceInvitation(input: {
   role: InviteRole;
 }) {
   const email = normalizeEmail(input.email);
-  const existingMember = await db.select({ userId: memberships.userId })
-    .from(memberships)
-    .innerJoin(user, eq(memberships.userId, user.id))
-    .where(and(eq(memberships.workspaceId, input.workspaceId), sql`lower(${user.email}) = ${email}`))
-    .limit(1);
-  if (existingMember.length) throw new AppError("ALREADY_MEMBER", "That email already belongs to this workspace.", 409);
-
-  const now = new Date();
-  await db.update(workspaceInvitations)
-    .set({ status: "EXPIRED", updatedAt: now })
-    .where(and(
-      eq(workspaceInvitations.workspaceId, input.workspaceId),
-      eq(workspaceInvitations.email, email),
-      eq(workspaceInvitations.status, "PENDING"),
-      lte(workspaceInvitations.expiresAt, now),
-    ));
-
   const token = randomBytes(32).toString("base64url");
-  const expiresAt = new Date(now.getTime() + 7 * 24 * 60 * 60 * 1000);
+
   try {
-    const [invitation] = await db.insert(workspaceInvitations).values({
-      workspaceId: input.workspaceId,
-      email,
-      role: input.role,
-      tokenHash: tokenHash(token),
-      invitedByUserId: input.invitedByUserId,
-      expiresAt,
-    }).returning({
-      id: workspaceInvitations.id,
-      email: workspaceInvitations.email,
-      role: workspaceInvitations.role,
-      expiresAt: workspaceInvitations.expiresAt,
+    return await db.transaction(async (tx) => {
+      const existingMember = await tx.select({ userId: memberships.userId })
+        .from(memberships)
+        .innerJoin(user, eq(memberships.userId, user.id))
+        .where(and(eq(memberships.workspaceId, input.workspaceId), sql`lower(${user.email}) = ${email}`))
+        .limit(1);
+      if (existingMember.length) {
+        throw new AppError("ALREADY_MEMBER", "That email already belongs to this workspace.", 409);
+      }
+
+      const now = new Date();
+      await tx.update(workspaceInvitations)
+        .set({ status: "EXPIRED", updatedAt: now })
+        .where(and(
+          eq(workspaceInvitations.workspaceId, input.workspaceId),
+          eq(workspaceInvitations.status, "PENDING"),
+          lte(workspaceInvitations.expiresAt, now),
+        ));
+
+      await assertCanCreateWorkspaceInvitation(tx, input.workspaceId);
+
+      const expiresAt = new Date(now.getTime() + 7 * 24 * 60 * 60 * 1000);
+      const [invitation] = await tx.insert(workspaceInvitations).values({
+        workspaceId: input.workspaceId,
+        email,
+        role: input.role,
+        tokenHash: tokenHash(token),
+        invitedByUserId: input.invitedByUserId,
+        expiresAt,
+      }).returning({
+        id: workspaceInvitations.id,
+        email: workspaceInvitations.email,
+        role: workspaceInvitations.role,
+        expiresAt: workspaceInvitations.expiresAt,
+      });
+      return { invitation, token };
     });
-    return { invitation, token };
   } catch (error) {
     if (isUniqueViolation(error)) {
       throw new AppError("INVITATION_EXISTS", "A pending invitation already exists for that email.", 409);
@@ -159,6 +169,8 @@ export async function acceptWorkspaceInvitation(input: { userId: string; userEma
     if (invitation.email !== normalizeEmail(input.userEmail)) {
       throw new AppError("INVITATION_EMAIL_MISMATCH", "Sign in with the email address that was invited.", 403);
     }
+
+    await assertCanAcceptWorkspaceInvitation(tx, invitation.workspaceId, input.userId);
 
     await tx.insert(memberships).values({
       workspaceId: invitation.workspaceId,

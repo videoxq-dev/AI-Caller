@@ -1,6 +1,16 @@
 import { afterAll, beforeEach, describe, expect, it } from "vitest";
 import { db, closeDatabase } from "@/db";
-import { automationSettings, contacts, conversations, leads, memberships, user, workspaceInvitations, workspaces } from "@/db/schema";
+import {
+  automationSettings,
+  contacts,
+  conversations,
+  leads,
+  memberships,
+  user,
+  workspaceInvitations,
+  workspacePlans,
+  workspaces,
+} from "@/db/schema";
 import {
   acceptWorkspaceInvitation,
   createWorkspaceInvitation,
@@ -27,6 +37,11 @@ describe("workspace team invitations", () => {
     const [workspace] = await db.insert(workspaces).values({ name: "Team Test" }).returning();
     workspaceId = workspace.id;
     await db.insert(memberships).values({ workspaceId, userId: ownerId, role: "OWNER" });
+    await db.insert(workspacePlans).values({
+      workspaceId,
+      planId: "GROWTH",
+      source: "TEST",
+    });
   });
 
   afterAll(async () => {
@@ -110,6 +125,35 @@ describe("workspace team invitations", () => {
       .rejects.toMatchObject({ code: "FORBIDDEN_ROLE_ASSIGNMENT", status: 403 });
     await expect(revokeWorkspaceInvitation(workspaceId, adminInvite.invitation.id, "OWNER"))
       .resolves.toMatchObject({ id: adminInvite.invitation.id });
+  });
+
+  it("blocks sub-user invitations on Personal", async () => {
+    await db.update(workspacePlans).set({ planId: "PERSONAL", updatedAt: new Date() });
+
+    await expect(createWorkspaceInvitation({
+      workspaceId,
+      invitedByUserId: ownerId,
+      email: "personal-staff@example.com",
+      role: "STAFF",
+    })).rejects.toMatchObject({ code: "PLAN_SEAT_LIMIT", status: 403 });
+  });
+
+  it("counts pending invitations against the Growth three-sub-user limit", async () => {
+    for (const email of ["one@example.com", "two@example.com", "three@example.com"]) {
+      await createWorkspaceInvitation({
+        workspaceId,
+        invitedByUserId: ownerId,
+        email,
+        role: "STAFF",
+      });
+    }
+
+    await expect(createWorkspaceInvitation({
+      workspaceId,
+      invitedByUserId: ownerId,
+      email: "four@example.com",
+      role: "STAFF",
+    })).rejects.toMatchObject({ code: "PLAN_SEAT_LIMIT", status: 403 });
   });
 
   it("clears lead and conversation assignments when a member is removed", async () => {
