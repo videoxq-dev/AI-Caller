@@ -9,7 +9,7 @@ vi.mock("@/server/env", () => ({
   }),
 }));
 
-import { searchTelnyxNumbers } from "./telnyx-platform";
+import { orderTelnyxNumber, searchTelnyxNumbers } from "./telnyx-platform";
 
 describe("managed Telnyx number search", () => {
   it("sends state, city and area-code filters and requires voice + SMS", async () => {
@@ -46,6 +46,50 @@ describe("managed Telnyx number search", () => {
       administrativeArea: "WY",
       locality: "Sheridan",
       monthlyCost: "1.10",
+    });
+  });
+
+  it("requests quickship inventory for US toll-free numbers", async () => {
+    const fetcher = vi.fn(async (input: RequestInfo | URL) => {
+      const url = new URL(String(input));
+      expect(url.searchParams.get("filter[phone_number_type]")).toBe("toll-free");
+      expect(url.searchParams.get("filter[quickship]")).toBe("true");
+      return new Response(JSON.stringify({ data: [] }), { status: 200 });
+    }) as typeof fetch;
+
+    await searchTelnyxNumbers({ countryCode: "US", numberType: "toll_free" }, fetcher);
+  });
+
+  it("returns the purchased phone-number id supplied by the order response", async () => {
+    const fetcher = vi.fn(async (_input: RequestInfo | URL, init?: RequestInit) => {
+      const body = JSON.parse(String(init?.body)) as Record<string, unknown>;
+      expect(body).toMatchObject({
+        connection_id: "connection-1",
+        messaging_profile_id: "profile-1",
+      });
+      return new Response(JSON.stringify({
+        data: {
+          id: "order-1",
+          status: "success",
+          requirements_met: true,
+          phone_numbers: [{
+            id: "number-1",
+            phone_number: "+13075550184",
+            status: "success",
+            requirements_met: true,
+          }],
+        },
+      }), { status: 200, headers: { "content-type": "application/json" } });
+    }) as typeof fetch;
+
+    await expect(orderTelnyxNumber({
+      workspaceId: "11111111-1111-4111-8111-111111111111",
+      phoneNumber: "+13075550184",
+      connectionId: "connection-1",
+      messagingProfileId: "profile-1",
+    }, fetcher)).resolves.toMatchObject({
+      id: "order-1",
+      phone_numbers: [{ id: "number-1", phone_number: "+13075550184" }],
     });
   });
 });
