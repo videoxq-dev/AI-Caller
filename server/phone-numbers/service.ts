@@ -520,6 +520,8 @@ async function shortProvisioningPoll(id: string) {
 export async function provisionManagedPhoneNumber(workspaceId: string, input: {
   phoneNumber: string;
   requestId: string;
+  expectedPurchaseCredits: number;
+  expectedMonthlyCredits: number;
   replaceCurrent?: boolean;
 }) {
   const [priorRequest] = await db.select().from(hostedPhoneNumbers).where(and(
@@ -540,6 +542,13 @@ export async function provisionManagedPhoneNumber(workspaceId: string, input: {
   }
 
   const { match, quote } = await findFreshQuote(input.phoneNumber);
+  if (quote.purchaseCredits !== input.expectedPurchaseCredits || quote.monthlyCredits !== input.expectedMonthlyCredits) {
+    throw new AppError(
+      "PHONE_NUMBER_PRICE_CHANGED",
+      "The carrier price for that number changed. Search again and confirm the updated price before purchasing.",
+      409,
+    );
+  }
   const reservation = await reserveCredits(workspaceId, quote.purchaseCredits, {
     referenceType: "PHONE_NUMBER_PURCHASE",
     referenceId: input.requestId,
