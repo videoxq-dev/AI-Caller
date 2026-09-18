@@ -21,7 +21,7 @@ import { smsWebhookService } from "@/server/sms/service";
 import { whatsAppWebhookService } from "@/server/whatsapp/service";
 import { dispatchAutomationEvent } from "@/server/automations/dispatcher";
 import { executeAutomationRun } from "@/server/automations/executor";
-import { listRunnablePendingAutomationRuns, listUndispatchedAutomationEvents } from "@/server/automations/repository";
+import { listRecoverableAutomationRuns, listUndispatchedAutomationEvents } from "@/server/automations/repository";
 
 export async function startWorker() {
   const authBoss = await ensureQueue(AUTH_PASSWORD_RESET_EMAIL);
@@ -88,7 +88,7 @@ export async function startWorker() {
     try {
       const [events, runs] = await Promise.all([
         listUndispatchedAutomationEvents(100),
-        listRunnablePendingAutomationRuns(100),
+        listRecoverableAutomationRuns(100),
       ]);
       for (const event of events) {
         await enqueueUniqueJob(AUTOMATION_DISPATCH_EVENT, event.id, {
