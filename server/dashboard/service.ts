@@ -515,29 +515,31 @@ async function loadAttention(workspaceId: string, now: Date) {
   const result = await db.execute(sql`
     SELECT
       (SELECT count(*)::int
-         FROM (
-           SELECT DISTINCT ON (m.conversation_id)
-                  m.conversation_id,
-                  m.created_at AS inbound_at
-             FROM messages m
-            WHERE m.workspace_id = ${workspaceId}
-              AND m.direction = 'INBOUND'
-              AND m.sender_type = 'CUSTOMER'
-            ORDER BY m.conversation_id, m.created_at DESC
-         ) latest
-         JOIN conversations c
-           ON c.id = latest.conversation_id
-          AND c.workspace_id = ${workspaceId}
-        WHERE c.status = 'OPEN'
-          AND latest.inbound_at < ${staleBefore}
-          AND NOT EXISTS (
-            SELECT 1
-              FROM messages reply
-             WHERE reply.workspace_id = ${workspaceId}
-               AND reply.conversation_id = latest.conversation_id
-               AND reply.direction = 'OUTBOUND'
-               AND reply.created_at > latest.inbound_at
-          )) AS unanswered_inquiries,
+         FROM conversations c
+         JOIN LATERAL (
+           SELECT inbound.created_at
+             FROM messages inbound
+            WHERE inbound.workspace_id = ${workspaceId}
+              AND inbound.conversation_id = c.id
+              AND inbound.direction = 'INBOUND'
+              AND inbound.sender_type = 'CUSTOMER'
+            ORDER BY inbound.created_at DESC
+            LIMIT 1
+         ) latest_inbound ON true
+         LEFT JOIN LATERAL (
+           SELECT outbound.created_at
+             FROM messages outbound
+            WHERE outbound.workspace_id = ${workspaceId}
+              AND outbound.conversation_id = c.id
+              AND outbound.direction = 'OUTBOUND'
+            ORDER BY outbound.created_at DESC
+            LIMIT 1
+         ) latest_outbound ON true
+        WHERE c.workspace_id = ${workspaceId}
+          AND c.status = 'OPEN'
+          AND c.last_message_at < ${staleBefore}
+          AND latest_inbound.created_at < ${staleBefore}
+          AND (latest_outbound.created_at IS NULL OR latest_outbound.created_at < latest_inbound.created_at)) AS unanswered_inquiries,
       (SELECT count(*)::int
          FROM appointments
         WHERE workspace_id = ${workspaceId}
