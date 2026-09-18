@@ -1,6 +1,8 @@
 import { getEnv } from "@/server/env";
+import { getHostedPhoneRuntimeRecord } from "@/server/phone-numbers/service";
+import { getHostedTelnyxCredentials } from "@/server/providers/telnyx-platform";
 import { decryptIntegrationCredentials, type EncryptedSecretEnvelope } from "@/server/security/secrets";
-import { getCommunicationSetup, getPrivateIntegration } from "@/server/domain/integrations/repository";
+import { getPrivateIntegration } from "@/server/domain/integrations/repository";
 import { normalizePhone } from "@/server/domain/core/schemas";
 import { createE2ESmsProvider, isE2EProviderFixtureMode } from "../e2e-fixtures";
 import { resolveProviderRoute } from "../resolver";
@@ -64,16 +66,8 @@ function createProvider(provider: SmsProviderName, secret: Record<string, unknow
 }
 
 async function hostedSenderNumber(workspaceId: string) {
-  const setup = await getCommunicationSetup(workspaceId) as {
-    voice?: { number?: unknown };
-    sms?: { numberMode?: unknown; number?: unknown };
-  } | null;
-  const usesSeparateNumber = setup?.sms?.numberMode === "separate";
-  const candidate = usesSeparateNumber ? setup?.sms?.number : setup?.voice?.number;
-  if (typeof candidate !== "string" || !candidate.trim()) {
-    throw new Error("A hosted SMS sender number has not been assigned to this workspace.");
-  }
-  return normalizePhone(candidate);
+  const number = await getHostedPhoneRuntimeRecord(workspaceId);
+  return normalizePhone(number.phoneNumber);
 }
 
 function hostedProviderConfig(provider: SmsProviderName) {
@@ -95,15 +89,13 @@ function hostedProviderConfig(provider: SmsProviderName) {
         },
         settings: {},
       };
-    case "telnyx":
+    case "telnyx": {
+      const hosted = getHostedTelnyxCredentials();
       return {
-        secret: {
-          apiKey: env.HOSTED_SMS_TELNYX_API_KEY,
-        },
-        settings: {
-          webhookPublicKey: env.HOSTED_SMS_TELNYX_WEBHOOK_PUBLIC_KEY,
-        },
+        secret: { apiKey: hosted.apiKey },
+        settings: { webhookPublicKey: hosted.webhookPublicKey },
       };
+    }
   }
 }
 
@@ -116,8 +108,8 @@ export async function resolveSmsRuntime(
   if (!route) throw new Error("No SMS provider route is configured for this workspace.");
 
   if (route.mode === "HOSTED") {
-    const providerName = getEnv().HOSTED_SMS_PROVIDER;
-    if (requestedProvider !== providerName) throw new Error("The webhook provider is not the active hosted SMS provider.");
+    const providerName: SmsProviderName = "telnyx";
+    if (requestedProvider !== providerName) throw new Error("Managed SMS uses the Telnyx adapter.");
     const config = hostedProviderConfig(providerName);
     return {
       workspaceId,
@@ -166,7 +158,7 @@ export async function resolveSmsRuntimeForWorkspace(
 ): Promise<SmsRuntime> {
   const route = await resolveProviderRoute(workspaceId, "SMS");
   if (!route) throw new Error("No SMS provider route is configured for this workspace.");
-  const providerName = route.mode === "HOSTED" ? getEnv().HOSTED_SMS_PROVIDER : route.provider;
+  const providerName = route.mode === "HOSTED" ? "telnyx" : route.provider;
   if (!isSmsProviderName(providerName)) throw new Error("The active SMS provider is not supported.");
   return resolveSmsRuntime(workspaceId, providerName, fetcher);
 }
