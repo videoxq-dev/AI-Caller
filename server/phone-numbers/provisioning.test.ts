@@ -8,6 +8,7 @@ const platform = vi.hoisted(() => ({
   deleteTelnyxCallControlApplication: vi.fn(async () => undefined),
   deleteTelnyxMessagingProfile: vi.fn(async () => undefined),
   findOwnedTelnyxNumber: vi.fn(async () => ({ id: "owned-number-1", phone_number: "+12025550200", status: "active" })),
+  findTelnyxNumberOrderByReference: vi.fn(async () => null),
   orderTelnyxNumber: vi.fn(),
   releaseTelnyxNumber: vi.fn(async () => undefined),
   retrieveTelnyxNumberOrder: vi.fn(),
@@ -44,6 +45,7 @@ describe("managed phone provisioning lifecycle", () => {
     platform.deleteTelnyxMessagingProfile.mockResolvedValue(undefined);
     platform.releaseTelnyxNumber.mockResolvedValue(undefined);
     platform.findOwnedTelnyxNumber.mockResolvedValue({ id: "owned-number-1", phone_number: "+12025550200", status: "active" });
+    platform.findTelnyxNumberOrderByReference.mockResolvedValue(null);
     platform.searchTelnyxNumbers.mockResolvedValue([{
       phoneNumber: "+12025550200",
       countryCode: "US",
@@ -68,7 +70,7 @@ describe("managed phone provisioning lifecycle", () => {
     });
     platform.retrieveTelnyxNumberOrder.mockResolvedValue({
       id: "order-1",
-      status: "success",
+      status: "pending",
       requirements_met: true,
     });
     platform.retrieveTelnyxOrderPhoneNumber.mockResolvedValue({
@@ -88,7 +90,7 @@ describe("managed phone provisioning lifecycle", () => {
     await closeDatabase();
   });
 
-  it("waits for final carrier order and ordered-number statuses before activating", async () => {
+  it("waits for individual-number success and active account inventory before activating", async () => {
     const number = await provisionManagedPhoneNumber(workspaceId, {
       phoneNumber: "+12025550200",
       requestId,
@@ -112,7 +114,7 @@ describe("managed phone provisioning lifecycle", () => {
       providerOrderId: "order-1",
       providerOrderPhoneNumberId: "order-number-1",
       providerNumberId: "owned-number-1",
-      providerOrderStatus: "success",
+      providerOrderStatus: "pending",
       status: "ACTIVE",
       messagingReadiness: "NOT_REGISTERED",
     });
@@ -166,7 +168,7 @@ describe("managed phone provisioning lifecycle", () => {
     expect((await db.select().from(usageEvents))).toHaveLength(0);
   });
 
-  it("keeps an ambiguous carrier timeout reconcilable and adopts the number before charging/refunding again", async () => {
+  it("recovers an ambiguous carrier timeout by unique order reference before activation", async () => {
     platform.orderTelnyxNumber.mockRejectedValueOnce(new ProviderRequestError("Provider connection timed out.", 504));
     const number = await provisionManagedPhoneNumber(workspaceId, {
       phoneNumber: "+12025550200",
@@ -180,7 +182,27 @@ describe("managed phone provisioning lifecycle", () => {
 
     const [row] = await db.select().from(hostedPhoneNumbers);
     await db.update(hostedPhoneNumbers).set({ reconcileAfter: new Date(0) }).where(eq(hostedPhoneNumbers.id, row.id));
-    platform.findOwnedTelnyxNumber.mockResolvedValue({ id: "owned-number-after-timeout", phone_number: "+12025550200", status: "active" });
+    platform.findTelnyxNumberOrderByReference.mockResolvedValue({
+      id: "recovered-order-1",
+      status: "pending",
+      requirements_met: true,
+      customer_reference: `ai-caller:${workspaceId}:${requestId}`,
+      phone_numbers: [{
+        id: "recovered-order-number-1",
+        phone_number: "+12025550200",
+      }],
+    });
+    platform.retrieveTelnyxNumberOrder.mockResolvedValue({
+      id: "recovered-order-1",
+      status: "pending",
+      requirements_met: true,
+    });
+    platform.retrieveTelnyxOrderPhoneNumber.mockResolvedValue({
+      id: "recovered-order-number-1",
+      phone_number: "+12025550200",
+      status: "success",
+      requirements_met: true,
+    });
 
     await expect(processPendingPhoneNumberProvisioning()).resolves.toMatchObject({
       checked: 1,
@@ -190,11 +212,51 @@ describe("managed phone provisioning lifecycle", () => {
     const [reconciled] = await db.select().from(hostedPhoneNumbers);
     expect(reconciled).toMatchObject({
       status: "ACTIVE",
-      providerNumberId: "owned-number-after-timeout",
-      providerOrderStatus: "reconciled",
+      providerOrderId: "recovered-order-1",
+      providerOrderPhoneNumberId: "recovered-order-number-1",
+      providerNumberId: "owned-number-1",
+      providerOrderStatus: "pending",
+    });
+    expect(platform.findTelnyxNumberOrderByReference).toHaveBeenCalledWith({
+      workspaceId,
+      requestId,
+      phoneNumber: "+12025550200",
     });
     expect((await db.select().from(creditWallets))[0].balance).toBe(8_000);
     expect(await db.select().from(usageEvents)).toHaveLength(1);
+  });
+
+  it("fails and returns reserved credits after a prolonged indeterminate purchase has no order or owned number", async () => {
+    platform.orderTelnyxNumber.mockRejectedValueOnce(new ProviderRequestError("Provider connection timed out.", 504));
+    platform.findOwnedTelnyxNumber.mockResolvedValue(null);
+    platform.findTelnyxNumberOrderByReference.mockResolvedValue(null);
+
+    await provisionManagedPhoneNumber(workspaceId, {
+      phoneNumber: "+12025550200",
+      requestId,
+    });
+
+    const [row] = await db.select().from(hostedPhoneNumbers);
+    await db.update(hostedPhoneNumbers).set({
+      createdAt: new Date(Date.now() - 31 * 60_000),
+      reconcileAfter: new Date(0),
+    }).where(eq(hostedPhoneNumbers.id, row.id));
+
+    await expect(processPendingPhoneNumberProvisioning()).resolves.toMatchObject({
+      checked: 1,
+      failed: 1,
+    });
+
+    const [failed] = await db.select().from(hostedPhoneNumbers);
+    expect(failed).toMatchObject({
+      status: "FAILED",
+      providerOrderStatus: "not_found",
+    });
+    expect(platform.releaseTelnyxNumber).not.toHaveBeenCalled();
+    expect(platform.deleteTelnyxCallControlApplication).toHaveBeenCalledWith("call-control-1");
+    expect(platform.deleteTelnyxMessagingProfile).toHaveBeenCalledWith("messaging-profile-1");
+    expect((await db.select().from(creditWallets))[0].balance).toBe(10_000);
+    expect(await db.select().from(usageEvents)).toHaveLength(0);
   });
 
   it("releases the reservation and auxiliary resources on a definitive pre-purchase rejection", async () => {
