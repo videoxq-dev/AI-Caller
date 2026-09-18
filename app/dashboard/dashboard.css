@@ -2,3 +2,24 @@
 @media(max-width:1250px){.metricsGrid{grid-template-columns:repeat(3,1fr)}.bottomGrid{grid-template-columns:1fr 1fr}.creditCard{grid-column:1/-1}.creditContent{justify-content:flex-start}.analyticsGrid{grid-template-columns:1fr}.appointmentsCard{min-height:300px}}
 @media(max-width:900px){.appShell{grid-template-columns:76px 1fr}.appSidebar{padding:20px 10px}.appBrand{justify-content:center;padding:0}.appBrand strong,.appNavItem>span:not(.appNavIcon){display:none}.navWorkspaceControls{display:none}.appNav{margin-top:28px}.appNavItem{grid-template-columns:1fr;justify-items:center;padding:0}.navBadge{position:absolute;top:5px;right:5px}.appTopbar{padding:14px 18px}.dateRange span,.profileCopy{display:none}.profileBlock{min-width:65px;grid-template-columns:42px 18px}.dashboardBody{padding:14px}.bottomGrid{grid-template-columns:1fr}.creditCard{grid-column:auto}}
 @media(max-width:620px){.appShell{display:block}.sidebarHelp{display:none}.appSidebar{position:fixed;left:0;right:0;bottom:0;top:auto;z-index:40;width:auto;height:68px;display:flex;align-items:center;padding:6px 8px;border-top:1px solid #dfe6ef;border-right:0}.appBrand{display:none}.appNav{width:100%;grid-template-columns:repeat(8,1fr);gap:2px;margin:0}.appNavItem{min-height:52px}.appNavItem:nth-child(n+6){display:none}.appNavIcon{width:22px}.appTopbar{min-height:70px}.appTopbar h1{font-size:24px}.topbarActions{gap:8px}.dateRange{width:42px;padding:0;justify-content:center}.profileBlock{min-width:42px;display:block}.profileBlock>svg{display:none}.avatar{width:40px;height:40px}.dashboardBody{padding:12px 10px 84px}.metricsGrid{grid-template-columns:repeat(2,1fr);gap:10px}.metricCard{min-height:190px;padding:14px}.analyticsGrid,.bottomGrid{gap:10px;margin-top:10px}.cardHeading{align-items:flex-start}.chartLegend{display:none}.activityRow{grid-template-columns:30px 1fr auto}.activityRow time{display:none}.creditContent{justify-content:center;flex-wrap:wrap}.appointmentLegend{position:static;margin-top:14px;grid-template-columns:repeat(3,1fr)}.appointmentLegend span{grid-template-columns:9px 1fr auto}.metricsGrid .creditMetric{grid-column:1/-1;min-height:155px}}
+
+
+.dashboardLiveLabel{display:block;margin-top:4px;color:#718198;font-size:10px;font-weight:650}
+.dashboardRangeSummary{margin:0 0 12px;color:#718198;font-size:10px;font-weight:650}
+.dashboardRangeSelect{padding-right:8px}
+.dashboardRangeSelect select{min-width:112px;border:0;outline:0;color:inherit;background:transparent;font:inherit;cursor:pointer}
+.dashboardRefreshButton{height:44px;padding:0 14px;border:1px solid #ccd8e7;border-radius:8px;color:#1769ee;background:#fff;font-size:12px;font-weight:750;cursor:pointer}
+.dashboardRefreshButton:disabled{opacity:.6;cursor:default}
+.dashboardError{display:flex;align-items:center;gap:10px;margin:0 0 14px;padding:12px 14px;border:1px solid #f5b8c0;border-radius:10px;color:#9f1f32;background:#fff4f5;font-size:11px}
+.dashboardError strong{font-size:12px}.dashboardError span{flex:1}.dashboardError button{border:0;color:#1769ee;background:transparent;font-weight:750;cursor:pointer}
+.cardSubcopy{margin:4px 0 0;color:#7a889b;font-size:9px}
+.dashboardButtonLink{display:grid;place-items:center;text-decoration:none}
+.dashboardButtonLink.primary{color:#fff}
+.activityRow,.attentionRow{color:inherit;text-decoration:none}
+.activityRow:hover,.attentionRow:hover{background:#f8fbff}
+.dashboardEmpty{min-height:180px;display:grid;place-items:center;color:#7b899b;font-size:10px;text-align:center}
+.dashboardEmpty.compact{min-height:92px}
+.activityList .dashboardEmpty{border-top:1px solid #edf1f5}
+.creditMetric .metricChange{padding-bottom:8px}
+@media(max-width:900px){.dashboardLiveLabel{display:none}.dashboardRangeSelect select{min-width:96px}.dashboardRefreshButton{height:40px}.dashboardRangeSummary{margin-bottom:10px}}
+@media(max-width:620px){.dashboardRangeSelect{width:auto;min-width:118px;padding:0 8px}.dashboardRangeSelect svg{display:none}.dashboardRangeSelect select{min-width:100px;font-size:10px}.dashboardRefreshButton{padding:0 9px;font-size:10px}.dashboardError{align-items:flex-start;flex-wrap:wrap}.dashboardError button{margin-left:auto}.activityRow{grid-template-columns:30px 1fr auto}.activityTag{max-width:92px;overflow:hidden;text-overflow:ellipsis}.dashboardEmpty{min-height:130px}}
