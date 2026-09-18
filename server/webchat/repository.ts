@@ -101,7 +101,7 @@ export async function getPublicWebchatWidget(widgetKey: string) {
   };
 }
 
-export async function resolveWebchatSession(token: string, expectedWidgetKey?: string) {
+export async function resolveWebchatSession(token: string, expectedWidgetKey?: string, touch = true) {
   const hash = tokenHash(token);
   const [row] = await db.select({ session: webchatSessions, widget: webchatWidgets })
     .from(webchatSessions)
@@ -114,11 +114,13 @@ export async function resolveWebchatSession(token: string, expectedWidgetKey?: s
     .limit(1);
   if (!row || (expectedWidgetKey && row.widget.publicKey !== expectedWidgetKey)) return null;
 
-  await db.update(webchatSessions).set({ lastSeenAt: new Date() }).where(eq(webchatSessions.id, row.session.id));
+  if (touch) {
+    await db.update(webchatSessions).set({ lastSeenAt: new Date() }).where(eq(webchatSessions.id, row.session.id));
+  }
   return row;
 }
 
-async function sessionHistory(workspaceId: string, conversationId: string): Promise<WebchatHistoryMessage[]> {
+export async function sessionHistory(workspaceId: string, conversationId: string): Promise<WebchatHistoryMessage[]> {
   const timeline = await getConversationTimelinePage(workspaceId, conversationId, { limit: 30, offset: 0 });
   if (!timeline) return [];
 
@@ -265,4 +267,15 @@ export async function findWebchatAIResponse(workspaceId: string, externalMessage
     eq(messages.externalMessageId, externalMessageId),
   )).orderBy(desc(messages.createdAt)).limit(1);
   return message ?? null;
+}
+
+
+export async function getWebchatSessionHistory(token: string) {
+  const resolved = await resolveWebchatSession(token, undefined, false);
+  if (!resolved) return null;
+  return {
+    history: await sessionHistory(resolved.session.workspaceId, resolved.session.conversationId),
+    workspaceId: resolved.session.workspaceId,
+    conversationId: resolved.session.conversationId,
+  };
 }
