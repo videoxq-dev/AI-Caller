@@ -71,11 +71,11 @@ export const communicationSetupSchema = z.object({
     }
   }
 
-  if (input.voice.mode !== "BYOP" || input.voice.provider !== "telnyx") {
+  if (input.completeStep && (input.voice.mode !== "BYOP" || input.voice.provider !== "telnyx")) {
     ctx.addIssue({
       code: "custom",
       path: ["voice", "provider"],
-      message: "Milestone 7 inbound voice currently requires a connected Telnyx BYOP integration.",
+      message: "Milestone 7 inbound voice currently requires a connected Telnyx BYOP integration before setup can be completed.",
     });
   }
 
