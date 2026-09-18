@@ -192,16 +192,24 @@ export function createSmsWebhookService(dependencies: SmsServiceDependencies) {
           return { skipped: false as const, replied: false as const };
         }
         terminalFailure = true;
-        const outbound = await sendSmsConversationTextWithRuntime(job.workspaceId, conversation.id, runtime, {
-          senderType: "AI",
-          text: orchestrated.reply,
-          to: job.customerNumber,
-          idempotencyKey: job.webhookEventId,
-          metadata: { inReplyToProviderEventId: job.webhookEventId },
-        });
+        try {
+          const outbound = await sendSmsConversationTextWithRuntime(job.workspaceId, conversation.id, runtime, {
+            senderType: "AI",
+            text: orchestrated.reply,
+            to: job.customerNumber,
+            idempotencyKey: job.webhookEventId,
+            metadata: { inReplyToProviderEventId: job.webhookEventId },
+          });
 
-        await completeProviderWebhookEvent(job.workspaceId, job.webhookEventId);
-        return { skipped: false as const, replied: true as const, messageId: outbound.id };
+          await completeProviderWebhookEvent(job.workspaceId, job.webhookEventId);
+          return { skipped: false as const, replied: true as const, messageId: outbound.id };
+        } catch (error) {
+          if (error instanceof AppError && error.code === "AI_HANDLING_PAUSED") {
+            await completeProviderWebhookEvent(job.workspaceId, job.webhookEventId);
+            return { skipped: false as const, replied: false as const };
+          }
+          throw error;
+        }
       } catch (error) {
         if (terminalFailure) {
           await failProviderWebhookEvent(job.workspaceId, job.webhookEventId, error);
