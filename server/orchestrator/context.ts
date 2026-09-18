@@ -1,6 +1,6 @@
-import { and, asc, desc, eq } from "drizzle-orm";
+import { and, asc, eq } from "drizzle-orm";
 import { db } from "@/db";
-import { aiAgents, faqs, knowledgeSources, policies, services } from "@/db/schema";
+import { aiAgents, faqs, policies, services } from "@/db/schema";
 import { getConversationTimelinePage } from "@/server/domain/core/conversation-timeline";
 import { getContactDetail } from "@/server/domain/core/repository";
 import { getBusinessSetup } from "@/server/domain/onboarding/repository";
@@ -35,7 +35,7 @@ type CustomerPromptState = {
 };
 
 async function getOrchestrationAgentSetup(workspaceId: string) {
-  const [agentRows, serviceRows, faqRows, policyRows, knowledgeRows] = await Promise.all([
+  const [agentRows, serviceRows, faqRows, policyRows] = await Promise.all([
     db.select().from(aiAgents).where(eq(aiAgents.workspaceId, workspaceId)).limit(1),
     db.select().from(services).where(and(
       eq(services.workspaceId, workspaceId),
@@ -46,14 +46,12 @@ async function getOrchestrationAgentSetup(workspaceId: string) {
       eq(faqs.active, true),
     )).orderBy(asc(faqs.createdAt)).limit(20),
     db.select().from(policies).where(eq(policies.workspaceId, workspaceId)).orderBy(asc(policies.createdAt)).limit(12),
-    db.select().from(knowledgeSources).where(eq(knowledgeSources.workspaceId, workspaceId)).orderBy(desc(knowledgeSources.updatedAt)).limit(8),
   ]);
   return {
     agent: agentRows[0] ?? null,
     services: serviceRows,
     faqs: faqRows,
     policies: policyRows,
-    knowledge: knowledgeRows,
   };
 }
 
@@ -92,9 +90,6 @@ function buildSystemPrompt(
     qualificationConfigFromBehaviorSettings(agent?.behaviorSettings),
     customer.qualificationData,
   );
-  const knowledgeText = agentSetup.knowledge.length
-    ? agentSetup.knowledge.map((source) => `SOURCE: ${clip(source.label, 200)}${source.sourceUrl ? ` (${clip(source.sourceUrl, 500)})` : ""}\n${clip(source.content, 1800)}`).join("\n\n")
-    : "No imported knowledge sources configured.";
 
   return [
     `You are ${clip(agent?.name, 120) || "the business AI assistant"} for ${clip(profile?.businessName, 200) || "this business"}.`,
@@ -120,8 +115,6 @@ function buildSystemPrompt(
     faqText,
     "\nPOLICIES",
     policyText,
-    "\nIMPORTED KNOWLEDGE",
-    knowledgeText,
     `\n${qualificationText}`,
     "\nCUSTOMER STATE",
     `Name: ${clip(customer.name, 200) || "Unknown"}`,
