@@ -196,6 +196,12 @@ export function createTelnyxVoiceProvider(config: TelnyxVoiceConfig): VoiceProvi
       });
     },
 
+    async stopTranscription(input) {
+      await action(input.callControlId, "transcription_stop", {
+        command_id: commandId(input.commandId),
+      });
+    },
+
     async startRecording(input) {
       await action(input.callControlId, "record_start", {
         command_id: commandId(input.commandId),
