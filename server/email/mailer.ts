@@ -1,6 +1,7 @@
 import nodemailer from "nodemailer";
 import type { Transporter } from "nodemailer";
 import { getEnv } from "@/server/env";
+import { isGuardedE2EFixtureMode } from "@/server/e2e-mode";
 
 let transporter: Transporter | undefined;
 
@@ -57,6 +58,7 @@ export async function sendWelcomeEmail(input: { to: string; name: string; tempor
 
 
 export async function sendTeamInvitationEmail(input: { to: string; inviterName: string; workspaceName: string; acceptUrl: string }) {
+  if (isGuardedE2EFixtureMode()) return;
   const safeInviter = escapeHtml(input.inviterName);
   const safeWorkspace = escapeHtml(input.workspaceName);
   const safeUrl = escapeHtml(input.acceptUrl);
