@@ -186,6 +186,32 @@ async function requireConnectedProvider(workspaceId: string, provider: string, l
   if (row?.status !== "CONNECTED") throw new Error(`${label} provider ${provider} must be connected before this setup step can be completed.`);
 }
 
+async function requireVoiceIntegrationReady(workspaceId: string, provider: string) {
+  if (provider !== "telnyx") {
+    await requireConnectedProvider(workspaceId, provider, "Voice");
+    return;
+  }
+  const row = await getPrivateIntegration(workspaceId, provider);
+  if (!row || row.status !== "CONNECTED") {
+    throw new Error("Voice provider telnyx must be connected before this setup step can be completed.");
+  }
+  const settings = row.settings && typeof row.settings === "object" ? row.settings as Record<string, unknown> : {};
+  const credentials = decryptCredentialMap(row.encryptedCredentials);
+  const phone = typeof settings.phone === "string" && settings.phone.trim()
+    ? settings.phone.trim()
+    : credentials.phone?.trim();
+  if (!phone) throw new Error("Telnyx voice needs an inbound phone number before setup can be completed.");
+  const publicKey = typeof settings.webhookPublicKey === "string" && settings.webhookPublicKey.trim()
+    ? settings.webhookPublicKey.trim()
+    : credentials.webhookPublicKey?.trim();
+  if (!publicKey) throw new Error("Telnyx voice needs its webhook signing public key before setup can be completed.");
+  try {
+    parseTelnyxWebhookPublicKey(publicKey);
+  } catch (error) {
+    throw new Error(error instanceof Error ? error.message : "Telnyx voice webhook signing public key is invalid.");
+  }
+}
+
 async function requireSmsIntegrationReady(workspaceId: string, provider: string) {
   const row = await getPrivateIntegration(workspaceId, provider);
   if (!row || row.status !== "CONNECTED") {
@@ -249,7 +275,7 @@ export async function getCommunicationSetup(workspaceId: string) {
 
 export async function saveCommunicationSetup(workspaceId: string, input: CommunicationSetupInput) {
   if (input.completeStep) {
-    if (input.voice.mode === "BYOP" && input.voice.provider) await requireConnectedProvider(workspaceId, input.voice.provider, "Voice");
+    if (input.voice.mode === "BYOP" && input.voice.provider) await requireVoiceIntegrationReady(workspaceId, input.voice.provider);
     if (input.sms.mode === "BYOP" && input.sms.provider) await requireSmsIntegrationReady(workspaceId, input.sms.provider);
     if (input.whatsapp.mode === "BYOP") await requireConnectedProvider(workspaceId, input.whatsapp.provider ?? "whatsapp", "WhatsApp");
   }
