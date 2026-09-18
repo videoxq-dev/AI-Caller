@@ -209,8 +209,8 @@ try {
        FROM hosted_phone_numbers WHERE workspace_id = $1 AND provision_request_id = $2 LIMIT 1`,
     [workspaceId, provisionRequestId],
   );
-  assert(provisionedRow.rows[0]?.status === "ACTIVE", "Provisioning lifecycle did not persist ACTIVE after final carrier success.");
-  assert(provisionedRow.rows[0]?.provider_order_status === "success", "Final Telnyx order status was not persisted.");
+  assert(provisionedRow.rows[0]?.status === "ACTIVE", "Provisioning lifecycle did not persist ACTIVE after the ordered number and owned inventory became usable.");
+  assert(provisionedRow.rows[0]?.provider_order_status === "pending", "Documented Telnyx parent-order status was not persisted while the individual number finalized.");
   assert(Boolean(provisionedRow.rows[0]?.provider_order_phone_number_id), "Telnyx order-phone-number id was not persisted separately.");
   assert(Boolean(provisionedRow.rows[0]?.provider_number_id), "Owned Telnyx phone-number id was not reconciled.");
 
