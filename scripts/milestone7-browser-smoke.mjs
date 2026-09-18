@@ -233,6 +233,15 @@ try {
   const callSessionId = `call-m7-${Date.now()}`;
   const callControlId = `control-m7-${Date.now()}`;
   const caller = "+15550001111";
+  const preexistingContact = await pool.query(
+    `INSERT INTO contacts (workspace_id, name, phone) VALUES ($1, 'Existing SMS Customer', $2) RETURNING id`,
+    [workspaceId, caller],
+  );
+  await pool.query(
+    `INSERT INTO contact_identities (workspace_id, contact_id, channel, external_id, normalized_value)
+     VALUES ($1, $2, 'SMS', $3, $3)`,
+    [workspaceId, preexistingContact.rows[0].id, caller],
+  );
   const initiated = await sendWebhook(
     workspaceId,
     eventPayload("call.initiated", "m7-call-1", callSessionId, callControlId, { from: caller, to: voiceNumber }),
@@ -340,13 +349,19 @@ try {
   assert(appointment.rows[0].booking_source === "PHONE_AI", `Expected PHONE_AI booking source, got ${appointment.rows[0].booking_source}.`);
 
   const contact = await pool.query(
-    `SELECT c.name, c.email, ci.normalized_value
+    `SELECT c.id, c.name, c.email, ci.normalized_value
        FROM contacts c JOIN contact_identities ci ON ci.contact_id = c.id
       WHERE c.workspace_id = $1 AND ci.channel = 'PHONE' AND ci.normalized_value = $2 LIMIT 1`,
     [workspaceId, caller],
   );
-  assert(contact.rows[0]?.name === "Voice Visitor", "Voice orchestrator did not capture the caller name.");
+  assert(contact.rows[0]?.id === preexistingContact.rows[0].id, "Inbound voice did not reuse the existing SMS contact with the same phone.");
+  assert(contact.rows[0]?.name === "Voice Visitor", "Voice orchestrator did not update the caller name.");
   assert(contact.rows[0]?.email === "voice.visitor@example.com", "Voice orchestrator did not capture the caller email.");
+  const callerIdentities = await pool.query(
+    `SELECT channel FROM contact_identities WHERE workspace_id = $1 AND contact_id = $2 ORDER BY channel`,
+    [workspaceId, preexistingContact.rows[0].id],
+  );
+  assert(callerIdentities.rows.some((row) => row.channel === "SMS") && callerIdentities.rows.some((row) => row.channel === "PHONE"), "Unified caller contact is missing SMS/PHONE identities.");
 
   const hangup = await sendWebhook(workspaceId, eventPayload("call.hangup", "m7-hangup", callSessionId, callControlId, { hangup_cause: "normal_clearing" }));
   assert(hangup.data?.processed === 1, "Voice hangup event failed.");
