@@ -24,12 +24,12 @@ function telnyxSignature(timestamp, rawBody) {
   return sign(null, Buffer.from(`${timestamp}|${rawBody}`, "utf8"), privateKey).toString("base64");
 }
 
-function eventPayload(eventType, id, callSessionId, callControlId, extra = {}) {
+function eventPayload(eventType, id, callSessionId, callControlId, extra = {}, occurredAt = new Date()) {
   return {
     data: {
       event_type: eventType,
       id,
-      occurred_at: new Date().toISOString(),
+      occurred_at: occurredAt.toISOString(),
       payload: {
         call_session_id: callSessionId,
         ...(callControlId ? { call_control_id: callControlId } : {}),
@@ -231,9 +231,10 @@ try {
      VALUES ($1, $2, 'SMS', $3, $3)`,
     [workspaceId, preexistingContact.rows[0].id, caller],
   );
+  const callClock = Date.now();
   const initiated = await sendWebhook(
     workspaceId,
-    eventPayload("call.initiated", "m7-call-1", callSessionId, callControlId, { from: caller, to: voiceNumber }),
+    eventPayload("call.initiated", "m7-call-1", callSessionId, callControlId, { from: caller, to: voiceNumber }, new Date(callClock - 70_000)),
   );
   assert(initiated.response.status === 200 && initiated.data?.processed === 1, `Inbound call initiation failed: ${initiated.text}`);
 
@@ -248,7 +249,7 @@ try {
   assert(callRow.rows[0].mode === "AI_FIRST", `Expected AI_FIRST mode, got ${callRow.rows[0].mode}.`);
   assert(callRow.rows[0].recording_consent_status === "PENDING", "Recording consent was persisted before disclosure/consent.");
 
-  const answered = await sendWebhook(workspaceId, eventPayload("call.answered", "m7-call-2", callSessionId, callControlId));
+  const answered = await sendWebhook(workspaceId, eventPayload("call.answered", "m7-call-2", callSessionId, callControlId, {}, new Date(callClock - 65_000)));
   assert(answered.data?.processed === 1, "Answered voice event was not processed.");
 
   let consentState = await pool.query(
@@ -352,7 +353,7 @@ try {
   );
   assert(callerIdentities.rows.some((row) => row.channel === "SMS") && callerIdentities.rows.some((row) => row.channel === "PHONE"), "Unified caller contact is missing SMS/PHONE identities.");
 
-  const hangup = await sendWebhook(workspaceId, eventPayload("call.hangup", "m7-hangup", callSessionId, callControlId, { hangup_cause: "normal_clearing" }));
+  const hangup = await sendWebhook(workspaceId, eventPayload("call.hangup", "m7-hangup", callSessionId, callControlId, { hangup_cause: "normal_clearing" }, new Date(callClock)));
   assert(hangup.data?.processed === 1, "Voice hangup event failed.");
 
   const recording = await sendWebhook(
@@ -393,7 +394,7 @@ try {
     [workspaceId, callId],
   );
   assert(usage.rows[0].count === 1, "Voice usage was not persisted exactly once across distinct hangup callbacks.");
-  assert(usage.rows[0].credits > 0, "Managed hosted voice usage was not charged through credits.");
+  assert(usage.rows[0].credits === 160, `Expected 2 started hosted voice minutes (160 credits), received ${usage.rows[0].credits}.`);
 
   await page.goto(`${baseUrl}/inbox`, { waitUntil: "networkidle" });
   await page.getByLabel("Channel filter").selectOption("PHONE");
