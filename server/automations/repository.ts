@@ -261,10 +261,14 @@ export async function listAutomationDeliveries(workspaceId: string, runId: strin
 }
 
 
-export async function listRunnablePendingAutomationRuns(limit = 100) {
+export async function listRecoverableAutomationRuns(limit = 100) {
   const now = new Date();
+  const staleBefore = new Date(now.getTime() - 2 * 60_000);
   return db.select().from(automationRuns).where(and(
-    eq(automationRuns.status, "PENDING"),
     or(isNull(automationRuns.scheduledFor), lte(automationRuns.scheduledFor, now)),
+    or(
+      eq(automationRuns.status, "PENDING"),
+      and(eq(automationRuns.status, "RUNNING"), lt(automationRuns.startedAt, staleBefore)),
+    ),
   )).orderBy(asc(automationRuns.createdAt)).limit(Math.min(Math.max(limit, 1), 500));
 }
