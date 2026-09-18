@@ -6,6 +6,7 @@ import { db } from "@/db";
 import { usageEvents } from "@/db/schema";
 import {
   appendMessage,
+  getConversationById,
   getOrCreateOpenConversation,
 } from "@/server/domain/core/repository";
 import { normalizePhone } from "@/server/domain/core/schemas";
