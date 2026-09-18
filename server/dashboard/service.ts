@@ -112,7 +112,6 @@ async function loadSummary(workspaceId: string, start: Date, end: Date, previous
          SELECT conversation_id
            FROM voice_calls
           WHERE workspace_id = ${workspaceId}
-            AND answered_at IS NOT NULL
             AND started_at >= ${start}
             AND started_at < ${end}
           GROUP BY conversation_id
@@ -130,7 +129,6 @@ async function loadSummary(workspaceId: string, start: Date, end: Date, previous
          SELECT conversation_id
            FROM voice_calls
           WHERE workspace_id = ${workspaceId}
-            AND answered_at IS NOT NULL
             AND started_at >= ${previousStart}
             AND started_at < ${start}
           GROUP BY conversation_id
@@ -147,6 +145,7 @@ async function loadSummary(workspaceId: string, start: Date, end: Date, previous
          SELECT conversation_id
            FROM voice_calls
           WHERE workspace_id = ${workspaceId}
+            AND answered_at IS NOT NULL
             AND started_at >= ${start}
             AND started_at < ${end}
           GROUP BY conversation_id
@@ -163,6 +162,7 @@ async function loadSummary(workspaceId: string, start: Date, end: Date, previous
          SELECT conversation_id
            FROM voice_calls
           WHERE workspace_id = ${workspaceId}
+            AND answered_at IS NOT NULL
             AND started_at >= ${previousStart}
             AND started_at < ${start}
           GROUP BY conversation_id
@@ -232,7 +232,6 @@ async function loadSeries(workspaceId: string, start: Date, end: Date): Promise<
           SELECT to_char(started_at AT TIME ZONE 'UTC', 'YYYY-MM-DD') AS day, conversation_id
             FROM voice_calls
            WHERE workspace_id = ${workspaceId}
-             AND answered_at IS NOT NULL
              AND started_at >= ${start}
              AND started_at < ${end}
            GROUP BY day, conversation_id
@@ -254,6 +253,7 @@ async function loadSeries(workspaceId: string, start: Date, end: Date): Promise<
           SELECT to_char(started_at AT TIME ZONE 'UTC', 'YYYY-MM-DD') AS day, conversation_id
             FROM voice_calls
            WHERE workspace_id = ${workspaceId}
+             AND answered_at IS NOT NULL
              AND started_at >= ${start}
              AND started_at < ${end}
            GROUP BY day, conversation_id
