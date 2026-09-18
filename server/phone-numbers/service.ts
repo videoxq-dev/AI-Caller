@@ -166,6 +166,18 @@ const PROVISIONING_RECONCILE_DELAY_MS = 15_000;
 const REQUIREMENTS_RECONCILE_DELAY_MS = 5 * 60_000;
 const INDETERMINATE_PURCHASE_MAX_MS = 30 * 60_000;
 
+type DbTransaction = Parameters<Parameters<typeof db.transaction>[0]>[0];
+
+async function withManagedPhoneLock<T>(
+  workspaceId: string,
+  work: (tx: DbTransaction) => Promise<T>,
+) {
+  return db.transaction(async (tx) => {
+    await tx.execute(sql`select pg_advisory_xact_lock(hashtext(${`managed-phone:${workspaceId}`}))`);
+    return work(tx);
+  });
+}
+
 function uncertainProviderFailure(error: unknown) {
   return !(error instanceof ProviderRequestError) || error.status >= 500;
 }
@@ -235,11 +247,19 @@ async function createProvisioningRecord(
 }
 
 async function markReleasePending(row: typeof hostedPhoneNumbers.$inferSelect) {
-  await db.update(hostedPhoneNumbers).set({
-    status: "RELEASE_PENDING",
-    failureReason: "Carrier release is pending and will be retried automatically.",
-    updatedAt: new Date(),
-  }).where(eq(hostedPhoneNumbers.id, row.id));
+  return withManagedPhoneLock(row.workspaceId, async (tx) => {
+    const [current] = await tx.select().from(hostedPhoneNumbers)
+      .where(eq(hostedPhoneNumbers.id, row.id))
+      .limit(1);
+    if (!current || current.releasedAt || current.status === "RELEASED") return current ?? row;
+    const [pending] = await tx.update(hostedPhoneNumbers).set({
+      status: "RELEASE_PENDING",
+      failureReason: "Carrier release is pending and will be retried automatically.",
+      reconcileAfter: null,
+      updatedAt: new Date(),
+    }).where(eq(hostedPhoneNumbers.id, row.id)).returning();
+    return pending;
+  });
 }
 
 async function finalizeRelease(row: typeof hostedPhoneNumbers.$inferSelect) {
@@ -303,41 +323,67 @@ async function activateProvisionedNumber(
   providerNumberId: string,
   providerOrderStatus: string | null,
 ) {
-  if (!row.provisionRequestId) throw new Error("Managed phone provisioning request ID is missing.");
+  let didActivate = false;
+  const activated = await withManagedPhoneLock(row.workspaceId, async (tx) => {
+    const [current] = await tx.select().from(hostedPhoneNumbers)
+      .where(eq(hostedPhoneNumbers.id, row.id))
+      .limit(1);
+    if (!current) throw new Error("Managed phone provisioning record not found.");
+    if (
+      current.releasedAt
+      || (current.status !== "PROVISIONING" && current.status !== "RECONCILING")
+    ) {
+      return current;
+    }
+    if (!current.provisionRequestId) throw new Error("Managed phone provisioning request ID is missing.");
 
-  const reservation = await reserveCredits(row.workspaceId, row.purchaseCredits, {
-    referenceType: "PHONE_NUMBER_PURCHASE",
-    referenceId: row.provisionRequestId,
+    const reservation = await reserveCredits(current.workspaceId, current.purchaseCredits, {
+      referenceType: "PHONE_NUMBER_PURCHASE",
+      referenceId: current.provisionRequestId,
+    });
+    await settleCreditReservation(current.workspaceId, reservation.id, current.purchaseCredits, {
+      reason: "Managed phone number purchase and first month",
+      referenceType: "PHONE_NUMBER_PURCHASE",
+      referenceId: current.provisionRequestId,
+    });
+
+    await Promise.all([
+      bindCapability(current.workspaceId, "VOICE", "HOSTED"),
+      bindCapability(current.workspaceId, "SMS", "HOSTED"),
+    ]);
+    await recordPhonePurchaseUsage(current);
+
+    const now = new Date();
+    const nextBillingAt = addBillingMonth(now);
+    const [next] = await tx.update(hostedPhoneNumbers).set({
+      providerNumberId,
+      providerOrderStatus: providerOrderStatus ?? "success",
+      status: "ACTIVE",
+      currentPeriodStart: now,
+      currentPeriodEnd: nextBillingAt,
+      nextBillingAt,
+      graceEndsAt: null,
+      provisioningLastCheckedAt: now,
+      reconcileAfter: null,
+      failureReason: null,
+      updatedAt: now,
+    }).where(and(
+      eq(hostedPhoneNumbers.id, current.id),
+      isNull(hostedPhoneNumbers.releasedAt),
+      inArray(hostedPhoneNumbers.status, ["PROVISIONING", "RECONCILING"]),
+    )).returning();
+    if (!next) {
+      const [latest] = await tx.select().from(hostedPhoneNumbers)
+        .where(eq(hostedPhoneNumbers.id, current.id))
+        .limit(1);
+      if (!latest) throw new Error("Managed phone provisioning record disappeared during activation.");
+      return latest;
+    }
+    didActivate = true;
+    return next;
   });
-  await settleCreditReservation(row.workspaceId, reservation.id, row.purchaseCredits, {
-    reason: "Managed phone number purchase and first month",
-    referenceType: "PHONE_NUMBER_PURCHASE",
-    referenceId: row.provisionRequestId,
-  });
 
-  await Promise.all([
-    bindCapability(row.workspaceId, "VOICE", "HOSTED"),
-    bindCapability(row.workspaceId, "SMS", "HOSTED"),
-  ]);
-  await recordPhonePurchaseUsage(row);
-
-  const now = new Date();
-  const nextBillingAt = addBillingMonth(now);
-  const [activated] = await db.update(hostedPhoneNumbers).set({
-    providerNumberId,
-    providerOrderStatus: providerOrderStatus ?? "success",
-    status: "ACTIVE",
-    currentPeriodStart: now,
-    currentPeriodEnd: nextBillingAt,
-    nextBillingAt,
-    graceEndsAt: null,
-    provisioningLastCheckedAt: now,
-    reconcileAfter: null,
-    failureReason: null,
-    updatedAt: now,
-  }).where(eq(hostedPhoneNumbers.id, row.id)).returning();
-
-  await releasePreviousManagedNumbers(activated);
+  if (didActivate) await releasePreviousManagedNumbers(activated);
   return activated;
 }
 
@@ -346,50 +392,68 @@ async function failProvisioning(
   reason: string,
   providerOrderStatus: string | null,
 ) {
-  let ownedId = row.providerNumberId;
-  if (!ownedId) {
-    try {
-      ownedId = (await findOwnedTelnyxNumber(row.phoneNumber))?.id ?? null;
-    } catch (error) {
-      logger.warn({ err: error, workspaceId: row.workspaceId, phoneNumber: row.phoneNumber }, "Could not check carrier ownership while failing provisioning");
-    }
-  }
-
-  if (ownedId) {
-    try {
-      await cleanupProviderResources({ ...row, providerNumberId: ownedId });
-    } catch (error) {
-      await db.update(hostedPhoneNumbers).set({
-        providerNumberId: ownedId,
-        providerOrderStatus,
-        status: "RELEASE_PENDING",
-        failureReason: reason.slice(0, 500),
-        reconcileAfter: null,
-        updatedAt: new Date(),
-      }).where(eq(hostedPhoneNumbers.id, row.id));
+  await withManagedPhoneLock(row.workspaceId, async (tx) => {
+    const [current] = await tx.select().from(hostedPhoneNumbers)
+      .where(eq(hostedPhoneNumbers.id, row.id))
+      .limit(1);
+    if (!current) return;
+    if (
+      current.releasedAt
+      || (current.status !== "PROVISIONING" && current.status !== "RECONCILING")
+    ) {
       return;
     }
-  } else {
-    await cleanupAuxiliaryResources(row);
-  }
 
-  if (row.provisionRequestId) {
-    const reservation = await reserveCredits(row.workspaceId, row.purchaseCredits, {
-      referenceType: "PHONE_NUMBER_PURCHASE",
-      referenceId: row.provisionRequestId,
-    });
-    await releaseCreditReservation(row.workspaceId, reservation.id).catch(() => undefined);
-  }
+    let ownedId = current.providerNumberId;
+    if (!ownedId) {
+      try {
+        ownedId = (await findOwnedTelnyxNumber(current.phoneNumber))?.id ?? null;
+      } catch (error) {
+        logger.warn({ err: error, workspaceId: current.workspaceId, phoneNumber: current.phoneNumber }, "Could not check carrier ownership while failing provisioning");
+        throw error;
+      }
+    }
 
-  await db.update(hostedPhoneNumbers).set({
-    providerNumberId: ownedId,
-    providerOrderStatus,
-    status: "FAILED",
-    failureReason: reason.slice(0, 500),
-    reconcileAfter: null,
-    releasedAt: new Date(),
-    updatedAt: new Date(),
-  }).where(eq(hostedPhoneNumbers.id, row.id));
+    if (ownedId) {
+      try {
+        await cleanupProviderResources({ ...current, providerNumberId: ownedId });
+      } catch (error) {
+        await tx.update(hostedPhoneNumbers).set({
+          providerNumberId: ownedId,
+          providerOrderStatus,
+          status: "RELEASE_PENDING",
+          failureReason: reason.slice(0, 500),
+          reconcileAfter: null,
+          updatedAt: new Date(),
+        }).where(eq(hostedPhoneNumbers.id, current.id));
+        return;
+      }
+    } else {
+      await cleanupAuxiliaryResources(current);
+    }
+
+    if (current.provisionRequestId) {
+      const reservation = await reserveCredits(current.workspaceId, current.purchaseCredits, {
+        referenceType: "PHONE_NUMBER_PURCHASE",
+        referenceId: current.provisionRequestId,
+      });
+      await releaseCreditReservation(current.workspaceId, reservation.id).catch(() => undefined);
+    }
+
+    await tx.update(hostedPhoneNumbers).set({
+      providerNumberId: ownedId,
+      providerOrderStatus,
+      status: "FAILED",
+      failureReason: reason.slice(0, 500),
+      reconcileAfter: null,
+      releasedAt: new Date(),
+      updatedAt: new Date(),
+    }).where(and(
+      eq(hostedPhoneNumbers.id, current.id),
+      isNull(hostedPhoneNumbers.releasedAt),
+      inArray(hostedPhoneNumbers.status, ["PROVISIONING", "RECONCILING"]),
+    ));
+  });
 }
 
 function ownedNumberIsUsable(
