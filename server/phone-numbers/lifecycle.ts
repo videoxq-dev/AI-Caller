@@ -1,20 +1,6 @@
 import type { TelnyxNumberOrder, TelnyxNumberOrderPhoneNumber } from "@/server/providers/telnyx-platform";
 
-export type ManagedPhoneStatus =
-  | "PROVISIONING"
-  | "RECONCILING"
-  | "ACTIVE"
-  | "PAST_DUE"
-  | "SUSPENDED"
-  | "RELEASE_PENDING"
-  | "RELEASED"
-  | "FAILED";
-
-export type MessagingReadiness =
-  | "NOT_REGISTERED"
-  | "PENDING"
-  | "READY"
-  | "REJECTED";
+export type MessagingReadiness = "NOT_REGISTERED" | "PENDING" | "READY" | "REJECTED";
 
 export type CarrierProvisioningOutcome =
   | { kind: "READY"; orderStatus: string; numberStatus: string }
@@ -37,11 +23,11 @@ export function carrierProvisioningOutcome(
   const numberStatus = normalized(orderedNumber?.status);
   const requirementsMet = order?.requirements_met !== false && orderedNumber?.requirements_met !== false;
 
-  if (!requirementsMet) {
-    return { kind: "REQUIREMENTS", orderStatus, numberStatus };
-  }
   if ((orderStatus && FINAL_FAILURE.has(orderStatus)) || (numberStatus && FINAL_FAILURE.has(numberStatus))) {
     return { kind: "FAILED", orderStatus, numberStatus };
+  }
+  if (!requirementsMet) {
+    return { kind: "REQUIREMENTS", orderStatus, numberStatus };
   }
   if (numberStatus && FINAL_SUCCESS.has(numberStatus)) {
     return { kind: "READY", orderStatus ?? "pending", numberStatus };
@@ -49,13 +35,6 @@ export function carrierProvisioningOutcome(
   return { kind: "PENDING", orderStatus, numberStatus };
 }
 
-export function isManagedPhoneOperational(status: string) {
-  return status === "ACTIVE" || status === "PAST_DUE";
-}
-
-export function canReceiveManagedWebhooks(status: string) {
-  return status === "ACTIVE" || status === "PAST_DUE" || status === "SUSPENDED";
-}
 
 export function outboundSmsReady(readiness: string | null | undefined) {
   return readiness === "READY";
