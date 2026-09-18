@@ -12,6 +12,8 @@ const envSchema = z.object({
   JVZOO_IPN_SECRET: z.string().min(1).optional(),
   JVZOO_CORE_PRODUCT_IDS: z.string().default(""),
   STARTER_CREDITS: z.coerce.number().int().positive().default(2500),
+  STRIPE_RESTRICTED_API_KEY: z.string().min(1).optional(),
+  STRIPE_WEBHOOK_SECRET: z.string().min(1).optional(),
   HOSTED_AI_PROVIDER: z.enum(["openai", "gemini", "openrouter"]).default("openai"),
   HOSTED_AI_API_KEY: z.string().min(1).optional(),
   HOSTED_AI_MODEL: z.string().min(1).optional(),

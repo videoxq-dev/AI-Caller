@@ -1,6 +1,6 @@
 import { afterAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { closeDatabase, db } from "@/db";
-import { contactIdentities, creditWallets, messages, providerWebhookEvents, usageEvents, workspaces } from "@/db/schema";
+import { contactIdentities, creditWallets, hostedApiRateCards, messages, providerWebhookEvents, usageEvents, workspaces } from "@/db/schema";
 import type { SmsInboundResponseJob } from "@/server/jobs/queues";
 import type { NormalizedSmsEvent, SMSProvider } from "@/server/providers/contracts";
 import { ProviderRequestError } from "@/server/providers/http";
@@ -67,6 +67,17 @@ describe("SMS webhook service", () => {
     await db.delete(workspaces);
     const [workspace] = await db.insert(workspaces).values({ name: "SMS Service Test" }).returning();
     workspaceId = workspace.id;
+    await db.insert(hostedApiRateCards).values({
+      capability: "SMS",
+      provider: "twilio",
+      model: "",
+      unit: "SMS_SEGMENT",
+      costMicros: 450,
+      unitsPerCost: 1,
+      targetMarginBps: 5500,
+      effectiveFrom: new Date("2026-01-01T00:00:00Z"),
+      metadata: { fixture: "sms-service-test" },
+    }).onConflictDoNothing();
   });
 
   afterAll(async () => {

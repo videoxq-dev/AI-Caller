@@ -10,6 +10,7 @@ import {
   uniqueIndex,
   uuid,
 } from "drizzle-orm/pg-core";
+import { user } from "./auth";
 import { workspaces } from "./core";
 import { capabilityType } from "./integrations";
 
@@ -96,3 +97,56 @@ export const creditReservations = pgTable(
     index("credit_reservations_expiry_idx").on(table.status, table.expiresAt),
   ],
 );
+
+export const creditPacks = pgTable("credit_packs", {
+  code: text("code").primaryKey(),
+  name: text("name").notNull(),
+  credits: integer("credits").notNull(),
+  amountCents: integer("amount_cents").notNull(),
+  currency: text("currency").default("usd").notNull(),
+  active: boolean("active").default(true).notNull(),
+  sortOrder: integer("sort_order").default(0).notNull(),
+  metadata: jsonb("metadata").$type<Record<string, unknown>>().default({}).notNull(),
+  createdAt: timestamp("created_at", { withTimezone: true, mode: "date" }).defaultNow().notNull(),
+  updatedAt: timestamp("updated_at", { withTimezone: true, mode: "date" }).defaultNow().notNull(),
+});
+
+export const creditTopups = pgTable(
+  "credit_topups",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    workspaceId: uuid("workspace_id").notNull().references(() => workspaces.id, { onDelete: "cascade" }),
+    createdByUserId: text("created_by_user_id").references(() => user.id, { onDelete: "set null" }),
+    packCode: text("pack_code").notNull().references(() => creditPacks.code),
+    credits: integer("credits").notNull(),
+    amountCents: integer("amount_cents").notNull(),
+    currency: text("currency").notNull(),
+    status: text("status").default("PENDING").notNull(),
+    stripeCheckoutSessionId: text("stripe_checkout_session_id"),
+    stripePaymentIntentId: text("stripe_payment_intent_id"),
+    stripeChargeId: text("stripe_charge_id"),
+    stripeDisputeId: text("stripe_dispute_id"),
+    refundedAmountCents: integer("refunded_amount_cents").default(0).notNull(),
+    disputedAmountCents: integer("disputed_amount_cents").default(0).notNull(),
+    reversedCredits: integer("reversed_credits").default(0).notNull(),
+    metadata: jsonb("metadata").$type<Record<string, unknown>>().default({}).notNull(),
+    paidAt: timestamp("paid_at", { withTimezone: true, mode: "date" }),
+    createdAt: timestamp("created_at", { withTimezone: true, mode: "date" }).defaultNow().notNull(),
+    updatedAt: timestamp("updated_at", { withTimezone: true, mode: "date" }).defaultNow().notNull(),
+  },
+  (table) => [
+    index("credit_topups_workspace_created_idx").on(table.workspaceId, table.createdAt),
+    uniqueIndex("credit_topups_stripe_session_uq").on(table.stripeCheckoutSessionId),
+    uniqueIndex("credit_topups_stripe_payment_intent_uq").on(table.stripePaymentIntentId),
+    index("credit_topups_stripe_charge_idx").on(table.stripeChargeId),
+  ],
+);
+
+export const stripeWebhookEvents = pgTable("stripe_webhook_events", {
+  stripeEventId: text("stripe_event_id").primaryKey(),
+  eventType: text("event_type").notNull(),
+  status: text("status").default("RECEIVED").notNull(),
+  error: text("error"),
+  receivedAt: timestamp("received_at", { withTimezone: true, mode: "date" }).defaultNow().notNull(),
+  processedAt: timestamp("processed_at", { withTimezone: true, mode: "date" }),
+});
