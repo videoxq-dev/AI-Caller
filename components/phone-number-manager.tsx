@@ -23,6 +23,7 @@ export type ManagedPhoneNumber = {
   locality: string | null;
   numberType: string;
   status: string;
+  messagingReadiness: "NOT_REGISTERED" | "PENDING" | "READY" | "REJECTED";
   monthlyCredits?: number;
   purchaseCredits?: number;
   currentPeriodEnd?: string | null;
@@ -56,6 +57,7 @@ function statusLabel(status: string) {
   if (status === "PAST_DUE") return "Renewal past due";
   if (status === "SUSPENDED") return "Service suspended";
   if (status === "PROVISIONING") return "Provisioning";
+  if (status === "RECONCILING") return "Confirming with carrier";
   return status.replaceAll("_", " ").toLowerCase();
 }
 
@@ -153,7 +155,16 @@ export function PhoneNumberManager({
       setResults([]);
       setSelected(null);
       await loadCurrent();
-      showToast("Your phone number is active for calls and SMS.", "success");
+      if (payload.number.status === "ACTIVE") {
+        showToast(
+          payload.number.messagingReadiness === "READY"
+            ? "Your phone number is active for calls and outbound SMS."
+            : "Your phone number is active for calls. Outbound SMS will unlock after carrier registration is approved.",
+          "success",
+        );
+      } else {
+        showToast("Your number order was accepted. AI Caller is waiting for the carrier to finish activation.", "info");
+      }
     } catch (error) {
       showToast(error instanceof Error ? error.message : "Unable to activate that phone number.", "error");
     } finally {
@@ -164,7 +175,9 @@ export function PhoneNumberManager({
   if (!loaded) return <div className={styles.loading}>Loading phone number settings…</div>;
 
   if (current && !changing) {
-    const attention = current.status === "PAST_DUE" || current.status === "SUSPENDED";
+    const attention = current.status === "PAST_DUE" || current.status === "SUSPENDED" || current.status === "PROVISIONING" || current.status === "RECONCILING";
+    const phoneOperational = current.status === "ACTIVE" || current.status === "PAST_DUE";
+    const smsReady = current.messagingReadiness === "READY";
     return (
       <div className={styles.currentWrap}>
         <div className={styles.currentCard}>
@@ -172,23 +185,29 @@ export function PhoneNumberManager({
           <div className={styles.currentIdentity}>
             <small>Your business number</small>
             <strong>{formatNumber(current.phoneNumber)}</strong>
-            <span>{[current.locality, current.administrativeArea].filter(Boolean).join(", ") || "United States"} · Calls &amp; SMS</span>
+            <span>{[current.locality, current.administrativeArea].filter(Boolean).join(", ") || "United States"} · Managed voice + SMS-capable number</span>
           </div>
           <span className={attention ? styles.statusWarn : styles.statusOk}>{statusLabel(current.status)}</span>
         </div>
 
         {attention && (
           <div className={styles.warning}>
-            <strong>{current.status === "SUSPENDED" ? "Phone service is suspended" : "Renewal needs more credits"}</strong>
-            <span>{current.failureReason ?? "Add credits to renew this number."}</span>
-            {canManage && <a href="/settings/billing">Top up credits</a>}
+            <strong>{
+              current.status === "SUSPENDED" ? "Phone service is suspended"
+                : current.status === "PAST_DUE" ? "Renewal needs more credits"
+                  : current.status === "RECONCILING" ? "Confirming carrier purchase"
+                    : "Carrier activation in progress"
+            }</strong>
+            <span>{current.failureReason ?? (current.status === "PAST_DUE" || current.status === "SUSPENDED" ? "Add credits to renew this number." : "AI Caller is waiting for the carrier to finish activating this number.")}</span>
+            {canManage && (current.status === "PAST_DUE" || current.status === "SUSPENDED") && <a href="/settings/billing">Top up credits</a>}
           </div>
         )}
 
         <div className={styles.billingRow}>
           {canManage && <div><span>Monthly renewal</span><strong>{(current.monthlyCredits ?? 0).toLocaleString()} credits</strong></div>}
           {canManage && <div><span>Next billing</span><strong>{current.nextBillingAt ? new Date(current.nextBillingAt).toLocaleDateString() : "Pending"}</strong></div>}
-          <div><span>Features</span><strong>Calls + SMS</strong></div>
+          <div><span>Calls</span><strong>{phoneOperational ? "Active" : "Pending carrier activation"}</strong></div>
+          <div><span>Outbound SMS</span><strong>{smsReady ? "Ready" : current.messagingReadiness === "REJECTED" ? "Registration rejected" : current.messagingReadiness === "PENDING" ? "Registration pending" : "Registration required"}</strong></div>
           {canManage && <button type="button" onClick={() => setChanging(true)}>{settingsMode ? "Change number" : "Choose a different number"}</button>}
         </div>
       </div>
@@ -211,7 +230,7 @@ export function PhoneNumberManager({
       {current && changing && <button className={styles.cancelChange} type="button" onClick={() => setChanging(false)}>← Keep current number</button>}
       <div className={styles.heading}>
         <span><PhoneIcon size={22} /></span>
-        <div><strong>Choose your phone number</strong><p>Find a local number for customer calls and SMS. AI Caller configures it automatically.</p></div>
+        <div><strong>Choose your phone number</strong><p>Find a voice + SMS-capable number. AI Caller configures carrier routing automatically; outbound US business SMS may require registration before sending.</p></div>
       </div>
 
       <div className={styles.filters}>
@@ -225,7 +244,7 @@ export function PhoneNumberManager({
 
       {results.length > 0 && (
         <div className={styles.results}>
-          <div className={styles.resultHeader}><span>Available numbers</span><small>{results.length} matches · calls and SMS included</small></div>
+          <div className={styles.resultHeader}><span>Available numbers</span><small>{results.length} matches · voice + SMS capable</small></div>
           {results.map((item) => {
             const active = selected?.phoneNumber === item.phoneNumber;
             return (
@@ -257,7 +276,7 @@ export function PhoneNumberManager({
 
       <div className={styles.autoNote}>
         <CheckIcon size={16} />
-        <span><strong>Everything is handled for you.</strong> Voice, SMS routing and carrier webhooks are configured automatically. Number renewal is billed from your AI Caller credits.</span>
+        <span><strong>Carrier routing is handled for you.</strong> AI Caller configures voice, inbound SMS routing and webhooks automatically. Outbound SMS stays disabled until the required carrier registration is approved. Number renewal is billed from your AI Caller credits.</span>
       </div>
     </div>
   );
