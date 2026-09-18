@@ -18,7 +18,8 @@
     "worker": "tsx worker/index.ts",
     "worker:dev": "tsx watch worker/index.ts",
     "voice-gateway": "tsx voice/gateway.ts",
-    "voice-gateway:dev": "tsx watch voice/gateway.ts"
+    "voice-gateway:dev": "tsx watch voice/gateway.ts",
+    "test:browser:m7": "node scripts/milestone7-browser-smoke.mjs"
   },
   "dependencies": {
     "better-auth": "^1.7.5",
