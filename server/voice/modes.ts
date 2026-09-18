@@ -39,26 +39,31 @@ function parseMinute(value: string | null) {
   return hour * 60 + minute;
 }
 
-function isWithinHours(
+export function isWithinBusinessHours(
   hours: Awaited<ReturnType<typeof getBusinessSetup>>["hours"],
   day: number,
   minuteOfDay: number,
 ) {
   const today = hours.find((row) => row.dayOfWeek === day);
-  if (!today?.enabled) return false;
-  const open = parseMinute(today.openTime);
-  const close = parseMinute(today.closeTime);
-  if (open == null || close == null) return false;
-  if (open === close) return true;
-  if (open < close) return minuteOfDay >= open && minuteOfDay < close;
+  if (today?.enabled) {
+    const open = parseMinute(today.openTime);
+    const close = parseMinute(today.closeTime);
+    if (open != null && close != null) {
+      if (open === close) return true;
+      if (open < close && minuteOfDay >= open && minuteOfDay < close) return true;
+      if (open > close && minuteOfDay >= open) return true;
+    }
+  }
 
-  if (minuteOfDay >= open) return true;
   const previousDay = (day + 6) % 7;
   const previous = hours.find((row) => row.dayOfWeek === previousDay);
   if (!previous?.enabled) return false;
   const previousOpen = parseMinute(previous.openTime);
   const previousClose = parseMinute(previous.closeTime);
-  return previousOpen != null && previousClose != null && previousOpen > previousClose && minuteOfDay < previousClose;
+  return previousOpen != null
+    && previousClose != null
+    && previousOpen > previousClose
+    && minuteOfDay < previousClose;
 }
 
 export async function resolveInboundVoiceMode(workspaceId: string, now = new Date()) {
@@ -70,7 +75,7 @@ export async function resolveInboundVoiceMode(workspaceId: string, now = new Dat
     return "AI_FIRST" as const;
   }
   const local = localDayAndMinute(now, business.profile.timezone);
-  return isWithinHours(business.hours, local.day, local.minuteOfDay)
+  return isWithinBusinessHours(business.hours, local.day, local.minuteOfDay)
     ? "AI_FIRST" as const
     : "AFTER_HOURS" as const;
 }
