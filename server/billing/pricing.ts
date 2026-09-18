@@ -25,7 +25,7 @@ export type UsageLine = { unit: HostedPricingUnit; units: number };
 
 function ceilDiv(left: bigint, right: bigint) {
   if (right <= BigInt(0)) throw new Error("Pricing divisor must be positive.");
-  return (left + right - 1n) / right;
+  return (left + right - BigInt(1)) / right;
 }
 
 function safeNumber(value: bigint, label: string) {
@@ -60,7 +60,7 @@ export function quoteHostedUsage(rates: HostedRate[], lines: UsageLine[]) {
       BigInt(rate.unitsPerCost),
     );
     const retail = ceilDiv(
-      cost * 10_00BigInt(0),
+      cost * BigInt(10_000),
       BigInt(10_000 - rate.targetMarginBps),
     );
 
@@ -70,7 +70,7 @@ export function quoteHostedUsage(rates: HostedRate[], lines: UsageLine[]) {
     if (!usedRates.some((candidate) => candidate.id === rate.id)) usedRates.push(rate);
   }
 
-  const credits = retailMicros === BigInt(0) ? 0 : ceilDiv(retailMicros, 1_00BigInt(0));
+  const credits = retailMicros === BigInt(0) ? 0 : ceilDiv(retailMicros, BigInt(1_000));
   return {
     credits: safeNumber(credits, "Credit charge"),
     providerCostMicros: safeNumber(providerCostMicros, "Provider cost"),
