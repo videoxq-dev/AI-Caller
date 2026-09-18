@@ -197,13 +197,6 @@ async function recordingBytes(initialUrl: string, fetcher: typeof fetch) {
 }
 
 async function recordVoiceUsage(workspaceId: string, call: NonNullable<Awaited<ReturnType<typeof getVoiceCallByExternalId>>>) {
-  const [existing] = await db.select({ id: usageEvents.id }).from(usageEvents).where(and(
-    eq(usageEvents.workspaceId, workspaceId),
-    eq(usageEvents.referenceType, "VOICE_CALL"),
-    eq(usageEvents.referenceId, call.id),
-  )).limit(1);
-  if (existing) return;
-
   try {
     await db.insert(usageEvents).values({
       workspaceId,
@@ -217,7 +210,7 @@ async function recordVoiceUsage(workspaceId: string, call: NonNullable<Awaited<R
       creditsCharged: 0,
       referenceType: "VOICE_CALL",
       referenceId: call.id,
-    });
+    }).onConflictDoNothing();
   } catch (error) {
     logger.error({ err: error, workspaceId, callId: call.id }, "Failed to persist voice usage event");
   }
