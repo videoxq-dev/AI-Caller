@@ -20,7 +20,17 @@ export async function GET(request: Request) {
       getManagedPhoneNumber(context.workspace.id),
       canManage ? getCreditBalance(context.workspace.id) : Promise.resolve(null),
     ]);
-    return Response.json({ number, creditBalance, canManage }, { headers: { "cache-control": "no-store" } });
+    const visibleNumber = number && !canManage ? {
+      id: number.id,
+      phoneNumber: number.phoneNumber,
+      countryCode: number.countryCode,
+      administrativeArea: number.administrativeArea,
+      locality: number.locality,
+      numberType: number.numberType,
+      status: number.status,
+      failureReason: number.failureReason,
+    } : number;
+    return Response.json({ number: visibleNumber, creditBalance, canManage }, { headers: { "cache-control": "no-store" } });
   } catch (error) {
     return toErrorResponse(error);
   }
