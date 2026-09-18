@@ -56,6 +56,41 @@ async function readWebhookBody(request: Request) {
   return Buffer.concat(chunks).toString("utf8");
 }
 
+function safeEventPayload(event: NormalizedSmsEvent) {
+  return event.type === "MESSAGE_RECEIVED"
+    ? { type: event.type, externalMessageId: event.externalMessageId, from: normalizePhone(event.from), to: normalizePhone(event.to) }
+    : { type: event.type, externalMessageId: event.externalMessageId, status: event.status };
+}
+
+function jobFromEvent(
+  workspaceId: string,
+  provider: SmsProviderName,
+  webhookEventId: string,
+  event: Extract<NormalizedSmsEvent, { type: "MESSAGE_RECEIVED" }>,
+): SmsInboundResponseJob {
+  return smsInboundResponseJobSchema.parse({
+    workspaceId,
+    provider,
+    webhookEventId,
+    externalMessageId: event.externalMessageId,
+    customerNumber: normalizePhone(event.from),
+    destinationNumber: normalizePhone(event.to),
+    text: event.text,
+  });
+}
+
+function queuedJobFromPayload(workspaceId: string, provider: SmsProviderName, eventId: string, payload: Record<string, unknown>) {
+  return smsInboundResponseJobSchema.safeParse({
+    workspaceId,
+    provider,
+    webhookEventId: eventId,
+    externalMessageId: payload.externalMessageId,
+    customerNumber: payload.customerNumber,
+    destinationNumber: payload.destinationNumber,
+    text: payload.text,
+  });
+}
+
 function webhookUrl(provider: SmsProviderName, workspaceId: string) {
   return `${getEnv().BETTER_AUTH_URL.replace(/\/$/, "")}/api/webhooks/sms/${provider}/${workspaceId}`;
 }
