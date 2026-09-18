@@ -251,7 +251,7 @@ export async function retrieveTelnyxNumberOrder(orderId: string, fetcher: typeof
     const requestId = orderId.replace(/^e2e-order-/, "");
     return {
       id: orderId,
-      status: "success",
+      status: "pending",
       requirements_met: true,
       customer_reference: `e2e:${requestId}`,
       phone_numbers: [],
