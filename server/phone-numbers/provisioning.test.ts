@@ -141,6 +141,50 @@ describe("managed phone provisioning lifecycle", () => {
     expect((await db.select().from(creditWallets))[0].balance).toBe(10_000);
   });
 
+  it("settles a concurrently reconciled carrier activation only once", async () => {
+    await db.insert(hostedPhoneNumbers).values({
+      workspaceId,
+      provider: "telnyx",
+      providerOrderId: "order-concurrent",
+      providerOrderPhoneNumberId: "order-number-concurrent",
+      provisionRequestId: requestId,
+      phoneNumber: "+12025550200",
+      countryCode: "US",
+      numberType: "local",
+      status: "PROVISIONING",
+      messagingReadiness: "NOT_REGISTERED",
+      providerMonthlyCostMicros: 1_000_000,
+      providerUpfrontCostMicros: 0,
+      monthlyCredits: 2000,
+      purchaseCredits: 2000,
+      voiceConnectionId: "call-control-1",
+      messagingProfileId: "messaging-profile-1",
+      reconcileAfter: new Date(0),
+    });
+    platform.retrieveTelnyxNumberOrder.mockResolvedValue({
+      id: "order-concurrent",
+      status: "pending",
+      requirements_met: true,
+    });
+    platform.retrieveTelnyxOrderPhoneNumber.mockResolvedValue({
+      id: "order-number-concurrent",
+      phone_number: "+12025550200",
+      status: "success",
+      requirements_met: true,
+    });
+
+    await Promise.all([
+      processPendingPhoneNumberProvisioning(),
+      processPendingPhoneNumberProvisioning(),
+    ]);
+
+    const [stored] = await db.select().from(hostedPhoneNumbers);
+    expect(stored.status).toBe("ACTIVE");
+    expect((await db.select().from(creditWallets))[0].balance).toBe(8_000);
+    expect(await db.select().from(usageEvents)).toHaveLength(1);
+    expect((await db.select().from(capabilityBindings)).map((row) => row.capability).sort()).toEqual(["SMS", "VOICE"]);
+  });
+
   it("keeps the number provisioning when the order is final but account inventory is not active", async () => {
     platform.findOwnedTelnyxNumber.mockResolvedValue({
       id: "owned-number-pending",
