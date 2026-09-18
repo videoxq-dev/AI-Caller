@@ -1,3 +1,4 @@
+import { sql } from "drizzle-orm";
 import {
   boolean,
   index,
@@ -15,6 +16,7 @@ import { user } from "./auth";
 
 export const workspaceStatus = pgEnum("workspace_status", ["ACTIVE", "SUSPENDED"]);
 export const membershipRole = pgEnum("membership_role", ["OWNER", "ADMIN", "STAFF"]);
+export const workspaceInvitationStatus = pgEnum("workspace_invitation_status", ["PENDING", "ACCEPTED", "REVOKED", "EXPIRED"]);
 export const licenseSource = pgEnum("license_source", ["JVZOO", "MANUAL"]);
 export const licenseStatus = pgEnum("license_status", ["ACTIVE", "REFUNDED", "CHARGEBACK", "CANCELLED"]);
 export const aiAgentStatus = pgEnum("ai_agent_status", ["DRAFT", "ACTIVE", "PAUSED"]);
@@ -40,6 +42,30 @@ export const memberships = pgTable(
   (table) => [
     primaryKey({ columns: [table.workspaceId, table.userId], name: "memberships_pk" }),
     index("memberships_user_idx").on(table.userId),
+  ],
+);
+
+export const workspaceInvitations = pgTable(
+  "workspace_invitations",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    workspaceId: uuid("workspace_id").notNull().references(() => workspaces.id, { onDelete: "cascade" }),
+    email: text("email").notNull(),
+    role: membershipRole("role").notNull(),
+    tokenHash: text("token_hash").notNull().unique(),
+    status: workspaceInvitationStatus("status").default("PENDING").notNull(),
+    invitedByUserId: text("invited_by_user_id").notNull().references(() => user.id, { onDelete: "cascade" }),
+    expiresAt: timestamp("expires_at", { withTimezone: true, mode: "date" }).notNull(),
+    acceptedAt: timestamp("accepted_at", { withTimezone: true, mode: "date" }),
+    createdAt: timestamp("created_at", { withTimezone: true, mode: "date" }).defaultNow().notNull(),
+    updatedAt: timestamp("updated_at", { withTimezone: true, mode: "date" }).defaultNow().notNull(),
+  },
+  (table) => [
+    index("workspace_invitations_workspace_idx").on(table.workspaceId, table.createdAt),
+    index("workspace_invitations_email_idx").on(table.email),
+    uniqueIndex("workspace_invitations_workspace_email_pending_uq")
+      .on(table.workspaceId, table.email)
+      .where(sql`${table.status} = 'PENDING'`),
   ],
 );
 
