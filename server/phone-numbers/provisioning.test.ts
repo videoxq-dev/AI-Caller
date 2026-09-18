@@ -29,8 +29,8 @@ const platform = vi.hoisted(() => ({
 vi.mock("@/server/providers/telnyx-platform", () => platform);
 
 import { closeDatabase, db } from "@/db";
-import { capabilityBindings, creditWallets, hostedPhoneNumbers, usageEvents, workspaces } from "@/db/schema";
-import { processPendingPhoneNumberProvisioning, provisionManagedPhoneNumber } from "./service";
+import { capabilityBindings, creditWallets, hostedPhoneNumbers, integrations, usageEvents, workspaces } from "@/db/schema";
+import { processPendingPhoneNumberProvisioning, provisionManagedPhoneNumber, releaseManagedPhoneNumber } from "./service";
 
 const requestId = "11111111-1111-4111-8111-111111111111";
 
@@ -312,6 +312,45 @@ describe("managed phone provisioning lifecycle", () => {
     expect(platform.deleteTelnyxMessagingProfile).toHaveBeenCalledWith("messaging-profile-1");
     expect((await db.select().from(creditWallets))[0].balance).toBe(10_000);
     expect(await db.select().from(usageEvents)).toHaveLength(0);
+  });
+
+  it("preserves BYOP capability routes when the last managed number is released", async () => {
+    const [integration] = await db.insert(integrations).values({
+      workspaceId,
+      category: "COMMUNICATION",
+      provider: "telnyx",
+      mode: "BYOP",
+      status: "CONNECTED",
+    }).returning();
+    await db.insert(capabilityBindings).values([
+      { workspaceId, capability: "VOICE", mode: "BYOP", integrationId: integration.id },
+      { workspaceId, capability: "SMS", mode: "BYOP", integrationId: integration.id },
+    ]);
+    const [number] = await db.insert(hostedPhoneNumbers).values({
+      workspaceId,
+      provider: "telnyx",
+      providerNumberId: "owned-number-release",
+      phoneNumber: "+12025550200",
+      countryCode: "US",
+      numberType: "local",
+      status: "ACTIVE",
+      messagingReadiness: "READY",
+      providerMonthlyCostMicros: 1_000_000,
+      providerUpfrontCostMicros: 0,
+      monthlyCredits: 2000,
+      purchaseCredits: 2000,
+      currentPeriodStart: new Date(),
+      currentPeriodEnd: new Date(Date.now() + 30 * 24 * 60 * 60_000),
+      nextBillingAt: new Date(Date.now() + 30 * 24 * 60 * 60_000),
+    }).returning();
+
+    await expect(releaseManagedPhoneNumber(workspaceId, number.id)).resolves.toMatchObject({
+      status: "RELEASED",
+    });
+
+    const bindings = await db.select().from(capabilityBindings);
+    expect(bindings).toHaveLength(2);
+    expect(bindings.every((binding) => binding.mode === "BYOP" && binding.integrationId === integration.id)).toBe(true);
   });
 
   it("preserves a failed outcome on an idempotent retry instead of reporting accepted provisioning", async () => {
