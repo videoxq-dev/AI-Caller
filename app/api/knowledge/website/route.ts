@@ -1,0 +1,33 @@
+import { z } from "zod";
+import { resolveWorkspaceContext } from "@/server/auth/workspace-context";
+import { AppError, toErrorResponse } from "@/server/http/errors";
+import { parseInput } from "@/server/http/validation";
+import { saveKnowledgeSource } from "@/server/knowledge/repository";
+import { importWebsiteText } from "@/server/knowledge/website-import";
+
+const schema = z.object({ url: z.string().trim().min(1).max(2000) });
+
+export async function POST(request: Request) {
+  try {
+    const context = await resolveWorkspaceContext(request.headers);
+    const input = parseInput(schema, await request.json());
+    try {
+      const imported = await importWebsiteText(input.url);
+      const source = await saveKnowledgeSource(context.workspace.id, {
+        kind: "WEBSITE",
+        label: imported.label,
+        sourceUrl: imported.sourceUrl,
+        content: imported.content,
+      });
+      return Response.json({ source: { ...source, content: undefined } }, { status: 201 });
+    } catch (error) {
+      throw new AppError(
+        "KNOWLEDGE_IMPORT_FAILED",
+        error instanceof Error ? error.message : "Unable to import website knowledge.",
+        422,
+      );
+    }
+  } catch (error) {
+    return toErrorResponse(error);
+  }
+}
