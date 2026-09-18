@@ -387,23 +387,6 @@ export async function appendMessage(workspaceId: string, conversationId: string,
   });
 }
 
-export async function setConversationHandlingMode(
-  workspaceId: string,
-  conversationId: string,
-  mode: "AI" | "HUMAN",
-  assignedUserId: string | null,
-) {
-  const now = new Date();
-  const [conversation] = await db.update(conversations).set({
-    handlingMode: mode,
-    assignedUserId,
-    aiPausedAt: mode === "HUMAN" ? now : null,
-    updatedAt: now,
-  }).where(and(eq(conversations.workspaceId, workspaceId), eq(conversations.id, conversationId))).returning();
-  if (!conversation) throw new AppError("CONVERSATION_NOT_FOUND", "Conversation not found.", 404);
-  return conversation;
-}
-
 export async function getConversationById(workspaceId: string, conversationId: string) {
   const [conversation] = await db.select().from(conversations).where(and(
     eq(conversations.workspaceId, workspaceId),
