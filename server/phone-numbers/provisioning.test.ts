@@ -121,6 +121,51 @@ describe("managed phone provisioning lifecycle", () => {
     expect((await db.select().from(creditWallets))[0].balance).toBe(8_000);
   });
 
+  it("keeps the number provisioning when the order is final but account inventory is not active", async () => {
+    platform.findOwnedTelnyxNumber.mockResolvedValue({
+      id: "owned-number-pending",
+      phone_number: "+12025550200",
+      status: "pending",
+    });
+
+    const number = await provisionManagedPhoneNumber(workspaceId, {
+      phoneNumber: "+12025550200",
+      requestId,
+    });
+
+    expect(number).toMatchObject({
+      status: "PROVISIONING",
+      messagingReadiness: "NOT_REGISTERED",
+    });
+    expect((await db.select().from(capabilityBindings))).toHaveLength(0);
+    expect((await db.select().from(usageEvents))).toHaveLength(0);
+    expect((await db.select().from(creditWallets))[0].balance).toBe(8_000);
+  });
+
+  it("keeps carrier requirement orders non-active until requirements are actually satisfied", async () => {
+    platform.retrieveTelnyxNumberOrder.mockResolvedValue({
+      id: "order-1",
+      status: "pending",
+      requirements_met: false,
+    });
+    platform.retrieveTelnyxOrderPhoneNumber.mockResolvedValue({
+      id: "order-number-1",
+      phone_number: "+12025550200",
+      status: "pending",
+      requirements_met: false,
+    });
+
+    const number = await provisionManagedPhoneNumber(workspaceId, {
+      phoneNumber: "+12025550200",
+      requestId,
+    });
+
+    expect(number).toMatchObject({ status: "PROVISIONING" });
+    expect(number?.failureReason).toContain("requires additional number-order information");
+    expect((await db.select().from(capabilityBindings))).toHaveLength(0);
+    expect((await db.select().from(usageEvents))).toHaveLength(0);
+  });
+
   it("keeps an ambiguous carrier timeout reconcilable and adopts the number before charging/refunding again", async () => {
     platform.orderTelnyxNumber.mockRejectedValueOnce(new ProviderRequestError("Provider connection timed out.", 504));
     const number = await provisionManagedPhoneNumber(workspaceId, {
