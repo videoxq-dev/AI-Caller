@@ -1,5 +1,6 @@
 import { getEnv } from "@/server/env";
 import { providerJson } from "@/server/providers/http";
+import { isE2EProviderFixtureMode } from "@/server/providers/e2e-fixtures";
 
 const BASE_URL = "https://api.telnyx.com/v2";
 
@@ -24,6 +25,21 @@ type CostInformation = {
 type RegionInformation = {
   region_name?: string;
   region_type?: string;
+};
+
+export type TelnyxNumberOrderPhoneNumber = {
+  id?: string;
+  phone_number?: string;
+  status?: string;
+  requirements_met?: boolean;
+};
+
+export type TelnyxNumberOrder = {
+  id?: string;
+  status?: string;
+  requirements_met?: boolean;
+  customer_reference?: string;
+  phone_numbers?: TelnyxNumberOrderPhoneNumber[];
 };
 
 function telnyxConfig() {
@@ -56,6 +72,21 @@ export async function searchTelnyxNumbers(input: {
   startsWith?: string | null;
   limit?: number;
 }, fetcher: typeof fetch = fetch): Promise<TelnyxAvailableNumber[]> {
+  if (isE2EProviderFixtureMode()) {
+    const area = input.areaCode?.replace(/\D/g, "") || (input.numberType === "toll_free" ? "888" : "202");
+    const phoneNumber = input.numberType === "toll_free" ? "+18885550100" : `+1${area}5550200`;
+    return [{
+      phoneNumber,
+      countryCode: "US",
+      administrativeArea: input.administrativeArea?.trim().toUpperCase() || "DC",
+      locality: input.locality?.trim() || "Washington",
+      numberType: input.numberType ?? "local",
+      monthlyCost: "1.00",
+      upfrontCost: "0.00",
+      currency: "USD",
+      bestEffort: false,
+    }];
+  }
   const { apiKey } = telnyxConfig();
   const params = new URLSearchParams();
   params.set("filter[country_code]", input.countryCode);
@@ -106,6 +137,7 @@ export async function createTelnyxCallControlApplication(
   webhookUrl: string,
   fetcher: typeof fetch = fetch,
 ) {
+  if (isE2EProviderFixtureMode()) return `e2e-call-control-${workspaceId}`;
   const { apiKey } = telnyxConfig();
   const response = await providerJson<{ data?: { id?: string } }>(`${BASE_URL}/call_control_applications`, {
     method: "POST",
@@ -127,6 +159,7 @@ export async function createTelnyxMessagingProfile(
   webhookUrl: string,
   fetcher: typeof fetch = fetch,
 ) {
+  if (isE2EProviderFixtureMode()) return `e2e-messaging-profile-${workspaceId}`;
   const { apiKey } = telnyxConfig();
   const response = await providerJson<{ data?: { id?: string } }>(`${BASE_URL}/messaging_profiles`, {
     method: "POST",
@@ -146,26 +179,35 @@ export async function createTelnyxMessagingProfile(
 
 export async function orderTelnyxNumber(input: {
   workspaceId: string;
+  requestId: string;
   phoneNumber: string;
   connectionId: string;
   messagingProfileId: string;
-}, fetcher: typeof fetch = fetch) {
-  const { apiKey } = telnyxConfig();
-  const response = await providerJson<{
-    data?: {
-      id?: string;
-      status?: string;
-      requirements_met?: boolean;
-      phone_numbers?: Array<{ id?: string; phone_number?: string; status?: string; requirements_met?: boolean }>;
+}, fetcher: typeof fetch = fetch): Promise<TelnyxNumberOrder> {
+  const customerReference = `ai-caller:${input.workspaceId}:${input.requestId}`;
+  if (isE2EProviderFixtureMode()) {
+    return {
+      id: `e2e-order-${input.requestId}`,
+      status: "pending",
+      requirements_met: true,
+      customer_reference: customerReference,
+      phone_numbers: [{
+        id: `e2e-number-${input.phoneNumber.replace(/\D/g, "")}`,
+        phone_number: input.phoneNumber,
+        status: "pending",
+        requirements_met: true,
+      }],
     };
-  }>(`${BASE_URL}/number_orders`, {
+  }
+  const { apiKey } = telnyxConfig();
+  const response = await providerJson<{ data?: TelnyxNumberOrder }>(`${BASE_URL}/number_orders`, {
     method: "POST",
     headers: authHeaders(apiKey),
     body: JSON.stringify({
       phone_numbers: [{ phone_number: input.phoneNumber }],
       connection_id: input.connectionId,
       messaging_profile_id: input.messagingProfileId,
-      customer_reference: `ai-caller:${input.workspaceId}`,
+      customer_reference: customerReference,
     }),
   }, fetcher);
   const order = response.data;
@@ -173,7 +215,45 @@ export async function orderTelnyxNumber(input: {
   return order;
 }
 
+export async function retrieveTelnyxNumberOrder(orderId: string, fetcher: typeof fetch = fetch): Promise<TelnyxNumberOrder> {
+  if (isE2EProviderFixtureMode()) {
+    const requestId = orderId.replace(/^e2e-order-/, "");
+    return {
+      id: orderId,
+      status: "success",
+      requirements_met: true,
+      customer_reference: `e2e:${requestId}`,
+      phone_numbers: [],
+    };
+  }
+  const { apiKey } = telnyxConfig();
+  const response = await providerJson<{ data?: TelnyxNumberOrder }>(
+    `${BASE_URL}/number_orders/${encodeURIComponent(orderId)}`,
+    { headers: authHeaders(apiKey) },
+    fetcher,
+  );
+  if (!response.data?.id) throw new Error("Telnyx did not return the phone number order.");
+  return response.data;
+}
+
+export async function retrieveTelnyxOrderPhoneNumber(orderPhoneNumberId: string, fetcher: typeof fetch = fetch): Promise<TelnyxNumberOrderPhoneNumber> {
+  if (isE2EProviderFixtureMode()) {
+    return { id: orderPhoneNumberId, status: "success", requirements_met: true };
+  }
+  const { apiKey } = telnyxConfig();
+  const response = await providerJson<{ data?: TelnyxNumberOrderPhoneNumber }>(
+    `${BASE_URL}/number_order_phone_numbers/${encodeURIComponent(orderPhoneNumberId)}`,
+    { headers: authHeaders(apiKey) },
+    fetcher,
+  );
+  if (!response.data?.id) throw new Error("Telnyx did not return the ordered phone number.");
+  return response.data;
+}
+
 export async function findOwnedTelnyxNumber(phoneNumber: string, fetcher: typeof fetch = fetch) {
+  if (isE2EProviderFixtureMode()) {
+    return { id: `e2e-number-${phoneNumber.replace(/\D/g, "")}`, phone_number: phoneNumber, status: "active" };
+  }
   const { apiKey } = telnyxConfig();
   const digits = phoneNumber.replace(/\D/g, "");
   const params = new URLSearchParams({ "filter[phone_number]": digits, "page[size]": "20" });
@@ -186,6 +266,7 @@ export async function findOwnedTelnyxNumber(phoneNumber: string, fetcher: typeof
 }
 
 export async function releaseTelnyxNumber(providerNumberId: string, fetcher: typeof fetch = fetch) {
+  if (isE2EProviderFixtureMode()) return;
   const { apiKey } = telnyxConfig();
   await providerJson(`${BASE_URL}/phone_numbers/${encodeURIComponent(providerNumberId)}`, {
     method: "DELETE",
@@ -194,6 +275,7 @@ export async function releaseTelnyxNumber(providerNumberId: string, fetcher: typ
 }
 
 export async function deleteTelnyxCallControlApplication(id: string, fetcher: typeof fetch = fetch) {
+  if (isE2EProviderFixtureMode()) return;
   const { apiKey } = telnyxConfig();
   await providerJson(`${BASE_URL}/call_control_applications/${encodeURIComponent(id)}`, {
     method: "DELETE",
@@ -202,6 +284,7 @@ export async function deleteTelnyxCallControlApplication(id: string, fetcher: ty
 }
 
 export async function deleteTelnyxMessagingProfile(id: string, fetcher: typeof fetch = fetch) {
+  if (isE2EProviderFixtureMode()) return;
   const { apiKey } = telnyxConfig();
   await providerJson(`${BASE_URL}/messaging_profiles/${encodeURIComponent(id)}`, {
     method: "DELETE",
