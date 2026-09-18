@@ -16,17 +16,37 @@ import { resolveWorkspaceContext } from "@/server/auth/workspace-context";
 import { getBusinessSetup, getSetupStatus } from "@/server/domain/onboarding/repository";
 import { saveBusinessSetupAction } from "../actions";
 import { SetupProgressPanel } from "../setup-progress";
+import { IndustryField } from "./industry-field";
 import "./business-profile.css";
 
 const defaultDays = [
-  { day: "Monday", open: "8:00 AM", close: "6:00 PM", enabled: true },
-  { day: "Tuesday", open: "8:00 AM", close: "6:00 PM", enabled: true },
-  { day: "Wednesday", open: "8:00 AM", close: "6:00 PM", enabled: true },
-  { day: "Thursday", open: "8:00 AM", close: "6:00 PM", enabled: true },
-  { day: "Friday", open: "8:00 AM", close: "6:00 PM", enabled: true },
-  { day: "Saturday", open: "9:00 AM", close: "3:00 PM", enabled: true },
+  { day: "Monday", open: "08:00", close: "18:00", enabled: true },
+  { day: "Tuesday", open: "08:00", close: "18:00", enabled: true },
+  { day: "Wednesday", open: "08:00", close: "18:00", enabled: true },
+  { day: "Thursday", open: "08:00", close: "18:00", enabled: true },
+  { day: "Friday", open: "08:00", close: "18:00", enabled: true },
+  { day: "Saturday", open: "09:00", close: "15:00", enabled: true },
   { day: "Sunday", open: "", close: "", enabled: false },
 ];
+
+const timeOptions = Array.from({ length: 24 }, (_, hour) => {
+  const value = `${String(hour).padStart(2, "0")}:00`;
+  const suffix = hour >= 12 ? "PM" : "AM";
+  const displayHour = hour % 12 || 12;
+  return { value, label: `${displayHour}:00 ${suffix}` };
+});
+
+const timezones = ["UTC", ...Intl.supportedValuesOf("timeZone").filter((zone) => zone !== "UTC")];
+
+function normalizeStoredTime(value: string | null | undefined, fallback: string) {
+  if (!value) return fallback;
+  if (/^(?:[01]\\d|2[0-3]):00$/.test(value)) return value;
+  const match = /^(\\d{1,2}):00\\s*(AM|PM)$/i.exec(value.trim());
+  if (!match) return fallback;
+  let hour = Number(match[1]) % 12;
+  if (match[2].toUpperCase() === "PM") hour += 12;
+  return `${String(hour).padStart(2, "0")}:00`;
+}
 
 export default async function BusinessProfilePage() {
   const context = await resolveWorkspaceContext(await headers());
@@ -37,7 +57,7 @@ export default async function BusinessProfilePage() {
   const hourMap = new Map(saved.hours.map((row) => [row.dayOfWeek, row]));
   const days = defaultDays.map((day, index) => {
     const stored = hourMap.get(index);
-    return stored ? { day: day.day, open: stored.openTime ?? day.open, close: stored.closeTime ?? day.close, enabled: stored.enabled } : day;
+    return stored ? { day: day.day, open: normalizeStoredTime(stored.openTime, day.open), close: normalizeStoredTime(stored.closeTime, day.close), enabled: stored.enabled } : day;
   });
   const profile = saved.profile;
 
@@ -61,7 +81,7 @@ export default async function BusinessProfilePage() {
               <div className="sectionHeading"><span className="sectionIcon blue"><StoreIcon size={22} /></span><div><h2>Business details</h2><p>Basic information about your business.</p></div></div>
               <div className="fieldGrid twoColumns">
                 <label className="businessField"><span>Business name</span><input type="text" name="businessName" defaultValue={profile?.businessName ?? ""} required /></label>
-                <label className="businessField"><span>Industry</span><select name="industry" defaultValue={profile?.industry ?? "Other"}><option>Auto Repair</option><option>Plumbing</option><option>HVAC</option><option>Roofing</option><option>Dental</option><option>Med Spa</option><option>Cleaning</option><option>Other</option></select></label>
+                <IndustryField initialIndustry={profile?.industry} />
                 <label className="businessField"><span>Website URL</span><input type="url" name="website" defaultValue={profile?.websiteUrl ?? ""} /></label>
                 <label className="businessField"><span>Business phone</span><input type="tel" name="phone" defaultValue={profile?.phone ?? ""} /><small>We&apos;ll use this number for your AI assistant to handle calls.</small></label>
               </div>
@@ -82,16 +102,16 @@ export default async function BusinessProfilePage() {
             <section className="formSection hoursSection">
               <div className="hoursHeader">
                 <div className="sectionHeading compact"><span className="sectionIcon purple"><ClockIcon size={22} /></span><div><h2>Hours of operation</h2><p>Set the days and times your business is open.</p></div></div>
-                <label className="timezoneField"><span>Timezone</span><input name="timezone" defaultValue={profile?.timezone ?? "UTC"} /></label>
+                <label className="timezoneField"><span>Timezone</span><select name="timezone" defaultValue={profile?.timezone ?? "UTC"}>{timezones.map((timezone) => <option value={timezone} key={timezone}>{timezone}</option>)}</select></label>
               </div>
               <div className="hoursTable">
                 {days.map((row, index) => (
                   <div className={`hoursRow ${!row.enabled ? "closed" : ""}`} key={row.day}>
                     <strong>{row.day}</strong>
                     <label className="toggle" aria-label={`${row.day} open`}><input name={`hours.${index}.enabled`} type="checkbox" defaultChecked={row.enabled} /><span /></label>
-                    <select name={`hours.${index}.openTime`} aria-label={`${row.day} opening time`} defaultValue={row.open || "8:00 AM"}><option>8:00 AM</option><option>9:00 AM</option><option>10:00 AM</option></select>
+                    <select name={`hours.${index}.openTime`} aria-label={`${row.day} opening time`} defaultValue={row.open || "08:00"}>{timeOptions.map((option) => <option value={option.value} key={option.value}>{option.label}</option>)}</select>
                     <span className="toLabel">to</span>
-                    <select name={`hours.${index}.closeTime`} aria-label={`${row.day} closing time`} defaultValue={row.close || "6:00 PM"}><option>3:00 PM</option><option>5:00 PM</option><option>6:00 PM</option><option>7:00 PM</option></select>
+                    <select name={`hours.${index}.closeTime`} aria-label={`${row.day} closing time`} defaultValue={row.close || "18:00"}>{timeOptions.map((option) => <option value={option.value} key={option.value}>{option.label}</option>)}</select>
                   </div>
                 ))}
               </div>
