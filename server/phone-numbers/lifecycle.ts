@@ -43,8 +43,8 @@ export function carrierProvisioningOutcome(
   if ((orderStatus && FINAL_FAILURE.has(orderStatus)) || (numberStatus && FINAL_FAILURE.has(numberStatus))) {
     return { kind: "FAILED", orderStatus, numberStatus };
   }
-  if (orderStatus && numberStatus && FINAL_SUCCESS.has(orderStatus) && FINAL_SUCCESS.has(numberStatus)) {
-    return { kind: "READY", orderStatus, numberStatus };
+  if (numberStatus && FINAL_SUCCESS.has(numberStatus)) {
+    return { kind: "READY", orderStatus ?? "pending", numberStatus };
   }
   return { kind: "PENDING", orderStatus, numberStatus };
 }
