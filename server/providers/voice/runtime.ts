@@ -4,7 +4,7 @@ import { decryptIntegrationCredentials, type EncryptedSecretEnvelope } from "@/s
 import { resolveProviderRoute } from "@/server/providers/resolver";
 import type { VoiceProvider } from "@/server/providers/contracts";
 import { createTelnyxVoiceProvider } from "./telnyx";
-import { getHostedPhoneRuntimeRecord } from "@/server/phone-numbers/service";
+import { getHostedPhoneWebhookRecord } from "@/server/phone-numbers/service";
 import { getHostedTelnyxCredentials } from "@/server/providers/telnyx-platform";
 import { createE2EVoiceProvider, isE2EProviderFixtureMode } from "@/server/providers/e2e-fixtures";
 
@@ -16,6 +16,7 @@ export type VoiceRuntime = {
   providerName: VoiceProviderName;
   integrationId: string | null;
   receiverNumber: string;
+  serviceStatus: "ACTIVE" | "PAST_DUE" | "SUSPENDED" | null;
   provider: VoiceProvider;
 };
 
@@ -42,7 +43,7 @@ export async function resolveVoiceRuntime(
   if (requestedProvider !== "telnyx") throw new Error("Inbound voice currently uses the managed Telnyx adapter.");
 
   if (route.mode === "HOSTED") {
-    const number = await getHostedPhoneRuntimeRecord(workspaceId);
+    const number = await getHostedPhoneWebhookRecord(workspaceId);
     const hosted = getHostedTelnyxCredentials();
     const base = createTelnyxVoiceProvider({
       apiKey: hosted.apiKey,
@@ -55,6 +56,7 @@ export async function resolveVoiceRuntime(
       providerName: "telnyx",
       integrationId: null,
       receiverNumber: normalizePhone(number.phoneNumber),
+      serviceStatus: number.status as "ACTIVE" | "PAST_DUE" | "SUSPENDED",
       provider: isE2EProviderFixtureMode() ? createE2EVoiceProvider(base) : base,
     };
   }
@@ -84,6 +86,7 @@ export async function resolveVoiceRuntime(
     providerName: "telnyx",
     integrationId: integration.id,
     receiverNumber: normalizePhone(phone),
+    serviceStatus: null,
     provider: (() => {
       const base = createTelnyxVoiceProvider({
         apiKey: required(secret, "apiKey", "Telnyx API key"),
