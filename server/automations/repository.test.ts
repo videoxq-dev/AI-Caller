@@ -13,6 +13,7 @@ import {
   createAutomationRun,
   listRecoverableAutomationRuns,
   releaseAutomationRunForRetry,
+  saveAutomationSetting,
 } from "./repository";
 
 let workspaceId = "";
@@ -42,6 +43,16 @@ describe("automation run claiming", () => {
 
   afterAll(async () => {
     await closeDatabase();
+  });
+
+  it("rejects a configured assignee who is not a workspace member", async () => {
+    await expect(saveAutomationSetting(workspaceId, "QUALIFIED_LEAD_ASSIGNMENT", {
+      enabled: true,
+      config: { assignedUserId: "not-a-workspace-member", notifyInApp: true },
+    })).rejects.toMatchObject({
+      code: "AUTOMATION_ASSIGNEE_INVALID",
+      status: 400,
+    });
   });
 
   it("does not claim a scheduled run before its due time", async () => {
