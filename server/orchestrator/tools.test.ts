@@ -82,7 +82,6 @@ describe("orchestrator lead updates", () => {
     ));
     expect(lead.status).toBe("QUALIFIED");
   });
-});
 
   it("qualifies leads only after configured required answers are persisted", async () => {
     await db.insert(aiAgents).values({
@@ -132,4 +131,4 @@ describe("orchestrator lead updates", () => {
     expect(lead.qualificationData).toEqual({ service: "Commercial HVAC repair", urgency: "Today" });
     expect(lead.qualificationCompletedAt).toBeInstanceOf(Date);
   });
-
+});
