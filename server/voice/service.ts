@@ -6,7 +6,6 @@ import { db } from "@/db";
 import { usageEvents } from "@/db/schema";
 import {
   appendMessage,
-  getOrCreateContactByIdentity,
   getOrCreateOpenConversation,
 } from "@/server/domain/core/repository";
 import { normalizePhone } from "@/server/domain/core/schemas";
@@ -28,6 +27,7 @@ import {
 } from "@/server/providers/webhooks/repository";
 import { getVoiceConfig } from "./config";
 import { buildVoiceGatewayStreamUrl } from "./gateway-auth";
+import { resolveVoiceContact } from "./identity";
 import { resolveInboundVoiceMode } from "./modes";
 import {
   appendVoiceTranscriptSegment,
@@ -234,10 +234,7 @@ export function createVoiceWebhookService(dependencies: VoiceServiceDependencies
         throw new AppError("VOICE_DESTINATION_MISMATCH", "The inbound call destination does not match this workspace.", 409);
       }
 
-      const contact = await getOrCreateContactByIdentity(workspaceId, {
-        channel: "PHONE",
-        externalId: event.from,
-      });
+      const contact = await resolveVoiceContact(workspaceId, event.from);
       const conversation = await getOrCreateOpenConversation(workspaceId, contact.id);
       const [mode, voice] = await Promise.all([
         resolveInboundVoiceMode(workspaceId, event.occurredAt ?? new Date()),
