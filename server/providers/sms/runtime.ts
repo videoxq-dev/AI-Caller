@@ -1,4 +1,5 @@
 import { getHostedPhoneRuntimeRecord, getHostedPhoneWebhookRecord } from "@/server/phone-numbers/service";
+import type { MessagingReadiness } from "@/server/phone-numbers/lifecycle";
 import { getHostedTelnyxCredentials } from "@/server/providers/telnyx-platform";
 import { decryptIntegrationCredentials, type EncryptedSecretEnvelope } from "@/server/security/secrets";
 import { getPrivateIntegration } from "@/server/domain/integrations/repository";
@@ -19,7 +20,7 @@ export type SmsRuntime = {
   integrationId: string | null;
   senderNumber: string;
   serviceStatus: "ACTIVE" | "PAST_DUE" | "SUSPENDED" | null;
-  messagingReadiness: "NOT_REGISTERED" | "PENDING" | "READY" | "REJECTED" | null;
+  messagingReadiness: MessagingReadiness | null;
   provider: SMSProvider;
 };
 
@@ -73,7 +74,7 @@ async function hostedNumber(workspaceId: string, allowSuspended: boolean) {
   return {
     senderNumber: normalizePhone(number.phoneNumber),
     serviceStatus: number.status as "ACTIVE" | "PAST_DUE" | "SUSPENDED",
-    messagingReadiness: number.messagingReadiness as "NOT_REGISTERED" | "PENDING" | "READY" | "REJECTED",
+    messagingReadiness: number.messagingReadiness as MessagingReadiness,
   };
 }
 
