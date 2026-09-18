@@ -58,6 +58,9 @@ export const leadInputSchema = z.object({
   serviceRequested: optionalText(500),
   source: optionalText(100),
   estimatedValue: z.number().int().nonnegative().nullable().optional(),
+  qualificationData: z.record(z.string(), z.string().trim().max(2000)).optional(),
+  qualificationScore: z.number().int().min(0).max(100).optional(),
+  qualificationCompletedAt: z.coerce.date().nullable().optional(),
   assignedUserId: optionalText(200),
 });
 
