@@ -72,7 +72,7 @@ describe("automation run claiming", () => {
     });
     await db.update(automationRuns).set({
       status: "RUNNING",
-      startedAt: new Date(Date.now() - 11 * 60_000),
+      startedAt: new Date(Date.now() - 3 * 60_000),
     });
     expect((await claimAutomationRun(workspaceId, run.id))?.status).toBe("RUNNING");
   });
