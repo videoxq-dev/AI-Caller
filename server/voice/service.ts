@@ -560,7 +560,10 @@ export function createVoiceWebhookService(dependencies: VoiceServiceDependencies
 
     if (event.type === "CALL_HANGUP") {
       const endedAt = event.occurredAt ?? new Date();
-      const durationSeconds = Math.max(0, Math.round((endedAt.getTime() - call.startedAt.getTime()) / 1000));
+      const billableStart = call.answeredAt ?? call.startedAt;
+      const durationSeconds = call.answeredAt
+        ? Math.max(0, Math.round((endedAt.getTime() - billableStart.getTime()) / 1000))
+        : 0;
       const updated = await updateVoiceCall(workspaceId, call.id, {
         status: "COMPLETED",
         endedAt,
