@@ -94,6 +94,8 @@ describe("managed phone provisioning lifecycle", () => {
     const number = await provisionManagedPhoneNumber(workspaceId, {
       phoneNumber: "+12025550200",
       requestId,
+      expectedPurchaseCredits: 2000,
+      expectedMonthlyCredits: 2000,
     });
 
     expect(platform.orderTelnyxNumber).toHaveBeenCalledWith(expect.objectContaining({
@@ -123,6 +125,22 @@ describe("managed phone provisioning lifecycle", () => {
     expect((await db.select().from(creditWallets))[0].balance).toBe(8_000);
   });
 
+  it("rejects a changed carrier quote before reserving credits or ordering the number", async () => {
+    await expect(provisionManagedPhoneNumber(workspaceId, {
+      phoneNumber: "+12025550200",
+      requestId,
+      expectedPurchaseCredits: 1999,
+      expectedMonthlyCredits: 2000,
+    })).rejects.toMatchObject({
+      code: "PHONE_NUMBER_PRICE_CHANGED",
+      status: 409,
+    });
+
+    expect(platform.orderTelnyxNumber).not.toHaveBeenCalled();
+    expect(await db.select().from(hostedPhoneNumbers)).toHaveLength(0);
+    expect((await db.select().from(creditWallets))[0].balance).toBe(10_000);
+  });
+
   it("keeps the number provisioning when the order is final but account inventory is not active", async () => {
     platform.findOwnedTelnyxNumber.mockResolvedValue({
       id: "owned-number-pending",
@@ -133,6 +151,8 @@ describe("managed phone provisioning lifecycle", () => {
     const number = await provisionManagedPhoneNumber(workspaceId, {
       phoneNumber: "+12025550200",
       requestId,
+      expectedPurchaseCredits: 2000,
+      expectedMonthlyCredits: 2000,
     });
 
     expect(number).toMatchObject({
@@ -160,6 +180,8 @@ describe("managed phone provisioning lifecycle", () => {
     const number = await provisionManagedPhoneNumber(workspaceId, {
       phoneNumber: "+12025550200",
       requestId,
+      expectedPurchaseCredits: 2000,
+      expectedMonthlyCredits: 2000,
     });
 
     expect(number).toMatchObject({ status: "PROVISIONING" });
@@ -173,6 +195,8 @@ describe("managed phone provisioning lifecycle", () => {
     const number = await provisionManagedPhoneNumber(workspaceId, {
       phoneNumber: "+12025550200",
       requestId,
+      expectedPurchaseCredits: 2000,
+      expectedMonthlyCredits: 2000,
     });
 
     expect(number).toMatchObject({ status: "RECONCILING" });
@@ -234,6 +258,8 @@ describe("managed phone provisioning lifecycle", () => {
     await provisionManagedPhoneNumber(workspaceId, {
       phoneNumber: "+12025550200",
       requestId,
+      expectedPurchaseCredits: 2000,
+      expectedMonthlyCredits: 2000,
     });
 
     const [row] = await db.select().from(hostedPhoneNumbers);
@@ -265,6 +291,8 @@ describe("managed phone provisioning lifecycle", () => {
     await expect(provisionManagedPhoneNumber(workspaceId, {
       phoneNumber: "+12025550200",
       requestId,
+      expectedPurchaseCredits: 2000,
+      expectedMonthlyCredits: 2000,
     })).rejects.toThrow("Invalid order");
 
     expect(platform.deleteTelnyxCallControlApplication).toHaveBeenCalledWith("call-control-1");
