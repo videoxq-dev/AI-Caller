@@ -20,8 +20,11 @@ import { isE2EProviderFixtureMode } from "@/server/providers/e2e-fixtures";
 import { resolveVoiceRuntime, type VoiceProviderName, type VoiceRuntime } from "@/server/providers/voice/runtime";
 import {
   claimProviderWebhookEvent,
+  claimQueuedProviderWebhookEvent,
   completeProviderWebhookEvent,
   failProviderWebhookEvent,
+  markProviderWebhookQueued,
+  releaseProviderWebhookEventForRetry,
 } from "@/server/providers/webhooks/repository";
 import { getVoiceConfig } from "./config";
 import { buildVoiceGatewayStreamUrl } from "./gateway-auth";
@@ -550,12 +553,27 @@ export function createVoiceWebhookService(dependencies: VoiceServiceDependencies
       let failed = 0;
 
       for (const event of events) {
+        const payload = safeEventPayload(event);
         const claim = await claimProviderWebhookEvent(workspaceId, {
           provider: `${providerName}-voice`,
           externalEventId: event.externalEventId,
-          payload: safeEventPayload(event),
+          payload,
         });
-        if (claim.status === "PROCESSED" || claim.status === "FAILED" || claim.status === "PROCESSING" || claim.status === "QUEUED") {
+        if (claim.status === "PROCESSED" || claim.status === "FAILED" || claim.status === "PROCESSING") {
+          duplicates += 1;
+          continue;
+        }
+
+        if (claim.status === "RECEIVED") {
+          const queued = await markProviderWebhookQueued(workspaceId, claim.eventId, payload);
+          if (!queued) {
+            duplicates += 1;
+            continue;
+          }
+        }
+
+        const processing = await claimQueuedProviderWebhookEvent(workspaceId, claim.eventId);
+        if (!processing) {
           duplicates += 1;
           continue;
         }
@@ -575,6 +593,7 @@ export function createVoiceWebhookService(dependencies: VoiceServiceDependencies
             failed += 1;
             continue;
           }
+          await releaseProviderWebhookEventForRetry(workspaceId, claim.eventId, error);
           throw error;
         }
       }
