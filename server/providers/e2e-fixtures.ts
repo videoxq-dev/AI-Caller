@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import type { AIProvider, CalendarProvider, SMSProvider, WhatsAppProvider } from "./contracts";
+import type { AIProvider, CalendarProvider, SMSProvider, VoiceProvider, WhatsAppProvider } from "./contracts";
 
 function nextUtcDay(hour: number, minute = 0) {
   const now = new Date();
@@ -126,5 +126,20 @@ export function createE2EWhatsAppProvider(base: WhatsAppProvider): WhatsAppProvi
     async sendTemplate() {
       return { externalId: `e2e-wa-template-${randomUUID()}`, status: "SENT" };
     },
+  };
+}
+
+
+export function createE2EVoiceProvider(base: VoiceProvider): VoiceProvider {
+  if (!isE2EProviderFixtureMode()) throw new Error("E2E provider fixtures are not available outside guarded CI localhost mode.");
+  return {
+    verifyWebhook: (input) => base.verifyWebhook(input),
+    normalizeWebhook: (input) => base.normalizeWebhook(input),
+    async answer() {},
+    async startTranscription() {},
+    async stopTranscription() {},
+    async startRecording() {},
+    async speak() {},
+    async hangup() {},
   };
 }
