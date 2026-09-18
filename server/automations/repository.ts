@@ -259,3 +259,12 @@ export async function listAutomationDeliveries(workspaceId: string, runId: strin
     eq(automationDeliveries.runId, runId),
   )).orderBy(asc(automationDeliveries.createdAt));
 }
+
+
+export async function listRunnablePendingAutomationRuns(limit = 100) {
+  const now = new Date();
+  return db.select().from(automationRuns).where(and(
+    eq(automationRuns.status, "PENDING"),
+    or(isNull(automationRuns.scheduledFor), lte(automationRuns.scheduledFor, now)),
+  )).orderBy(asc(automationRuns.createdAt)).limit(Math.min(Math.max(limit, 1), 500));
+}
