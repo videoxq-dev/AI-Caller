@@ -6,3 +6,7 @@ CREATE INDEX IF NOT EXISTS "leads_workspace_qualification_idx"
 
 CREATE INDEX IF NOT EXISTS "appointments_workspace_created_idx"
   ON "appointments" ("workspace_id", "created_at");
+
+CREATE INDEX IF NOT EXISTS "credit_ledger_workspace_created_idx"
+  ON "credit_ledger" ("workspace_id", "created_at");
+
