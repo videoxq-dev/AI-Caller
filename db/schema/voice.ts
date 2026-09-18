@@ -41,7 +41,7 @@ export const voiceCalls = pgTable(
     durationSeconds: integer("duration_seconds"),
     recordingStatus: voiceRecordingStatus("recording_status").default("PENDING").notNull(),
     recordingExternalId: text("recording_external_id"),
-    recordingUri: text("recording_uri"),
+    recordingObjectKey: text("recording_object_key"),
     recordingMimeType: text("recording_mime_type"),
     recordingDurationSeconds: integer("recording_duration_seconds"),
     recordingConsentStatus: voiceRecordingConsentStatus("recording_consent_status").default("ANNOUNCED").notNull(),
