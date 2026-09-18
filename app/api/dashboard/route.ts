@@ -16,7 +16,7 @@ export async function GET(request: Request) {
   try {
     const context = await resolveWorkspaceContext(request.headers);
     const url = new URL(request.url);
-    const days = daysSchema.parse(url.searchParams.get("days") ?? "30");
+    const days = daysSchema.parse(url.searchParams.get("days") ?? "30") as DashboardDays;
     return Response.json(await getDashboardOverview(context.workspace.id, days));
   } catch (error) {
     return toErrorResponse(error);
