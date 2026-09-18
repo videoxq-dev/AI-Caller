@@ -60,7 +60,7 @@ describe("WhatsApp outbound service", () => {
       contentType: "TEXT",
       body: "Hello",
       provider: "whatsapp",
-      externalMessageId: options.id ?? `wamid.in.${createdAt.getTime()}.${occurredAt.getTime()}`,
+      externalMessageId: options.id ?? `wamid.in.${createdAt.getTime()}.${occurredAt?.getTime() ?? "missing"}`,
       status: "RECEIVED",
       metadata: occurredAt ? { occurredAt: occurredAt.toISOString() } : {},
       createdAt,
