@@ -401,10 +401,7 @@ export async function releaseManagedPhoneNumber(workspaceId: string, phoneNumber
   } catch (error) {
     throw new AppError("PHONE_NUMBER_RELEASE_PENDING", "The carrier could not release this number immediately. AI Caller will retry automatically.", 503);
   }
-  await db.delete(capabilityBindings).where(and(
-    eq(capabilityBindings.workspaceId, workspaceId),
-    inArray(capabilityBindings.capability, ["VOICE", "SMS"]),
-  ));
+  await clearHostedTelephonyBindingsIfUnused(workspaceId);
   const [released] = await db.select().from(hostedPhoneNumbers).where(eq(hostedPhoneNumbers.id, row.id)).limit(1);
   return publicNumber(released);
 }
