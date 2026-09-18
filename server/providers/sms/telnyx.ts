@@ -1,5 +1,5 @@
 import { createPublicKey, verify } from "node:crypto";
-import { providerJson } from "../http";
+import { providerJson } from "../http";\nimport { parseTelnyxWebhookPublicKey, verifyTelnyxWebhookSignature } from "../telnyx-webhook";
 import type { NormalizedSmsEvent, SMSProvider, SmsWebhookInput } from "../contracts";
 import { mapSmsDeliveryStatus, normalizeOccurredAt, requiredString } from "./common";
 
@@ -59,21 +59,7 @@ export function createTelnyxSmsProvider(config: TelnyxConfig): SMSProvider {
     },
 
     async verifyWebhook(input: SmsWebhookInput) {
-      const timestamp = input.request.headers.get("telnyx-timestamp") ?? input.request.headers.get("webhook-timestamp");
-      const signature = input.request.headers.get("telnyx-signature-ed25519") ?? input.request.headers.get("webhook-signature");
-      if (!timestamp || !signature) return false;
-      const epochSeconds = Number(timestamp);
-      if (!Number.isFinite(epochSeconds) || Math.abs(Date.now() / 1000 - epochSeconds) > 300) return false;
-      try {
-        return verify(
-          null,
-          Buffer.from(`${timestamp}|${input.rawBody}`, "utf8"),
-          publicKey,
-          Buffer.from(signature, "base64"),
-        );
-      } catch {
-        return false;
-      }
+      return verifyTelnyxWebhookSignature(input.request, input.rawBody, publicKey);
     },
 
     async normalizeWebhook(input: SmsWebhookInput): Promise<NormalizedSmsEvent[]> {
