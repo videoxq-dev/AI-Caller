@@ -99,16 +99,42 @@ function enumerateUtcDays(start: Date, end: Date) {
 async function loadSummary(workspaceId: string, start: Date, end: Date, previousStart: Date) {
   const result = await db.execute(sql`
     SELECT
-      (SELECT count(*)::int
-         FROM conversations
-        WHERE workspace_id = ${workspaceId}
-          AND created_at >= ${start}
-          AND created_at < ${end}) AS inquiries_current,
-      (SELECT count(*)::int
-         FROM conversations
-        WHERE workspace_id = ${workspaceId}
-          AND created_at >= ${previousStart}
-          AND created_at < ${start}) AS inquiries_previous,
+      (SELECT count(*)::int FROM (
+         SELECT conversation_id
+           FROM messages
+          WHERE workspace_id = ${workspaceId}
+            AND direction = 'INBOUND'
+            AND sender_type = 'CUSTOMER'
+            AND created_at >= ${start}
+            AND created_at < ${end}
+          GROUP BY conversation_id
+         UNION
+         SELECT conversation_id
+           FROM voice_calls
+          WHERE workspace_id = ${workspaceId}
+            AND answered_at IS NOT NULL
+            AND started_at >= ${start}
+            AND started_at < ${end}
+          GROUP BY conversation_id
+       ) current_inquiries) AS inquiries_current,
+      (SELECT count(*)::int FROM (
+         SELECT conversation_id
+           FROM messages
+          WHERE workspace_id = ${workspaceId}
+            AND direction = 'INBOUND'
+            AND sender_type = 'CUSTOMER'
+            AND created_at >= ${previousStart}
+            AND created_at < ${start}
+          GROUP BY conversation_id
+         UNION
+         SELECT conversation_id
+           FROM voice_calls
+          WHERE workspace_id = ${workspaceId}
+            AND answered_at IS NOT NULL
+            AND started_at >= ${previousStart}
+            AND started_at < ${start}
+          GROUP BY conversation_id
+       ) previous_inquiries) AS inquiries_previous,
       (SELECT count(*)::int FROM (
          SELECT conversation_id
            FROM messages
@@ -186,22 +212,34 @@ async function loadSummary(workspaceId: string, start: Date, end: Date, previous
 }
 
 async function loadSeries(workspaceId: string, start: Date, end: Date): Promise<DashboardSeriesPoint[]> {
-  const conversationDay = sql<string>`to_char(${conversations.createdAt} AT TIME ZONE 'UTC', 'YYYY-MM-DD')`;
   const leadDay = sql<string>`to_char(${leads.qualificationCompletedAt} AT TIME ZONE 'UTC', 'YYYY-MM-DD')`;
   const appointmentDay = sql<string>`to_char(${appointments.createdAt} AT TIME ZONE 'UTC', 'YYYY-MM-DD')`;
   const takeoverDay = sql<string>`to_char(${conversationHandlingEvents.createdAt} AT TIME ZONE 'UTC', 'YYYY-MM-DD')`;
 
   const [inquiryRows, aiResult, leadRows, appointmentRows, takeoverRows] = await Promise.all([
-    db.select({
-      day: conversationDay,
-      count: sql<number>`count(*)::int`,
-    }).from(conversations)
-      .where(and(
-        eq(conversations.workspaceId, workspaceId),
-        gte(conversations.createdAt, start),
-        lt(conversations.createdAt, end),
-      ))
-      .groupBy(conversationDay),
+    db.execute(sql`
+      SELECT day, count(*)::int AS count
+        FROM (
+          SELECT to_char(created_at AT TIME ZONE 'UTC', 'YYYY-MM-DD') AS day, conversation_id
+            FROM messages
+           WHERE workspace_id = ${workspaceId}
+             AND direction = 'INBOUND'
+             AND sender_type = 'CUSTOMER'
+             AND created_at >= ${start}
+             AND created_at < ${end}
+           GROUP BY day, conversation_id
+          UNION
+          SELECT to_char(started_at AT TIME ZONE 'UTC', 'YYYY-MM-DD') AS day, conversation_id
+            FROM voice_calls
+           WHERE workspace_id = ${workspaceId}
+             AND answered_at IS NOT NULL
+             AND started_at >= ${start}
+             AND started_at < ${end}
+           GROUP BY day, conversation_id
+        ) daily_inquiries
+       GROUP BY day
+       ORDER BY day
+    `),
     db.execute(sql`
       SELECT day, count(*)::int AS count
         FROM (
@@ -275,7 +313,7 @@ async function loadSeries(workspaceId: string, start: Date, end: Date): Promise<
     });
   }
 
-  for (const row of inquiryRows) {
+  for (const row of inquiryRows.rows as Array<{ day: string; count: number }>) {
     const point = byDay.get(row.day);
     if (point) point.inquiries = numberValue(row.count);
   }
