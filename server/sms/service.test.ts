@@ -203,12 +203,15 @@ describe("SMS webhook service", () => {
     const { service, jobs } = serviceHarness(runtime, async () => orchestratorReply("This reply must be gated."));
 
     await service.ingest(request(), workspaceId, "twilio");
-    await expect(service.processInboundJob(jobs[0])).rejects.toMatchObject({
-      code: "SMS_REGISTRATION_REQUIRED",
-      status: 409,
+    await expect(service.processInboundJob(jobs[0])).resolves.toMatchObject({
+      replied: false,
+      outboundBlocked: true,
+      messagingReadiness: "NOT_REGISTERED",
     });
     expect(provider.send).not.toHaveBeenCalled();
     expect((await db.select().from(messages)).filter((message) => message.direction === "OUTBOUND")).toHaveLength(0);
+    expect((await db.select().from(messages)).filter((message) => message.direction === "INBOUND")).toHaveLength(1);
+    expect((await db.select().from(providerWebhookEvents))[0].status).toBe("PROCESSED");
   });
 
   it("charges hosted credits once after a successful worker send", async () => {
