@@ -40,6 +40,11 @@ export async function saveAISetupAction(formData: FormData) {
   const context = await resolveWorkspaceContext(await headers());
   const completeStep = field(formData, "intent") === "continue";
   const guardrails = formData.getAll("guardrails").map((value) => String(value));
+  const qualificationConfig = (() => {
+    const raw = field(formData, "qualificationConfig");
+    if (!raw) return { enabled: false, criteria: [] };
+    try { return JSON.parse(raw) as unknown; } catch { return { enabled: false, criteria: [] }; }
+  })();
   const input = aiAgentInputSchema.parse({
     name: field(formData, "assistantName"),
     primaryGoal: field(formData, "primaryGoal"),
@@ -49,6 +54,14 @@ export async function saveAISetupAction(formData: FormData) {
     advancedInstructions: null,
     openingMessage: null,
     guardrails,
+    voice: {
+      profileKey: field(formData, "voiceProfile") || "ava-us-1",
+      language: field(formData, "voiceLanguage") || "en-US",
+      speakingRate: Number(field(formData, "voiceSpeed") || "1"),
+      recordingPolicy: field(formData, "recordingPolicy") || "ANNOUNCE",
+      afterHoursEnabled: field(formData, "afterHoursEnabled") !== "off",
+    },
+    qualification: qualificationConfig,
     completeStep,
   });
   await saveAgentSetup(context.workspace.id, input);
