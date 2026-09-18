@@ -9,6 +9,8 @@ import { parseInput } from "@/server/http/validation";
 const provisionSchema = z.object({
   phoneNumber: z.string().trim().regex(/^\+1\d{10}$/),
   requestId: z.string().uuid(),
+  expectedPurchaseCredits: z.number().int().positive(),
+  expectedMonthlyCredits: z.number().int().positive(),
   replaceCurrent: z.boolean().default(false),
 });
 
