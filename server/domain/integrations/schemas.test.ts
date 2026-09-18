@@ -34,10 +34,12 @@ describe("communication setup provider validation", () => {
     expect(communicationSetupSchema.safeParse(validCommunicationSetup()).success).toBe(true);
   });
 
-  it("rejects hosted or non-Telnyx voice until those adapters are implemented", () => {
+  it("allows unsupported voice routes only as drafts and rejects them on completion", () => {
     const base = validCommunicationSetup();
-    expect(communicationSetupSchema.safeParse({ ...base, voice: { ...base.voice, mode: "HOSTED", provider: null } }).success).toBe(false);
-    expect(communicationSetupSchema.safeParse({ ...base, voice: { ...base.voice, provider: "twilio" } }).success).toBe(false);
+    expect(communicationSetupSchema.safeParse({ ...base, voice: { ...base.voice, mode: "HOSTED", provider: null }, completeStep: false }).success).toBe(true);
+    expect(communicationSetupSchema.safeParse({ ...base, voice: { ...base.voice, provider: "twilio" }, completeStep: false }).success).toBe(true);
+    expect(communicationSetupSchema.safeParse({ ...base, voice: { ...base.voice, mode: "HOSTED", provider: null }, completeStep: true }).success).toBe(false);
+    expect(communicationSetupSchema.safeParse({ ...base, voice: { ...base.voice, provider: "twilio" }, completeStep: true }).success).toBe(false);
   });
 
   it("rejects non-communication providers for voice and SMS", () => {
