@@ -2,3 +2,20 @@
 @media(max-width:1250px){.unifiedInboxGrid{grid-template-columns:300px minmax(430px,1fr) 290px}.inboxShell{grid-template-columns:78px 1fr}.inboxSidebarNav{padding:18px 8px}.appBrand{justify-content:center;padding:0}.appBrand strong,.appNavItem>span:not(.appNavIcon),.sidebarHelp div{display:none}.appNavItem{grid-template-columns:1fr;justify-items:center;padding:0}.navBadge{position:absolute;right:4px;top:4px}.sidebarHelp{left:12px;right:12px;justify-content:center}.sidebarHelp>span{width:32px;height:32px}.profileCopy{display:none}.profileBlock{grid-template-columns:40px 15px}.inboxTopActions{gap:6px}.creditsButton{display:none}}
 @media(max-width:980px){.unifiedInboxGrid{grid-template-columns:290px minmax(0,1fr)}.contactColumn{display:none}.globalSearch{width:min(480px,55vw)}.threadActions button:nth-child(3),.threadActions button:nth-child(4){display:none}}
 @media(max-width:700px){.inboxShell{display:block}.inboxSidebarNav{position:fixed;left:0;right:0;bottom:0;top:auto;z-index:60;width:auto;height:66px;display:flex;align-items:center;padding:6px 8px;border-top:1px solid #dfe6ef;border-right:0}.appBrand,.sidebarHelp{display:none}.appNav{width:100%;grid-template-columns:repeat(8,1fr);gap:2px;margin:0}.appNavItem{min-height:50px}.appNavItem:nth-child(n+6){display:none}.inboxTopbar{height:62px;padding:8px 10px}.globalSearch{width:100%;max-width:none}.inboxTopActions{display:none}.unifiedInboxGrid{height:calc(100vh - 62px);display:block;padding-bottom:66px}.conversationColumn{height:100%;border-right:0}.threadColumn,.contactColumn{display:none}.conversationList{height:calc(100vh - 204px)}.conversationColumnHeader{height:54px}}
+
+.voiceCallArtifact{max-width:86%;margin:6px auto 16px;padding:13px 14px}
+.voiceCallArtifact .callPlayback{grid-template-columns:auto minmax(0,1fr);align-items:center}
+.voiceCallDuration{min-width:38px;color:#385474;font-size:10px;font-weight:800}
+.voiceCallArtifact audio{width:100%;min-width:0;height:34px}
+.voiceCallActions{display:flex;justify-content:flex-end;margin-top:9px}
+.voiceCallActions button{height:30px;padding:0 10px;border:1px solid #8ab7f3;border-radius:6px;color:#1769ee;background:#fff;font-size:9px;font-weight:750;cursor:pointer}
+.voiceCallActions button:disabled{opacity:.55;cursor:not-allowed}
+.voiceCallError{color:#b42318!important}
+.voiceTranscriptPanel{display:grid;gap:5px;margin-top:10px;padding-top:10px;border-top:1px solid #d8e5f4}
+.voiceTranscriptPanel>p{margin:0;color:#65758c;font-size:9px}
+.voiceTranscriptSegment{display:grid;grid-template-columns:42px 78px minmax(0,1fr);gap:7px;align-items:start;width:100%;padding:7px 8px;border:0;border-radius:6px;color:#2d405b;background:#fff;text-align:left;cursor:pointer}
+.voiceTranscriptSegment:hover{background:#edf5ff}
+.voiceTranscriptSegment>span{color:#7e8da2;font-size:8px;font-variant-numeric:tabular-nums}
+.voiceTranscriptSegment>strong{font-size:8.5px}
+.voiceTranscriptSegment>p{margin:0!important;color:#52657e!important;font-size:9px!important;line-height:1.45}
+@media(max-width:680px){.voiceCallArtifact{max-width:100%;margin-left:0;margin-right:0}.voiceTranscriptSegment{grid-template-columns:36px 68px minmax(0,1fr)}.voiceCallArtifact audio{height:32px}}
