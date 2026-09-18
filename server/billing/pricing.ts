@@ -24,7 +24,7 @@ export type HostedRate = {
 export type UsageLine = { unit: HostedPricingUnit; units: number };
 
 function ceilDiv(left: bigint, right: bigint) {
-  if (right <= 0n) throw new Error("Pricing divisor must be positive.");
+  if (right <= BigInt(0)) throw new Error("Pricing divisor must be positive.");
   return (left + right - 1n) / right;
 }
 
@@ -35,8 +35,8 @@ function safeNumber(value: bigint, label: string) {
 }
 
 export function quoteHostedUsage(rates: HostedRate[], lines: UsageLine[]) {
-  let providerCostMicros = 0n;
-  let retailMicros = 0n;
+  let providerCostMicros = BigInt(0);
+  let retailMicros = BigInt(0);
   const billedUnits: Record<string, number> = {};
   const usedRates: HostedRate[] = [];
 
@@ -60,7 +60,7 @@ export function quoteHostedUsage(rates: HostedRate[], lines: UsageLine[]) {
       BigInt(rate.unitsPerCost),
     );
     const retail = ceilDiv(
-      cost * 10_000n,
+      cost * 10_00BigInt(0),
       BigInt(10_000 - rate.targetMarginBps),
     );
 
@@ -70,7 +70,7 @@ export function quoteHostedUsage(rates: HostedRate[], lines: UsageLine[]) {
     if (!usedRates.some((candidate) => candidate.id === rate.id)) usedRates.push(rate);
   }
 
-  const credits = retailMicros === 0n ? 0 : ceilDiv(retailMicros, 1_000n);
+  const credits = retailMicros === BigInt(0) ? 0 : ceilDiv(retailMicros, 1_00BigInt(0));
   return {
     credits: safeNumber(credits, "Credit charge"),
     providerCostMicros: safeNumber(providerCostMicros, "Provider cost"),

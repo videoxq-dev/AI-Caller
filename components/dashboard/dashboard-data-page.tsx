@@ -283,7 +283,7 @@ export function DashboardDataPage() {
               <strong className="metricValue">{formatNumber(data.credit.balance)}</strong>
               <span className="metricLabel">Credit balance</span>
               <span className="metricChange">{formatNumber(data.credit.usedInPeriod)} used in period</span>
-              <Link className="topupOutline dashboardButtonLink" href="/settings">View usage</Link>
+              <Link className="topupOutline dashboardButtonLink" href="/settings/billing">Top up / usage</Link>
             </article>
           </section>
 

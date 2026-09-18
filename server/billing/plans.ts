@@ -51,6 +51,62 @@ export async function getWorkspacePlan(workspaceId: string) {
   return db.transaction((tx) => getWorkspacePlanInTransaction(tx, workspaceId));
 }
 
+export async function getWorkspaceSeatUsage(workspaceId: string) {
+  return db.transaction(async (tx) => {
+    const now = new Date();
+    const plan = await getWorkspacePlanInTransaction(tx, workspaceId);
+    const [members, pending] = await Promise.all([
+      activeSubUsers(tx, workspaceId),
+      pendingInvitations(tx, workspaceId, now),
+    ]);
+    return {
+      plan,
+      activeSubUsers: members,
+      pendingInvitations: pending,
+      usedSeats: members + pending,
+      availableSeats: Math.max(0, plan.subUserLimit - members - pending),
+    };
+  });
+}
+
+export async function assignWorkspacePlan(
+  workspaceId: string,
+  planId: PlanCode,
+  source: string,
+) {
+  return db.transaction(async (tx) => {
+    await lockSeats(tx, workspaceId);
+    const [target] = await tx.select().from(plans).where(eq(plans.id, planId)).limit(1);
+    if (!target || !target.active) throw new AppError("PLAN_NOT_AVAILABLE", "That plan is not available.", 409);
+
+    const now = new Date();
+    const [members, pending] = await Promise.all([
+      activeSubUsers(tx, workspaceId),
+      pendingInvitations(tx, workspaceId, now),
+    ]);
+    if (members + pending > target.subUserLimit) {
+      throw new AppError(
+        "PLAN_DOWNGRADE_BLOCKED",
+        `Remove team members or pending invitations before moving this workspace to ${target.name}.`,
+        409,
+        { activeSubUsers: members, pendingInvitations: pending, subUserLimit: target.subUserLimit },
+      );
+    }
+
+    const [assigned] = await tx.insert(workspacePlans).values({
+      workspaceId,
+      planId,
+      source,
+      assignedAt: now,
+      updatedAt: now,
+    }).onConflictDoUpdate({
+      target: workspacePlans.workspaceId,
+      set: { planId, source, updatedAt: now },
+    }).returning();
+    return assigned;
+  });
+}
+
 export async function ensureWorkspacePlan(
   workspaceId: string,
   planId: PlanCode = "PERSONAL",

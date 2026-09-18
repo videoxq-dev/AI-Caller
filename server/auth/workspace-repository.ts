@@ -1,6 +1,6 @@
 import { and, asc, eq } from "drizzle-orm";
 import { db } from "@/db";
-import { memberships, user, workspaces } from "@/db/schema";
+import { memberships, user, workspacePlans, workspaces } from "@/db/schema";
 
 type WorkspaceUser = {
   id: string;
@@ -108,6 +108,11 @@ export async function ensureDefaultWorkspace(user: WorkspaceUser): Promise<Works
       userId: user.id,
       role: "OWNER",
     });
+    await tx.insert(workspacePlans).values({
+      workspaceId: workspace.id,
+      planId: "PERSONAL",
+      source: "DEFAULT",
+    }).onConflictDoNothing();
 
     return {
       workspaceId: workspace.id,
