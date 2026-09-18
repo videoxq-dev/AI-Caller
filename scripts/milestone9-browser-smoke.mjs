@@ -173,6 +173,9 @@ try {
   await page.goto(`${baseUrl}/integrations`, { waitUntil: "networkidle" });
   await page.getByRole("heading", { name: "Integrations", exact: true }).waitFor({ timeout: 10_000 });
   await assertNoHorizontalOverflow(page, "Integrations shared AppNav mobile");
+  for (const destination of ["Automations", "Integrations", "Settings"]) {
+    assert(await page.getByRole("link", { name: destination, exact: true }).isVisible(), `${destination} is hidden from the mobile AppNav.`);
+  }
   await page.screenshot({ path: path.join(outputDir, "integrations-appnav-mobile.png"), fullPage: true });
 
   assert(runtimeErrors.length === 0, `Browser/runtime errors detected: ${runtimeErrors.join(" | ")}`);
