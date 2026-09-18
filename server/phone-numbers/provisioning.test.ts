@@ -258,7 +258,7 @@ describe("managed phone provisioning lifecycle", () => {
     });
 
     expect(number).toMatchObject({ status: "PROVISIONING" });
-    expect(number?.failureReason).toContain("requires additional number-order information");
+    expect(number?.failureReason).toBe("Additional carrier activation requirements are still pending.");
     expect((await db.select().from(capabilityBindings))).toHaveLength(0);
     expect((await db.select().from(usageEvents))).toHaveLength(0);
   });
