@@ -13,6 +13,8 @@ import {
   findOwnedTelnyxNumber,
   orderTelnyxNumber,
   releaseTelnyxNumber,
+  retrieveTelnyxNumberOrder,
+  retrieveTelnyxOrderPhoneNumber,
   searchTelnyxNumbers,
 } from "@/server/providers/telnyx-platform";
 import {
@@ -21,8 +23,10 @@ import {
   reserveCredits,
   settleCreditReservation,
 } from "@/server/credits/service";
+import { ProviderRequestError } from "@/server/providers/http";
 import { quoteHostedPhoneNumber } from "./pricing";
 import { addBillingMonth } from "./billing-period";
+import { carrierProvisioningOutcome } from "./lifecycle";
 
 export type ManagedNumberSearch = {
   phoneNumber: string;
@@ -44,6 +48,7 @@ function publicNumber(row: typeof hostedPhoneNumbers.$inferSelect | null | undef
     locality: row.locality,
     numberType: row.numberType,
     status: row.status,
+    messagingReadiness: row.messagingReadiness,
     monthlyCredits: row.monthlyCredits,
     purchaseCredits: row.purchaseCredits,
     currentPeriodEnd: row.currentPeriodEnd,
@@ -59,7 +64,7 @@ export async function getManagedPhoneNumber(workspaceId: string) {
     .where(and(
       eq(hostedPhoneNumbers.workspaceId, workspaceId),
       isNull(hostedPhoneNumbers.releasedAt),
-      inArray(hostedPhoneNumbers.status, ["PROVISIONING", "ACTIVE", "PAST_DUE", "SUSPENDED"]),
+      inArray(hostedPhoneNumbers.status, ["PROVISIONING", "RECONCILING", "ACTIVE", "PAST_DUE", "SUSPENDED"]),
     ))
     .orderBy(desc(hostedPhoneNumbers.createdAt))
     .limit(1);
@@ -71,7 +76,7 @@ async function privateManagedPhoneNumber(workspaceId: string) {
     .where(and(
       eq(hostedPhoneNumbers.workspaceId, workspaceId),
       isNull(hostedPhoneNumbers.releasedAt),
-      inArray(hostedPhoneNumbers.status, ["PROVISIONING", "ACTIVE", "PAST_DUE", "SUSPENDED"]),
+      inArray(hostedPhoneNumbers.status, ["PROVISIONING", "RECONCILING", "ACTIVE", "PAST_DUE", "SUSPENDED"]),
     ))
     .orderBy(desc(hostedPhoneNumbers.createdAt))
     .limit(1);
@@ -188,7 +193,7 @@ async function createProvisioningRecord(
       .where(and(
         eq(hostedPhoneNumbers.workspaceId, workspaceId),
         isNull(hostedPhoneNumbers.releasedAt),
-        inArray(hostedPhoneNumbers.status, ["PROVISIONING", "ACTIVE", "PAST_DUE", "SUSPENDED"]),
+        inArray(hostedPhoneNumbers.status, ["PROVISIONING", "RECONCILING", "ACTIVE", "PAST_DUE", "SUSPENDED"]),
       ))
       .orderBy(desc(hostedPhoneNumbers.createdAt))
       .limit(1);
@@ -459,7 +464,7 @@ async function clearHostedTelephonyBindingsIfUnused(workspaceId: string) {
   const [active] = await db.select({ id: hostedPhoneNumbers.id }).from(hostedPhoneNumbers).where(and(
     eq(hostedPhoneNumbers.workspaceId, workspaceId),
     isNull(hostedPhoneNumbers.releasedAt),
-    inArray(hostedPhoneNumbers.status, ["PROVISIONING", "ACTIVE", "PAST_DUE", "SUSPENDED"]),
+    inArray(hostedPhoneNumbers.status, ["PROVISIONING", "RECONCILING", "ACTIVE", "PAST_DUE", "SUSPENDED"]),
   )).limit(1);
   if (active) return;
   await db.delete(capabilityBindings).where(and(
