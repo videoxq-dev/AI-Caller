@@ -15,6 +15,7 @@ import {
 } from "./repository";
 
 const CUSTOMER_WINDOW_MS = 24 * 60 * 60 * 1000;
+const CUSTOMER_WINDOW_FUTURE_TOLERANCE_MS = 5 * 60 * 1000;
 const MAX_WHATSAPP_TEXT_CHARACTERS = 4096;
 
 type OutboundDependencies = {
@@ -78,7 +79,9 @@ async function destination(workspaceId: string, conversationId: string) {
 
 export async function isWhatsAppCustomerWindowOpen(workspaceId: string, conversationId: string, now = new Date()) {
   const lastInbound = await latestWhatsAppInboundAt(workspaceId, conversationId);
-  return Boolean(lastInbound && now.getTime() - lastInbound.getTime() <= CUSTOMER_WINDOW_MS);
+  if (!lastInbound) return false;
+  const ageMs = now.getTime() - lastInbound.getTime();
+  return ageMs >= -CUSTOMER_WINDOW_FUTURE_TOLERANCE_MS && ageMs <= CUSTOMER_WINDOW_MS;
 }
 
 export function createWhatsAppOutboundService(dependencies: OutboundDependencies) {
