@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useRouter, useSearchParams } from "next/navigation";
+import { useRouter } from "next/navigation";
 import { useEffect, useMemo, useState } from "react";
 import { AuthShell } from "@/components/auth-shell";
 import { CheckIcon, UsersIcon } from "@/components/icons";
@@ -10,14 +10,18 @@ type State = "pending" | "needs-auth" | "success" | "error";
 
 export default function TeamInvitePage() {
   const router = useRouter();
-  const searchParams = useSearchParams();
-  const token = searchParams.get("token") ?? "";
+  const [token, setToken] = useState<string | null>(null);
   const [state, setState] = useState<State>("pending");
   const [message, setMessage] = useState("Checking your invitation…");
-  const returnTo = useMemo(() => `/team/invite?token=${encodeURIComponent(token)}`, [token]);
+  const returnTo = useMemo(() => `/team/invite?token=${encodeURIComponent(token ?? "")}`, [token]);
+
+  useEffect(() => {
+    setToken(new URLSearchParams(window.location.search).get("token") ?? "");
+  }, []);
 
   useEffect(() => {
     let cancelled = false;
+    if (token === null) return;
     if (!token) {
       setState("error");
       setMessage("This invitation link is incomplete.");
