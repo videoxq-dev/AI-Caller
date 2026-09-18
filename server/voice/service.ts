@@ -581,6 +581,9 @@ export function createVoiceWebhookService(dependencies: VoiceServiceDependencies
       if (!(await runtime.provider.verifyWebhook(input))) {
         throw new AppError("INVALID_WEBHOOK_SIGNATURE", "Invalid voice webhook signature.", 401);
       }
+      if (runtime.mode === "HOSTED" && runtime.serviceStatus === "SUSPENDED") {
+        return { ok: true as const, processed: 0, duplicates: 0, failed: 0, suppressed: 1 };
+      }
       const events = await runtime.provider.normalizeWebhook(input);
       let processed = 0;
       let duplicates = 0;
