@@ -1,4 +1,4 @@
-import { and, asc, desc, eq, max, sql } from "drizzle-orm";
+import { and, asc, eq, max, sql } from "drizzle-orm";
 import { db } from "@/db";
 import { voiceCalls, voiceTranscriptSegments } from "@/db/schema";
 import { AppError } from "@/server/http/errors";
@@ -13,6 +13,7 @@ export type CreateVoiceCallInput = {
   fromNumber: string;
   toNumber: string;
   mode: "AI_FIRST" | "AFTER_HOURS" | "OVERFLOW";
+  recordingDisclosureVersion?: string | null;
   metadata?: Record<string, unknown>;
 };
 
@@ -54,6 +55,7 @@ export async function createVoiceCall(workspaceId: string, input: CreateVoiceCal
     fromNumber: input.fromNumber,
     toNumber: input.toNumber,
     mode: input.mode,
+    recordingDisclosureVersion: input.recordingDisclosureVersion ?? null,
     metadata: input.metadata ?? {},
   }).onConflictDoNothing().returning();
 
@@ -103,15 +105,8 @@ export async function getVoiceCallWithTranscript(workspaceId: string, callId: st
   const transcript = await db.select().from(voiceTranscriptSegments).where(and(
     eq(voiceTranscriptSegments.workspaceId, workspaceId),
     eq(voiceTranscriptSegments.voiceCallId, callId),
-  )).orderBy(asc(voiceTranscriptSegments.sequence));
+  )).orderBy(asc(voiceTranscriptSegments.sequence)).limit(2000);
   return { call, transcript };
-}
-
-export async function listVoiceCallsForConversation(workspaceId: string, conversationId: string) {
-  return db.select().from(voiceCalls).where(and(
-    eq(voiceCalls.workspaceId, workspaceId),
-    eq(voiceCalls.conversationId, conversationId),
-  )).orderBy(desc(voiceCalls.startedAt));
 }
 
 export async function appendVoiceTranscriptSegment(
