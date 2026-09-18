@@ -19,6 +19,7 @@ export const hostedPhoneNumbers = pgTable(
     provider: text("provider").default("telnyx").notNull(),
     providerNumberId: text("provider_number_id"),
     providerOrderId: text("provider_order_id"),
+    providerOrderPhoneNumberId: text("provider_order_phone_number_id"),
     providerOrderStatus: text("provider_order_status"),
     provisionRequestId: uuid("provision_request_id"),
     phoneNumber: text("phone_number").notNull(),
