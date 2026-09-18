@@ -1,5 +1,5 @@
 import { getEnv } from "@/server/env";
-import { providerJson } from "@/server/providers/http";
+import { ProviderRequestError, providerJson } from "@/server/providers/http";
 import { isE2EProviderFixtureMode } from "@/server/providers/e2e-fixtures";
 
 const BASE_URL = "https://api.telnyx.com/v2";
@@ -299,26 +299,41 @@ export async function findOwnedTelnyxNumber(phoneNumber: string, fetcher: typeof
 export async function releaseTelnyxNumber(providerNumberId: string, fetcher: typeof fetch = fetch) {
   if (isE2EProviderFixtureMode()) return;
   const { apiKey } = telnyxConfig();
-  await providerJson(`${BASE_URL}/phone_numbers/${encodeURIComponent(providerNumberId)}`, {
-    method: "DELETE",
-    headers: authHeaders(apiKey),
-  }, fetcher);
+  try {
+    await providerJson(`${BASE_URL}/phone_numbers/${encodeURIComponent(providerNumberId)}`, {
+      method: "DELETE",
+      headers: authHeaders(apiKey),
+    }, fetcher);
+  } catch (error) {
+    if (error instanceof ProviderRequestError && error.status === 404) return;
+    throw error;
+  }
 }
 
 export async function deleteTelnyxCallControlApplication(id: string, fetcher: typeof fetch = fetch) {
   if (isE2EProviderFixtureMode()) return;
   const { apiKey } = telnyxConfig();
-  await providerJson(`${BASE_URL}/call_control_applications/${encodeURIComponent(id)}`, {
-    method: "DELETE",
-    headers: authHeaders(apiKey),
-  }, fetcher);
+  try {
+    await providerJson(`${BASE_URL}/call_control_applications/${encodeURIComponent(id)}`, {
+      method: "DELETE",
+      headers: authHeaders(apiKey),
+    }, fetcher);
+  } catch (error) {
+    if (error instanceof ProviderRequestError && error.status === 404) return;
+    throw error;
+  }
 }
 
 export async function deleteTelnyxMessagingProfile(id: string, fetcher: typeof fetch = fetch) {
   if (isE2EProviderFixtureMode()) return;
   const { apiKey } = telnyxConfig();
-  await providerJson(`${BASE_URL}/messaging_profiles/${encodeURIComponent(id)}`, {
-    method: "DELETE",
-    headers: authHeaders(apiKey),
-  }, fetcher);
+  try {
+    await providerJson(`${BASE_URL}/messaging_profiles/${encodeURIComponent(id)}`, {
+      method: "DELETE",
+      headers: authHeaders(apiKey),
+    }, fetcher);
+  } catch (error) {
+    if (error instanceof ProviderRequestError && error.status === 404) return;
+    throw error;
+  }
 }
