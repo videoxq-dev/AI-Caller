@@ -52,12 +52,12 @@ describe("hosted API pricing", () => {
     });
   });
 
-  it("prices a conservative US hosted SMS segment at 20 credits", () => {
+  it("prices a conservative US hosted SMS segment at 23 credits", () => {
     const quote = quoteHostedUsage([
       {
         id: "sms",
         unit: "SMS_SEGMENT",
-        costMicros: 9000,
+        costMicros: 10000,
         unitsPerCost: 1,
         targetMarginBps: 5500,
         provider: "telnyx",
@@ -66,8 +66,8 @@ describe("hosted API pricing", () => {
       },
     ], [{ unit: "SMS_SEGMENT", units: 1 }]);
 
-    expect(quote.providerCostMicros).toBe(9000);
-    expect(quote.credits).toBe(20);
+    expect(quote.providerCostMicros).toBe(10000);
+    expect(quote.credits).toBe(23);
   });
 
   it("does not charge for zero billable units", () => {

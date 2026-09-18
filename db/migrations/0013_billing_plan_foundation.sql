@@ -101,4 +101,4 @@ VALUES
   ('AI_TEXT', 'openai', 'gpt-5.6-luna', 'AI_INPUT_TOKEN', 200000, 1000000, 5500, '{"currency":"USD"}'::jsonb),
   ('AI_TEXT', 'openai', 'gpt-5.6-luna', 'AI_CACHED_INPUT_TOKEN', 20000, 1000000, 5500, '{"currency":"USD"}'::jsonb),
   ('AI_TEXT', 'openai', 'gpt-5.6-luna', 'AI_OUTPUT_TOKEN', 1200000, 1000000, 5500, '{"currency":"USD"}'::jsonb),
-  ('SMS', 'telnyx', '', 'SMS_SEGMENT', 9000, 1, 5500, '{"currency":"USD","market":"US","basis":"conservative_provider_and_carrier_cost"}'::jsonb);
+  ('SMS', 'telnyx', '', 'SMS_SEGMENT', 10000, 1, 5500, '{"currency":"USD","market":"US","basis":"conservative_us_outbound_base_plus_max_carrier_fee"}'::jsonb);
