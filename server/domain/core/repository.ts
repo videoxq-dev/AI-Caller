@@ -365,6 +365,14 @@ export async function setConversationHandlingMode(
   return conversation;
 }
 
+export async function getConversationById(workspaceId: string, conversationId: string) {
+  const [conversation] = await db.select().from(conversations).where(and(
+    eq(conversations.workspaceId, workspaceId),
+    eq(conversations.id, conversationId),
+  )).limit(1);
+  return conversation ?? null;
+}
+
 export async function closeConversation(workspaceId: string, conversationId: string) {
   const [conversation] = await db.update(conversations).set({ status: "CLOSED", updatedAt: new Date() })
     .where(and(eq(conversations.workspaceId, workspaceId), eq(conversations.id, conversationId))).returning();
