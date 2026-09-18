@@ -292,6 +292,7 @@ export function createVoiceWebhookService(dependencies: VoiceServiceDependencies
         await updateVoiceCall(workspaceId, call.id, {
           status: "ACTIVE",
           answeredAt: event.occurredAt ?? new Date(),
+          recordingDisclosedAt: event.occurredAt ?? new Date(),
         }, {
           phase: "AWAITING_RECORDING_CONSENT",
         });
@@ -379,7 +380,6 @@ export function createVoiceWebhookService(dependencies: VoiceServiceDependencies
         await updateVoiceCall(workspaceId, call.id, {
           recordingStatus: "RECORDING",
           recordingConsentStatus: "GRANTED",
-          recordingDisclosedAt: event.occurredAt ?? new Date(),
           transcriptStatus: "ACTIVE",
         }, {
           phase: "ACTIVE",
@@ -402,7 +402,6 @@ export function createVoiceWebhookService(dependencies: VoiceServiceDependencies
       await updateVoiceCall(workspaceId, call.id, {
         recordingStatus: "DECLINED",
         recordingConsentStatus: "DECLINED",
-        recordingDisclosedAt: event.occurredAt ?? new Date(),
         transcriptStatus: "COMPLETE",
       }, {
         phase: "DECLINED_NOTICE",
