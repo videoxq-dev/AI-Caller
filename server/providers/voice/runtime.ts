@@ -4,6 +4,7 @@ import { decryptIntegrationCredentials, type EncryptedSecretEnvelope } from "@/s
 import { resolveProviderRoute } from "@/server/providers/resolver";
 import type { VoiceProvider } from "@/server/providers/contracts";
 import { createTelnyxVoiceProvider } from "./telnyx";
+import { createE2EVoiceProvider, isE2EProviderFixtureMode } from "@/server/providers/e2e-fixtures";
 
 export type VoiceProviderName = "telnyx";
 
@@ -66,10 +67,13 @@ export async function resolveVoiceRuntime(
     providerName: "telnyx",
     integrationId: integration.id,
     receiverNumber: normalizePhone(phone),
-    provider: createTelnyxVoiceProvider({
-      apiKey: required(secret, "apiKey", "Telnyx API key"),
-      webhookPublicKey,
-      fetcher,
-    }),
+    provider: (() => {
+      const base = createTelnyxVoiceProvider({
+        apiKey: required(secret, "apiKey", "Telnyx API key"),
+        webhookPublicKey,
+        fetcher,
+      });
+      return isE2EProviderFixtureMode() ? createE2EVoiceProvider(base) : base;
+    })(),
   };
 }
