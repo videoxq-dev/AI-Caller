@@ -24,7 +24,7 @@ import { whatsAppWebhookService } from "@/server/whatsapp/service";
 import { dispatchAutomationEvent } from "@/server/automations/dispatcher";
 import { executeAutomationRun } from "@/server/automations/executor";
 import { listRecoverableAutomationRuns, listUndispatchedAutomationEvents } from "@/server/automations/repository";
-import { processDuePhoneNumberRenewals, processPendingPhoneNumberReleases } from "@/server/phone-numbers/service";
+import { processDuePhoneNumberRenewals, processPendingPhoneNumberProvisioning, processPendingPhoneNumberReleases } from "@/server/phone-numbers/service";
 
 export async function startWorker() {
   const authBoss = await ensureQueue(AUTH_PASSWORD_RESET_EMAIL);
@@ -124,6 +124,23 @@ export async function startWorker() {
   const recoveryTimer = setInterval(() => void recoverAutomationEvents(), 15_000);
   recoveryTimer.unref();
 
+  let provisioningRunning = false;
+  const reconcileManagedNumberProvisioning = async () => {
+    if (provisioningRunning) return;
+    provisioningRunning = true;
+    try {
+      const result = await processPendingPhoneNumberProvisioning(50);
+      if (result.checked > 0) logger.info(result, "Reconciled managed phone number provisioning");
+    } catch (error) {
+      logger.error({ err: error }, "Failed to reconcile managed phone number provisioning");
+    } finally {
+      provisioningRunning = false;
+    }
+  };
+  await reconcileManagedNumberProvisioning();
+  const provisioningTimer = setInterval(() => void reconcileManagedNumberProvisioning(), 30_000);
+  provisioningTimer.unref();
+
   let renewalRunning = false;
   const renewManagedNumbers = async () => {
     if (renewalRunning) return;
@@ -150,6 +167,7 @@ export async function startWorker() {
   const shutdown = async (signal: string) => {
     logger.info({ signal }, "Stopping AI Caller worker");
     clearInterval(recoveryTimer);
+    clearInterval(provisioningTimer);
     clearInterval(renewalTimer);
     await stopBoss();
     process.exit(0);
