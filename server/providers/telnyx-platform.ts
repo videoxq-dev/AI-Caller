@@ -65,6 +65,7 @@ export async function searchTelnyxNumbers(input: {
   params.set("filter[limit]", String(Math.min(Math.max(input.limit ?? 12, 1), 30)));
   params.set("filter[best_effort]", "false");
   params.set("filter[exclude_held_numbers]", "true");
+  if (input.numberType === "toll_free") params.set("filter[quickship]", "true");
   if (input.administrativeArea?.trim()) params.set("filter[administrative_area]", input.administrativeArea.trim().toUpperCase());
   if (input.locality?.trim()) params.set("filter[locality]", input.locality.trim());
   if (input.areaCode?.trim()) params.set("filter[national_destination_code]", input.areaCode.replace(/\D/g, ""));
@@ -155,7 +156,7 @@ export async function orderTelnyxNumber(input: {
       id?: string;
       status?: string;
       requirements_met?: boolean;
-      phone_numbers?: Array<{ phone_number?: string; status?: string; requirements_met?: boolean }>;
+      phone_numbers?: Array<{ id?: string; phone_number?: string; status?: string; requirements_met?: boolean }>;
     };
   }>(`${BASE_URL}/number_orders`, {
     method: "POST",
