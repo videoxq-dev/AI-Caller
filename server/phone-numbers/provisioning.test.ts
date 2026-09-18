@@ -1,3 +1,4 @@
+import { eq } from "drizzle-orm";
 import { afterAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { ProviderRequestError } from "@/server/providers/http";
 
@@ -135,10 +136,7 @@ describe("managed phone provisioning lifecycle", () => {
     expect((await db.select().from(creditWallets))[0].balance).toBe(8_000);
 
     const [row] = await db.select().from(hostedPhoneNumbers);
-    await db.update(hostedPhoneNumbers).set({ reconcileAfter: new Date(0) }).where(
-      // test-only exact row update
-      (await import("drizzle-orm")).eq(hostedPhoneNumbers.id, row.id),
-    );
+    await db.update(hostedPhoneNumbers).set({ reconcileAfter: new Date(0) }).where(eq(hostedPhoneNumbers.id, row.id));
     platform.findOwnedTelnyxNumber.mockResolvedValue({ id: "owned-number-after-timeout", phone_number: "+12025550200", status: "active" });
 
     await expect(processPendingPhoneNumberProvisioning()).resolves.toMatchObject({
