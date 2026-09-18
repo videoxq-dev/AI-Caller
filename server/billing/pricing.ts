@@ -8,7 +8,8 @@ export type HostedPricingUnit =
   | "AI_INPUT_TOKEN"
   | "AI_CACHED_INPUT_TOKEN"
   | "AI_OUTPUT_TOKEN"
-  | "SMS_SEGMENT";
+  | "SMS_SEGMENT"
+  | "VOICE_MINUTE";
 
 export type HostedRate = {
   id: string;
