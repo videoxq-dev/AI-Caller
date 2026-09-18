@@ -37,7 +37,7 @@ export async function GET(request: Request) {
     const requestedProvider = providerSchema.safeParse(new URL(request.url).searchParams.get("provider"));
     const route = await resolveProviderRoute(context.workspace.id, "SMS");
     const activeProvider = route
-      ? route.mode === "HOSTED" ? getEnv().HOSTED_SMS_PROVIDER : providerSchema.parse(route.provider)
+      ? route.mode === "HOSTED" ? "telnyx" : providerSchema.parse(route.provider)
       : null;
     const provider = requestedProvider.success ? requestedProvider.data : activeProvider;
     if (!provider) return Response.json({ configured: false, mode: null, provider: null, webhookUrl: null });
@@ -60,7 +60,9 @@ export async function GET(request: Request) {
       webhookUrl: callbackUrl(provider, context.workspace.id),
       senderNumber,
       webhookPublicKeyConfigured: provider === "telnyx"
-        ? (hosted ? Boolean(getEnv().HOSTED_SMS_TELNYX_WEBHOOK_PUBLIC_KEY) : Boolean(settings.webhookPublicKey || legacy.webhookPublicKey))
+        ? (hosted
+          ? Boolean(getEnv().HOSTED_TELNYX_WEBHOOK_PUBLIC_KEY || getEnv().HOSTED_SMS_TELNYX_WEBHOOK_PUBLIC_KEY)
+          : Boolean(settings.webhookPublicKey || legacy.webhookPublicKey))
         : null,
     });
   } catch (error) {
