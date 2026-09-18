@@ -9,11 +9,12 @@ import {
   UsersIcon,
 } from "@/components/icons";
 import { AppNav } from "@/components/core-domain/app-nav";
+import { PhoneNumberManager } from "@/components/phone-number-manager";
 import "../dashboard/dashboard.css";
 import "./settings.css";
 
-type SettingsTab = "general" | "team" | "channels";
-type ChannelId = "voice" | "sms" | "whatsapp" | "webchat";
+type SettingsTab = "general" | "phone" | "team" | "channels";
+type ChannelId = "whatsapp" | "webchat";
 type WorkspaceRole = "OWNER" | "ADMIN" | "STAFF";
 type TeamMember = { userId: string; name: string; email: string; image: string | null; role: WorkspaceRole; joinedAt: string };
 type TeamInvitation = { id: string; email: string; role: "ADMIN" | "STAFF"; status: "PENDING"; expiresAt: string; createdAt: string; invitedByUserId: string };
@@ -21,8 +22,9 @@ type TeamPlan = { id: "PERSONAL" | "GROWTH"; name: string; subUserLimit: number;
 
 const settingsTabs: Array<{ id: SettingsTab; label: string }> = [
   { id: "general", label: "General" },
+  { id: "phone", label: "Phone & Messaging" },
   { id: "team", label: "Team" },
-  { id: "channels", label: "Channels" },
+  { id: "channels", label: "Other channels" },
 ];
 
 export default function SettingsPage() {
@@ -41,7 +43,7 @@ export default function SettingsPage() {
   const [teamLoading, setTeamLoading] = useState(false);
   const [teamError, setTeamError] = useState<string | null>(null);
   const [teamActionPending, setTeamActionPending] = useState(false);
-  const [channels, setChannels] = useState<Record<ChannelId, boolean>>({ voice: true, sms: true, whatsapp: true, webchat: true });
+  const [channels, setChannels] = useState<Record<ChannelId, boolean>>({ whatsapp: true, webchat: true });
 
   const activeMembers = team.length;
   const canManageTeam = currentRole === "OWNER" || currentRole === "ADMIN";
@@ -160,7 +162,7 @@ export default function SettingsPage() {
         <div className="settingsBody">
           <div className="settingsTitleRow">
             <div><h1>Settings</h1><p>Manage your account, team, channels and billing.</p></div>
-            {tab !== "team" && <button className="settingsSaveButton" type="button" onClick={save}>{saved ? "Saved" : "Save changes"}</button>}
+            {tab !== "team" && tab !== "phone" && <button className="settingsSaveButton" type="button" onClick={save}>{saved ? "Saved" : "Save changes"}</button>}
           </div>
 
           <div className="settingsTabs settingsTabsWithBilling" role="tablist" aria-label="Settings sections">
@@ -170,6 +172,21 @@ export default function SettingsPage() {
 
           {tab === "general" && (
             <GeneralTab businessName={businessName} setBusinessName={setBusinessName} timezone={timezone} setTimezone={setTimezone} language={language} setLanguage={setLanguage} notificationEmail={notificationEmail} setNotificationEmail={setNotificationEmail} />
+          )}
+
+          {tab === "phone" && (
+            <section className="settingsPhoneSection">
+              <article className="settingsCard phoneManagementCard">
+                <div className="sectionHeading"><div><h2>Phone &amp; Messaging</h2><p>Manage the AI Caller number customers use for both calls and SMS.</p></div><span className="statusPill">Managed by AI Caller</span></div>
+                <div className="settingsPhoneManager"><PhoneNumberManager settingsMode /></div>
+              </article>
+              <aside className="settingsCard compactCard phoneBillingHelp">
+                <h2>How billing works</h2>
+                <p className="compactCopy">Your number renews monthly from your credit balance. Calls, SMS and AI usage are metered separately.</p>
+                <Link className="settingsOutlineLink" href="/settings/billing">Credits &amp; usage</Link>
+                <p className="compactCopy">If renewal cannot be charged, a 7-day grace period starts before phone service is suspended. Adding enough credits reactivates it automatically.</p>
+              </aside>
+            </section>
           )}
 
           {tab === "team" && (
@@ -219,12 +236,10 @@ export default function SettingsPage() {
 
           {tab === "channels" && (
             <section className="channelSettingsGrid">
-              <ChannelCard title="Voice" provider="Telnyx — BYOP" active={channels.voice} onToggle={() => setChannels((current) => ({ ...current, voice: !current.voice }))} icon={<PhoneIcon size={20} />} detail="Inbound calls" />
-              <ChannelCard title="SMS" provider="Telnyx — BYOP" active={channels.sms} onToggle={() => setChannels((current) => ({ ...current, sms: !current.sms }))} icon={<MessageIcon size={20} />} detail="Two-way messaging" />
-              <ChannelCard title="WhatsApp" provider="Meta — BYOP" active={channels.whatsapp} onToggle={() => setChannels((current) => ({ ...current, whatsapp: !current.whatsapp }))} icon={<WhatsAppIcon />} detail="Business messaging" />
+              <ChannelCard title="WhatsApp" provider="Meta connection" active={channels.whatsapp} onToggle={() => setChannels((current) => ({ ...current, whatsapp: !current.whatsapp }))} icon={<WhatsAppIcon />} detail="Business messaging" />
               <ChannelCard title="Web Chat" provider="AI Caller widget" active={channels.webchat} onToggle={() => setChannels((current) => ({ ...current, webchat: !current.webchat }))} icon={<MessageIcon size={20} />} detail="Website conversations" />
               <article className="settingsCard channelRoutingCard"><div className="sectionHeading"><div><h2>Channel routing</h2><p>Shared handling rules</p></div></div><SettingToggle title="Allow AI to respond first" text="Human takeover remains available at any time." on /><SettingToggle title="Escalate when AI is unsure" text="Move the conversation to a human agent." on /><SettingToggle title="Notify team on takeover" text="Send an in-app notification when escalation happens." on /></article>
-              <article className="settingsCard compactCard"><h2>Provider setup</h2><p className="compactCopy">Update API credentials and provider connections from Integrations.</p><Link className="settingsOutlineLink" href="/integrations">Manage integrations</Link></article>
+              <article className="settingsCard compactCard"><h2>Other channel setup</h2><p className="compactCopy">Manage WhatsApp and calendar connections from Integrations. Phone and SMS are managed directly by AI Caller.</p><Link className="settingsOutlineLink" href="/integrations">Manage integrations</Link></article>
             </section>
           )}
         </div>
