@@ -72,7 +72,7 @@ export function AppNav({ active, className = "appSidebar" }: { active: string; c
     }
   }
 
-  async function markRead(item: NotificationItem) {
+  async function openNotification(item: NotificationItem) {
     if (!item.readAt) {
       const response = await fetch(`/api/notifications/${item.id}/read`, { method: "POST" });
       if (response.ok) {
@@ -80,6 +80,7 @@ export function AppNav({ active, className = "appSidebar" }: { active: string; c
       }
     }
     setNotificationsOpen(false);
+    if (item.conversationId) window.location.assign("/inbox");
   }
 
   return (
@@ -114,16 +115,16 @@ export function AppNav({ active, className = "appSidebar" }: { active: string; c
             <div className="navNotificationHeading"><strong>Notifications</strong><span>{unread} unread</span></div>
             {!notifications.length && <p>No notifications yet.</p>}
             {notifications.map((item) => (
-              <Link
+              <button
                 key={item.id}
-                href={item.conversationId ? "/inbox" : "#"}
+                type="button"
                 className={`navNotificationItem ${item.readAt ? "" : "unread"}`}
-                onClick={() => void markRead(item)}
+                onClick={() => void openNotification(item)}
               >
                 <strong>{item.title}</strong>
                 <span>{item.body}</span>
                 <small>{new Date(item.createdAt).toLocaleString()}</small>
-              </Link>
+              </button>
             ))}
           </div>
         )}
