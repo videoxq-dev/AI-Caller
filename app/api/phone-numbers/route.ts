@@ -43,7 +43,8 @@ export async function POST(request: Request) {
     requireWorkspacePermission(context.membership.role, "billing.manage");
     const input = parseInput(provisionSchema, await request.json());
     const number = await provisionManagedPhoneNumber(context.workspace.id, input);
-    return Response.json({ number }, { status: 201, headers: { "cache-control": "no-store" } });
+    const status = number?.status === "ACTIVE" ? 201 : 202;
+    return Response.json({ number }, { status, headers: { "cache-control": "no-store" } });
   } catch (error) {
     if (error instanceof z.ZodError) {
       return toErrorResponse(new AppError("INVALID_PHONE_PROVISIONING_REQUEST", "Choose a valid available phone number.", 422));
