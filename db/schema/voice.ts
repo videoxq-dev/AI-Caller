@@ -16,7 +16,7 @@ import { workspaces } from "./core";
 export const voiceCallMode = pgEnum("voice_call_mode", ["AI_FIRST", "AFTER_HOURS", "OVERFLOW"]);
 export const voiceCallStatus = pgEnum("voice_call_status", ["RINGING", "ACTIVE", "COMPLETED", "FAILED"]);
 export const voiceRecordingStatus = pgEnum("voice_recording_status", ["PENDING", "RECORDING", "AVAILABLE", "FAILED", "DECLINED"]);
-export const voiceRecordingConsentStatus = pgEnum("voice_recording_consent_status", ["NOT_REQUIRED", "ANNOUNCED", "GRANTED", "DECLINED"]);
+export const voiceRecordingConsentStatus = pgEnum("voice_recording_consent_status", ["PENDING", "NOT_REQUIRED", "ANNOUNCED", "GRANTED", "DECLINED"]);
 export const voiceTranscriptStatus = pgEnum("voice_transcript_status", ["PENDING", "ACTIVE", "COMPLETE", "FAILED"]);
 export const voiceTranscriptSpeaker = pgEnum("voice_transcript_speaker", ["CUSTOMER", "AI", "HUMAN"]);
 
@@ -44,7 +44,7 @@ export const voiceCalls = pgTable(
     recordingObjectKey: text("recording_object_key"),
     recordingMimeType: text("recording_mime_type"),
     recordingDurationSeconds: integer("recording_duration_seconds"),
-    recordingConsentStatus: voiceRecordingConsentStatus("recording_consent_status").default("ANNOUNCED").notNull(),
+    recordingConsentStatus: voiceRecordingConsentStatus("recording_consent_status").default("PENDING").notNull(),
     recordingDisclosureVersion: text("recording_disclosure_version"),
     recordingDisclosedAt: timestamp("recording_disclosed_at", { withTimezone: true, mode: "date" }),
     transcriptStatus: voiceTranscriptStatus("transcript_status").default("PENDING").notNull(),
