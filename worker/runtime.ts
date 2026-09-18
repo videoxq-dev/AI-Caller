@@ -1,20 +1,27 @@
-import { ensureQueue, stopBoss } from "@/server/jobs";
+import { enqueueUniqueJob, ensureQueue, stopBoss } from "@/server/jobs";
 import {
   AUTH_PASSWORD_RESET_EMAIL,
   COMMERCE_WELCOME_EMAIL,
   TEAM_INVITATION_EMAIL,
   SMS_INBOUND_RESPONSE,
   WHATSAPP_INBOUND_RESPONSE,
+  AUTOMATION_DISPATCH_EVENT,
+  AUTOMATION_EXECUTE_RUN,
   passwordResetEmailJobSchema,
   teamInvitationEmailJobSchema,
   smsInboundResponseJobSchema,
   whatsappInboundResponseJobSchema,
+  automationDispatchEventJobSchema,
+  automationExecuteRunJobSchema,
   welcomeEmailJobSchema,
 } from "@/server/jobs/queues";
 import { sendPasswordResetEmail, sendTeamInvitationEmail, sendWelcomeEmail } from "@/server/email/mailer";
 import { logger } from "@/server/observability/logger";
 import { smsWebhookService } from "@/server/sms/service";
 import { whatsAppWebhookService } from "@/server/whatsapp/service";
+import { dispatchAutomationEvent } from "@/server/automations/dispatcher";
+import { executeAutomationRun } from "@/server/automations/executor";
+import { listUndispatchedAutomationEvents } from "@/server/automations/repository";
 
 export async function startWorker() {
   const authBoss = await ensureQueue(AUTH_PASSWORD_RESET_EMAIL);
@@ -22,6 +29,8 @@ export async function startWorker() {
   const teamBoss = await ensureQueue(TEAM_INVITATION_EMAIL);
   const smsBoss = await ensureQueue(SMS_INBOUND_RESPONSE);
   const whatsappBoss = await ensureQueue(WHATSAPP_INBOUND_RESPONSE);
+  const automationDispatchBoss = await ensureQueue(AUTOMATION_DISPATCH_EVENT);
+  const automationExecuteBoss = await ensureQueue(AUTOMATION_EXECUTE_RUN);
 
   await authBoss.work(AUTH_PASSWORD_RESET_EMAIL, async (jobs) => {
     for (const job of jobs) {
@@ -58,10 +67,48 @@ export async function startWorker() {
     }
   });
 
-  logger.info({ queues: [AUTH_PASSWORD_RESET_EMAIL, COMMERCE_WELCOME_EMAIL, TEAM_INVITATION_EMAIL, SMS_INBOUND_RESPONSE, WHATSAPP_INBOUND_RESPONSE] }, "AI Caller worker started");
+  await automationDispatchBoss.work(AUTOMATION_DISPATCH_EVENT, async (jobs) => {
+    for (const job of jobs) {
+      const payload = automationDispatchEventJobSchema.parse(job.data);
+      await dispatchAutomationEvent(payload.workspaceId, payload.eventId);
+    }
+  });
+
+  await automationExecuteBoss.work(AUTOMATION_EXECUTE_RUN, async (jobs) => {
+    for (const job of jobs) {
+      const payload = automationExecuteRunJobSchema.parse(job.data);
+      await executeAutomationRun(payload.workspaceId, payload.runId);
+    }
+  });
+
+  let recoveryRunning = false;
+  const recoverAutomationEvents = async () => {
+    if (recoveryRunning) return;
+    recoveryRunning = true;
+    try {
+      const events = await listUndispatchedAutomationEvents(100);
+      for (const event of events) {
+        await enqueueUniqueJob(AUTOMATION_DISPATCH_EVENT, event.id, {
+          workspaceId: event.workspaceId,
+          eventId: event.id,
+        });
+      }
+    } catch (error) {
+      logger.error({ err: error }, "Failed to recover undispatched automation events");
+    } finally {
+      recoveryRunning = false;
+    }
+  };
+
+  await recoverAutomationEvents();
+  const recoveryTimer = setInterval(() => void recoverAutomationEvents(), 15_000);
+  recoveryTimer.unref();
+
+  logger.info({ queues: [AUTH_PASSWORD_RESET_EMAIL, COMMERCE_WELCOME_EMAIL, TEAM_INVITATION_EMAIL, SMS_INBOUND_RESPONSE, WHATSAPP_INBOUND_RESPONSE, AUTOMATION_DISPATCH_EVENT, AUTOMATION_EXECUTE_RUN] }, "AI Caller worker started");
 
   const shutdown = async (signal: string) => {
     logger.info({ signal }, "Stopping AI Caller worker");
+    clearInterval(recoveryTimer);
     await stopBoss();
     process.exit(0);
   };
