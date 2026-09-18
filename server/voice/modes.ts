@@ -31,11 +31,21 @@ function localDayAndMinute(now: Date, timeZone: string) {
 
 function parseMinute(value: string | null) {
   if (!value) return null;
-  const match = /^(\d{1,2}):(\d{2})$/.exec(value.trim());
-  if (!match) return null;
-  const hour = Number(match[1]);
-  const minute = Number(match[2]);
-  if (hour < 0 || hour > 23 || minute < 0 || minute > 59) return null;
+  const normalized = value.trim();
+  const twentyFourHour = /^(\d{1,2}):(\d{2})$/.exec(normalized);
+  if (twentyFourHour) {
+    const hour = Number(twentyFourHour[1]);
+    const minute = Number(twentyFourHour[2]);
+    if (hour < 0 || hour > 23 || minute < 0 || minute > 59) return null;
+    return hour * 60 + minute;
+  }
+
+  const twelveHour = /^(\d{1,2}):(\d{2})\s*(AM|PM)$/i.exec(normalized);
+  if (!twelveHour) return null;
+  const displayHour = Number(twelveHour[1]);
+  const minute = Number(twelveHour[2]);
+  if (displayHour < 1 || displayHour > 12 || minute < 0 || minute > 59) return null;
+  const hour = (displayHour % 12) + (twelveHour[3].toUpperCase() === "PM" ? 12 : 0);
   return hour * 60 + minute;
 }
 
