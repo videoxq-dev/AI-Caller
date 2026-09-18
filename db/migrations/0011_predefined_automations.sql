@@ -20,7 +20,7 @@ CREATE TABLE "automation_settings" (
   "id" uuid PRIMARY KEY DEFAULT gen_random_uuid() NOT NULL,
   "workspace_id" uuid NOT NULL REFERENCES "workspaces"("id") ON DELETE CASCADE,
   "key" "automation_key" NOT NULL,
-  "enabled" boolean NOT NULL DEFAULT true,
+  "enabled" boolean NOT NULL DEFAULT false,
   "config" jsonb NOT NULL DEFAULT '{}'::jsonb,
   "created_at" timestamptz NOT NULL DEFAULT now(),
   "updated_at" timestamptz NOT NULL DEFAULT now()
