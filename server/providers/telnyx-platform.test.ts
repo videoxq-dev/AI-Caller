@@ -13,7 +13,7 @@ vi.mock("@/server/env", () => ({
   }),
 }));
 
-import { orderTelnyxNumber, retrieveTelnyxNumberOrder, retrieveTelnyxOrderPhoneNumber, searchTelnyxNumbers } from "./telnyx-platform";
+import { findTelnyxNumberOrderByReference, orderTelnyxNumber, retrieveTelnyxNumberOrder, retrieveTelnyxOrderPhoneNumber, searchTelnyxNumbers } from "./telnyx-platform";
 
 describe("managed Telnyx number search", () => {
   it("sends state, city and area-code filters and requires voice + SMS", async () => {
@@ -62,6 +62,42 @@ describe("managed Telnyx number search", () => {
     }) as typeof fetch;
 
     await searchTelnyxNumbers({ countryCode: "US", numberType: "toll_free" }, fetcher);
+  });
+
+  it("finds an indeterminate purchase by unique customer reference and exact phone number", async () => {
+    const fetcher = vi.fn(async (input: RequestInfo | URL) => {
+      const url = new URL(String(input));
+      expect(url.pathname).toBe("/v2/number_orders");
+      expect(url.searchParams.get("filter[customer_reference]")).toBe(
+        "ai-caller:11111111-1111-4111-8111-111111111111:22222222-2222-4222-8222-222222222222",
+      );
+      expect(url.searchParams.get("page[size]")).toBe("20");
+      return new Response(JSON.stringify({
+        data: [
+          {
+            id: "wrong-order",
+            status: "pending",
+            customer_reference: "ai-caller:11111111-1111-4111-8111-111111111111:22222222-2222-4222-8222-222222222222",
+            phone_numbers: [{ id: "wrong-number", phone_number: "+13075550999" }],
+          },
+          {
+            id: "order-1",
+            status: "pending",
+            customer_reference: "ai-caller:11111111-1111-4111-8111-111111111111:22222222-2222-4222-8222-222222222222",
+            phone_numbers: [{ id: "order-number-1", phone_number: "+13075550184" }],
+          },
+        ],
+      }), { status: 200, headers: { "content-type": "application/json" } });
+    }) as typeof fetch;
+
+    await expect(findTelnyxNumberOrderByReference({
+      workspaceId: "11111111-1111-4111-8111-111111111111",
+      requestId: "22222222-2222-4222-8222-222222222222",
+      phoneNumber: "+13075550184",
+    }, fetcher)).resolves.toMatchObject({
+      id: "order-1",
+      phone_numbers: [{ id: "order-number-1", phone_number: "+13075550184" }],
+    });
   });
 
   it("retrieves order and ordered-number state for carrier reconciliation", async () => {
