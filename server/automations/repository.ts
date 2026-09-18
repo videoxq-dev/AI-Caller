@@ -1,6 +1,6 @@
 import { and, asc, desc, eq, isNull, lt, lte, or } from "drizzle-orm";
 import { db } from "@/db";
-import { automationDeliveries, automationEvents, automationRuns, automationSettings } from "@/db/schema";
+import { automationDeliveries, automationEvents, automationRuns, automationSettings, memberships } from "@/db/schema";
 import { AppError } from "@/server/http/errors";
 import {
   automationKeys,
@@ -52,6 +52,25 @@ export async function saveAutomationSetting<K extends AutomationKey>(
   input: { enabled: boolean; config: unknown },
 ): Promise<AutomationSettingRecord<K>> {
   const config = parseAutomationConfig(key, input.config);
+  if (key === "QUALIFIED_LEAD_ASSIGNMENT" || key === "HUMAN_ESCALATION") {
+    const assignedUserId = (config as { assignedUserId: string | null }).assignedUserId;
+    if (assignedUserId) {
+      const [membership] = await db.select({ userId: memberships.userId })
+        .from(memberships)
+        .where(and(
+          eq(memberships.workspaceId, workspaceId),
+          eq(memberships.userId, assignedUserId),
+        ))
+        .limit(1);
+      if (!membership) {
+        throw new AppError(
+          "AUTOMATION_ASSIGNEE_INVALID",
+          "Automation assignee must be a current workspace member.",
+          400,
+        );
+      }
+    }
+  }
   await db.insert(automationSettings).values({
     workspaceId,
     key,
@@ -168,7 +187,12 @@ export async function completeAutomationRun(
   return run ?? null;
 }
 
-export async function failAutomationRun(workspaceId: string, runId: string, error: unknown) {
+export async function failAutomationRun(
+  workspaceId: string,
+  runId: string,
+  error: unknown,
+  metadata?: Record<string, unknown>,
+) {
   const code = error instanceof AppError ? error.code : "AUTOMATION_FAILED";
   const message = error instanceof Error ? error.message : "Automation execution failed.";
   const [run] = await db.update(automationRuns).set({
@@ -176,6 +200,7 @@ export async function failAutomationRun(workspaceId: string, runId: string, erro
     completedAt: new Date(),
     errorCode: code,
     errorMessage: message.slice(0, 1000),
+    ...(metadata ? { metadata } : {}),
   }).where(and(
     eq(automationRuns.workspaceId, workspaceId),
     eq(automationRuns.id, runId),
