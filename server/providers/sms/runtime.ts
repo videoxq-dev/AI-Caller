@@ -1,4 +1,3 @@
-import { getEnv } from "@/server/env";
 import { getHostedPhoneRuntimeRecord, getHostedPhoneWebhookRecord } from "@/server/phone-numbers/service";
 import { getHostedTelnyxCredentials } from "@/server/providers/telnyx-platform";
 import { decryptIntegrationCredentials, type EncryptedSecretEnvelope } from "@/server/security/secrets";
@@ -76,33 +75,12 @@ async function hostedNumber(workspaceId: string, allowSuspended: boolean) {
   };
 }
 
-function hostedProviderConfig(provider: SmsProviderName) {
-  const env = getEnv();
-  switch (provider) {
-    case "twilio":
-      return {
-        secret: {
-          sid: env.HOSTED_SMS_TWILIO_ACCOUNT_SID,
-          authToken: env.HOSTED_SMS_TWILIO_AUTH_TOKEN,
-        },
-        settings: {},
-      };
-    case "plivo":
-      return {
-        secret: {
-          authId: env.HOSTED_SMS_PLIVO_AUTH_ID,
-          authToken: env.HOSTED_SMS_PLIVO_AUTH_TOKEN,
-        },
-        settings: {},
-      };
-    case "telnyx": {
-      const hosted = getHostedTelnyxCredentials();
-      return {
-        secret: { apiKey: hosted.apiKey },
-        settings: { webhookPublicKey: hosted.webhookPublicKey },
-      };
-    }
-  }
+function hostedProviderConfig() {
+  const hosted = getHostedTelnyxCredentials();
+  return {
+    secret: { apiKey: hosted.apiKey },
+    settings: { webhookPublicKey: hosted.webhookPublicKey },
+  };
 }
 
 async function resolveSmsRuntimeInternal(
@@ -117,7 +95,7 @@ async function resolveSmsRuntimeInternal(
   if (route.mode === "HOSTED") {
     const providerName: SmsProviderName = "telnyx";
     if (requestedProvider !== providerName) throw new Error("Managed SMS uses the Telnyx adapter.");
-    const config = hostedProviderConfig(providerName);
+    const config = hostedProviderConfig();
     const number = await hostedNumber(workspaceId, allowSuspended);
     return {
       workspaceId,
