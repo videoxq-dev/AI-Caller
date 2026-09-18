@@ -29,7 +29,7 @@ CREATE TABLE "voice_calls" (
   "duration_seconds" integer,
   "recording_status" "voice_recording_status" NOT NULL DEFAULT 'PENDING',
   "recording_external_id" text,
-  "recording_uri" text,
+  "recording_object_key" text,
   "recording_mime_type" text,
   "recording_duration_seconds" integer,
   "recording_consent_status" "voice_recording_consent_status" NOT NULL DEFAULT 'ANNOUNCED',
