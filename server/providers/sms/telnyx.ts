@@ -1,5 +1,5 @@
-import { createPublicKey, verify } from "node:crypto";
-import { providerJson } from "../http";\nimport { parseTelnyxWebhookPublicKey, verifyTelnyxWebhookSignature } from "../telnyx-webhook";
+import { providerJson } from "../http";
+import { parseTelnyxWebhookPublicKey, verifyTelnyxWebhookSignature } from "../telnyx-webhook";
 export { parseTelnyxWebhookPublicKey } from "../telnyx-webhook";
 import type { NormalizedSmsEvent, SMSProvider, SmsWebhookInput } from "../contracts";
 import { mapSmsDeliveryStatus, normalizeOccurredAt, requiredString } from "./common";
@@ -9,22 +9,6 @@ type TelnyxConfig = {
   webhookPublicKey: string;
   fetcher?: typeof fetch;
 };
-
-export function parseTelnyxWebhookPublicKey(value: string) {
-  const trimmed = requiredString(value, "Telnyx webhook public key");
-  const key = trimmed.includes("BEGIN PUBLIC KEY")
-    ? createPublicKey(trimmed)
-    : (() => {
-        const raw = Buffer.from(trimmed, "base64");
-        if (raw.length !== 32) throw new Error("Telnyx webhook public key must be a 32-byte Ed25519 key or PEM public key.");
-        const spkiPrefix = Buffer.from("302a300506032b6570032100", "hex");
-        return createPublicKey({ key: Buffer.concat([spkiPrefix, raw]), format: "der", type: "spki" });
-      })();
-  if (key.asymmetricKeyType !== "ed25519") {
-    throw new Error("Telnyx webhook public key must be an Ed25519 public key.");
-  }
-  return key;
-}
 
 function asRecord(value: unknown): Record<string, unknown> | null {
   return value && typeof value === "object" && !Array.isArray(value) ? value as Record<string, unknown> : null;
