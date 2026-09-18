@@ -49,6 +49,16 @@ export async function enqueueUniqueJob<T extends object>(name: string, singleton
   return boss.send(name, data, { singletonKey });
 }
 
+export async function enqueueUniqueJobAt<T extends object>(
+  name: string,
+  singletonKey: string,
+  data: T,
+  startAfter: Date,
+): Promise<string | null> {
+  const boss = await ensureQueue(name);
+  return boss.send(name, data, { singletonKey, startAfter });
+}
+
 export async function stopBoss(): Promise<void> {
   if (!bossPromise) return;
   const boss = await bossPromise;
