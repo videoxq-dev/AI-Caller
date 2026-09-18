@@ -241,15 +241,18 @@ export default function SettingsPage() {
                       </div>
                     );
                   })}
-                  {pendingInvitations.map((invitation) => (
-                    <div className="teamRow pendingTeamRow" key={invitation.id}>
-                      <span className="teamAvatar">?</span>
-                      <div><strong>{invitation.email}</strong><small>Invitation expires {new Date(invitation.expiresAt).toLocaleDateString()}</small></div>
-                      <span className="teamRoleText">{invitation.role === "ADMIN" ? "Admin" : "Staff"}</span>
-                      <span className="memberStatus invited">Invited</span>
-                      {canManageTeam ? <button type="button" className="rowMenu teamRemove" disabled={teamActionPending} onClick={() => void revokeInvitation(invitation)}>Revoke</button> : <span className="rowMenuPlaceholder" />}
-                    </div>
-                  ))}
+                  {pendingInvitations.map((invitation) => {
+                    const canRevoke = canManageTeam && !(currentRole === "ADMIN" && invitation.role === "ADMIN");
+                    return (
+                      <div className="teamRow pendingTeamRow" key={invitation.id}>
+                        <span className="teamAvatar">?</span>
+                        <div><strong>{invitation.email}</strong><small>Invitation expires {new Date(invitation.expiresAt).toLocaleDateString()}</small></div>
+                        <span className="teamRoleText">{invitation.role === "ADMIN" ? "Admin" : "Staff"}</span>
+                        <span className="memberStatus invited">Invited</span>
+                        {canRevoke ? <button type="button" className="rowMenu teamRemove" disabled={teamActionPending} onClick={() => void revokeInvitation(invitation)}>Revoke</button> : <span className="rowMenuPlaceholder" />}
+                      </div>
+                    );
+                  })}
                   {!teamLoading && !team.length && !pendingInvitations.length && <div className="teamEmpty">No team members yet.</div>}
                 </div>
               </article>
