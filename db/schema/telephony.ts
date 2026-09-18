@@ -19,6 +19,7 @@ export const hostedPhoneNumbers = pgTable(
     provider: text("provider").default("telnyx").notNull(),
     providerNumberId: text("provider_number_id"),
     providerOrderId: text("provider_order_id"),
+    provisionRequestId: uuid("provision_request_id"),
     phoneNumber: text("phone_number").notNull(),
     countryCode: text("country_code").notNull(),
     administrativeArea: text("administrative_area"),
@@ -46,6 +47,9 @@ export const hostedPhoneNumbers = pgTable(
     uniqueIndex("hosted_phone_numbers_provider_id_uq")
       .on(table.provider, table.providerNumberId)
       .where(sql`${table.providerNumberId} IS NOT NULL`),
+    uniqueIndex("hosted_phone_numbers_provision_request_uq")
+      .on(table.workspaceId, table.provisionRequestId)
+      .where(sql`${table.provisionRequestId} IS NOT NULL`),
     uniqueIndex("hosted_phone_numbers_active_number_uq")
       .on(table.phoneNumber)
       .where(sql`${table.releasedAt} IS NULL`),
