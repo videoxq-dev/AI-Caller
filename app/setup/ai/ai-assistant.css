@@ -397,3 +397,18 @@
   .aiWhyBody { grid-template-columns: 1fr; }
   .assistantIllustration { display: none; }
 }
+
+
+.voiceSetupGrid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px 18px}
+.voiceSetupNote{margin:10px 0 0;padding:9px 11px;border:1px solid #cfe0f8;border-radius:7px;color:#526b8d;background:#f5f9ff;font-size:11px;line-height:1.45}
+.qualificationEditor{display:grid;gap:11px}
+.qualificationToggleRow{display:flex;align-items:center;justify-content:space-between;gap:18px;padding:10px 12px;border:1px solid #dbe4ef;border-radius:8px;background:#fbfdff}
+.qualificationToggleRow strong,.qualificationToggleRow span{display:block}.qualificationToggleRow strong{color:#23344f;font-size:12px}.qualificationToggleRow span{margin-top:3px;color:#71809a;font-size:10.5px;line-height:1.4}
+.qualificationCriteria{display:grid;gap:8px}
+.qualificationCriterion{display:grid;grid-template-columns:minmax(0,1fr) auto 30px;gap:10px;align-items:end;padding:10px;border:1px solid #dce4ee;border-radius:8px;background:#fff}
+.qualificationCriterionFields{display:grid;grid-template-columns:minmax(130px,.55fr) minmax(220px,1.45fr);gap:10px}
+.qualificationQuestion{min-width:0}
+.qualificationRequired{height:34px;display:flex;align-items:center;gap:6px;color:#53647e;font-size:11px;font-weight:700;white-space:nowrap}.qualificationRequired input{accent-color:#1769ee}
+.qualificationRemove{width:30px;height:34px;border:1px solid #e1e7ef;border-radius:7px;color:#8a5c63;background:#fff;font-size:19px;cursor:pointer}.qualificationRemove:disabled{opacity:.35;cursor:not-allowed}
+.qualificationAdd{width:max-content;min-height:34px;padding:0 12px;border:1px solid #70a4f5;border-radius:7px;color:#1769ee;background:#fff;font-size:11px;font-weight:750;cursor:pointer}.qualificationAdd:disabled{opacity:.5;cursor:not-allowed}
+@media(max-width:680px){.voiceSetupGrid{grid-template-columns:minmax(0,1fr)}.qualificationCriterion{grid-template-columns:minmax(0,1fr) auto}.qualificationCriterionFields{grid-column:1/-1;grid-template-columns:minmax(0,1fr)}.qualificationRequired{grid-column:1}.qualificationRemove{grid-column:2;grid-row:2}.qualificationToggleRow{align-items:flex-start}}
