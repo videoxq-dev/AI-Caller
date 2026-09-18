@@ -282,6 +282,52 @@ export async function releaseCreditReservation(
   });
 }
 
+export async function chargeUnavoidableCredits(
+  workspaceId: string,
+  amount: number,
+  input: { reason: string; referenceType: string; referenceId: string },
+): Promise<number> {
+  positiveInteger(amount, "Unavoidable credit charge");
+
+  return db.transaction(async (tx) => {
+    await lockWallet(tx, workspaceId);
+    const now = new Date();
+    await releaseExpiredReservations(tx, workspaceId, now);
+
+    const [existing] = await tx.select({ balanceAfter: creditLedger.balanceAfter })
+      .from(creditLedger)
+      .where(and(
+        eq(creditLedger.workspaceId, workspaceId),
+        eq(creditLedger.type, "DEBIT"),
+        eq(creditLedger.referenceType, input.referenceType),
+        eq(creditLedger.referenceId, input.referenceId),
+      ))
+      .limit(1);
+    if (existing) return existing.balanceAfter;
+
+    await tx.insert(creditWallets).values({ workspaceId, balance: 0 }).onConflictDoNothing();
+    const [wallet] = await tx.update(creditWallets)
+      .set({
+        balance: sql`${creditWallets.balance} - ${amount}`,
+        updatedAt: now,
+      })
+      .where(eq(creditWallets.workspaceId, workspaceId))
+      .returning({ balance: creditWallets.balance });
+    if (!wallet) throw new AppError("CREDIT_WALLET_NOT_FOUND", "Hosted credit wallet not found.", 409);
+
+    await tx.insert(creditLedger).values({
+      workspaceId,
+      type: "DEBIT",
+      amount: -amount,
+      balanceAfter: wallet.balance,
+      reason: input.reason,
+      referenceType: input.referenceType,
+      referenceId: input.referenceId,
+    });
+    return wallet.balance;
+  });
+}
+
 export async function debitCredits(
   workspaceId: string,
   amount: number,

@@ -3,6 +3,7 @@ import { eq } from "drizzle-orm";
 import { closeDatabase, db } from "@/db";
 import { creditLedger, creditReservations, creditWallets, workspaces } from "@/db/schema";
 import {
+  chargeUnavoidableCredits,
   debitCredits,
   grantStarterCredits,
   refundCredits,
@@ -93,6 +94,24 @@ describe("credits", () => {
     expect(await releaseCreditReservation(workspaceId, reservation.id)).toBe(12);
     expect(await releaseCreditReservation(workspaceId, reservation.id)).toBe(12);
     expect(await db.select().from(creditLedger).where(eq(creditLedger.workspaceId, workspaceId))).toHaveLength(0);
+  });
+
+  it("records unavoidable provider spend even when it creates a negative balance", async () => {
+    await db.insert(creditWallets).values({ workspaceId, balance: 2 });
+    const input = {
+      reason: "Hosted inbound SMS",
+      referenceType: "SMS_INBOUND_MESSAGE",
+      referenceId: "twilio:SM-inbound-1",
+    };
+
+    expect(await chargeUnavoidableCredits(workspaceId, 5, input)).toBe(-3);
+    expect(await chargeUnavoidableCredits(workspaceId, 5, input)).toBe(-3);
+
+    const [wallet] = await db.select().from(creditWallets).where(eq(creditWallets.workspaceId, workspaceId));
+    const entries = await db.select().from(creditLedger).where(eq(creditLedger.workspaceId, workspaceId));
+    expect(wallet.balance).toBe(-3);
+    expect(entries).toHaveLength(1);
+    expect(entries[0]).toMatchObject({ type: "DEBIT", amount: -5, balanceAfter: -3 });
   });
 
   it("never lets concurrent hosted debits overspend the wallet", async () => {

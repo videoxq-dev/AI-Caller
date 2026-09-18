@@ -10,3 +10,10 @@
 .rowMenuPlaceholder{width:54px}
 .pendingTeamRow{background:#fbfcfe}
 @media(max-width:700px){.inviteRow{grid-template-columns:1fr 100px}.inviteRow button{grid-column:1/-1;height:38px}.teamRow{grid-template-columns:34px minmax(0,1fr) 84px}.teamRow .memberStatus{grid-column:2}.teamRow .rowMenu,.teamRow .rowMenuPlaceholder{grid-column:3;grid-row:2}.teamRoleText{grid-column:3;grid-row:1}}
+
+.settingsBillingTopLink{height:34px;display:inline-flex;align-items:center;padding:0 12px;border:1px solid #8eb8f6;border-radius:7px;color:#1769ee;background:#fff;text-decoration:none;font-size:9px;font-weight:750}
+.settingsTabsWithBilling{display:flex;align-items:center}
+.settingsBillingTabLink{height:100%;display:inline-flex;align-items:center;padding:0 12px;color:#1769ee;text-decoration:none;font-size:9px;font-weight:750;border-left:1px solid #e5eaf1}
+.teamPlanNotice{display:flex;align-items:center;justify-content:space-between;gap:12px;margin:12px 0;padding:10px 11px;border:1px solid #cfe0f5;border-radius:8px;color:#50657d;background:#f4f9ff;font-size:9px}
+.teamPlanNotice a{color:#1769ee;font-weight:750;text-decoration:none}
+@media(max-width:760px){.settingsBillingTopLink{display:none}.settingsTabsWithBilling{overflow:auto}.settingsBillingTabLink{white-space:nowrap}.teamPlanNotice{align-items:flex-start;flex-direction:column}}

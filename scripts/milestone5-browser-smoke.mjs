@@ -354,11 +354,11 @@ try {
   );
 
   const smsUsage = await pool.query(`SELECT mode, provider, credits_charged FROM usage_events WHERE workspace_id = $1 AND capability = 'SMS' ORDER BY created_at`, [workspaceId]);
-  assert(smsUsage.rowCount === 3, `Expected 3 SMS usage events, received ${smsUsage.rowCount}.`);
+  assert(smsUsage.rowCount === 6, `Expected 6 hosted SMS usage events (3 inbound + 3 outbound), received ${smsUsage.rowCount}.`);
   assert(smsUsage.rows.every((row) => row.mode === "HOSTED" && row.provider === "twilio" && row.credits_charged === 1), "Hosted SMS usage attribution/credits are incorrect.");
 
   const balance = (await pool.query(`SELECT balance FROM credit_wallets WHERE workspace_id = $1`, [workspaceId])).rows[0].balance;
-  assert(balance === 92, `Expected 8 total hosted credits consumed (5 AI + 3 SMS); received balance ${balance}.`);
+  assert(balance === 89, `Expected 11 total hosted credits consumed (5 AI + 3 inbound SMS + 3 outbound SMS); received balance ${balance}.`);
 
   await page.goto(`${baseUrl}/inbox`, { waitUntil: "networkidle" });
   await page.getByRole("heading", { name: "Inbox", level: 1 }).waitFor();
@@ -397,7 +397,7 @@ try {
   await page.screenshot({ path: path.join(outputDir, "inbox-sms-mobile.png"), fullPage: true });
 
   assert(runtimeErrors.length === 0, `Milestone 5 browser runtime errors:\n${runtimeErrors.join("\n")}`);
-  console.log("Milestone 5 browser acceptance passed: BYOP webhook setup UI and metadata privacy, signed SMS webhook, provider-compatible TwiML acknowledgement, async worker, knowledge response, contact capture, qualification, availability, booking, hosted credits, duplicate suppression, delivery reconciliation, unified Inbox, and human takeover suppression.");
+  console.log("Milestone 5 browser acceptance passed: BYOP webhook setup UI and metadata privacy, signed SMS webhook, provider-compatible TwiML acknowledgement, async worker, knowledge response, contact capture, qualification, availability, booking, inbound/outbound hosted credit metering, duplicate suppression, delivery reconciliation, unified Inbox, and human takeover suppression.");
 } finally {
   await pool.end();
   await browser.close();

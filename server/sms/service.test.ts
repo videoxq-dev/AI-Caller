@@ -185,10 +185,11 @@ describe("SMS webhook service", () => {
     await service.ingest(request(), workspaceId, "twilio");
     await service.processInboundJob(jobs[0]);
     const [wallet] = await db.select().from(creditWallets);
-    expect(wallet.balance).toBe(4);
+    expect(wallet.balance).toBe(3);
     const usage = await db.select().from(usageEvents);
-    expect(usage).toHaveLength(1);
-    expect(usage[0]).toMatchObject({ capability: "SMS", mode: "HOSTED", creditsCharged: 1, provider: "twilio" });
+    expect(usage).toHaveLength(2);
+    expect(usage.every((entry) => entry.capability === "SMS" && entry.mode === "HOSTED" && entry.creditsCharged === 1 && entry.provider === "twilio")).toBe(true);
+    expect(usage.map((entry) => entry.referenceType).sort()).toEqual(["MESSAGE", "SMS_INBOUND"]);
   });
 
   it("refunds hosted credits on definitive rejection but not on an uncertain provider outcome", async () => {
@@ -205,7 +206,7 @@ describe("SMS webhook service", () => {
 
     await service.ingest(request(), workspaceId, "twilio");
     await expect(service.processInboundJob(jobs.shift()!)).rejects.toThrow("Rejected");
-    expect((await db.select().from(creditWallets))[0].balance).toBe(5);
+    expect((await db.select().from(creditWallets))[0].balance).toBe(4);
     expect((await db.select().from(messages)).find((message) => message.direction === "OUTBOUND")?.status).toBe("FAILED");
     expect((await db.select().from(providerWebhookEvents))[0].status).toBe("FAILED");
 
@@ -213,7 +214,7 @@ describe("SMS webhook service", () => {
     send.mockImplementation(async () => { throw new ProviderRequestError("Timeout", 504); });
     await service.ingest(request(), workspaceId, "twilio");
     await expect(service.processInboundJob(jobs.shift()!)).rejects.toThrow("Timeout");
-    expect((await db.select().from(creditWallets))[0].balance).toBe(4);
+    expect((await db.select().from(creditWallets))[0].balance).toBe(2);
     const outbound = (await db.select().from(messages)).filter((message) => message.direction === "OUTBOUND");
     expect(outbound.at(-1)?.status).toBe("SEND_UNKNOWN");
     const usage = await db.select().from(usageEvents);
