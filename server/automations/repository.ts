@@ -1,6 +1,6 @@
 import { and, asc, desc, eq, isNull } from "drizzle-orm";
 import { db } from "@/db";
-import { automationEvents, automationRuns, automationSettings } from "@/db/schema";
+import { automationDeliveries, automationEvents, automationRuns, automationSettings } from "@/db/schema";
 import { AppError } from "@/server/http/errors";
 import {
   automationKeys,
@@ -180,4 +180,61 @@ export async function listAutomationActivity(workspaceId: string, limit = 100) {
     .where(eq(automationRuns.workspaceId, workspaceId))
     .orderBy(desc(automationRuns.createdAt))
     .limit(Math.min(Math.max(limit, 1), 200));
+}
+
+
+export async function claimAutomationDelivery(input: {
+  workspaceId: string;
+  runId: string;
+  channel: string;
+  recipient: string;
+}) {
+  const [created] = await db.insert(automationDeliveries).values({
+    workspaceId: input.workspaceId,
+    runId: input.runId,
+    channel: input.channel,
+    recipient: input.recipient,
+  }).onConflictDoNothing().returning();
+  if (created) return { delivery: created, created: true as const };
+
+  const [existing] = await db.select().from(automationDeliveries).where(and(
+    eq(automationDeliveries.runId, input.runId),
+    eq(automationDeliveries.channel, input.channel),
+    eq(automationDeliveries.recipient, input.recipient),
+  )).limit(1);
+  if (!existing) throw new AppError("AUTOMATION_DELIVERY_CONFLICT", "Automation delivery could not be resolved.", 409);
+  return { delivery: existing, created: false as const };
+}
+
+export async function finishAutomationDelivery(
+  workspaceId: string,
+  deliveryId: string,
+  input: {
+    status: "SENT" | "SKIPPED" | "FAILED" | "UNKNOWN";
+    messageId?: string | null;
+    providerExternalId?: string | null;
+    errorCode?: string | null;
+    errorMessage?: string | null;
+  },
+) {
+  const [delivery] = await db.update(automationDeliveries).set({
+    status: input.status,
+    messageId: input.messageId ?? null,
+    providerExternalId: input.providerExternalId ?? null,
+    errorCode: input.errorCode ?? null,
+    errorMessage: input.errorMessage?.slice(0, 1000) ?? null,
+    updatedAt: new Date(),
+  }).where(and(
+    eq(automationDeliveries.workspaceId, workspaceId),
+    eq(automationDeliveries.id, deliveryId),
+  )).returning();
+  if (!delivery) throw new AppError("AUTOMATION_DELIVERY_NOT_FOUND", "Automation delivery not found.", 404);
+  return delivery;
+}
+
+export async function listAutomationDeliveries(workspaceId: string, runId: string) {
+  return db.select().from(automationDeliveries).where(and(
+    eq(automationDeliveries.workspaceId, workspaceId),
+    eq(automationDeliveries.runId, runId),
+  )).orderBy(asc(automationDeliveries.createdAt));
 }
