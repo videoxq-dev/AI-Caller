@@ -43,6 +43,9 @@ CREATE UNIQUE INDEX IF NOT EXISTS "usage_events_phone_number_reference_uq"
     AND "reference_id" IS NOT NULL;
 
 -- Standardize hosted service pricing on the approved 50% gross-margin target.
+ALTER TABLE "hosted_api_rate_cards"
+  ALTER COLUMN "target_margin_bps" SET DEFAULT 5000;
+
 UPDATE "hosted_api_rate_cards"
 SET "target_margin_bps" = 5000, "updated_at" = now()
 WHERE "target_margin_bps" = 5500;
