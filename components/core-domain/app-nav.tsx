@@ -1,6 +1,7 @@
 "use client";
 
 import Link from "next/link";
+import "./app-nav.css";
 import { useEffect, useMemo, useState } from "react";
 import { CalendarIcon, DatabaseIcon, GearIcon, HelpIcon, LogoMark, MessageIcon, UsersIcon } from "@/components/icons";
 
