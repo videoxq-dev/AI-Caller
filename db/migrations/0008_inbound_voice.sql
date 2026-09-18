@@ -71,3 +71,8 @@ ON "voice_transcript_segments" ("workspace_id", "external_event_id")
 WHERE "external_event_id" IS NOT NULL;
 CREATE INDEX "voice_transcript_call_created_idx"
 ON "voice_transcript_segments" ("voice_call_id", "created_at");
+
+
+CREATE UNIQUE INDEX "usage_events_voice_call_reference_uq"
+ON "usage_events" ("workspace_id", "reference_type", "reference_id")
+WHERE "reference_type" = 'VOICE_CALL' AND "reference_id" IS NOT NULL;
