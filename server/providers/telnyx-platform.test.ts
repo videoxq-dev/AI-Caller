@@ -1,5 +1,9 @@
 import { describe, expect, it, vi } from "vitest";
 
+vi.mock("@/server/providers/e2e-fixtures", () => ({
+  isE2EProviderFixtureMode: () => false,
+}));
+
 vi.mock("@/server/env", () => ({
   getEnv: () => ({
     HOSTED_TELNYX_API_KEY: "test-key",
