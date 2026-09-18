@@ -171,7 +171,8 @@ export interface VoiceProvider {
   verifyWebhook(input: VoiceWebhookInput): Promise<boolean>;
   normalizeWebhook(input: VoiceWebhookInput): Promise<NormalizedVoiceEvent[]>;
   answer(input: { callControlId: string; streamUrl?: string | null; commandId?: string }): Promise<void>;
-  startTranscription(input: { callControlId: string; language: string; commandId?: string }): Promise<void>;\n  stopTranscription(input: { callControlId: string; commandId?: string }): Promise<void>;
+  startTranscription(input: { callControlId: string; language: string; commandId?: string }): Promise<void>;
+  stopTranscription(input: { callControlId: string; commandId?: string }): Promise<void>;
   startRecording(input: { callControlId: string; commandId?: string }): Promise<void>;
   speak(input: { callControlId: string; text: string; voice: string; language: string; speakingRate?: number; commandId?: string }): Promise<void>;
   hangup(input: { callControlId: string; commandId?: string }): Promise<void>;
