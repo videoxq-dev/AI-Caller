@@ -279,16 +279,6 @@
   font-weight: 750;
 }
 
-.importButton:disabled { opacity: .55; cursor: not-allowed; }
-.knowledgeSourceList { display: grid; gap: 7px; margin-top: 12px; padding-top: 10px; border-top: 1px solid #e7edf4; }
-.knowledgeSourceList > strong { color: #263650; font-size: 11px; }
-.knowledgeSourceRow { min-height: 42px; display: grid; grid-template-columns: 30px minmax(0,1fr) auto; align-items: center; gap: 9px; padding: 6px 8px; border: 1px solid #e0e7f0; border-radius: 7px; background: #fbfdff; }
-.knowledgeSourceIcon { width: 28px; height: 28px; display: grid; place-items: center; border-radius: 7px; color: #1769ee; background: #eaf3ff; }
-.knowledgeSourceRow strong,.knowledgeSourceRow small { display: block; }
-.knowledgeSourceRow strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: #2d405d; font-size: 10.5px; }
-.knowledgeSourceRow small { margin-top: 2px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: #7a899e; font-size: 9px; }
-.knowledgeSourceRow button { border: 0; color: #c43c46; background: transparent; font-size: 9.5px; font-weight: 700; cursor: pointer; }
-
 .aiFormFooter {
   min-height: 48px;
   display: flex;
