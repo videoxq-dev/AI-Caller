@@ -32,6 +32,21 @@ describe("voice contact identity resolution", () => {
     expect(identities.map((identity) => identity.channel).sort()).toEqual(["PHONE", "SMS"]);
   });
 
+  it("attaches PHONE to a manually created contact with a unique phone number", async () => {
+    const [manual] = await db.insert(contacts).values({
+      workspaceId,
+      name: "Manual Contact",
+      phone: "+15554443333",
+    }).returning();
+
+    const voiceContact = await resolveVoiceContact(workspaceId, "+1 (555) 444-3333");
+
+    expect(voiceContact.id).toBe(manual.id);
+    const identities = await db.select().from(contactIdentities);
+    expect(identities).toHaveLength(1);
+    expect(identities[0]).toMatchObject({ contactId: manual.id, channel: "PHONE", normalizedValue: "+15554443333" });
+  });
+
   it("does not merge when the same number is already ambiguous across contacts", async () => {
     const [first, second] = await db.insert(contacts).values([
       { workspaceId, name: "First", phone: "+15550001111" },
