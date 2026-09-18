@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { resolveWorkspaceContext } from "@/server/auth/workspace-context";
+import { requireWorkspacePermission } from "@/server/auth/permissions";
 import { toErrorResponse } from "@/server/http/errors";
 import { searchManagedPhoneNumbers } from "@/server/phone-numbers/service";
 
@@ -13,7 +14,8 @@ const querySchema = z.object({
 
 export async function GET(request: Request) {
   try {
-    await resolveWorkspaceContext(request.headers);
+    const context = await resolveWorkspaceContext(request.headers);
+    requireWorkspacePermission(context.membership.role, "billing.manage");
     const url = new URL(request.url);
     const parsed = querySchema.parse({
       country: url.searchParams.get("country") ?? "US",
