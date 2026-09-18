@@ -125,7 +125,7 @@ export default function CommunicationSetupPage() {
           <div className="communicationIntro">
             <span className="stepBadge">STEP 3 OF 6</span>
             <h1>Connect your communication channels</h1>
-            <p>Choose a business phone number for calls and SMS, connect WhatsApp, and add web chat to your website.</p>
+            <p>Choose a voice + SMS-capable business number, connect WhatsApp, and add web chat to your website. Outbound US business SMS unlocks after the required carrier registration is approved.</p>
           </div>
 
           <div className="channelTabs channelTabsThree" role="tablist" aria-label="Communication channels">
@@ -136,7 +136,7 @@ export default function CommunicationSetupPage() {
 
           {channel === "phone" && (
             <section className="channelSetupCard">
-              <div className="communicationSectionHeading"><span className="sectionCircle blue"><PhoneIcon size={23} /></span><div><h2>Phone &amp; SMS</h2><p>Use one AI Caller-managed number for customer calls and text messages. Search by state, city or area code to find a local number.</p></div></div>
+              <div className="communicationSectionHeading"><span className="sectionCircle blue"><PhoneIcon size={23} /></span><div><h2>Phone &amp; SMS</h2><p>Use one AI Caller-managed voice + SMS-capable number. Search by state, city or area code; outbound SMS remains gated until carrier registration is approved.</p></div></div>
               <PhoneNumberManager onNumberChange={setManagedNumber} />
             </section>
           )}
@@ -158,7 +158,7 @@ export default function CommunicationSetupPage() {
 
         <aside className="communicationSidebar">
           <SetupProgressPanel currentStep={3} estimated="7 minutes" className="sidebarCard communicationProgressCard" progressClassName="sidebarProgressBar communicationProgressBar" />
-          {channel === "webchat" ? <WebChatSidebar /> : <section className="sidebarCard communicationWhyCard"><h2>Connect what you need</h2><p>Your AI Caller number handles both calls and SMS. Number setup, routing and renewals are managed for you and billed from your credit balance.</p><div className="communicationBenefits"><div className="communicationBenefit"><span className="benefitIcon green"><CheckIcon size={16} /></span><div><strong>One number for calls and SMS</strong><small>No carrier account, provider credentials or callback URLs are required.</small></div></div><div className="communicationBenefit"><span className="benefitIcon blue"><PhoneIcon size={16} /></span><div><strong>Local number search</strong><small>Filter by state, city or area code and AI Caller configures the number automatically.</small></div></div></div></section>}
+          {channel === "webchat" ? <WebChatSidebar /> : <section className="sidebarCard communicationWhyCard"><h2>Connect what you need</h2><p>Your AI Caller number is provisioned for voice and SMS routing. Outbound US business SMS is enabled only after the required carrier registration is approved. Number setup and renewals are billed from your credit balance.</p><div className="communicationBenefits"><div className="communicationBenefit"><span className="benefitIcon green"><CheckIcon size={16} /></span><div><strong>One managed voice + SMS number</strong><small>No carrier account, provider credentials or callback URLs are required.</small></div></div><div className="communicationBenefit"><span className="benefitIcon blue"><PhoneIcon size={16} /></span><div><strong>Local number search</strong><small>Filter by state, city or area code and AI Caller configures the number automatically.</small></div></div></div></section>}
         </aside>
       </div>
     </main>
