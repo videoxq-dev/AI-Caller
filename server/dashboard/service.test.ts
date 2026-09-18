@@ -274,6 +274,44 @@ describe("dashboard aggregation", () => {
     expect(result.series.reduce((sum, point) => sum + point.aiConversations, 0)).toBe(1);
   });
 
+  it("does not flag a qualified lead after an outbound follow-up", async () => {
+    const [contact] = await db.insert(contacts).values({
+      workspaceId,
+      name: "Followed Up Customer",
+      phone: "+12025550112",
+    }).returning();
+    const [conversation] = await db.insert(conversations).values({
+      workspaceId,
+      contactId: contact.id,
+      createdAt: new Date("2026-09-18T09:00:00.000Z"),
+      lastMessageAt: new Date("2026-09-18T09:20:00.000Z"),
+    }).returning();
+
+    await db.insert(leads).values({
+      workspaceId,
+      contactId: contact.id,
+      status: "QUALIFIED",
+      qualificationScore: 95,
+      qualificationCompletedAt: new Date("2026-09-18T09:10:00.000Z"),
+    });
+    await db.insert(messages).values({
+      workspaceId,
+      conversationId: conversation.id,
+      channel: "SMS",
+      direction: "OUTBOUND",
+      senderType: "USER",
+      body: "Following up on your request.",
+      provider: "fixture",
+      externalMessageId: "dashboard-followup-outbound",
+      status: "SENT",
+      createdAt: new Date("2026-09-18T09:20:00.000Z"),
+    });
+
+    const result = await getDashboardOverview(workspaceId, 7, now);
+
+    expect(result.attention.qualifiedFollowups).toBe(0);
+  });
+
   it("never mixes records from another workspace", async () => {
     const [foreignWorkspace] = await db.insert(workspaces).values({ name: "Other Workspace" }).returning();
     const [foreignContact] = await db.insert(contacts).values({
