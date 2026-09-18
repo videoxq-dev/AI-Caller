@@ -259,21 +259,23 @@ try {
   );
   assert(consentState.rows[0].recording_status === "PENDING", "Recording started before explicit consent.");
   assert(consentState.rows[0].recording_consent_status === "PENDING", "Explicit consent was incorrectly inferred from the disclosure.");
+  assert(consentState.rows[0].transcript_status === "PENDING", "Transcription started before explicit consent.");
 
   const consent = await sendWebhook(
     workspaceId,
-    eventPayload("call.transcription", "m7-consent", callSessionId, callControlId, {
-      transcription_data: { transcript: "Yes, that's fine.", is_final: true, confidence: 0.99 },
+    eventPayload("call.gather.ended", "m7-consent", callSessionId, callControlId, {
+      digits: "1",
+      status: "valid",
     }),
   );
-  assert(consent.data?.processed === 1, "Explicit recording consent event was not processed.");
+  assert(consent.data?.processed === 1, "Explicit keypad recording consent event was not processed.");
 
   consentState = await pool.query(
     `SELECT recording_status, recording_consent_status, recording_disclosed_at, metadata FROM voice_calls WHERE id = $1`,
     [callId],
   );
   assert(consentState.rows[0].recording_status === "RECORDING", "Recording did not start after affirmative consent.");
-  assert(consentState.rows[0].recording_consent_status === "GRANTED", "Affirmative recording consent was not persisted.");
+  assert(consentState.rows[0].recording_consent_status === "GRANTED", "Affirmative keypad recording consent was not persisted.");
   assert(consentState.rows[0].recording_disclosed_at, "Recording consent evidence timestamp was not persisted.");
 
   const qualificationTurn = await sendWebhook(
