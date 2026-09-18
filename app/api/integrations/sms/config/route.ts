@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { resolveWorkspaceContext } from "@/server/auth/workspace-context";
+import { requireWorkspacePermission } from "@/server/auth/permissions";
 import { getPrivateIntegration, saveIntegration } from "@/server/domain/integrations/repository";
 import { normalizePhone } from "@/server/domain/core/schemas";
 import { getEnv } from "@/server/env";
@@ -73,6 +74,7 @@ export async function GET(request: Request) {
 export async function PUT(request: Request) {
   try {
     const context = await resolveWorkspaceContext(request.headers);
+    requireWorkspacePermission(context.membership.role, "integration.manage");
     const input = parseInput(updateSchema, await request.json());
     const integration = await getPrivateIntegration(context.workspace.id, input.provider);
     if (!integration || integration.status !== "CONNECTED") {
