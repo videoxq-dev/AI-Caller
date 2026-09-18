@@ -1,0 +1,39 @@
+import { z } from "zod";
+import { resolveWorkspaceContext } from "@/server/auth/workspace-context";
+import { AppError, toErrorResponse } from "@/server/http/errors";
+import { getManagedPhoneNumber, provisionManagedPhoneNumber } from "@/server/phone-numbers/service";
+import { getCreditBalance } from "@/server/credits/service";
+import { parseInput } from "@/server/http/validation";
+
+const provisionSchema = z.object({
+  phoneNumber: z.string().trim().regex(/^\+1\d{10}$/),
+  requestId: z.string().uuid(),
+  replaceCurrent: z.boolean().default(false),
+});
+
+export async function GET(request: Request) {
+  try {
+    const context = await resolveWorkspaceContext(request.headers);
+    const [number, creditBalance] = await Promise.all([
+      getManagedPhoneNumber(context.workspace.id),
+      getCreditBalance(context.workspace.id),
+    ]);
+    return Response.json({ number, creditBalance }, { headers: { "cache-control": "no-store" } });
+  } catch (error) {
+    return toErrorResponse(error);
+  }
+}
+
+export async function POST(request: Request) {
+  try {
+    const context = await resolveWorkspaceContext(request.headers);
+    const input = parseInput(provisionSchema, await request.json());
+    const number = await provisionManagedPhoneNumber(context.workspace.id, input);
+    return Response.json({ number }, { status: 201, headers: { "cache-control": "no-store" } });
+  } catch (error) {
+    if (error instanceof z.ZodError) {
+      return toErrorResponse(new AppError("INVALID_PHONE_PROVISIONING_REQUEST", "Choose a valid available phone number.", 422));
+    }
+    return toErrorResponse(error);
+  }
+}
