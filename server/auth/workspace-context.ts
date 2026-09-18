@@ -1,13 +1,22 @@
 import { auth } from "@/server/auth";
 import { AppError } from "@/server/http/errors";
-import { ensureDefaultWorkspace, getPrimaryMembership } from "./workspace-repository";
+import { readActiveWorkspaceId } from "./active-workspace";
+import { ensureDefaultWorkspace, getMembership, getPrimaryMembership } from "./workspace-repository";
 
 export async function resolveWorkspaceContext(requestHeaders: Headers) {
   const session = await auth.api.getSession({ headers: requestHeaders });
 
   if (!session) throw new AppError("UNAUTHORIZED", "You must be signed in.", 401);
 
-  let membership = await getPrimaryMembership(session.user.id);
+  const activeWorkspaceId = readActiveWorkspaceId(requestHeaders);
+  let membership = activeWorkspaceId
+    ? await getMembership(session.user.id, activeWorkspaceId)
+    : await getPrimaryMembership(session.user.id);
+
+  if (!membership) {
+    membership = await getPrimaryMembership(session.user.id);
+  }
+
   if (!membership) {
     membership = await ensureDefaultWorkspace({
       id: session.user.id,
