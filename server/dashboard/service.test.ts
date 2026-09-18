@@ -218,7 +218,9 @@ describe("dashboard aggregation", () => {
       "APPOINTMENT",
       "HUMAN_TAKEOVER",
     ]));
-    expect(result.series.some((point) => point.inquiries === 2)).toBe(true);
+    expect(result.series.reduce((sum, point) => sum + point.inquiries, 0)).toBe(result.metrics.inquiries.value);
+    expect(result.series.reduce((sum, point) => sum + point.aiConversations, 0)).toBe(result.metrics.aiConversations.value);
+    expect(result.series.reduce((sum, point) => sum + point.humanTakeovers, 0)).toBe(result.metrics.humanTakeovers.value);
   });
 
   it("counts missed voice calls as inquiries but only answered calls as AI conversations", async () => {
