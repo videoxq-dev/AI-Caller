@@ -133,6 +133,9 @@ jobs:
       - name: Milestone 7 inbound voice browser acceptance verification
         run: npm run test:browser:m7
 
+      - name: Milestone 8 collaboration and automations browser acceptance verification
+        run: npm run test:browser:m8
+
       - name: Upload Milestone 3 browser screenshots
         if: always()
         uses: actions/upload-artifact@v4
@@ -175,6 +178,15 @@ jobs:
         with:
           name: milestone7-browser-verification
           path: artifacts/milestone7-browser
+          if-no-files-found: warn
+          retention-days: 14
+
+      - name: Upload Milestone 8 browser screenshots
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: milestone8-browser-verification
+          path: artifacts/milestone8-browser
           if-no-files-found: warn
           retention-days: 14
 
