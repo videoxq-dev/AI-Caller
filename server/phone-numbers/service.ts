@@ -711,6 +711,7 @@ async function clearHostedTelephonyBindingsIfUnused(workspaceId: string) {
   if (active) return;
   await db.delete(capabilityBindings).where(and(
     eq(capabilityBindings.workspaceId, workspaceId),
+    eq(capabilityBindings.mode, "HOSTED"),
     inArray(capabilityBindings.capability, ["VOICE", "SMS"]),
   ));
 }
