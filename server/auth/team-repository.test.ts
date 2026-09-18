@@ -80,7 +80,7 @@ describe("workspace team invitations", () => {
       role: "STAFF",
     })).rejects.toMatchObject({ code: "INVITATION_EXISTS" });
 
-    await revokeWorkspaceInvitation(workspaceId, created.invitation.id);
+    await revokeWorkspaceInvitation(workspaceId, created.invitation.id, "OWNER");
     const replacement = await createWorkspaceInvitation({
       workspaceId,
       invitedByUserId: ownerId,
@@ -88,6 +88,28 @@ describe("workspace team invitations", () => {
       role: "ADMIN",
     });
     expect(replacement.invitation.role).toBe("ADMIN");
+  });
+
+  it("allows admins to revoke staff invitations but protects admin invitations", async () => {
+    const staffInvite = await createWorkspaceInvitation({
+      workspaceId,
+      invitedByUserId: ownerId,
+      email: "staff-role@example.com",
+      role: "STAFF",
+    });
+    await expect(revokeWorkspaceInvitation(workspaceId, staffInvite.invitation.id, "ADMIN"))
+      .resolves.toMatchObject({ id: staffInvite.invitation.id });
+
+    const adminInvite = await createWorkspaceInvitation({
+      workspaceId,
+      invitedByUserId: ownerId,
+      email: "admin-role@example.com",
+      role: "ADMIN",
+    });
+    await expect(revokeWorkspaceInvitation(workspaceId, adminInvite.invitation.id, "ADMIN"))
+      .rejects.toMatchObject({ code: "FORBIDDEN_ROLE_ASSIGNMENT", status: 403 });
+    await expect(revokeWorkspaceInvitation(workspaceId, adminInvite.invitation.id, "OWNER"))
+      .resolves.toMatchObject({ id: adminInvite.invitation.id });
   });
 
   it("clears lead and conversation assignments when a member is removed", async () => {
