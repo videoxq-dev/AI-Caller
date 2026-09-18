@@ -196,6 +196,8 @@ try {
   const provisioned = await api(context, "POST", "/api/phone-numbers", {
     phoneNumber: availableNumber.phoneNumber,
     requestId: provisionRequestId,
+    expectedPurchaseCredits: availableNumber.purchaseCredits,
+    expectedMonthlyCredits: availableNumber.monthlyCredits,
     replaceCurrent: false,
   }, "provision managed phone number");
   assert(provisioned?.number?.status === "ACTIVE", `Managed number did not reach ACTIVE after carrier reconciliation: ${JSON.stringify(provisioned?.number)}`);
