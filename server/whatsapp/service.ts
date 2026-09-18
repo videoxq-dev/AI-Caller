@@ -232,10 +232,18 @@ export function createWhatsAppWebhookService(dependencies: WhatsAppServiceDepend
           return { skipped: false as const, replied: false as const };
         }
 
-        await dependencies.sendText(job.workspaceId, conversation.id, {
-          senderType: "AI",
-          text: orchestrated.reply,
-        });
+        try {
+          await dependencies.sendText(job.workspaceId, conversation.id, {
+            senderType: "AI",
+            text: orchestrated.reply,
+          });
+        } catch (error) {
+          if (error instanceof AppError && error.code === "AI_HANDLING_PAUSED") {
+            await completeProviderWebhookEvent(job.workspaceId, job.webhookEventId);
+            return { skipped: false as const, replied: false as const };
+          }
+          throw error;
+        }
 
         await completeProviderWebhookEvent(job.workspaceId, job.webhookEventId);
         return { skipped: false as const, replied: true as const };
