@@ -1,5 +1,6 @@
 import { createHmac, timingSafeEqual } from "node:crypto";
 import { getEnv } from "@/server/env";
+import { isE2EProviderFixtureMode } from "@/server/providers/e2e-fixtures";
 
 function signature(workspaceId: string, callId: string, externalCallId: string, expiresAt: number) {
   const secret = getEnv().BETTER_AUTH_SECRET;
@@ -19,6 +20,9 @@ export function buildVoiceGatewayStreamUrl(
   const url = new URL(base);
   if (url.protocol !== "wss:" && url.protocol !== "ws:") {
     throw new Error("VOICE_GATEWAY_URL must use ws:// or wss://.");
+  }
+  if (getEnv().NODE_ENV === "production" && url.protocol !== "wss:" && !isE2EProviderFixtureMode()) {
+    throw new Error("Production voice gateway URLs must use wss://.");
   }
   const expiresAt = Math.floor(now / 1000) + 10 * 60;
   url.searchParams.set("workspaceId", workspaceId);
