@@ -23,11 +23,11 @@ export type ManagedPhoneNumber = {
   locality: string | null;
   numberType: string;
   status: string;
-  monthlyCredits: number;
-  purchaseCredits: number;
-  currentPeriodEnd: string | null;
-  nextBillingAt: string | null;
-  graceEndsAt: string | null;
+  monthlyCredits?: number;
+  purchaseCredits?: number;
+  currentPeriodEnd?: string | null;
+  nextBillingAt?: string | null;
+  graceEndsAt?: string | null;
   failureReason: string | null;
 };
 
@@ -181,13 +181,13 @@ export function PhoneNumberManager({
           <div className={styles.warning}>
             <strong>{current.status === "SUSPENDED" ? "Phone service is suspended" : "Renewal needs more credits"}</strong>
             <span>{current.failureReason ?? "Add credits to renew this number."}</span>
-            <a href="/settings/billing">Top up credits</a>
+            {canManage && <a href="/settings/billing">Top up credits</a>}
           </div>
         )}
 
         <div className={styles.billingRow}>
-          <div><span>Monthly renewal</span><strong>{current.monthlyCredits.toLocaleString()} credits</strong></div>
-          <div><span>Next billing</span><strong>{current.nextBillingAt ? new Date(current.nextBillingAt).toLocaleDateString() : "Pending"}</strong></div>
+          {canManage && <div><span>Monthly renewal</span><strong>{(current.monthlyCredits ?? 0).toLocaleString()} credits</strong></div>}
+          {canManage && <div><span>Next billing</span><strong>{current.nextBillingAt ? new Date(current.nextBillingAt).toLocaleDateString() : "Pending"}</strong></div>}
           <div><span>Features</span><strong>Calls + SMS</strong></div>
           {canManage && <button type="button" onClick={() => setChanging(true)}>{settingsMode ? "Change number" : "Choose a different number"}</button>}
         </div>
