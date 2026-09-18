@@ -36,3 +36,18 @@ CREATE UNIQUE INDEX IF NOT EXISTS "hosted_phone_numbers_provider_id_uq"
 CREATE UNIQUE INDEX IF NOT EXISTS "hosted_phone_numbers_active_number_uq"
   ON "hosted_phone_numbers" ("phone_number")
   WHERE "released_at" IS NULL;
+
+-- Standardize hosted service pricing on the approved 50% gross-margin target.
+UPDATE "hosted_api_rate_cards"
+SET "target_margin_bps" = 5000, "updated_at" = now()
+WHERE "target_margin_bps" = 5500;
+
+-- Conservative US inbound managed-voice COGS estimate per started minute.
+-- Covers Voice API + inbound SIP + recording + Telnyx STT + media streaming,
+-- with headroom for TTS. Admin rate versioning can replace this as account-specific
+-- Telnyx pricing becomes available.
+INSERT INTO "hosted_api_rate_cards"
+  ("capability", "provider", "model", "unit", "cost_micros", "units_per_cost", "target_margin_bps", "metadata")
+VALUES
+  ('VOICE', 'telnyx', '', 'VOICE_MINUTE', 40000, 1, 5000, '{"currency":"USD","market":"US","basis":"conservative_managed_inbound_voice_components"}'::jsonb)
+ON CONFLICT DO NOTHING;
