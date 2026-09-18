@@ -11,7 +11,7 @@ export async function DELETE(request: Request, { params }: { params: Promise<{ i
     const context = await resolveWorkspaceContext(request.headers);
     requireWorkspacePermission(context.membership.role, "team.manage");
     const { id } = await params;
-    const invitation = await revokeWorkspaceInvitation(context.workspace.id, idSchema.parse(id));
+    const invitation = await revokeWorkspaceInvitation(context.workspace.id, idSchema.parse(id), context.membership.role as "OWNER" | "ADMIN");
     return Response.json({ invitation });
   } catch (error) {
     return toErrorResponse(error);
