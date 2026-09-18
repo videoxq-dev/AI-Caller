@@ -17,7 +17,8 @@ import { resolveWorkspaceContext } from "@/server/auth/workspace-context";
 import { getAgentSetup, getBusinessSetup, getSetupStatus } from "@/server/domain/onboarding/repository";
 import { saveAISetupAction } from "../actions";
 import { SetupProgressPanel } from "../setup-progress";
-import { KnowledgeEditor } from "./knowledge-editor";\nimport { QualificationEditor } from "./qualification-editor";
+import { KnowledgeEditor } from "./knowledge-editor";
+import { QualificationEditor } from "./qualification-editor";
 import "./ai-assistant.css";
 
 const defaultGuardrails = [
@@ -35,7 +36,9 @@ export default async function AIAssistantSetupPage() {
     getSetupStatus(context.workspace.id),
   ]);
   const agent = saved.agent;
-  const configuredGuardrails = agent?.behaviorSettings?.guardrails;\n  const voiceSettings = agent?.behaviorSettings?.voice && typeof agent.behaviorSettings.voice === "object" ? agent.behaviorSettings.voice as Record<string, unknown> : {};\n  const qualificationSettings = agent?.behaviorSettings?.qualification && typeof agent.behaviorSettings.qualification === "object" ? agent.behaviorSettings.qualification as { enabled?: boolean; criteria?: Array<{ id: string; label: string; question: string; required: boolean }> } : null;
+  const configuredGuardrails = agent?.behaviorSettings?.guardrails;
+  const voiceSettings = agent?.behaviorSettings?.voice && typeof agent.behaviorSettings.voice === "object" ? agent.behaviorSettings.voice as Record<string, unknown> : {};
+  const qualificationSettings = agent?.behaviorSettings?.qualification && typeof agent.behaviorSettings.qualification === "object" ? agent.behaviorSettings.qualification as { enabled?: boolean; criteria?: Array<{ id: string; label: string; question: string; required: boolean }> } : null;
   const guardrails = Array.isArray(configuredGuardrails) && configuredGuardrails.every((item) => typeof item === "string")
     ? configuredGuardrails as string[]
     : defaultGuardrails;
