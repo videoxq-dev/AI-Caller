@@ -375,7 +375,9 @@ async function failProvisioning(
   }).where(eq(hostedPhoneNumbers.id, row.id));
 }
 
-function ownedNumberIsUsable(owned: { id?: string; status?: string } | null | undefined) {
+function ownedNumberIsUsable(
+  owned: { id?: string; status?: string } | null | undefined,
+): owned is { id: string; status?: string } {
   const status = owned?.status?.trim().toLowerCase();
   return Boolean(owned?.id && (status === "active" || status === "success"));
 }
@@ -388,7 +390,7 @@ async function reconcileProvisioningRow(row: typeof hostedPhoneNumbers.$inferSel
     if (!row.providerOrderId) {
       const owned = await findOwnedTelnyxNumber(row.phoneNumber);
       if (ownedNumberIsUsable(owned)) {
-        return activateProvisionedNumber(row, owned!.id!, "reconciled");
+        return activateProvisionedNumber(row, owned.id, "reconciled");
       }
       const [pending] = await db.update(hostedPhoneNumbers).set({
         status: "RECONCILING",
@@ -451,7 +453,7 @@ async function reconcileProvisioningRow(row: typeof hostedPhoneNumbers.$inferSel
       return pending;
     }
 
-    return activateProvisionedNumber(row, owned!.id!, outcome.orderStatus);
+    return activateProvisionedNumber(row, owned.id, outcome.orderStatus);
   } catch (error) {
     const [pending] = await db.update(hostedPhoneNumbers).set({
       status: "RECONCILING",
