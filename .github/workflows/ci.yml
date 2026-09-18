@@ -33,6 +33,8 @@ jobs:
       HOSTED_SMS_TWILIO_ACCOUNT_SID: AC11111111111111111111111111111111
       HOSTED_SMS_TWILIO_AUTH_TOKEN: ci-twilio-signature-secret
       HOSTED_SMS_CREDITS_PER_MESSAGE: "1"
+      META_APP_SECRET: ci-meta-app-secret
+      META_WEBHOOK_VERIFY_TOKEN: ci-meta-verify-token
 
     services:
       postgres:
@@ -108,6 +110,9 @@ jobs:
       - name: Milestone 5 SMS browser acceptance verification
         run: npm run test:browser:m5
 
+      - name: Milestone 6 WhatsApp browser acceptance verification
+        run: npm run test:browser:m6
+
       - name: Upload Milestone 3 browser screenshots
         if: always()
         uses: actions/upload-artifact@v4
@@ -132,6 +137,15 @@ jobs:
         with:
           name: milestone5-browser-verification
           path: artifacts/milestone5-browser
+          if-no-files-found: warn
+          retention-days: 14
+
+      - name: Upload Milestone 6 browser screenshots
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: milestone6-browser-verification
+          path: artifacts/milestone6-browser
           if-no-files-found: warn
           retention-days: 14
 

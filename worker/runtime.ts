@@ -3,18 +3,22 @@ import {
   AUTH_PASSWORD_RESET_EMAIL,
   COMMERCE_WELCOME_EMAIL,
   SMS_INBOUND_RESPONSE,
+  WHATSAPP_INBOUND_RESPONSE,
   passwordResetEmailJobSchema,
   smsInboundResponseJobSchema,
+  whatsappInboundResponseJobSchema,
   welcomeEmailJobSchema,
 } from "@/server/jobs/queues";
 import { sendPasswordResetEmail, sendWelcomeEmail } from "@/server/email/mailer";
 import { logger } from "@/server/observability/logger";
 import { smsWebhookService } from "@/server/sms/service";
+import { whatsAppWebhookService } from "@/server/whatsapp/service";
 
 export async function startWorker() {
   const authBoss = await ensureQueue(AUTH_PASSWORD_RESET_EMAIL);
   const commerceBoss = await ensureQueue(COMMERCE_WELCOME_EMAIL);
   const smsBoss = await ensureQueue(SMS_INBOUND_RESPONSE);
+  const whatsappBoss = await ensureQueue(WHATSAPP_INBOUND_RESPONSE);
 
   await authBoss.work(AUTH_PASSWORD_RESET_EMAIL, async (jobs) => {
     for (const job of jobs) {
@@ -37,7 +41,14 @@ export async function startWorker() {
     }
   });
 
-  logger.info({ queues: [AUTH_PASSWORD_RESET_EMAIL, COMMERCE_WELCOME_EMAIL, SMS_INBOUND_RESPONSE] }, "AI Caller worker started");
+  await whatsappBoss.work(WHATSAPP_INBOUND_RESPONSE, async (jobs) => {
+    for (const job of jobs) {
+      const payload = whatsappInboundResponseJobSchema.parse(job.data);
+      await whatsAppWebhookService.processInboundJob(payload);
+    }
+  });
+
+  logger.info({ queues: [AUTH_PASSWORD_RESET_EMAIL, COMMERCE_WELCOME_EMAIL, SMS_INBOUND_RESPONSE, WHATSAPP_INBOUND_RESPONSE] }, "AI Caller worker started");
 
   const shutdown = async (signal: string) => {
     logger.info({ signal }, "Stopping AI Caller worker");

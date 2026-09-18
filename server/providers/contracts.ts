@@ -66,10 +66,39 @@ export interface SMSProvider {
   normalizeWebhook(input: SmsWebhookInput): Promise<NormalizedSmsEvent[]>;
 }
 
+export type WhatsAppDeliveryStatus = "SENT" | "DELIVERED" | "READ" | "FAILED";
+
+export type NormalizedWhatsAppEvent =
+  | {
+      type: "MESSAGE_RECEIVED";
+      externalEventId: string;
+      externalMessageId: string;
+      phoneNumberId: string;
+      from: string;
+      profileName: string | null;
+      text: string;
+      occurredAt: Date | null;
+    }
+  | {
+      type: "DELIVERY_UPDATED";
+      externalEventId: string;
+      externalMessageId: string;
+      phoneNumberId: string;
+      status: WhatsAppDeliveryStatus;
+      error: string | null;
+      occurredAt: Date | null;
+    };
+
+export type WhatsAppWebhookInput = {
+  request: Request;
+  rawBody: string;
+};
+
 export interface WhatsAppProvider {
-  sendText(input: { phoneNumberId: string; to: string; text: string }): Promise<{ externalId: string }>;
-  verifyWebhook(request: Request, rawBody: string): Promise<boolean>;
-  normalizeWebhook(payload: unknown): Promise<unknown[]>;
+  sendText(input: { phoneNumberId: string; to: string; text: string }): Promise<{ externalId: string; status: "SENT" }>;
+  sendTemplate(input: { phoneNumberId: string; to: string; templateName: string; languageCode: string; components?: unknown[] }): Promise<{ externalId: string; status: "SENT" }>;
+  verifyWebhook(input: WhatsAppWebhookInput): Promise<boolean>;
+  normalizeWebhook(input: WhatsAppWebhookInput): Promise<NormalizedWhatsAppEvent[]>;
 }
 
 export interface VoiceProvider {
