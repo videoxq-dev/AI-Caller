@@ -1,4 +1,5 @@
 import {
+  boolean,
   index,
   jsonb,
   pgEnum,
@@ -8,7 +9,6 @@ import {
   uniqueIndex,
   uuid,
 } from "drizzle-orm/pg-core";
-import { contacts, conversations, appointments } from "./core-domain";
 import { workspaces } from "./core";
 
 export const automationKey = pgEnum("automation_key", [
@@ -50,7 +50,7 @@ export const automationSettings = pgTable(
     id: uuid("id").defaultRandom().primaryKey(),
     workspaceId: uuid("workspace_id").notNull().references(() => workspaces.id, { onDelete: "cascade" }),
     key: automationKey("key").notNull(),
-    enabled: text("enabled").$type<"true" | "false">().default("true").notNull(),
+    enabled: boolean("enabled").default(true).notNull(),
     config: jsonb("config").$type<Record<string, unknown>>().default({}).notNull(),
     createdAt: timestamp("created_at", { withTimezone: true, mode: "date" }).defaultNow().notNull(),
     updatedAt: timestamp("updated_at", { withTimezone: true, mode: "date" }).defaultNow().notNull(),
@@ -130,8 +130,3 @@ export const automationDeliveries = pgTable(
   ],
 );
 
-export const automationReferences = {
-  conversations,
-  contacts,
-  appointments,
-};
