@@ -27,6 +27,7 @@ const server = http.createServer((request, response) => {
 });
 
 const wss = new WebSocketServer({ noServer: true, maxPayload: 2 * 1024 * 1024 });
+const authByRequest = new WeakMap<object, NonNullable<ReturnType<typeof verifyVoiceGatewayRequest>>>();
 
 server.on("upgrade", (request, socket, head) => {
   try {
@@ -38,8 +39,9 @@ server.on("upgrade", (request, socket, head) => {
       return;
     }
 
+    authByRequest.set(request, auth);
     wss.handleUpgrade(request, socket, head, (ws) => {
-      wss.emit("connection", ws, request, auth);
+      wss.emit("connection", ws, request);
     });
   } catch {
     socket.write("HTTP/1.1 400 Bad Request\r\nConnection: close\r\n\r\n");
@@ -47,7 +49,9 @@ server.on("upgrade", (request, socket, head) => {
   }
 });
 
-wss.on("connection", (ws, _request, auth: ReturnType<typeof verifyVoiceGatewayRequest>) => {
+wss.on("connection", (ws, request) => {
+  const auth = authByRequest.get(request);
+  authByRequest.delete(request);
   if (!auth) {
     ws.close(1008, "Unauthorized");
     return;
