@@ -298,12 +298,12 @@ async function executeQualifiedLead(
     if (!membership) throw new AppError("AUTOMATION_ASSIGNEE_INVALID", "Configured lead assignee is no longer a workspace member.", 409);
   }
 
-  await db.transaction(async (tx) => {
-    await tx.update(leads).set({ assignedUserId, updatedAt: new Date() }).where(and(
-      eq(leads.workspaceId, workspaceId),
-      eq(leads.id, leadId),
-    ));
-    if (assignedUserId) {
+  if (assignedUserId) {
+    await db.transaction(async (tx) => {
+      await tx.update(leads).set({ assignedUserId, updatedAt: new Date() }).where(and(
+        eq(leads.workspaceId, workspaceId),
+        eq(leads.id, leadId),
+      ));
       const [conversation] = await tx.select().from(conversations).where(and(
         eq(conversations.workspaceId, workspaceId),
         eq(conversations.contactId, contactId),
@@ -320,8 +320,8 @@ async function executeQualifiedLead(
           metadata: { automationRunId: runId },
         });
       }
-    }
-  });
+    });
+  }
 
   if (!setting.config.notifyInApp) return { sent: 0, skipped: 1, failed: 0 };
   return deliverInApp({
@@ -460,9 +460,17 @@ export async function executeAutomationRun(workspaceId: string, runId: string) {
       summary = await executeEscalation(workspaceId, runId, event);
     }
 
-    const finalStatus = summary.failed > 0 && summary.sent === 0 ? "FAILED" : summary.sent > 0 ? "COMPLETED" : "SKIPPED";
+    const finalStatus = summary.failed > 0 ? "FAILED" : summary.sent > 0 ? "COMPLETED" : "SKIPPED";
     if (finalStatus === "FAILED") {
-      await failAutomationRun(workspaceId, runId, new AppError("AUTOMATION_DELIVERY_FAILED", "All requested automation deliveries failed.", 502));
+      const message = summary.sent > 0
+        ? "One or more requested automation deliveries failed."
+        : "All requested automation deliveries failed.";
+      await failAutomationRun(
+        workspaceId,
+        runId,
+        new AppError("AUTOMATION_DELIVERY_FAILED", message, 502),
+        { deliverySummary: summary },
+      );
     } else {
       await completeAutomationRun(workspaceId, runId, finalStatus, { deliverySummary: summary });
     }
