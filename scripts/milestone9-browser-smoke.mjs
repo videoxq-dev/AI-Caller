@@ -138,7 +138,9 @@ try {
   await page.goto(`${baseUrl}/dashboard`, { waitUntil: "networkidle" });
   await page.getByRole("heading", { name: "Dashboard", exact: true }).waitFor({ timeout: 10_000 });
   await page.getByLabel("Dashboard date range").selectOption("7");
-  await page.locator(".metricCard", { hasText: "New inquiries" }).locator(".metricValue").getByText("1", { exact: true }).waitFor({ timeout: 10_000 });
+  const inquiryValue = page.locator(".metricCard", { hasText: "New inquiries" }).locator(".metricValue");
+  await inquiryValue.waitFor({ timeout: 10_000 });
+  assert(await inquiryValue.innerText() === "1", "Dashboard inquiry card is not live.");
   assert(await page.locator(".metricCard", { hasText: "Credit balance" }).locator(".metricValue").innerText() === "88", "Dashboard credit card is not live.");
   assert(await page.getByText("M9 Dashboard Customer", { exact: false }).count() > 0, "Recent activity did not surface the seeded customer.");
   assert(await page.getByLabel("Active workspace").inputValue() === workspaceId, "Dashboard is not using shared AppNav workspace state.");
