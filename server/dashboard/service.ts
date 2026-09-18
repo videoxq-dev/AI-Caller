@@ -214,50 +214,54 @@ async function loadSummary(workspaceId: string, start: Date, end: Date, previous
 async function loadSeries(workspaceId: string, start: Date, end: Date): Promise<DashboardSeriesPoint[]> {
   const leadDay = sql<string>`to_char(${leads.qualificationCompletedAt} AT TIME ZONE 'UTC', 'YYYY-MM-DD')`;
   const appointmentDay = sql<string>`to_char(${appointments.createdAt} AT TIME ZONE 'UTC', 'YYYY-MM-DD')`;
-  const takeoverDay = sql<string>`to_char(${conversationHandlingEvents.createdAt} AT TIME ZONE 'UTC', 'YYYY-MM-DD')`;
+
 
   const [inquiryRows, aiResult, leadRows, appointmentRows, takeoverRows] = await Promise.all([
     db.execute(sql`
-      SELECT day, count(*)::int AS count
+      SELECT to_char(first_at AT TIME ZONE 'UTC', 'YYYY-MM-DD') AS day, count(*)::int AS count
         FROM (
-          SELECT to_char(created_at AT TIME ZONE 'UTC', 'YYYY-MM-DD') AS day, conversation_id
-            FROM messages
-           WHERE workspace_id = ${workspaceId}
-             AND direction = 'INBOUND'
-             AND sender_type = 'CUSTOMER'
-             AND created_at >= ${start}
-             AND created_at < ${end}
-           GROUP BY day, conversation_id
-          UNION
-          SELECT to_char(started_at AT TIME ZONE 'UTC', 'YYYY-MM-DD') AS day, conversation_id
-            FROM voice_calls
-           WHERE workspace_id = ${workspaceId}
-             AND started_at >= ${start}
-             AND started_at < ${end}
-           GROUP BY day, conversation_id
-        ) daily_inquiries
+          SELECT conversation_id, min(occurred_at) AS first_at
+            FROM (
+              SELECT conversation_id, created_at AS occurred_at
+                FROM messages
+               WHERE workspace_id = ${workspaceId}
+                 AND direction = 'INBOUND'
+                 AND sender_type = 'CUSTOMER'
+                 AND created_at >= ${start}
+                 AND created_at < ${end}
+              UNION ALL
+              SELECT conversation_id, started_at AS occurred_at
+                FROM voice_calls
+               WHERE workspace_id = ${workspaceId}
+                 AND started_at >= ${start}
+                 AND started_at < ${end}
+            ) inquiry_events
+           GROUP BY conversation_id
+        ) first_inquiries
        GROUP BY day
        ORDER BY day
     `),
     db.execute(sql`
-      SELECT day, count(*)::int AS count
+      SELECT to_char(first_at AT TIME ZONE 'UTC', 'YYYY-MM-DD') AS day, count(*)::int AS count
         FROM (
-          SELECT to_char(created_at AT TIME ZONE 'UTC', 'YYYY-MM-DD') AS day, conversation_id
-            FROM messages
-           WHERE workspace_id = ${workspaceId}
-             AND sender_type = 'AI'
-             AND created_at >= ${start}
-             AND created_at < ${end}
-           GROUP BY day, conversation_id
-          UNION
-          SELECT to_char(started_at AT TIME ZONE 'UTC', 'YYYY-MM-DD') AS day, conversation_id
-            FROM voice_calls
-           WHERE workspace_id = ${workspaceId}
-             AND answered_at IS NOT NULL
-             AND started_at >= ${start}
-             AND started_at < ${end}
-           GROUP BY day, conversation_id
-        ) daily_ai
+          SELECT conversation_id, min(occurred_at) AS first_at
+            FROM (
+              SELECT conversation_id, created_at AS occurred_at
+                FROM messages
+               WHERE workspace_id = ${workspaceId}
+                 AND sender_type = 'AI'
+                 AND created_at >= ${start}
+                 AND created_at < ${end}
+              UNION ALL
+              SELECT conversation_id, started_at AS occurred_at
+                FROM voice_calls
+               WHERE workspace_id = ${workspaceId}
+                 AND answered_at IS NOT NULL
+                 AND started_at >= ${start}
+                 AND started_at < ${end}
+            ) ai_events
+           GROUP BY conversation_id
+        ) first_ai_conversations
        GROUP BY day
        ORDER BY day
     `),
@@ -285,17 +289,20 @@ async function loadSeries(workspaceId: string, start: Date, end: Date): Promise<
         lt(appointments.createdAt, end),
       ))
       .groupBy(appointmentDay),
-    db.select({
-      day: takeoverDay,
-      count: sql<number>`count(distinct ${conversationHandlingEvents.conversationId})::int`,
-    }).from(conversationHandlingEvents)
-      .where(and(
-        eq(conversationHandlingEvents.workspaceId, workspaceId),
-        sql`${conversationHandlingEvents.type} in ('TAKEOVER', 'ESCALATED')`,
-        gte(conversationHandlingEvents.createdAt, start),
-        lt(conversationHandlingEvents.createdAt, end),
-      ))
-      .groupBy(takeoverDay),
+    db.execute(sql`
+      SELECT to_char(first_at AT TIME ZONE 'UTC', 'YYYY-MM-DD') AS day, count(*)::int AS count
+        FROM (
+          SELECT conversation_id, min(created_at) AS first_at
+            FROM conversation_handling_events
+           WHERE workspace_id = ${workspaceId}
+             AND type IN ('TAKEOVER', 'ESCALATED')
+             AND created_at >= ${start}
+             AND created_at < ${end}
+           GROUP BY conversation_id
+        ) first_takeovers
+       GROUP BY day
+       ORDER BY day
+    `),
   ]);
 
   const byDay = new Map<string, DashboardSeriesPoint>();
@@ -333,7 +340,7 @@ async function loadSeries(workspaceId: string, start: Date, end: Date): Promise<
     point.completedAppointments = numberValue(row.completed);
     point.cancelledAppointments = numberValue(row.cancelled);
   }
-  for (const row of takeoverRows) {
+  for (const row of takeoverRows.rows as Array<{ day: string; count: number }>) {
     const point = byDay.get(row.day);
     if (point) point.humanTakeovers = numberValue(row.count);
   }
