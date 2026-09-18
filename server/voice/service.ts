@@ -88,25 +88,6 @@ function phase(metadata: Record<string, unknown>) {
   return typeof metadata.phase === "string" ? metadata.phase : "UNKNOWN";
 }
 
-function consentAttempts(metadata: Record<string, unknown>) {
-  const value = metadata.consentAttempts;
-  return typeof value === "number" && Number.isInteger(value) && value >= 0 ? value : 0;
-}
-
-function normalizeConsentText(value: string) {
-  return value.toLowerCase().replace(/[^a-z0-9' ]+/g, " ").replace(/\s+/g, " ").trim();
-}
-
-function classifyConsent(value: string): "YES" | "NO" | "UNKNOWN" {
-  const normalized = normalizeConsentText(value);
-  if (!normalized) return "UNKNOWN";
-  if (/\b(no|nope|decline|stop)\b/.test(normalized) || /\b(do not|don't|dont)\b/.test(normalized)) return "NO";
-  if (/\b(yes|yeah|yep|sure|okay|ok|agree|consent)\b/.test(normalized) || normalized.includes("go ahead") || normalized.includes("that's fine")) {
-    return "YES";
-  }
-  return "UNKNOWN";
-}
-
 function estimateSpeechDurationMs(text: string, speakingRate = 1) {
   const words = Math.max(1, text.trim().split(/\s+/).length);
   const wordsPerSecond = 2.5 * Math.max(0.75, Math.min(1.25, speakingRate));
@@ -122,6 +103,7 @@ function safeEventPayload(event: NormalizedVoiceEvent) {
   return {
     type: event.type,
     externalCallId: event.externalCallId,
+    ...(event.type === "DTMF_GATHERED" ? { status: event.status } : {}),
     ...(event.type === "TRANSCRIPTION" ? { isFinal: event.isFinal } : {}),
     ...(event.type === "CALL_HANGUP" ? { cause: event.cause } : {}),
     ...(event.type === "RECORDING_SAVED" ? { recordingId: event.recordingId, format: event.format } : {}),
@@ -135,7 +117,7 @@ function disclosureText(
 ) {
   const identity = `Hi, I'm ${assistantName}, an AI assistant for ${businessName}.`;
   return recordingPolicy === "EXPLICIT_CONSENT"
-    ? `${identity} This call may be recorded and transcribed to help with your request. Do I have your permission to continue?`
+    ? `${identity} This call may be recorded and transcribed to help with your request. Press 1 to agree, or press 2 to decline.`
     : `${identity} This call will be recorded and transcribed to help with your request.`;
 }
 
@@ -300,26 +282,18 @@ export function createVoiceWebhookService(dependencies: VoiceServiceDependencies
       if (phase(call.metadata) !== "AWAITING_ANSWER") return;
 
       if (voice.config.recordingPolicy === "EXPLICIT_CONSENT") {
-        await runtime.provider.startTranscription({
-          callControlId: event.callControlId,
-          language: voice.config.language,
-          commandId: deterministicCommandId(`${event.externalEventId}:consent-transcription`),
-        });
-        await runtime.provider.speak({
+        await runtime.provider.gatherConsent({
           callControlId: event.callControlId,
           text,
           voice: resolveVoiceProfile(voice.config.profileKey).providerVoiceId,
           language: voice.config.language,
-          speakingRate: voice.config.speakingRate,
-          commandId: deterministicCommandId(`${event.externalEventId}:disclosure`),
+          commandId: deterministicCommandId(`${event.externalEventId}:consent-gather`),
         });
         await updateVoiceCall(workspaceId, call.id, {
           status: "ACTIVE",
           answeredAt: event.occurredAt ?? new Date(),
-          transcriptStatus: "ACTIVE",
         }, {
           phase: "AWAITING_RECORDING_CONSENT",
-          consentAttempts: 0,
         });
         return;
       }
@@ -378,98 +352,71 @@ export function createVoiceWebhookService(dependencies: VoiceServiceDependencies
       return;
     }
 
+    if (event.type === "DTMF_GATHERED") {
+      if (phase(call.metadata) !== "AWAITING_RECORDING_CONSENT") return;
+      const voice = await getVoiceConfig(workspaceId);
+      const profile = resolveVoiceProfile(voice.config.profileKey);
+      const consentGranted = event.digits === "1" && event.status !== "invalid";
+
+      if (consentGranted) {
+        await runtime.provider.startRecording({
+          callControlId: event.callControlId,
+          commandId: deterministicCommandId(`${event.externalEventId}:record-after-consent`),
+        });
+        await runtime.provider.startTranscription({
+          callControlId: event.callControlId,
+          language: voice.config.language,
+          commandId: deterministicCommandId(`${event.externalEventId}:transcription-after-consent`),
+        });
+        await runtime.provider.speak({
+          callControlId: event.callControlId,
+          text: openingText(voice.openingMessage),
+          voice: profile.providerVoiceId,
+          language: voice.config.language,
+          speakingRate: voice.config.speakingRate,
+          commandId: deterministicCommandId(`${event.externalEventId}:opening-after-consent`),
+        });
+        await updateVoiceCall(workspaceId, call.id, {
+          recordingStatus: "RECORDING",
+          recordingConsentStatus: "GRANTED",
+          recordingDisclosedAt: event.occurredAt ?? new Date(),
+          transcriptStatus: "ACTIVE",
+        }, {
+          phase: "ACTIVE",
+          consentEvidence: "DTMF_1",
+          consentEventId: event.externalEventId,
+        });
+        return;
+      }
+
+      await runtime.provider.speak({
+        callControlId: event.callControlId,
+        text: event.digits === "2"
+          ? "No problem. I won't record or transcribe this call. Please contact the business by text or WhatsApp for assistance."
+          : "I couldn't confirm permission to record and transcribe the call, so I'll end this call now. Please contact the business by text or WhatsApp for assistance.",
+        voice: profile.providerVoiceId,
+        language: voice.config.language,
+        speakingRate: voice.config.speakingRate,
+        commandId: deterministicCommandId(`${event.externalEventId}:declined-notice`),
+      });
+      await updateVoiceCall(workspaceId, call.id, {
+        recordingStatus: "DECLINED",
+        recordingConsentStatus: "DECLINED",
+        recordingDisclosedAt: event.occurredAt ?? new Date(),
+        transcriptStatus: "COMPLETE",
+      }, {
+        phase: "DECLINED_NOTICE",
+        consentEvidence: event.digits === "2" ? "DTMF_2" : "NO_VALID_DTMF",
+        consentEventId: event.externalEventId,
+        consentGatherStatus: event.status,
+      });
+      return;
+    }
+
     if (event.type === "TRANSCRIPTION") {
       if (!event.isFinal) return;
       const currentPhase = phase(call.metadata);
       const voice = await getVoiceConfig(workspaceId);
-
-      if (currentPhase === "AWAITING_RECORDING_CONSENT") {
-        const consent = classifyConsent(event.transcript);
-        const profile = resolveVoiceProfile(voice.config.profileKey);
-        if (consent === "YES") {
-          await runtime.provider.startRecording({
-            callControlId: event.callControlId,
-            commandId: deterministicCommandId(`${event.externalEventId}:record-after-consent`),
-          });
-          await runtime.provider.speak({
-            callControlId: event.callControlId,
-            text: openingText(voice.openingMessage),
-            voice: profile.providerVoiceId,
-            language: voice.config.language,
-            speakingRate: voice.config.speakingRate,
-            commandId: deterministicCommandId(`${event.externalEventId}:opening-after-consent`),
-          });
-          await updateVoiceCall(workspaceId, call.id, {
-            recordingStatus: "RECORDING",
-            recordingConsentStatus: "GRANTED",
-            recordingDisclosedAt: event.occurredAt ?? new Date(),
-          }, {
-            phase: "ACTIVE",
-            consentEvidence: "AFFIRMATIVE",
-            consentEventId: event.externalEventId,
-          });
-          return;
-        }
-
-        if (consent === "NO") {
-          await runtime.provider.stopTranscription({
-            callControlId: event.callControlId,
-            commandId: deterministicCommandId(`${event.externalEventId}:stop-consent-transcription`),
-          });
-          await runtime.provider.speak({
-            callControlId: event.callControlId,
-            text: "No problem. I won't record or transcribe this call. Please contact the business by text or WhatsApp for assistance.",
-            voice: profile.providerVoiceId,
-            language: voice.config.language,
-            speakingRate: voice.config.speakingRate,
-            commandId: deterministicCommandId(`${event.externalEventId}:declined-notice`),
-          });
-          await updateVoiceCall(workspaceId, call.id, {
-            recordingStatus: "DECLINED",
-            recordingConsentStatus: "DECLINED",
-            recordingDisclosedAt: event.occurredAt ?? new Date(),
-            transcriptStatus: "COMPLETE",
-          }, {
-            phase: "DECLINED_NOTICE",
-            consentEvidence: "DECLINED",
-            consentEventId: event.externalEventId,
-          });
-          return;
-        }
-
-        const attempts = consentAttempts(call.metadata) + 1;
-        if (attempts >= 2) {
-          await runtime.provider.stopTranscription({
-            callControlId: event.callControlId,
-            commandId: deterministicCommandId(`${event.externalEventId}:stop-unconfirmed-transcription`),
-          });
-          await runtime.provider.speak({
-            callControlId: event.callControlId,
-            text: "I couldn't confirm permission to record and transcribe the call, so I'll end this call now. Please contact the business by text or WhatsApp for assistance.",
-            voice: profile.providerVoiceId,
-            language: voice.config.language,
-            speakingRate: voice.config.speakingRate,
-            commandId: deterministicCommandId(`${event.externalEventId}:unconfirmed-notice`),
-          });
-          await updateVoiceCall(workspaceId, call.id, {
-            recordingStatus: "DECLINED",
-            recordingConsentStatus: "DECLINED",
-            transcriptStatus: "COMPLETE",
-          }, { phase: "DECLINED_NOTICE", consentAttempts: attempts });
-          return;
-        }
-
-        await runtime.provider.speak({
-          callControlId: event.callControlId,
-          text: "Please say yes if you agree to recording and transcription, or no to decline.",
-          voice: profile.providerVoiceId,
-          language: voice.config.language,
-          speakingRate: voice.config.speakingRate,
-          commandId: deterministicCommandId(`${event.externalEventId}:consent-clarification`),
-        });
-        await updateVoiceCall(workspaceId, call.id, {}, { consentAttempts: attempts });
-        return;
-      }
 
       if (currentPhase !== "ACTIVE") return;
 
