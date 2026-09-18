@@ -48,9 +48,9 @@ describe("WhatsApp outbound service", () => {
     await closeDatabase();
   });
 
-  async function addInbound(options: { createdAt?: Date; occurredAt?: Date; id?: string } = {}) {
+  async function addInbound(options: { createdAt?: Date; occurredAt?: Date | null; id?: string } = {}) {
     const createdAt = options.createdAt ?? new Date();
-    const occurredAt = options.occurredAt ?? createdAt;
+    const occurredAt = options.occurredAt === undefined ? createdAt : options.occurredAt;
     await db.insert(messages).values({
       workspaceId,
       conversationId,
@@ -62,7 +62,7 @@ describe("WhatsApp outbound service", () => {
       provider: "whatsapp",
       externalMessageId: options.id ?? `wamid.in.${createdAt.getTime()}.${occurredAt.getTime()}`,
       status: "RECEIVED",
-      metadata: { occurredAt: occurredAt.toISOString() },
+      metadata: occurredAt ? { occurredAt: occurredAt.toISOString() } : {},
       createdAt,
     });
   }
@@ -80,7 +80,13 @@ describe("WhatsApp outbound service", () => {
     await setConversationHandlingMode(workspaceId, conversationId, "HUMAN", null);
     const service = createWhatsAppOutboundService({ resolveRuntime: async () => runtime });
     const sent = await service.sendText(workspaceId, conversationId, { senderType: "USER", text: "Happy to help." });
-    expect(sent).toMatchObject({ senderType: "USER", channel: "WHATSAPP", status: "SENT", externalMessageId: "wamid.staff" });
+    expect(sent).toMatchObject({
+      senderType: "USER",
+      channel: "WHATSAPP",
+      status: "SENT",
+      externalMessageId: "wamid.staff",
+      metadata: { mode: "BYOP", provider: "meta" },
+    });
     expect(provider.sendText).toHaveBeenCalledTimes(1);
   });
 
@@ -122,6 +128,20 @@ describe("WhatsApp outbound service", () => {
     expect(provider.sendText).not.toHaveBeenCalled();
   });
 
+  it("fails closed when provider time is missing or implausibly far in the future", async () => {
+    await addInbound({ occurredAt: null, id: "wamid.missing-provider-time" });
+    await setConversationHandlingMode(workspaceId, conversationId, "HUMAN", null);
+    const service = createWhatsAppOutboundService({ resolveRuntime: async () => runtime });
+
+    await expect(service.sendText(workspaceId, conversationId, { senderType: "USER", text: "Missing timestamp" }))
+      .rejects.toMatchObject({ code: "WHATSAPP_TEMPLATE_REQUIRED" });
+
+    await addInbound({ occurredAt: new Date(Date.now() + 10 * 60 * 1000), id: "wamid.future-provider-time" });
+    await expect(service.sendText(workspaceId, conversationId, { senderType: "USER", text: "Future timestamp" }))
+      .rejects.toMatchObject({ code: "WHATSAPP_TEMPLATE_REQUIRED" });
+    expect(provider.sendText).not.toHaveBeenCalled();
+  });
+
   it("keeps the customer window open when an older provider event is persisted after a newer one", async () => {
     const now = new Date();
     await addInbound({ createdAt: new Date(now.getTime() - 60_000), occurredAt: new Date(now.getTime() - 5 * 60_000), id: "wamid.newer-provider-event" });
@@ -149,7 +169,11 @@ describe("WhatsApp outbound service", () => {
       templateName: "appointment_reminder",
       languageCode: "en_US",
     });
-    expect(sent).toMatchObject({ status: "SENT", externalMessageId: "wamid.template" });
+    expect(sent).toMatchObject({
+      status: "SENT",
+      externalMessageId: "wamid.template",
+      metadata: { mode: "BYOP", templateName: "appointment_reminder", languageCode: "en_US", provider: "meta" },
+    });
     expect(provider.sendTemplate).toHaveBeenCalledTimes(1);
   });
 });
