@@ -13,7 +13,6 @@ import "../dashboard/dashboard.css";
 import "./settings.css";
 
 type SettingsTab = "general" | "phone" | "team" | "channels";
-type ChannelId = "whatsapp" | "webchat";
 type WorkspaceRole = "OWNER" | "ADMIN" | "STAFF";
 type TeamMember = { userId: string; name: string; email: string; image: string | null; role: WorkspaceRole; joinedAt: string };
 type TeamInvitation = { id: string; email: string; role: "ADMIN" | "STAFF"; status: "PENDING"; expiresAt: string; createdAt: string; invitedByUserId: string };
@@ -42,7 +41,6 @@ export default function SettingsPage() {
   const [teamLoading, setTeamLoading] = useState(false);
   const [teamError, setTeamError] = useState<string | null>(null);
   const [teamActionPending, setTeamActionPending] = useState(false);
-  const [channels, setChannels] = useState<Record<ChannelId, boolean>>({ whatsapp: true, webchat: true });
 
   const activeMembers = team.length;
   const canManageTeam = currentRole === "OWNER" || currentRole === "ADMIN";
@@ -235,8 +233,8 @@ export default function SettingsPage() {
 
           {tab === "channels" && (
             <section className="channelSettingsGrid">
-              <ChannelCard title="WhatsApp" provider="Meta connection" active={channels.whatsapp} onToggle={() => setChannels((current) => ({ ...current, whatsapp: !current.whatsapp }))} icon={<WhatsAppIcon />} detail="Business messaging" />
-              <ChannelCard title="Web Chat" provider="AI Caller widget" active={channels.webchat} onToggle={() => setChannels((current) => ({ ...current, webchat: !current.webchat }))} icon={<MessageIcon size={20} />} detail="Website conversations" />
+              <ChannelCard title="WhatsApp" provider="Meta connection" icon={<WhatsAppIcon />} detail="Business messaging" />
+              <ChannelCard title="Web Chat" provider="AI Caller widget" icon={<MessageIcon size={20} />} detail="Website conversations" />
               <article className="settingsCard channelRoutingCard"><div className="sectionHeading"><div><h2>Channel routing</h2><p>Shared handling rules</p></div></div><SettingToggle title="Allow AI to respond first" text="Human takeover remains available at any time." on /><SettingToggle title="Escalate when AI is unsure" text="Move the conversation to a human agent." on /><SettingToggle title="Notify team on takeover" text="Send an in-app notification when escalation happens." on /></article>
               <article className="settingsCard compactCard"><h2>Other channel setup</h2><p className="compactCopy">Manage WhatsApp and calendar connections from Integrations. Phone and SMS are managed directly by AI Caller.</p><Link className="settingsOutlineLink" href="/integrations">Manage integrations</Link></article>
             </section>
@@ -262,8 +260,8 @@ function GeneralTab({ businessName, setBusinessName, timezone, setTimezone, lang
   </section>;
 }
 
-function ChannelCard({ title, provider, active, onToggle, icon, detail }: { title: string; provider: string; active: boolean; onToggle: () => void; icon: ReactNode; detail: string }) {
-  return <article className="settingsCard channelCard"><div className="channelCardTop"><span className="channelIcon">{icon}</span><div><h2>{title}</h2><p>{detail}</p></div><button type="button" className={`switch ${active ? "on" : ""}`} onClick={onToggle} aria-label={`Toggle ${title}`}><i /></button></div><div className="channelProvider"><span>Provider</span><strong>{provider}</strong></div><Link className="settingsOutlineLink" href="/integrations">Manage provider</Link></article>;
+function ChannelCard({ title, provider, icon, detail }: { title: string; provider: string; icon: ReactNode; detail: string }) {
+  return <article className="settingsCard channelCard"><div className="channelCardTop"><span className="channelIcon">{icon}</span><div><h2>{title}</h2><p>{detail}</p></div></div><div className="channelProvider"><span>Provider</span><strong>{provider}</strong></div><Link className="settingsOutlineLink" href="/integrations">Manage provider</Link></article>;
 }
 
 function SettingToggle({ title, text, on }: { title: string; text: string; on: boolean }) {
