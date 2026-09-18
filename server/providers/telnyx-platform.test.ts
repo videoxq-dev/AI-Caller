@@ -19,7 +19,7 @@ describe("managed Telnyx number search", () => {
       expect(url.searchParams.get("filter[administrative_area]")).toBe("WY");
       expect(url.searchParams.get("filter[locality]")).toBe("Sheridan");
       expect(url.searchParams.get("filter[national_destination_code]")).toBe("307");
-      expect(url.searchParams.get("filter[features]")).toBe("voice,sms");
+      expect(url.searchParams.get("filter[features]")).toBe("sms");
       return new Response(JSON.stringify({
         data: [{
           phone_number: "+13075550184",
