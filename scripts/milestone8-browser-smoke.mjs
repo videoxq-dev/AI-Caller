@@ -154,6 +154,12 @@ try {
 
   await pool.query(`UPDATE workspaces SET name = 'Milestone Eight Workspace' WHERE id = $1`, [workspaceId]);
   await pool.query(
+    `INSERT INTO workspace_plans (workspace_id, plan_id, source)
+     VALUES ($1, 'GROWTH', 'E2E')
+     ON CONFLICT (workspace_id) DO UPDATE SET plan_id = 'GROWTH', source = 'E2E', updated_at = now()`,
+    [workspaceId],
+  );
+  await pool.query(
     `INSERT INTO business_profiles (workspace_id, business_name, industry, timezone, summary)
      VALUES ($1, 'Milestone Eight Studio', 'Professional services', 'UTC', 'M8 collaboration and automation verification.')
      ON CONFLICT (workspace_id) DO UPDATE SET business_name = EXCLUDED.business_name, timezone = EXCLUDED.timezone, updated_at = now()`,
@@ -163,6 +169,14 @@ try {
     `INSERT INTO credit_wallets (workspace_id, balance) VALUES ($1, 100)
      ON CONFLICT (workspace_id) DO UPDATE SET balance = 100, updated_at = now()`,
     [workspaceId],
+  );
+  await pool.query(
+    `INSERT INTO hosted_api_rate_cards
+       (capability, provider, model, unit, cost_micros, units_per_cost, target_margin_bps, effective_from, metadata)
+     VALUES ('SMS', 'twilio', '', 'SMS_SEGMENT', 450, 1, 5500, '2026-01-01T00:00:00Z', '{"fixture":"milestone8"}'::jsonb)
+     ON CONFLICT (capability, provider, model, unit, effective_from)
+     DO UPDATE SET cost_micros = EXCLUDED.cost_micros, units_per_cost = EXCLUDED.units_per_cost,
+       target_margin_bps = EXCLUDED.target_margin_bps, enabled = true, effective_to = NULL, updated_at = now()`,
   );
 
   const communicationSettings = {

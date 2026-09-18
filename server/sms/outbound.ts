@@ -1,7 +1,13 @@
 import { and, eq } from "drizzle-orm";
 import { db } from "@/db";
 import { contactIdentities, conversations, messages, usageEvents } from "@/db/schema";
-import { debitCredits, refundCredits } from "@/server/credits/service";
+import { analyzeSmsSegments } from "@/server/billing/sms-segments";
+import { loadHostedRateSnapshot, quoteHostedUsage } from "@/server/billing/pricing";
+import {
+  releaseCreditReservation,
+  reserveCredits,
+  settleCreditReservation,
+} from "@/server/credits/service";
 import { appendMessage } from "@/server/domain/core/repository";
 import { getEnv } from "@/server/env";
 import { AppError } from "@/server/http/errors";
@@ -32,31 +38,59 @@ function definitiveProviderRejection(error: unknown) {
   return error instanceof ProviderRequestError && error.status >= 400 && error.status < 500;
 }
 
-async function reserveHostedCredits(workspaceId: string, runtime: SmsRuntime, messageId: string) {
-  if (runtime.mode !== "HOSTED") return 0;
-  const amount = getEnv().HOSTED_SMS_CREDITS_PER_MESSAGE;
-  await debitCredits(workspaceId, amount, {
+type HostedSmsCharge = {
+  reservation: Awaited<ReturnType<typeof reserveCredits>>;
+  quote: ReturnType<typeof quoteHostedUsage>;
+};
+
+async function reserveHostedCredits(
+  workspaceId: string,
+  runtime: SmsRuntime,
+  messageId: string,
+  segments: number,
+): Promise<HostedSmsCharge | null> {
+  if (runtime.mode !== "HOSTED") return null;
+  const rates = await loadHostedRateSnapshot({
+    capability: "SMS",
+    provider: runtime.providerName,
+    model: "",
+    units: ["SMS_SEGMENT"],
+  });
+  const quote = quoteHostedUsage(rates, [{ unit: "SMS_SEGMENT", units: segments }]);
+  if (quote.credits <= 0) throw new Error("Hosted SMS reservation must be positive.");
+  const reservation = await reserveCredits(workspaceId, quote.credits, {
+    referenceType: "SMS_RESERVATION",
+    referenceId: messageId,
+  });
+  return { reservation, quote };
+}
+
+async function settleHostedCredits(
+  workspaceId: string,
+  charge: HostedSmsCharge | null,
+  messageId: string,
+) {
+  if (!charge) return;
+  await settleCreditReservation(workspaceId, charge.reservation.id, charge.quote.credits, {
     reason: "Hosted SMS message",
     referenceType: "SMS_MESSAGE",
     referenceId: messageId,
   });
-  return amount;
 }
 
-async function refundHostedCredits(workspaceId: string, amount: number, messageId: string) {
-  if (amount <= 0) return;
-  await refundCredits(workspaceId, amount, {
-    reason: "Hosted SMS provider rejected message",
-    referenceType: "SMS_MESSAGE",
-    referenceId: messageId,
-  });
+async function releaseHostedCredits(
+  workspaceId: string,
+  charge: HostedSmsCharge | null,
+) {
+  if (!charge) return;
+  await releaseCreditReservation(workspaceId, charge.reservation.id);
 }
 
 async function recordUsage(
   workspaceId: string,
   runtime: SmsRuntime,
   referenceId: string,
-  creditsCharged: number,
+  charge: HostedSmsCharge | null,
   providerUsage: Record<string, unknown>,
 ) {
   try {
@@ -66,7 +100,10 @@ async function recordUsage(
       provider: runtime.providerName,
       mode: runtime.mode,
       providerUsage,
-      creditsCharged,
+      creditsCharged: charge?.quote.credits ?? 0,
+      providerCostMicros: charge?.quote.providerCostMicros ?? 0,
+      billedUnits: charge?.quote.billedUnits ?? {},
+      pricingDetails: charge?.quote.pricingDetails ?? {},
       referenceType: "MESSAGE",
       referenceId,
     });
@@ -117,6 +154,7 @@ export async function sendSmsConversationTextWithRuntime(
 
   const text = smsText(input.text);
   const to = input.to ?? await destination(workspaceId, conversationId);
+  const segmentUsage = analyzeSmsSegments(text);
   const outbound = await appendMessage(workspaceId, conversationId, {
     channel: "SMS",
     direction: "OUTBOUND",
@@ -129,9 +167,9 @@ export async function sendSmsConversationTextWithRuntime(
     metadata: { mode: runtime.mode, ...(input.metadata ?? {}) },
   });
 
-  let reservedCredits = 0;
+  let hostedCharge: HostedSmsCharge | null = null;
   try {
-    reservedCredits = await reserveHostedCredits(workspaceId, runtime, outbound.id);
+    hostedCharge = await reserveHostedCredits(workspaceId, runtime, outbound.id, segmentUsage.segments);
   } catch (error) {
     await markSmsSendFailure(workspaceId, outbound.id, "FAILED", error);
     throw error;
@@ -140,9 +178,7 @@ export async function sendSmsConversationTextWithRuntime(
   if (input.senderType === "AI") {
     const latest = await conversationState(workspaceId, conversationId);
     if (latest.handlingMode !== "AI") {
-      if (reservedCredits > 0) {
-        await refundHostedCredits(workspaceId, reservedCredits, outbound.id);
-      }
+      await releaseHostedCredits(workspaceId, hostedCharge);
       await db.update(messages).set({
         status: "SUPPRESSED",
         metadata: { ...outbound.metadata, suppressedReason: "HUMAN_TAKEOVER" },
@@ -159,16 +195,30 @@ export async function sendSmsConversationTextWithRuntime(
       statusCallbackUrl: statusCallbackUrl(runtime.providerName, workspaceId),
       idempotencyKey: input.idempotencyKey ?? outbound.id,
     });
+    await settleHostedCredits(workspaceId, hostedCharge, outbound.id);
     const updated = await attachSmsProviderMessage(workspaceId, outbound.id, runtime.providerName, sent.externalId, sent.status);
-    await recordUsage(workspaceId, runtime, outbound.id, reservedCredits, { messages: 1, status: sent.status });
+    await recordUsage(workspaceId, runtime, outbound.id, hostedCharge, {
+      messages: 1,
+      status: sent.status,
+      encoding: segmentUsage.encoding,
+      segments: segmentUsage.segments,
+      units: segmentUsage.units,
+    });
     return updated;
   } catch (error) {
     const uncertain = uncertainProviderFailure(error);
     await markSmsSendFailure(workspaceId, outbound.id, uncertain ? "SEND_UNKNOWN" : "FAILED", error);
-    if (reservedCredits > 0 && definitiveProviderRejection(error)) {
-      await refundHostedCredits(workspaceId, reservedCredits, outbound.id);
-    } else if (reservedCredits > 0 && uncertain) {
-      await recordUsage(workspaceId, runtime, outbound.id, reservedCredits, { messages: 0, outcome: "unknown" });
+    if (hostedCharge && definitiveProviderRejection(error)) {
+      await releaseHostedCredits(workspaceId, hostedCharge);
+    } else if (hostedCharge && uncertain) {
+      await settleHostedCredits(workspaceId, hostedCharge, outbound.id);
+      await recordUsage(workspaceId, runtime, outbound.id, hostedCharge, {
+        messages: 0,
+        outcome: "unknown",
+        encoding: segmentUsage.encoding,
+        segments: segmentUsage.segments,
+        units: segmentUsage.units,
+      });
     }
     throw error;
   }
