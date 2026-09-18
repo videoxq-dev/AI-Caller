@@ -2,14 +2,16 @@ import { ensureQueue, stopBoss } from "@/server/jobs";
 import {
   AUTH_PASSWORD_RESET_EMAIL,
   COMMERCE_WELCOME_EMAIL,
+  TEAM_INVITATION_EMAIL,
   SMS_INBOUND_RESPONSE,
   WHATSAPP_INBOUND_RESPONSE,
   passwordResetEmailJobSchema,
+  teamInvitationEmailJobSchema,
   smsInboundResponseJobSchema,
   whatsappInboundResponseJobSchema,
   welcomeEmailJobSchema,
 } from "@/server/jobs/queues";
-import { sendPasswordResetEmail, sendWelcomeEmail } from "@/server/email/mailer";
+import { sendPasswordResetEmail, sendTeamInvitationEmail, sendWelcomeEmail } from "@/server/email/mailer";
 import { logger } from "@/server/observability/logger";
 import { smsWebhookService } from "@/server/sms/service";
 import { whatsAppWebhookService } from "@/server/whatsapp/service";
@@ -17,6 +19,7 @@ import { whatsAppWebhookService } from "@/server/whatsapp/service";
 export async function startWorker() {
   const authBoss = await ensureQueue(AUTH_PASSWORD_RESET_EMAIL);
   const commerceBoss = await ensureQueue(COMMERCE_WELCOME_EMAIL);
+  const teamBoss = await ensureQueue(TEAM_INVITATION_EMAIL);
   const smsBoss = await ensureQueue(SMS_INBOUND_RESPONSE);
   const whatsappBoss = await ensureQueue(WHATSAPP_INBOUND_RESPONSE);
 
@@ -34,6 +37,13 @@ export async function startWorker() {
     }
   });
 
+  await teamBoss.work(TEAM_INVITATION_EMAIL, async (jobs) => {
+    for (const job of jobs) {
+      const payload = teamInvitationEmailJobSchema.parse(job.data);
+      await sendTeamInvitationEmail(payload);
+    }
+  });
+
   await smsBoss.work(SMS_INBOUND_RESPONSE, async (jobs) => {
     for (const job of jobs) {
       const payload = smsInboundResponseJobSchema.parse(job.data);
@@ -48,7 +58,7 @@ export async function startWorker() {
     }
   });
 
-  logger.info({ queues: [AUTH_PASSWORD_RESET_EMAIL, COMMERCE_WELCOME_EMAIL, SMS_INBOUND_RESPONSE, WHATSAPP_INBOUND_RESPONSE] }, "AI Caller worker started");
+  logger.info({ queues: [AUTH_PASSWORD_RESET_EMAIL, COMMERCE_WELCOME_EMAIL, TEAM_INVITATION_EMAIL, SMS_INBOUND_RESPONSE, WHATSAPP_INBOUND_RESPONSE] }, "AI Caller worker started");
 
   const shutdown = async (signal: string) => {
     logger.info({ signal }, "Stopping AI Caller worker");
