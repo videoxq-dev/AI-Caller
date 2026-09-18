@@ -8,7 +8,7 @@ ADD COLUMN "qualification_completed_at" timestamptz;
 CREATE TYPE "voice_call_mode" AS ENUM ('AI_FIRST', 'AFTER_HOURS', 'OVERFLOW');
 CREATE TYPE "voice_call_status" AS ENUM ('RINGING', 'ACTIVE', 'COMPLETED', 'FAILED');
 CREATE TYPE "voice_recording_status" AS ENUM ('PENDING', 'RECORDING', 'AVAILABLE', 'FAILED', 'DECLINED');
-CREATE TYPE "voice_recording_consent_status" AS ENUM ('NOT_REQUIRED', 'ANNOUNCED', 'GRANTED', 'DECLINED');
+CREATE TYPE "voice_recording_consent_status" AS ENUM ('PENDING', 'NOT_REQUIRED', 'ANNOUNCED', 'GRANTED', 'DECLINED');
 CREATE TYPE "voice_transcript_status" AS ENUM ('PENDING', 'ACTIVE', 'COMPLETE', 'FAILED');
 CREATE TYPE "voice_transcript_speaker" AS ENUM ('CUSTOMER', 'AI', 'HUMAN');
 
@@ -34,7 +34,7 @@ CREATE TABLE "voice_calls" (
   "recording_object_key" text,
   "recording_mime_type" text,
   "recording_duration_seconds" integer,
-  "recording_consent_status" "voice_recording_consent_status" NOT NULL DEFAULT 'ANNOUNCED',
+  "recording_consent_status" "voice_recording_consent_status" NOT NULL DEFAULT 'PENDING',
   "recording_disclosure_version" text,
   "recording_disclosed_at" timestamptz,
   "transcript_status" "voice_transcript_status" NOT NULL DEFAULT 'PENDING',
