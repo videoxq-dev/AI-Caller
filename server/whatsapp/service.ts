@@ -134,9 +134,15 @@ export function createWhatsAppWebhookService(dependencies: WhatsAppServiceDepend
       let processed = 0;
       let duplicates = 0;
       let deferred = 0;
+      const runtimes = new Map<string, Promise<WhatsAppRuntime>>();
 
       for (const event of events) {
-        const runtime = await dependencies.resolveByPhoneNumberId(event.phoneNumberId);
+        let runtimePromise = runtimes.get(event.phoneNumberId);
+        if (!runtimePromise) {
+          runtimePromise = dependencies.resolveByPhoneNumberId(event.phoneNumberId);
+          runtimes.set(event.phoneNumberId, runtimePromise);
+        }
+        const runtime = await runtimePromise;
         const eventPayload = safeEventPayload(event);
         const claim = await claimProviderWebhookEvent(runtime.workspaceId, {
           provider: "whatsapp",
