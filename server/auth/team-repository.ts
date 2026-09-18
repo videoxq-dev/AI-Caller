@@ -113,17 +113,36 @@ export async function createWorkspaceInvitation(input: {
   }
 }
 
-export async function revokeWorkspaceInvitation(workspaceId: string, invitationId: string) {
-  const [invitation] = await db.update(workspaceInvitations)
-    .set({ status: "REVOKED", updatedAt: new Date() })
-    .where(and(
+export async function revokeWorkspaceInvitation(
+  workspaceId: string,
+  invitationId: string,
+  actorRole: "OWNER" | "ADMIN",
+) {
+  return db.transaction(async (tx) => {
+    const [pending] = await tx.select({
+      id: workspaceInvitations.id,
+      role: workspaceInvitations.role,
+    }).from(workspaceInvitations).where(and(
       eq(workspaceInvitations.workspaceId, workspaceId),
       eq(workspaceInvitations.id, invitationId),
       eq(workspaceInvitations.status, "PENDING"),
-    ))
-    .returning({ id: workspaceInvitations.id });
-  if (!invitation) throw new AppError("INVITATION_NOT_FOUND", "Pending invitation not found.", 404);
-  return invitation;
+    )).limit(1);
+    if (!pending) throw new AppError("INVITATION_NOT_FOUND", "Pending invitation not found.", 404);
+    if (actorRole === "ADMIN" && pending.role === "ADMIN") {
+      throw new AppError("FORBIDDEN_ROLE_ASSIGNMENT", "Only the workspace owner can manage admin invitations.", 403);
+    }
+
+    const [invitation] = await tx.update(workspaceInvitations)
+      .set({ status: "REVOKED", updatedAt: new Date() })
+      .where(and(
+        eq(workspaceInvitations.workspaceId, workspaceId),
+        eq(workspaceInvitations.id, invitationId),
+        eq(workspaceInvitations.status, "PENDING"),
+      ))
+      .returning({ id: workspaceInvitations.id });
+    if (!invitation) throw new AppError("INVITATION_NOT_FOUND", "Pending invitation not found.", 404);
+    return invitation;
+  });
 }
 
 export async function acceptWorkspaceInvitation(input: { userId: string; userEmail: string; token: string }) {
