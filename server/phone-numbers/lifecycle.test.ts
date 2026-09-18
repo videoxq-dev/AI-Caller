@@ -28,6 +28,11 @@ describe("managed phone lifecycle", () => {
     )).toMatchObject({ kind: "FAILED" });
 
     expect(carrierProvisioningOutcome(
+      { id: "order-1", status: "failure", requirements_met: false },
+      { id: "ordered-number-1", status: "failure", requirements_met: false },
+    )).toMatchObject({ kind: "FAILED" });
+
+    expect(carrierProvisioningOutcome(
       { id: "order-1", status: "pending", requirements_met: false },
       { id: "ordered-number-1", status: "pending", requirements_met: false },
     )).toMatchObject({ kind: "REQUIREMENTS" });
