@@ -1,10 +1,11 @@
 import { afterAll, beforeEach, describe, expect, it } from "vitest";
 import { db, closeDatabase } from "@/db";
-import { memberships, user, workspaceInvitations, workspaces } from "@/db/schema";
+import { contacts, conversations, leads, memberships, user, workspaceInvitations, workspaces } from "@/db/schema";
 import {
   acceptWorkspaceInvitation,
   createWorkspaceInvitation,
   listWorkspaceTeam,
+  removeWorkspaceMember,
   revokeWorkspaceInvitation,
 } from "./team-repository";
 
@@ -87,6 +88,30 @@ describe("workspace team invitations", () => {
       role: "ADMIN",
     });
     expect(replacement.invitation.role).toBe("ADMIN");
+  });
+
+  it("clears lead and conversation assignments when a member is removed", async () => {
+    await db.insert(memberships).values({ workspaceId, userId: staffId, role: "STAFF" });
+    const [contact] = await db.insert(contacts).values({ workspaceId, name: "Assigned Customer" }).returning();
+    const [conversation] = await db.insert(conversations).values({
+      workspaceId,
+      contactId: contact.id,
+      assignedUserId: staffId,
+    }).returning();
+    const [lead] = await db.insert(leads).values({
+      workspaceId,
+      contactId: contact.id,
+      assignedUserId: staffId,
+    }).returning();
+
+    await removeWorkspaceMember(workspaceId, staffId);
+
+    const [storedConversation] = await db.select().from(conversations);
+    const [storedLead] = await db.select().from(leads);
+    expect(storedConversation.id).toBe(conversation.id);
+    expect(storedConversation.assignedUserId).toBeNull();
+    expect(storedLead.id).toBe(lead.id);
+    expect(storedLead.assignedUserId).toBeNull();
   });
 
   it("does not accept an expired token", async () => {
