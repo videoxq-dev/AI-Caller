@@ -1,4 +1,4 @@
-import { and, asc, desc, eq, isNull } from "drizzle-orm";
+import { and, asc, desc, eq, isNull, lt, lte, or } from "drizzle-orm";
 import { db } from "@/db";
 import { automationDeliveries, automationEvents, automationRuns, automationSettings } from "@/db/schema";
 import { AppError } from "@/server/http/errors";
@@ -116,15 +116,36 @@ export async function listUndispatchedAutomationEvents(limit = 100) {
 
 export async function claimAutomationRun(workspaceId: string, runId: string) {
   const now = new Date();
+  const staleBefore = new Date(now.getTime() - 10 * 60_000);
   const [run] = await db.update(automationRuns).set({
     status: "RUNNING",
     startedAt: now,
+    completedAt: null,
     errorCode: null,
     errorMessage: null,
   }).where(and(
     eq(automationRuns.workspaceId, workspaceId),
     eq(automationRuns.id, runId),
-    eq(automationRuns.status, "PENDING"),
+    or(isNull(automationRuns.scheduledFor), lte(automationRuns.scheduledFor, now)),
+    or(
+      eq(automationRuns.status, "PENDING"),
+      and(eq(automationRuns.status, "RUNNING"), lt(automationRuns.startedAt, staleBefore)),
+    ),
+  )).returning();
+  return run ?? null;
+}
+
+export async function releaseAutomationRunForRetry(workspaceId: string, runId: string) {
+  const [run] = await db.update(automationRuns).set({
+    status: "PENDING",
+    startedAt: null,
+    completedAt: null,
+    errorCode: null,
+    errorMessage: null,
+  }).where(and(
+    eq(automationRuns.workspaceId, workspaceId),
+    eq(automationRuns.id, runId),
+    eq(automationRuns.status, "RUNNING"),
   )).returning();
   return run ?? null;
 }
