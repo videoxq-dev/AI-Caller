@@ -632,6 +632,20 @@ export async function provisionManagedPhoneNumber(workspaceId: string, input: {
     }
 
     const reconciled = await shortProvisioningPoll(row.id);
+    if (reconciled.status === "FAILED") {
+      throw new AppError(
+        "PHONE_NUMBER_ORDER_FAILED",
+        reconciled.failureReason ?? "The carrier could not provision that phone number. Search again and choose another number.",
+        409,
+      );
+    }
+    if (reconciled.status === "RELEASE_PENDING") {
+      throw new AppError(
+        "PHONE_NUMBER_RELEASE_PENDING",
+        "The carrier rejected that number and cleanup is still pending. Choose another number while AI Caller finishes the release.",
+        503,
+      );
+    }
     return publicNumber(reconciled);
   } catch (error) {
     if (row && (row.status === "RECONCILING" || row.providerOrderId)) throw error;
