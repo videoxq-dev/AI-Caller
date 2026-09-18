@@ -4,6 +4,7 @@ CREATE TABLE IF NOT EXISTS "hosted_phone_numbers" (
   "provider" text DEFAULT 'telnyx' NOT NULL,
   "provider_number_id" text,
   "provider_order_id" text,
+  "provider_order_status" text,
   "provision_request_id" uuid,
   "phone_number" text NOT NULL,
   "country_code" text NOT NULL,
@@ -11,6 +12,7 @@ CREATE TABLE IF NOT EXISTS "hosted_phone_numbers" (
   "locality" text,
   "number_type" text DEFAULT 'local' NOT NULL,
   "status" text DEFAULT 'PROVISIONING' NOT NULL,
+  "messaging_readiness" text DEFAULT 'NOT_REGISTERED' NOT NULL,
   "provider_monthly_cost_micros" bigint NOT NULL,
   "provider_upfront_cost_micros" bigint DEFAULT 0 NOT NULL,
   "monthly_credits" integer NOT NULL,
@@ -21,6 +23,8 @@ CREATE TABLE IF NOT EXISTS "hosted_phone_numbers" (
   "current_period_end" timestamptz,
   "next_billing_at" timestamptz,
   "grace_ends_at" timestamptz,
+  "provisioning_last_checked_at" timestamptz,
+  "reconcile_after" timestamptz,
   "failure_reason" text,
   "released_at" timestamptz,
   "created_at" timestamptz DEFAULT now() NOT NULL,
@@ -31,6 +35,8 @@ CREATE INDEX IF NOT EXISTS "hosted_phone_numbers_workspace_status_idx"
   ON "hosted_phone_numbers" ("workspace_id", "status");
 CREATE INDEX IF NOT EXISTS "hosted_phone_numbers_due_idx"
   ON "hosted_phone_numbers" ("status", "next_billing_at");
+CREATE INDEX IF NOT EXISTS "hosted_phone_numbers_reconcile_idx"
+  ON "hosted_phone_numbers" ("status", "reconcile_after");
 CREATE UNIQUE INDEX IF NOT EXISTS "hosted_phone_numbers_provider_id_uq"
   ON "hosted_phone_numbers" ("provider", "provider_number_id")
   WHERE "provider_number_id" IS NOT NULL;
