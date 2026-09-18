@@ -44,6 +44,7 @@ function runtimeFor(workspaceId: string, provider: SMSProvider, mode: "HOSTED" |
     integrationId: mode === "BYOP" ? "22222222-2222-4222-8222-222222222222" : null,
     senderNumber: "+12025550200",
     serviceStatus: mode === "HOSTED" ? "ACTIVE" : null,
+    messagingReadiness: mode === "HOSTED" ? "READY" : null,
     provider,
   };
 }
@@ -190,6 +191,24 @@ describe("SMS webhook service", () => {
     const outbound = stored.find((message) => message.direction === "OUTBOUND");
     expect(outbound?.externalMessageId).toBe("msg-out-2");
     expect(outbound?.status).toBe("DELIVERED");
+  });
+
+  it("blocks hosted outbound SMS until carrier registration is ready", async () => {
+    const provider: SMSProvider = {
+      send: vi.fn(async () => ({ externalId: "should-not-send", status: "QUEUED" as const })),
+      verifyWebhook: vi.fn(async () => true),
+      normalizeWebhook: vi.fn(async () => [inboundEvent("registration-gate", "+12025550105")]),
+    };
+    const runtime = { ...runtimeFor(workspaceId, provider, "HOSTED"), messagingReadiness: "NOT_REGISTERED" as const };
+    const { service, jobs } = serviceHarness(runtime, async () => orchestratorReply("This reply must be gated."));
+
+    await service.ingest(request(), workspaceId, "twilio");
+    await expect(service.processInboundJob(jobs[0])).rejects.toMatchObject({
+      code: "SMS_REGISTRATION_REQUIRED",
+      status: 409,
+    });
+    expect(provider.send).not.toHaveBeenCalled();
+    expect((await db.select().from(messages)).filter((message) => message.direction === "OUTBOUND")).toHaveLength(0);
   });
 
   it("charges hosted credits once after a successful worker send", async () => {
