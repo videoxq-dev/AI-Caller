@@ -50,7 +50,6 @@ export default function CommunicationSetupPage() {
   const router = useRouter();
   const [channel, setChannel] = useState<Channel>("phone");
   const [managedNumber, setManagedNumber] = useState<ManagedPhoneNumber | null>(null);
-  const [displayName, setDisplayName] = useState("");
   const [integrations, setIntegrations] = useState<IntegrationSummary[]>([]);
   const [saving, setSaving] = useState(false);
 
@@ -58,10 +57,7 @@ export default function CommunicationSetupPage() {
     Promise.all([
       fetch("/api/setup/communication", { cache: "no-store" }).then((response) => response.ok ? response.json() : null),
       fetch("/api/integrations", { cache: "no-store" }).then((response) => response.ok ? response.json() : null),
-    ]).then(([setupPayload, integrationPayload]) => {
-      if (typeof setupPayload?.settings?.sms?.displayName === "string") {
-        setDisplayName(setupPayload.settings.sms.displayName);
-      }
+    ]).then(([_setupPayload, integrationPayload]) => {
       if (Array.isArray(integrationPayload?.integrations)) setIntegrations(integrationPayload.integrations);
     }).catch(() => showToast("Some communication settings could not be loaded. You can still continue setup.", "error"));
   }, []);
@@ -85,7 +81,7 @@ export default function CommunicationSetupPage() {
             provider: null,
             numberMode: "same",
             number: managedNumber?.phoneNumber ?? null,
-            displayName,
+            displayName: "",
             replyWindow: "Always respond",
             afterHoursBehavior: "Auto-reply + collect details",
           },
