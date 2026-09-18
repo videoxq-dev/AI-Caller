@@ -249,26 +249,31 @@ export function InboxDataPage() {
   }
 
   const latestChannel = timeline?.messages.at(-1)?.channel ?? "WEBCHAT";
-  const canReplyOnWhatsApp = Boolean(timeline && latestChannel === "WHATSAPP" && timeline.conversation.handlingMode === "HUMAN");
+  const canReplyOnStaffChannel = Boolean(
+    timeline
+    && (latestChannel === "WHATSAPP" || latestChannel === "SMS")
+    && timeline.conversation.handlingMode === "HUMAN",
+  );
 
-  async function sendWhatsAppReply() {
-    if (!timeline || !canReplyOnWhatsApp || !draft.trim()) return;
+  async function sendStaffReply() {
+    if (!timeline || !canReplyOnStaffChannel || !draft.trim()) return;
     setSendingReply(true);
     setError(null);
     try {
-      const response = await fetch(`/api/conversations/${timeline.conversation.id}/whatsapp-reply`, {
+      const endpoint = latestChannel === "WHATSAPP" ? "whatsapp-reply" : "sms-reply";
+      const response = await fetch(`/api/conversations/${timeline.conversation.id}/${endpoint}`, {
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({ text: draft.trim() }),
       });
       if (!response.ok) {
         const data = await response.json().catch(() => null) as { error?: { message?: string } } | null;
-        throw new Error(data?.error?.message ?? "Unable to send WhatsApp reply.");
+        throw new Error(data?.error?.message ?? `Unable to send ${channelLabels[latestChannel]} reply.`);
       }
       setDraft("");
       await Promise.all([loadTimeline(timeline.conversation.id), loadConversations()]);
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Unable to send WhatsApp reply.");
+      setError(err instanceof Error ? err.message : `Unable to send ${channelLabels[latestChannel]} reply.`);
     } finally {
       setSendingReply(false);
     }
@@ -309,7 +314,7 @@ export function InboxDataPage() {
                   return <div key={message.id} className={`messageRow ${customer ? "customer" : "agent"}`}>{customer && <span className="miniAvatar">{initials(timeline.contact.name)}</span>}<div className={`messageBubble ${customer ? "incoming" : "outgoing"}`}><div className="messageMeta"><span className={`channelBadge ${channelLabels[message.channel].toLowerCase().replace(" ", "-")}`}>{message.channel === "PHONE" ? <PhoneIcon size={13} /> : <MessageIcon size={13} />}{channelLabels[message.channel]}</span><time>{displayTime(message.createdAt)}</time></div><p>{message.body}</p></div>{!customer && <span className="botAvatar">{message.senderType === "USER" ? <UsersIcon size={16} /> : "✦"}</span>}</div>;
                 })}
               </div>
-              <div className="composerWrap"><div className="composerTabs"><button className="active" type="button">Message</button></div><textarea aria-label="Conversation reply" value={draft} onChange={(event) => setDraft(event.target.value)} disabled={!canReplyOnWhatsApp || sendingReply} placeholder={canReplyOnWhatsApp ? "Reply on WhatsApp…" : latestChannel === "WHATSAPP" ? "Take over this conversation to reply on WhatsApp." : `Staff outbound ${channelLabels[latestChannel]} replies are not enabled yet.`} /><div className="composerFooter"><span>{canReplyOnWhatsApp ? "Free-form WhatsApp replies require an active 24-hour customer window." : "WhatsApp staff replies are available after human takeover."}</span>{canReplyOnWhatsApp && <button className="sendButton" type="button" disabled={sendingReply || !draft.trim()} onClick={() => void sendWhatsAppReply()}>{sendingReply ? "Sending…" : "Send"}</button>}</div></div>
+              <div className="composerWrap"><div className="composerTabs"><button className="active" type="button">Message</button></div><textarea aria-label="Conversation reply" value={draft} onChange={(event) => setDraft(event.target.value)} disabled={!canReplyOnStaffChannel || sendingReply} placeholder={canReplyOnStaffChannel ? `Reply by ${channelLabels[latestChannel]}…` : latestChannel === "WHATSAPP" || latestChannel === "SMS" ? `Take over this conversation to reply by ${channelLabels[latestChannel]}.` : `Staff outbound ${channelLabels[latestChannel]} replies are not enabled yet.`} /><div className="composerFooter"><span>{canReplyOnStaffChannel ? latestChannel === "WHATSAPP" ? "Free-form WhatsApp replies require an active 24-hour customer window." : "Staff SMS replies use the workspace's active SMS provider." : "Take over a supported messaging conversation to reply as staff."}</span>{canReplyOnStaffChannel && <button className="sendButton" type="button" disabled={sendingReply || !draft.trim()} onClick={() => void sendStaffReply()}>{sendingReply ? "Sending…" : "Send"}</button>}</div></div>
             </> : <div style={{ display: "grid", placeItems: "center", height: "100%", minHeight: 420 }}>Select a conversation to view its timeline.</div>}
           </section>
 
