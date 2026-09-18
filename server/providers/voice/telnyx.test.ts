@@ -1,8 +1,8 @@
-import { generateKeyPairSync, sign } from "node:crypto";
+import { generateKeyPairSync, sign, type KeyObject } from "node:crypto";
 import { describe, expect, it, vi } from "vitest";
 import { createTelnyxVoiceProvider, normalizeTelnyxVoiceWebhook } from "./telnyx";
 
-function signedInput(body: string, privateKey: ReturnType<typeof generateKeyPairSync>["privateKey"]) {
+function signedInput(body: string, privateKey: KeyObject) {
   const timestamp = String(Math.floor(Date.now() / 1000));
   const signature = sign(null, Buffer.from(`${timestamp}|${body}`, "utf8"), privateKey).toString("base64");
   const request = new Request("https://app.example.com/api/webhooks/voice/telnyx/workspace", {
@@ -62,7 +62,7 @@ describe("Telnyx voice adapter", () => {
         },
       },
     });
-    await expect(normalizeTelnyxVoiceWebhook({ request: new Request("https://example.com"), rawBody: transcription })).resolves.toEqual([
+    expect(normalizeTelnyxVoiceWebhook({ request: new Request("https://example.com"), rawBody: transcription })).toEqual([
       expect.objectContaining({
         type: "TRANSCRIPTION",
         transcript: "Book tomorrow",
@@ -82,7 +82,7 @@ describe("Telnyx voice adapter", () => {
         },
       },
     });
-    await expect(normalizeTelnyxVoiceWebhook({ request: new Request("https://example.com"), rawBody: recording })).resolves.toEqual([
+    expect(normalizeTelnyxVoiceWebhook({ request: new Request("https://example.com"), rawBody: recording })).toEqual([
       expect.objectContaining({
         type: "RECORDING_SAVED",
         recordingId: "recording-1",
@@ -90,6 +90,61 @@ describe("Telnyx voice adapter", () => {
         format: "wav",
       }),
     ]);
+  });
+
+
+  it("normalizes keypad consent gathers", () => {
+    const body = JSON.stringify({
+      data: {
+        id: "evt-gather",
+        event_type: "call.gather.ended",
+        payload: {
+          call_session_id: "call-session-1",
+          call_control_id: "call-control-1",
+          digits: "1",
+          status: "valid",
+        },
+      },
+    });
+    expect(normalizeTelnyxVoiceWebhook({ request: new Request("https://example.com"), rawBody: body })).toEqual([
+      expect.objectContaining({
+        type: "DTMF_GATHERED",
+        digits: "1",
+        status: "valid",
+      }),
+    ]);
+  });
+
+  it("uses gather_using_speak for explicit recording consent", async () => {
+    const { publicKey } = generateKeyPairSync("ed25519");
+    const publicKeyPem = publicKey.export({ type: "spki", format: "pem" }).toString();
+    const fetcher = vi.fn(async () => new Response(JSON.stringify({ data: { result: "ok" } }), {
+      status: 200,
+      headers: { "content-type": "application/json" },
+    }));
+    const provider = createTelnyxVoiceProvider({
+      apiKey: "KEY123",
+      webhookPublicKey: publicKeyPem,
+      fetcher: fetcher as unknown as typeof fetch,
+    });
+
+    await provider.gatherConsent({
+      callControlId: "control-1",
+      text: "Press 1 to agree, or press 2 to decline.",
+      voice: "Azure.en-US-AvaMultilingualNeural",
+      language: "en-US",
+      commandId: "00000000-0000-5000-8000-000000000002",
+    });
+
+    const [url, init] = fetcher.mock.calls[0] as unknown as [string, RequestInit];
+    expect(url).toContain("/calls/control-1/actions/gather_using_speak");
+    expect(JSON.parse(String(init.body))).toEqual(expect.objectContaining({
+      command_id: "00000000-0000-5000-8000-000000000002",
+      minimum_digits: 1,
+      maximum_digits: 1,
+      maximum_tries: 1,
+      valid_digits: "12",
+    }));
   });
 
   it("sends idempotent Call Control actions with product voice payloads", async () => {
