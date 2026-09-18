@@ -38,6 +38,13 @@ export const orchestratorActionSchema = z.discriminatedUnion("type", [
     notes: z.string().trim().max(2000).nullable().optional(),
   }),
   z.object({
+    type: z.literal("QUALIFY_LEAD"),
+    answers: z.array(z.object({
+      criterionId: z.string().trim().regex(/^[a-z0-9_-]{1,64}$/),
+      answer: z.string().trim().min(1).max(2000),
+    })).min(1).max(10),
+  }),
+  z.object({
     type: z.literal("ESCALATE"),
     reason: z.string().trim().min(1).max(1000).optional(),
   }),
@@ -65,7 +72,7 @@ export const orchestratorEnvelopeSchema = z.object({
 
 export type OrchestratorEnvelope = z.infer<typeof orchestratorEnvelopeSchema>;
 export type OrchestratorToolResult = {
-  kind: "none" | "availability" | "booking" | "escalation";
+  kind: "none" | "qualification" | "availability" | "booking" | "escalation";
   data: Record<string, unknown>;
 };
 
@@ -120,7 +127,7 @@ async function updateLeadFromEnvelope(
   if (!detail) throw new Error("The conversation contact no longer exists.");
   const existing = detail.lead;
   return upsertLead(workspaceId, contactId, {
-    status: qualificationStatus(existing?.status, lead.status),
+    status: qualificationStatus(existing?.status, qualificationEnabled && lead.status === "QUALIFIED" ? undefined : lead.status),
     intent: lead.intent !== undefined ? lead.intent : existing?.intent ?? null,
     serviceRequested: lead.serviceRequested !== undefined ? lead.serviceRequested : existing?.serviceRequested ?? null,
     source: existing?.source ?? channel,
@@ -136,10 +143,54 @@ export async function executeOrchestratorTools(
   envelope: OrchestratorEnvelope,
 ): Promise<OrchestratorToolResult> {
   const channel = await getActiveConversationChannel(workspaceId, conversationId) ?? "WEBCHAT";
+  const needsQualificationConfig = envelope.action.type === "QUALIFY_LEAD" || envelope.lead?.status === "QUALIFIED";
+  const qualificationConfig = needsQualificationConfig ? await getQualificationConfig(workspaceId) : null;
   if (envelope.contact) await updateContactProfile(workspaceId, contactId, envelope.contact);
-  if (envelope.lead) await updateLeadFromEnvelope(workspaceId, contactId, envelope.lead, channel);
+  if (envelope.lead) {
+    await updateLeadFromEnvelope(
+      workspaceId,
+      contactId,
+      envelope.lead,
+      channel,
+      Boolean(qualificationConfig?.enabled && qualificationConfig.criteria.length),
+    );
+  }
 
   if (envelope.action.type === "NONE") return { kind: "none", data: {} };
+
+  if (envelope.action.type === "QUALIFY_LEAD") {
+    if (!qualificationConfig?.enabled || !qualificationConfig.criteria.length) {
+      throw new Error("Lead qualification is not configured for this workspace.");
+    }
+    const detail = await getContactDetail(workspaceId, contactId);
+    if (!detail) throw new Error("The conversation contact no longer exists.");
+    const result = evaluateQualification(
+      qualificationConfig,
+      detail.lead?.qualificationData,
+      envelope.action.answers,
+    );
+    const existing = detail.lead;
+    await upsertLead(workspaceId, contactId, {
+      status: qualificationStatus(existing?.status, result.qualified ? "QUALIFIED" : undefined),
+      intent: existing?.intent ?? null,
+      serviceRequested: existing?.serviceRequested ?? null,
+      source: existing?.source ?? channel,
+      estimatedValue: existing?.estimatedValue ?? null,
+      assignedUserId: existing?.assignedUserId ?? null,
+      qualificationData: result.answers,
+      qualificationScore: result.score,
+      qualificationCompletedAt: result.qualified ? existing?.qualificationCompletedAt ?? new Date() : null,
+    });
+    return {
+      kind: "qualification",
+      data: {
+        qualified: result.qualified,
+        score: result.score,
+        answers: result.answers,
+        missingRequired: result.missingRequired,
+      },
+    };
+  }
 
   if (envelope.action.type === "CHECK_AVAILABILITY") {
     const slots = await calendarBookingService.getAvailability(workspaceId, {
