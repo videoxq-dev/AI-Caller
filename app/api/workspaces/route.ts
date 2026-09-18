@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { auth } from "@/server/auth";
+import { resolveWorkspaceContext } from "@/server/auth/workspace-context";
 import { activeWorkspaceCookie } from "@/server/auth/active-workspace";
 import { getMembership, listMembershipsForUser } from "@/server/auth/workspace-repository";
 import { getEnv } from "@/server/env";
@@ -10,10 +11,9 @@ const inputSchema = z.object({ workspaceId: z.string().uuid() });
 
 export async function GET(request: Request) {
   try {
-    const session = await auth.api.getSession({ headers: request.headers });
-    if (!session) throw new AppError("UNAUTHORIZED", "You must be signed in.", 401);
-    const memberships = await listMembershipsForUser(session.user.id);
-    return Response.json({ workspaces: memberships });
+    const context = await resolveWorkspaceContext(request.headers);
+    const memberships = await listMembershipsForUser(context.session.user.id);
+    return Response.json({ workspaces: memberships, activeWorkspaceId: context.workspace.id });
   } catch (error) {
     return toErrorResponse(error);
   }
