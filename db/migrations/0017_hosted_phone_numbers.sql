@@ -37,6 +37,11 @@ CREATE UNIQUE INDEX IF NOT EXISTS "hosted_phone_numbers_active_number_uq"
   ON "hosted_phone_numbers" ("phone_number")
   WHERE "released_at" IS NULL;
 
+CREATE UNIQUE INDEX IF NOT EXISTS "usage_events_phone_number_reference_uq"
+  ON "usage_events" ("workspace_id", "reference_type", "reference_id")
+  WHERE "reference_type" IN ('PHONE_NUMBER_PURCHASE', 'PHONE_NUMBER_RENEWAL')
+    AND "reference_id" IS NOT NULL;
+
 -- Standardize hosted service pricing on the approved 50% gross-margin target.
 UPDATE "hosted_api_rate_cards"
 SET "target_margin_bps" = 5000, "updated_at" = now()
