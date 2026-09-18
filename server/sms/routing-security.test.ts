@@ -40,6 +40,7 @@ describe("SMS webhook workspace routing", () => {
       integrationId: null,
       senderNumber: "+12025550200",
       serviceStatus: "ACTIVE",
+      messagingReadiness: "READY",
       provider,
     };
     const enqueueResponseJob = vi.fn(async () => "unused-job");
