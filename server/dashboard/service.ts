@@ -563,6 +563,17 @@ async function loadAttention(workspaceId: string, now: Date) {
              WHERE a.workspace_id = ${workspaceId}
                AND a.contact_id = l.contact_id
                AND a.status IN ('PENDING', 'CONFIRMED', 'COMPLETED')
+          )
+          AND NOT EXISTS (
+            SELECT 1
+              FROM conversations followup_conversation
+              JOIN messages followup_message
+                ON followup_message.workspace_id = ${workspaceId}
+               AND followup_message.conversation_id = followup_conversation.id
+             WHERE followup_conversation.workspace_id = ${workspaceId}
+               AND followup_conversation.contact_id = l.contact_id
+               AND followup_message.direction = 'OUTBOUND'
+               AND followup_message.created_at > l.qualification_completed_at
           )) AS qualified_followups
   `);
   const row = result.rows[0] as unknown as {
