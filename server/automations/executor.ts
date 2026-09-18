@@ -1,4 +1,5 @@
-import { and, desc, eq, gt } from "drizzle-orm";
+import { and, desc, eq, gt, isNull, notInArray, or } from "drizzle-orm";
+import { ZodError } from "zod";
 import { db } from "@/db";
 import {
   appointments,
@@ -72,6 +73,12 @@ function appointmentVariables(context: NonNullable<Awaited<ReturnType<typeof aut
   };
 }
 
+function isRetryableAutomationError(error: unknown) {
+  if (error instanceof AppError) return error.status >= 500;
+  if (error instanceof ZodError) return false;
+  return true;
+}
+
 function deliveryFailureStatus(error: unknown): "FAILED" | "UNKNOWN" | "SKIPPED" {
   if (error instanceof AppError && (
     error.code === "SMS_IDENTITY_NOT_FOUND"
@@ -119,20 +126,36 @@ async function deliverInApp(input: {
     return existingDeliverySummary(input.workspaceId, claimed.delivery);
   }
 
-  const [notice] = await db.insert(notifications).values({
+  const recipients = input.userId
+    ? [input.userId]
+    : (await db.select({ userId: memberships.userId })
+        .from(memberships)
+        .where(eq(memberships.workspaceId, input.workspaceId)))
+        .map((row) => row.userId);
+
+  if (!recipients.length) {
+    await finishAutomationDelivery(input.workspaceId, claimed.delivery.id, {
+      status: "SKIPPED",
+      errorCode: "NO_NOTIFICATION_RECIPIENTS",
+      errorMessage: "No workspace members were available to receive the notification.",
+    });
+    return { sent: 0, skipped: 1, failed: 0 };
+  }
+
+  const noticeRows = await db.insert(notifications).values(recipients.map((userId) => ({
     workspaceId: input.workspaceId,
-    userId: input.userId,
+    userId,
     type: "AUTOMATION_NOTIFICATION",
     title: input.title,
     body: input.body,
     conversationId: input.conversationId ?? null,
     contactId: input.contactId ?? null,
     metadata: { automationRunId: input.runId, ...(input.metadata ?? {}) },
-  }).returning();
+  }))).returning({ id: notifications.id });
 
   await finishAutomationDelivery(input.workspaceId, claimed.delivery.id, {
     status: "SENT",
-    providerExternalId: notice.id,
+    providerExternalId: noticeRows[0]?.id ?? null,
   });
   return { sent: 1, skipped: 0, failed: 0 };
 }
@@ -216,7 +239,9 @@ async function executeMissedInquiry(
     eq(conversations.workspaceId, workspaceId),
     eq(conversations.id, conversationId),
   )).limit(1);
-  if (!conversation || conversation.status !== "OPEN") return { sent: 0, skipped: 1, failed: 0 };
+  if (!conversation || conversation.status !== "OPEN" || conversation.handlingMode !== "AI") {
+    return { sent: 0, skipped: 1, failed: 0 };
+  }
 
   const [newerCustomer] = await db.select({ id: messages.id }).from(messages).where(and(
     eq(messages.workspaceId, workspaceId),
@@ -233,6 +258,10 @@ async function executeMissedInquiry(
     eq(messages.conversationId, conversationId),
     eq(messages.direction, "OUTBOUND"),
     gt(messages.createdAt, event.occurredAt),
+    or(
+      isNull(messages.status),
+      notInArray(messages.status, ["FAILED", "SUPPRESSED"]),
+    ),
   )).limit(1);
   if (outbound) return { sent: 0, skipped: 1, failed: 0 };
 
@@ -440,7 +469,7 @@ export async function executeAutomationRun(workspaceId: string, runId: string) {
     return { claimed: true as const, status: finalStatus, summary };
   } catch (error) {
     const deliveries = await listAutomationDeliveries(workspaceId, runId).catch(() => []);
-    if (deliveries.length === 0) {
+    if (deliveries.length === 0 && isRetryableAutomationError(error)) {
       await releaseAutomationRunForRetry(workspaceId, runId).catch(() => undefined);
       throw error;
     }
