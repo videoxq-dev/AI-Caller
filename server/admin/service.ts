@@ -73,7 +73,7 @@ export async function getAdminOverview() {
     db.select({ count: sql<number>`count(*)::int` }).from(workspaces),
     db.select({
       count: sql<number>`count(*)::int`,
-      amountCents: sql<number>`coalesce(sum(${creditTopups.amountCents}), 0)::int`,
+      amountCents: sql<number>`coalesce(sum(greatest(${creditTopups.amountCents} - ${creditTopups.refundedAmountCents} - ${creditTopups.disputedAmountCents}, 0)), 0)::int`,
     }).from(creditTopups).where(isNotNull(creditTopups.paidAt)),
     db.select({
       credits: sql<number>`coalesce(sum(${usageEvents.creditsCharged}), 0)::int`,

@@ -324,7 +324,7 @@ export default function AdminPage() {
                 <Metric label="Users" value={n(overview?.users ?? 0)} />
                 <Metric label="Workspaces" value={n(overview?.workspaces ?? 0)} />
                 <Metric label="Paid top-ups" value={n(overview?.paidTopups ?? 0)} />
-                <Metric label="Top-up revenue" value={moneyFromCents(overview?.topupRevenueCents ?? 0)} />
+                <Metric label="Net top-up revenue" value={moneyFromCents(overview?.topupRevenueCents ?? 0)} />
                 <Metric label="Hosted credits charged" value={n(overview?.hostedCreditsCharged ?? 0)} />
                 <Metric label="Recorded provider COGS" value={moneyFromMicros(overview?.hostedProviderCostMicros ?? 0)} />
               </section>

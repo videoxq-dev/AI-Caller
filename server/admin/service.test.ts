@@ -4,6 +4,7 @@ import { closeDatabase, db } from "@/db";
 import {
   adminAuditLogs,
   creditLedger,
+  creditTopups,
   creditWallets,
   hostedApiRateCards,
   memberships,
@@ -16,6 +17,7 @@ import {
 } from "@/db/schema";
 import {
   adjustWorkspaceCredits,
+  getAdminOverview,
   createAdminRateVersion,
   updateAdminUser,
   updateAdminWorkspace,
@@ -77,6 +79,37 @@ describe("platform admin service", () => {
       targetType: "WORKSPACE",
       targetId: workspaceId,
     });
+  });
+
+  it("reports top-up revenue net of refunds and disputes", async () => {
+    await db.insert(creditTopups).values([
+      {
+        workspaceId,
+        createdByUserId: actorId,
+        packCode: "CREDITS_10000",
+        credits: 10_000,
+        amountCents: 1_000,
+        currency: "usd",
+        status: "PARTIALLY_REFUNDED",
+        refundedAmountCents: 250,
+        paidAt: new Date(),
+      },
+      {
+        workspaceId,
+        createdByUserId: actorId,
+        packCode: "CREDITS_25000",
+        credits: 25_000,
+        amountCents: 2_500,
+        currency: "usd",
+        status: "DISPUTED",
+        disputedAmountCents: 500,
+        paidAt: new Date(),
+      },
+    ]);
+
+    const overview = await getAdminOverview();
+    expect(overview.paidTopups).toBe(2);
+    expect(overview.topupRevenueCents).toBe(2_750);
   });
 
   it("applies an audited credit adjustment atomically", async () => {
