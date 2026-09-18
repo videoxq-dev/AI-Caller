@@ -1,7 +1,7 @@
 import { createHash, randomBytes } from "node:crypto";
 import { and, asc, eq, gt, lte, sql } from "drizzle-orm";
 import { db } from "@/db";
-import { conversations, leads, memberships, user, workspaceInvitations } from "@/db/schema";
+import { automationSettings, conversations, leads, memberships, user, workspaceInvitations } from "@/db/schema";
 import { AppError } from "@/server/http/errors";
 
 export type InviteRole = "ADMIN" | "STAFF";
@@ -176,16 +176,26 @@ export async function removeWorkspaceMember(workspaceId: string, userId: string)
       .returning({ userId: memberships.userId, role: memberships.role });
     if (!member) throw new AppError("MEMBER_NOT_FOUND", "Workspace member not found.", 404);
 
-    await Promise.all([
-      tx.update(conversations).set({ assignedUserId: null, updatedAt: new Date() }).where(and(
-        eq(conversations.workspaceId, workspaceId),
-        eq(conversations.assignedUserId, userId),
-      )),
-      tx.update(leads).set({ assignedUserId: null, updatedAt: new Date() }).where(and(
-        eq(leads.workspaceId, workspaceId),
-        eq(leads.assignedUserId, userId),
-      )),
-    ]);
+    await tx.update(conversations).set({ assignedUserId: null, updatedAt: new Date() }).where(and(
+      eq(conversations.workspaceId, workspaceId),
+      eq(conversations.assignedUserId, userId),
+    ));
+    await tx.update(leads).set({ assignedUserId: null, updatedAt: new Date() }).where(and(
+      eq(leads.workspaceId, workspaceId),
+      eq(leads.assignedUserId, userId),
+    ));
+
+    const assignmentSettings = await tx.select().from(automationSettings).where(and(
+      eq(automationSettings.workspaceId, workspaceId),
+      sql`${automationSettings.key} in ('QUALIFIED_LEAD_ASSIGNMENT', 'HUMAN_ESCALATION')`,
+    ));
+    for (const setting of assignmentSettings) {
+      if (setting.config.assignedUserId !== userId) continue;
+      await tx.update(automationSettings).set({
+        config: { ...setting.config, assignedUserId: null },
+        updatedAt: new Date(),
+      }).where(eq(automationSettings.id, setting.id));
+    }
     return member;
   });
 }
