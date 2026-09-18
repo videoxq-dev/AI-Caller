@@ -92,9 +92,10 @@ async function createTextConversation(pool, {
      VALUES ($1, $2, 'AI', $3) RETURNING id`,
     [workspaceId, contact.rows[0].id, createdAt],
   );
+  const metadata = channel === "WHATSAPP" ? { occurredAt: createdAt.toISOString() } : {};
   await pool.query(
-    `INSERT INTO messages (workspace_id, conversation_id, channel, direction, sender_type, content_type, body, provider, external_message_id, status, created_at)
-     VALUES ($1, $2, $3, 'INBOUND', 'CUSTOMER', 'TEXT', $4, $5, $6, 'RECEIVED', $7)`,
+    `INSERT INTO messages (workspace_id, conversation_id, channel, direction, sender_type, content_type, body, provider, external_message_id, status, metadata, created_at)
+     VALUES ($1, $2, $3, 'INBOUND', 'CUSTOMER', 'TEXT', $4, $5, $6, 'RECEIVED', $7::jsonb, $8)`,
     [
       workspaceId,
       conversation.rows[0].id,
@@ -102,6 +103,7 @@ async function createTextConversation(pool, {
       body,
       channel === "WHATSAPP" ? "whatsapp" : channel === "SMS" ? "fixture-sms" : "webchat-customer",
       `m8-${channel.toLowerCase()}-${randomUUID()}`,
+      JSON.stringify(metadata),
       createdAt,
     ],
   );
