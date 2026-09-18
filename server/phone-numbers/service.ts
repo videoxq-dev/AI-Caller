@@ -532,6 +532,20 @@ export async function provisionManagedPhoneNumber(workspaceId: string, input: {
     if (priorRequest.phoneNumber !== input.phoneNumber) {
       throw new AppError("PHONE_NUMBER_IDEMPOTENCY_CONFLICT", "This provisioning request was already used for a different phone number.", 409);
     }
+    if (priorRequest.status === "FAILED" || priorRequest.status === "RELEASED") {
+      throw new AppError(
+        "PHONE_NUMBER_REQUEST_COMPLETE",
+        priorRequest.failureReason ?? "This provisioning request has already completed and cannot be retried.",
+        409,
+      );
+    }
+    if (priorRequest.status === "RELEASE_PENDING") {
+      throw new AppError(
+        "PHONE_NUMBER_RELEASE_PENDING",
+        priorRequest.failureReason ?? "Carrier cleanup for this provisioning request is still pending.",
+        503,
+      );
+    }
     return publicNumber(priorRequest);
   }
 
