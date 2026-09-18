@@ -174,12 +174,12 @@ export default function SettingsPage() {
           {tab === "phone" && (
             <section className="settingsPhoneSection">
               <article className="settingsCard phoneManagementCard">
-                <div className="sectionHeading"><div><h2>Phone &amp; Messaging</h2><p>Manage the AI Caller number customers use for both calls and SMS.</p></div><span className="statusPill">Managed by AI Caller</span></div>
+                <div className="sectionHeading"><div><h2>Phone &amp; Messaging</h2><p>Manage your AI Caller voice + SMS-capable number and see its current outbound messaging readiness.</p></div><span className="statusPill">Managed by AI Caller</span></div>
                 <div className="settingsPhoneManager"><PhoneNumberManager settingsMode /></div>
               </article>
               <aside className="settingsCard compactCard phoneBillingHelp">
                 <h2>How billing works</h2>
-                <p className="compactCopy">Your number renews monthly from your credit balance. Calls, SMS and AI usage are metered separately.</p>
+                <p className="compactCopy">Your number renews monthly from your credit balance. Calls, eligible SMS traffic and AI usage are metered separately. Outbound US business SMS remains blocked until carrier registration is approved.</p>
                 <Link className="settingsOutlineLink" href="/settings/billing">Credits &amp; usage</Link>
                 <p className="compactCopy">If renewal cannot be charged, a 7-day grace period starts before phone service is suspended. Adding enough credits reactivates it automatically.</p>
               </aside>
