@@ -10,7 +10,6 @@ import {
   webchatWidgets,
   workspaces,
 } from "@/db/schema";
-import { getConversationTimelinePage } from "@/server/domain/core/conversation-timeline";
 import { getOrCreateContactByIdentity, getOrCreateOpenConversation } from "@/server/domain/core/repository";
 import { AppError } from "@/server/http/errors";
 import type { WebchatSessionInput } from "./schemas";
@@ -121,12 +120,18 @@ export async function resolveWebchatSession(token: string, expectedWidgetKey?: s
 }
 
 export async function sessionHistory(workspaceId: string, conversationId: string): Promise<WebchatHistoryMessage[]> {
-  const timeline = await getConversationTimelinePage(workspaceId, conversationId, { limit: 30, offset: 0 });
-  if (!timeline) return [];
+  const rows = await db.select({
+    id: messages.id,
+    senderType: messages.senderType,
+    body: messages.body,
+  }).from(messages).where(and(
+    eq(messages.workspaceId, workspaceId),
+    eq(messages.conversationId, conversationId),
+    eq(messages.contentType, "TEXT"),
+  )).orderBy(desc(messages.createdAt), desc(messages.id)).limit(30);
 
   const history: WebchatHistoryMessage[] = [];
-  for (const message of timeline.messages) {
-    if (message.contentType !== "TEXT") continue;
+  for (const message of rows.reverse()) {
     if (message.senderType === "CUSTOMER") {
       history.push({ id: message.id, role: "customer", text: message.body });
     } else if (message.senderType === "AI" || message.senderType === "USER") {
