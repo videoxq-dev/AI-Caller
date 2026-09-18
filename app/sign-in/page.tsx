@@ -1,15 +1,18 @@
 "use client";
 
 import Link from "next/link";
-import { useRouter } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import { useState, type FormEvent } from "react";
 import { AuthShell } from "@/components/auth-shell";
 import { ArrowRightIcon } from "@/components/icons";
 import { PasswordField } from "@/components/password-field";
 import { authClient } from "@/lib/auth-client";
+import { safeReturnPath } from "@/lib/safe-return-path";
 
 export default function SignInPage() {
   const router = useRouter();
+  const searchParams = useSearchParams();
+  const returnTo = safeReturnPath(searchParams.get("returnTo"), "/dashboard");
   const [pending, setPending] = useState(false);
   const [error, setError] = useState("");
 
@@ -29,7 +32,7 @@ export default function SignInPage() {
       return;
     }
 
-    router.replace("/dashboard");
+    router.replace(returnTo);
   }
 
   return (
@@ -56,7 +59,7 @@ export default function SignInPage() {
           </button>
         </form>
 
-        <div className="switchRow"><span>Don&apos;t have an account?</span><Link href="/sign-up">Create account</Link></div>
+        <div className="switchRow"><span>Don&apos;t have an account?</span><Link href={`/sign-up?returnTo=${encodeURIComponent(returnTo)}`}>Create account</Link></div>
       </div>
     </AuthShell>
   );
