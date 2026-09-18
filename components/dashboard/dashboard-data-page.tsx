@@ -107,9 +107,9 @@ function trendLabel(metric: DashboardMetric) {
   return `${metric.changePercent > 0 ? "↑" : "↓"} ${Math.abs(metric.changePercent)}%`;
 }
 
-function points(values: number[], width = 720, height = 180) {
+function points(values: number[], width = 720, height = 180, maxValue?: number) {
   if (!values.length) return "";
-  const max = Math.max(...values, 1);
+  const max = Math.max(maxValue ?? Math.max(...values, 1), 1);
   return values.map((value, index) => {
     const x = values.length === 1 ? width / 2 : (index / (values.length - 1)) * width;
     const y = height - 12 - (value / max) * (height - 28);
@@ -297,8 +297,8 @@ export function DashboardDataPage() {
                   <div className="chartCanvas">
                     <div className="gridLines">{Array.from({ length: 5 }).map((_, index) => <i key={index} />)}</div>
                     <svg viewBox="0 0 720 180" preserveAspectRatio="none" aria-label="Inquiries and AI conversations over time">
-                      <polyline className="chartLine inquiries" points={points(chartSeries.map((item) => item.inquiries))} />
-                      <polyline className="chartLine conversations" points={points(chartSeries.map((item) => item.aiConversations))} />
+                      <polyline className="chartLine inquiries" points={points(chartSeries.map((item) => item.inquiries), 720, 180, chartMax)} />
+                      <polyline className="chartLine conversations" points={points(chartSeries.map((item) => item.aiConversations), 720, 180, chartMax)} />
                     </svg>
                     <div className="xLabels">{chartSeries.map((item, index) => {
                       const show = index === 0 || index === chartSeries.length - 1 || index % Math.max(1, Math.ceil(chartSeries.length / 6)) === 0;
