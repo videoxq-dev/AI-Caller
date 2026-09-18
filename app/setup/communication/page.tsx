@@ -69,6 +69,11 @@ export default function CommunicationSetupPage() {
   const whatsappConnected = connected.has("whatsapp");
 
   async function save(completeStep: boolean) {
+    if (completeStep && managedNumber?.status !== "ACTIVE") {
+      setChannel("phone");
+      showToast("Choose and activate your AI Caller phone number before continuing.", "error");
+      return;
+    }
     setSaving(true);
     try {
       const response = await fetch("/api/setup/communication", {
