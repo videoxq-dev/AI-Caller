@@ -353,6 +353,26 @@ describe("managed phone provisioning lifecycle", () => {
     expect(bindings.every((binding) => binding.mode === "BYOP" && binding.integrationId === integration.id)).toBe(true);
   });
 
+  it("rejects idempotent request reuse when confirmed pricing changes", async () => {
+    await provisionManagedPhoneNumber(workspaceId, {
+      phoneNumber: "+12025550200",
+      requestId,
+      expectedPurchaseCredits: 2000,
+      expectedMonthlyCredits: 2000,
+    });
+
+    await expect(provisionManagedPhoneNumber(workspaceId, {
+      phoneNumber: "+12025550200",
+      requestId,
+      expectedPurchaseCredits: 2001,
+      expectedMonthlyCredits: 2000,
+    })).rejects.toMatchObject({
+      code: "PHONE_NUMBER_IDEMPOTENCY_CONFLICT",
+      status: 409,
+    });
+    expect(platform.orderTelnyxNumber).toHaveBeenCalledTimes(1);
+  });
+
   it("preserves a failed outcome on an idempotent retry instead of reporting accepted provisioning", async () => {
     platform.orderTelnyxNumber.mockRejectedValueOnce(new ProviderRequestError("Invalid order", 422));
 
