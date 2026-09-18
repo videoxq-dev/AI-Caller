@@ -26,7 +26,7 @@ CREATE TABLE IF NOT EXISTS "hosted_api_rate_cards" (
   "unit" text NOT NULL,
   "cost_micros" bigint NOT NULL,
   "units_per_cost" integer NOT NULL,
-  "target_margin_bps" integer DEFAULT 5500 NOT NULL,
+  "target_margin_bps" integer DEFAULT 5000 NOT NULL,
   "enabled" boolean DEFAULT true NOT NULL,
   "effective_from" timestamptz DEFAULT now() NOT NULL,
   "effective_to" timestamptz,
@@ -98,7 +98,7 @@ ON CONFLICT ("workspace_id") DO NOTHING;
 INSERT INTO "hosted_api_rate_cards"
   ("capability", "provider", "model", "unit", "cost_micros", "units_per_cost", "target_margin_bps", "metadata")
 VALUES
-  ('AI_TEXT', 'openai', 'gpt-5.6-luna', 'AI_INPUT_TOKEN', 200000, 1000000, 5500, '{"currency":"USD"}'::jsonb),
-  ('AI_TEXT', 'openai', 'gpt-5.6-luna', 'AI_CACHED_INPUT_TOKEN', 20000, 1000000, 5500, '{"currency":"USD"}'::jsonb),
-  ('AI_TEXT', 'openai', 'gpt-5.6-luna', 'AI_OUTPUT_TOKEN', 1200000, 1000000, 5500, '{"currency":"USD"}'::jsonb),
-  ('SMS', 'telnyx', '', 'SMS_SEGMENT', 10000, 1, 5500, '{"currency":"USD","market":"US","basis":"conservative_us_outbound_base_plus_max_carrier_fee"}'::jsonb);
+  ('AI_TEXT', 'openai', 'gpt-5.6-luna', 'AI_INPUT_TOKEN', 200000, 1000000, 5000, '{"currency":"USD"}'::jsonb),
+  ('AI_TEXT', 'openai', 'gpt-5.6-luna', 'AI_CACHED_INPUT_TOKEN', 20000, 1000000, 5000, '{"currency":"USD"}'::jsonb),
+  ('AI_TEXT', 'openai', 'gpt-5.6-luna', 'AI_OUTPUT_TOKEN', 1200000, 1000000, 5000, '{"currency":"USD"}'::jsonb),
+  ('SMS', 'telnyx', '', 'SMS_SEGMENT', 10000, 1, 5000, '{"currency":"USD","market":"US","basis":"conservative_us_outbound_base_plus_max_carrier_fee"}'::jsonb);
