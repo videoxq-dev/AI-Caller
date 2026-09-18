@@ -55,6 +55,10 @@ function authHeaders(apiKey: string) {
   return { authorization: `Bearer ${apiKey}`, "content-type": "application/json" };
 }
 
+function numberOrderCustomerReference(workspaceId: string, requestId: string) {
+  return `ai-caller:${workspaceId}:${requestId}`;
+}
+
 function regionValue(regions: RegionInformation[] | undefined, type: string) {
   return regions?.find((region) => region.region_type === type)?.region_name ?? null;
 }
@@ -187,7 +191,7 @@ export async function orderTelnyxNumber(input: {
   connectionId: string;
   messagingProfileId: string;
 }, fetcher: typeof fetch = fetch): Promise<TelnyxNumberOrder> {
-  const customerReference = `ai-caller:${input.workspaceId}:${input.requestId}`;
+  const customerReference = numberOrderCustomerReference(input.workspaceId, input.requestId);
   if (isE2EProviderFixtureMode()) {
     return {
       id: `e2e-order-${input.requestId}`,
@@ -216,6 +220,30 @@ export async function orderTelnyxNumber(input: {
   const order = response.data;
   if (!order?.id) throw new Error("Telnyx did not return a phone number order ID.");
   return order;
+}
+
+export async function findTelnyxNumberOrderByReference(input: {
+  workspaceId: string;
+  requestId: string;
+  phoneNumber: string;
+}, fetcher: typeof fetch = fetch): Promise<TelnyxNumberOrder | null> {
+  const customerReference = numberOrderCustomerReference(input.workspaceId, input.requestId);
+  if (isE2EProviderFixtureMode()) return null;
+
+  const { apiKey } = telnyxConfig();
+  const params = new URLSearchParams({
+    "filter[customer_reference]": customerReference,
+    "page[size]": "20",
+  });
+  const response = await providerJson<{ data?: TelnyxNumberOrder[] }>(
+    `${BASE_URL}/number_orders?${params.toString()}`,
+    { headers: authHeaders(apiKey) },
+    fetcher,
+  );
+  return (response.data ?? []).find((order) =>
+    order.customer_reference === customerReference
+    && (order.phone_numbers ?? []).some((number) => number.phone_number === input.phoneNumber)
+  ) ?? null;
 }
 
 export async function retrieveTelnyxNumberOrder(orderId: string, fetcher: typeof fetch = fetch): Promise<TelnyxNumberOrder> {
