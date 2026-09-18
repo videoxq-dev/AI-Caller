@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { carrierProvisioningOutcome, outboundSmsReady } from "./lifecycle";
 
 describe("managed phone lifecycle", () => {
-  it("does not consider a carrier order ready while either order or number is pending", () => {
+  it("does not consider a carrier number ready while the individual ordered number is pending", () => {
     expect(carrierProvisioningOutcome(
       { id: "order-1", status: "pending", requirements_met: true },
       { id: "ordered-number-1", status: "pending", requirements_met: true },
@@ -14,11 +14,11 @@ describe("managed phone lifecycle", () => {
     )).toMatchObject({ kind: "PENDING" });
   });
 
-  it("requires both final carrier statuses before activation", () => {
+  it("accepts individual-number success even while the parent order remains pending", () => {
     expect(carrierProvisioningOutcome(
-      { id: "order-1", status: "success", requirements_met: true },
+      { id: "order-1", status: "pending", requirements_met: true },
       { id: "ordered-number-1", status: "success", requirements_met: true },
-    )).toEqual({ kind: "READY", orderStatus: "success", numberStatus: "success" });
+    )).toEqual({ kind: "READY", orderStatus: "pending", numberStatus: "success" });
   });
 
   it("surfaces carrier failure and requirements separately", () => {
