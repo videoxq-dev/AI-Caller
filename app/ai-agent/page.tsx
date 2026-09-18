@@ -16,6 +16,17 @@ import "./ai-agent.css";
 
 type AgentTab = "overview" | "knowledge" | "behavior" | "test";
 type Channel = "WhatsApp" | "Phone" | "SMS" | "Web Chat";
+type QualificationCriterion = { id: string; label: string; question: string; required: boolean };
+type AgentApiRecord = {
+  name: string;
+  tone: string;
+  primaryGoal: string;
+  whenUnsure: string;
+  advancedInstructions: string | null;
+  openingMessage: string | null;
+  escalationMessage: string | null;
+  behaviorSettings: Record<string, unknown>;
+};
 
 type TestMessage = {
   id: number;
@@ -65,10 +76,114 @@ export default function AIAgentPage() {
   const [whenUnsure, setWhenUnsure] = useState("Escalate to a human");
   const [verbosity, setVerbosity] = useState("Concise");
   const [guardrails, setGuardrails] = useState({ pricing: true, availability: true, approvedInfo: true, collectContact: true });
+  const [assistantName, setAssistantName] = useState("Juvi AI");
+  const [openingMessage, setOpeningMessage] = useState("Hi! I'm Juvi AI. How can I help you today?");
+  const [escalationMessage, setEscalationMessage] = useState("I want to make sure you get the right answer. Let me connect you with a member of the team.");
+  const [advancedInstructions, setAdvancedInstructions] = useState<string | null>(null);
+  const [voiceProfile, setVoiceProfile] = useState("ava-us-1");
+  const [voiceLanguage, setVoiceLanguage] = useState("en-US");
+  const [voiceSpeed, setVoiceSpeed] = useState(1);
+  const [recordingPolicy, setRecordingPolicy] = useState<"ANNOUNCE" | "EXPLICIT_CONSENT">("ANNOUNCE");
+  const [afterHoursEnabled, setAfterHoursEnabled] = useState(true);
+  const [qualificationEnabled, setQualificationEnabled] = useState(true);
+  const [qualificationCriteria, setQualificationCriteria] = useState<QualificationCriterion[]>([
+    { id: "service_needed", label: "Service needed", question: "What service are you looking for?", required: true },
+    { id: "location", label: "Location", question: "What city or ZIP code is the service for?", required: true },
+    { id: "urgency", label: "Urgency", question: "How soon do you need help?", required: true },
+  ]);
+  const [savingSettings, setSavingSettings] = useState(false);
+  const [settingsError, setSettingsError] = useState<string | null>(null);
 
-  const saveChanges = () => {
-    setSaved(true);
-    window.setTimeout(() => setSaved(false), 1800);
+  useEffect(() => {
+    let cancelled = false;
+    fetch("/api/agent", { cache: "no-store" })
+      .then(async (response) => {
+        if (!response.ok) throw new Error("Unable to load AI agent settings.");
+        return response.json() as Promise<{ agent: AgentApiRecord | null }>;
+      })
+      .then(({ agent }) => {
+        if (cancelled || !agent) return;
+        setAssistantName(agent.name);
+        setTone(agent.tone);
+        setGoal(agent.primaryGoal);
+        setWhenUnsure(agent.whenUnsure);
+        setOpeningMessage(agent.openingMessage ?? "");
+        setEscalationMessage(agent.escalationMessage ?? "");
+        setAdvancedInstructions(agent.advancedInstructions);
+        const behavior = agent.behaviorSettings ?? {};
+        const rules = Array.isArray(behavior.guardrails) ? behavior.guardrails.filter((item): item is string => typeof item === "string") : [];
+        setGuardrails({
+          pricing: rules.includes("Never invent pricing"),
+          availability: rules.includes("Never confirm unavailable appointments"),
+          approvedInfo: rules.includes("Only answer based on approved business information") || rules.includes("Only answer from approved business information"),
+          collectContact: rules.includes("Collect customer name and phone number before handing off") || rules.includes("Collect customer name and contact before handoff"),
+        });
+        const voice = behavior.voice && typeof behavior.voice === "object" ? behavior.voice as Record<string, unknown> : {};
+        if (typeof voice.profileKey === "string") setVoiceProfile(voice.profileKey);
+        if (typeof voice.language === "string") setVoiceLanguage(voice.language);
+        if (typeof voice.speakingRate === "number") setVoiceSpeed(voice.speakingRate);
+        if (voice.recordingPolicy === "ANNOUNCE" || voice.recordingPolicy === "EXPLICIT_CONSENT") setRecordingPolicy(voice.recordingPolicy);
+        if (typeof voice.afterHoursEnabled === "boolean") setAfterHoursEnabled(voice.afterHoursEnabled);
+        const qualification = behavior.qualification && typeof behavior.qualification === "object" ? behavior.qualification as Record<string, unknown> : {};
+        if (typeof qualification.enabled === "boolean") setQualificationEnabled(qualification.enabled);
+        if (Array.isArray(qualification.criteria)) {
+          const parsed = qualification.criteria.filter((item): item is QualificationCriterion => {
+            if (!item || typeof item !== "object") return false;
+            const value = item as Record<string, unknown>;
+            return typeof value.id === "string" && typeof value.label === "string" && typeof value.question === "string" && typeof value.required === "boolean";
+          });
+          if (parsed.length) setQualificationCriteria(parsed);
+        }
+      })
+      .catch((err) => { if (!cancelled) setSettingsError(err instanceof Error ? err.message : "Unable to load AI agent settings."); });
+    return () => { cancelled = true; };
+  }, [setGoal, setTone, setWhenUnsure]);
+
+  const saveChanges = async () => {
+    setSavingSettings(true);
+    setSettingsError(null);
+    const rules = [
+      guardrails.pricing ? "Never invent pricing" : null,
+      guardrails.availability ? "Never confirm unavailable appointments" : null,
+      guardrails.approvedInfo ? "Only answer based on approved business information" : null,
+      guardrails.collectContact ? "Collect customer name and phone number before handing off" : null,
+    ].filter((value): value is string => Boolean(value));
+    try {
+      const response = await fetch("/api/agent", {
+        method: "PATCH",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          name: assistantName,
+          tone,
+          primaryGoal: goal,
+          whenUnsure,
+          advancedInstructions,
+          openingMessage: openingMessage || null,
+          escalationMessage: escalationMessage || null,
+          guardrails: rules,
+          voice: {
+            profileKey: voiceProfile,
+            language: voiceLanguage,
+            speakingRate: voiceSpeed,
+            recordingPolicy,
+            afterHoursEnabled,
+          },
+          qualification: {
+            enabled: qualificationEnabled,
+            criteria: qualificationCriteria,
+          },
+          completeStep: false,
+        }),
+      });
+      const payload = await response.json().catch(() => ({})) as { error?: { message?: string } };
+      if (!response.ok) throw new Error(payload.error?.message ?? "Unable to save AI agent settings.");
+      setSaved(true);
+      window.setTimeout(() => setSaved(false), 1800);
+    } catch (err) {
+      setSettingsError(err instanceof Error ? err.message : "Unable to save AI agent settings.");
+    } finally {
+      setSavingSettings(false);
+    }
   };
 
   return (
@@ -100,16 +215,16 @@ export default function AIAgentPage() {
         <div className="agentBody">
           <div className="agentTitleRow">
             <div><h1>AI Agent</h1><p>Configure, train and test your AI agent.</p></div>
-            <div className="agentTitleActions"><span className={`agentState ${agentOnline ? "online" : "paused"}`}><i />{agentOnline ? "Agent Online" : "Agent Paused"}</span><button type="button" onClick={saveChanges}>{saved ? "Saved" : "Save changes"}</button></div>
+            <div className="agentTitleActions"><span className={`agentState ${agentOnline ? "online" : "paused"}`}><i />{agentOnline ? "Agent Online" : "Agent Paused"}</span><button type="button" disabled={savingSettings} onClick={() => void saveChanges()}>{savingSettings ? "Saving…" : saved ? "Saved" : "Save changes"}</button></div>
           </div>
 
-          <div className="agentTabs" role="tablist" aria-label="AI Agent sections">
+          {settingsError && <div className="agentSettingsError">{settingsError}</div>}\n          <div className="agentTabs" role="tablist" aria-label="AI Agent sections">
             {(["overview", "knowledge", "behavior", "test"] as AgentTab[]).map((item) => <button key={item} type="button" className={tab === item ? "active" : ""} onClick={() => setTab(item)}>{item[0].toUpperCase() + item.slice(1)}</button>)}
           </div>
 
           {tab === "overview" && <OverviewTab agentOnline={agentOnline} setAgentOnline={setAgentOnline} channels={channels} setChannels={setChannels} setTab={setTab} />}
           {tab === "knowledge" && <KnowledgeTab />}
-          {tab === "behavior" && <BehaviorTab tone={tone} setTone={setTone} goal={goal} setGoal={setGoal} whenUnsure={whenUnsure} setWhenUnsure={setWhenUnsure} verbosity={verbosity} setVerbosity={setVerbosity} guardrails={guardrails} setGuardrails={setGuardrails} />}
+          {tab === "behavior" && <BehaviorTab tone={tone} setTone={setTone} goal={goal} setGoal={setGoal} whenUnsure={whenUnsure} setWhenUnsure={setWhenUnsure} verbosity={verbosity} setVerbosity={setVerbosity} guardrails={guardrails} setGuardrails={setGuardrails} assistantName={assistantName} setAssistantName={setAssistantName} openingMessage={openingMessage} setOpeningMessage={setOpeningMessage} escalationMessage={escalationMessage} setEscalationMessage={setEscalationMessage} voiceProfile={voiceProfile} setVoiceProfile={setVoiceProfile} voiceLanguage={voiceLanguage} setVoiceLanguage={setVoiceLanguage} voiceSpeed={voiceSpeed} setVoiceSpeed={setVoiceSpeed} recordingPolicy={recordingPolicy} setRecordingPolicy={setRecordingPolicy} afterHoursEnabled={afterHoursEnabled} setAfterHoursEnabled={setAfterHoursEnabled} qualificationEnabled={qualificationEnabled} setQualificationEnabled={setQualificationEnabled} qualificationCriteria={qualificationCriteria} setQualificationCriteria={setQualificationCriteria} />}
           {tab === "test" && <TestTab />}
         </div>
       </section>
