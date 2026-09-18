@@ -14,7 +14,15 @@ function request() {
 function provider(): VoiceProvider {
   return {
     verifyWebhook: vi.fn(async () => true),
-    normalizeWebhook: vi.fn(async () => []),
+    normalizeWebhook: vi.fn(async () => [{
+      type: "CALL_INITIATED" as const,
+      externalEventId: "evt-suspended",
+      externalCallId: "call-suspended",
+      callControlId: "control-suspended",
+      from: "+12025550100",
+      to: "+12025550200",
+      occurredAt: null,
+    }]),
     answer: vi.fn(async () => undefined),
     gatherConsent: vi.fn(async () => undefined),
     startTranscription: vi.fn(async () => undefined),
@@ -49,6 +57,6 @@ describe("voice webhook service", () => {
       suppressed: 1,
     });
     expect(voiceProvider.verifyWebhook).toHaveBeenCalledTimes(1);
-    expect(voiceProvider.normalizeWebhook).not.toHaveBeenCalled();
+    expect(voiceProvider.normalizeWebhook).toHaveBeenCalledTimes(1);
   });
 });
