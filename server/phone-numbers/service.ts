@@ -38,6 +38,21 @@ export type ManagedNumberSearch = {
   purchaseCredits: number;
 };
 
+function publicFailureReason(row: typeof hostedPhoneNumbers.$inferSelect) {
+  if (row.status === "PROVISIONING") {
+    return row.failureReason?.includes("additional number-order information")
+      ? "Additional carrier activation requirements are still pending."
+      : "The carrier is still finalizing this phone-number activation.";
+  }
+  if (row.status === "RECONCILING") {
+    return "AI Caller is confirming this phone-number purchase with the carrier before charging, refunding, or retrying.";
+  }
+  if (row.status === "PAST_DUE") return "Phone number renewal is waiting for additional credits.";
+  if (row.status === "SUSPENDED") return "Phone service is suspended until enough credits are available for renewal.";
+  if (row.status === "RELEASE_PENDING") return "Carrier release is pending and will be retried automatically.";
+  return row.failureReason;
+}
+
 function publicNumber(row: typeof hostedPhoneNumbers.$inferSelect | null | undefined) {
   if (!row) return null;
   return {
@@ -54,7 +69,7 @@ function publicNumber(row: typeof hostedPhoneNumbers.$inferSelect | null | undef
     currentPeriodEnd: row.currentPeriodEnd,
     nextBillingAt: row.nextBillingAt,
     graceEndsAt: row.graceEndsAt,
-    failureReason: row.failureReason,
+    failureReason: publicFailureReason(row),
     createdAt: row.createdAt,
   };
 }
