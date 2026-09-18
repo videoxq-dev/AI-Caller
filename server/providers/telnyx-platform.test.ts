@@ -9,7 +9,7 @@ vi.mock("@/server/env", () => ({
   }),
 }));
 
-import { orderTelnyxNumber, searchTelnyxNumbers } from "./telnyx-platform";
+import { orderTelnyxNumber, retrieveTelnyxNumberOrder, retrieveTelnyxOrderPhoneNumber, searchTelnyxNumbers } from "./telnyx-platform";
 
 describe("managed Telnyx number search", () => {
   it("sends state, city and area-code filters and requires voice + SMS", async () => {
@@ -60,12 +60,39 @@ describe("managed Telnyx number search", () => {
     await searchTelnyxNumbers({ countryCode: "US", numberType: "toll_free" }, fetcher);
   });
 
+  it("retrieves order and ordered-number state for carrier reconciliation", async () => {
+    const fetcher = vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url.endsWith("/number_orders/order-1")) {
+        return new Response(JSON.stringify({
+          data: { id: "order-1", status: "pending", requirements_met: true },
+        }), { status: 200, headers: { "content-type": "application/json" } });
+      }
+      if (url.endsWith("/number_order_phone_numbers/order-number-1")) {
+        return new Response(JSON.stringify({
+          data: { id: "order-number-1", phone_number: "+13075550184", status: "success", requirements_met: true },
+        }), { status: 200, headers: { "content-type": "application/json" } });
+      }
+      throw new Error(`Unexpected Telnyx test URL: ${url}`);
+    }) as typeof fetch;
+
+    await expect(retrieveTelnyxNumberOrder("order-1", fetcher)).resolves.toMatchObject({
+      id: "order-1",
+      status: "pending",
+    });
+    await expect(retrieveTelnyxOrderPhoneNumber("order-number-1", fetcher)).resolves.toMatchObject({
+      id: "order-number-1",
+      status: "success",
+    });
+  });
+
   it("returns the purchased phone-number id supplied by the order response", async () => {
     const fetcher = vi.fn(async (_input: RequestInfo | URL, init?: RequestInit) => {
       const body = JSON.parse(String(init?.body)) as Record<string, unknown>;
       expect(body).toMatchObject({
         connection_id: "connection-1",
         messaging_profile_id: "profile-1",
+        customer_reference: "ai-caller:11111111-1111-4111-8111-111111111111:22222222-2222-4222-8222-222222222222",
       });
       return new Response(JSON.stringify({
         data: {
@@ -84,6 +111,7 @@ describe("managed Telnyx number search", () => {
 
     await expect(orderTelnyxNumber({
       workspaceId: "11111111-1111-4111-8111-111111111111",
+      requestId: "22222222-2222-4222-8222-222222222222",
       phoneNumber: "+13075550184",
       connectionId: "connection-1",
       messagingProfileId: "profile-1",
