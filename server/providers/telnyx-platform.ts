@@ -73,8 +73,11 @@ export async function searchTelnyxNumbers(input: {
   limit?: number;
 }, fetcher: typeof fetch = fetch): Promise<TelnyxAvailableNumber[]> {
   if (isE2EProviderFixtureMode()) {
+    const startsWith = input.startsWith?.replace(/\D/g, "") ?? "";
     const area = input.areaCode?.replace(/\D/g, "") || (input.numberType === "toll_free" ? "888" : "202");
-    const phoneNumber = input.numberType === "toll_free" ? "+18885550100" : `+1${area}5550200`;
+    const phoneNumber = startsWith.length >= 10
+      ? `+1${startsWith.slice(0, 10)}`
+      : input.numberType === "toll_free" ? "+18885550100" : `+1${area}5550200`;
     return [{
       phoneNumber,
       countryCode: "US",
