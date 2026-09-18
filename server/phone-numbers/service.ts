@@ -32,8 +32,6 @@ export type ManagedNumberSearch = {
   numberType: string;
   monthlyCredits: number;
   purchaseCredits: number;
-  monthlyCostMicros: number;
-  upfrontCostMicros: number;
 };
 
 function publicNumber(row: typeof hostedPhoneNumbers.$inferSelect | null | undefined) {
@@ -115,8 +113,6 @@ export async function searchManagedPhoneNumbers(input: {
       numberType: number.numberType,
       monthlyCredits: quote.monthlyCredits,
       purchaseCredits: quote.purchaseCredits,
-      monthlyCostMicros: quote.monthlyCostMicros,
-      upfrontCostMicros: quote.upfrontCostMicros,
     };
   });
 }
