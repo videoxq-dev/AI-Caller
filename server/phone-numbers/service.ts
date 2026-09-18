@@ -658,6 +658,7 @@ export async function provisionManagedPhoneNumber(workspaceId: string, input: {
   let row: typeof hostedPhoneNumbers.$inferSelect | undefined;
   let voiceConnectionId: string | null = null;
   let messagingProfileId: string | null = null;
+  let carrierOrderReturned = false;
 
   try {
     row = await createProvisioningRecord(workspaceId, current?.id ?? null, {
@@ -701,6 +702,7 @@ export async function provisionManagedPhoneNumber(workspaceId: string, input: {
         connectionId: voiceConnectionId,
         messagingProfileId,
       });
+      carrierOrderReturned = true;
     } catch (error) {
       if (!uncertainProviderFailure(error)) throw error;
       const [reconciling] = await db.update(hostedPhoneNumbers).set({
@@ -749,7 +751,10 @@ export async function provisionManagedPhoneNumber(workspaceId: string, input: {
     }
     return publicNumber(reconciled);
   } catch (error) {
-    if (row && (row.status === "RECONCILING" || row.providerOrderId)) throw error;
+    // Once the carrier has returned an order, never refund/clean up solely because
+    // persisting the order identifiers failed. The durable provisioning row can
+    // recover it by customer_reference on the reconciliation worker.
+    if (row && (row.status === "RECONCILING" || row.providerOrderId || carrierOrderReturned)) throw error;
 
     await cleanupAuxiliaryResources({
       phoneNumber: match.phoneNumber,
