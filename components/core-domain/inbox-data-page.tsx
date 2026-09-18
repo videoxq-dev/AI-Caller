@@ -6,10 +6,11 @@ import { AppNav } from "./app-nav";
 
 type Channel = "PHONE" | "SMS" | "WHATSAPP" | "WEBCHAT";
 type Contact = { id: string; name: string | null; email: string | null; phone: string | null };
-type Conversation = { id: string; contactId: string; status: "OPEN" | "CLOSED"; handlingMode: "AI" | "HUMAN"; lastMessageAt: string | null; createdAt: string };
+type Conversation = { id: string; contactId: string; status: "OPEN" | "CLOSED"; handlingMode: "AI" | "HUMAN"; assignedUserId: string | null; lastMessageAt: string | null; createdAt: string };
 type ConversationRow = { conversation: Conversation; contact: Contact; channels: Channel[] };
 type Message = { id: string; channel: Channel; direction: "INBOUND" | "OUTBOUND" | "INTERNAL"; senderType: "CUSTOMER" | "AI" | "USER" | "SYSTEM"; contentType: string; body: string; createdAt: string; metadata: Record<string, unknown> };
 type Timeline = { conversation: Conversation; contact: Contact; messages: Message[] };
+type TeamMember = { userId: string; name: string; email: string; role: "OWNER" | "ADMIN" | "STAFF" };
 
 
 type VoiceCallDetail = {
@@ -140,6 +141,10 @@ export function InboxDataPage() {
   const [switching, setSwitching] = useState(false);
   const [draft, setDraft] = useState("");
   const [sendingReply, setSendingReply] = useState(false);
+  const [teamMembers, setTeamMembers] = useState<TeamMember[]>([]);
+  const [currentUserId, setCurrentUserId] = useState<string | null>(null);
+  const [currentRole, setCurrentRole] = useState<"OWNER" | "ADMIN" | "STAFF" | null>(null);
+  const [assignmentPending, setAssignmentPending] = useState(false);
 
   const loadConversations = useCallback(async () => {
     setLoading(true);
@@ -158,6 +163,17 @@ export function InboxDataPage() {
   }, [selectedId]);
 
   useEffect(() => { void loadConversations(); }, [loadConversations]);
+
+  useEffect(() => {
+    fetch("/api/team", { cache: "no-store" })
+      .then(async (response) => response.ok ? response.json() : null)
+      .then((data: { members?: TeamMember[]; currentUserId?: string; currentRole?: "OWNER" | "ADMIN" | "STAFF" } | null) => {
+        setTeamMembers(data?.members ?? []);
+        setCurrentUserId(data?.currentUserId ?? null);
+        setCurrentRole(data?.currentRole ?? null);
+      })
+      .catch(() => undefined);
+  }, []);
 
   const loadTimeline = useCallback(async (id: string) => {
     try {
@@ -186,6 +202,28 @@ export function InboxDataPage() {
     if (selectedId && visibleRows.some((row) => row.conversation.id === selectedId)) return;
     setSelectedId(visibleRows[0]?.conversation.id ?? null);
   }, [channel, selectedId, visibleRows]);
+
+  async function updateAssignment(assignedUserId: string | null) {
+    if (!timeline) return;
+    setAssignmentPending(true);
+    setError(null);
+    try {
+      const response = await fetch(`/api/conversations/${timeline.conversation.id}/assignment`, {
+        method: "PUT",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ assignedUserId }),
+      });
+      if (!response.ok) {
+        const data = await response.json().catch(() => null) as { error?: { message?: string } } | null;
+        throw new Error(data?.error?.message ?? "Unable to assign conversation.");
+      }
+      await Promise.all([loadTimeline(timeline.conversation.id), loadConversations()]);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Unable to assign conversation.");
+    } finally {
+      setAssignmentPending(false);
+    }
+  }
 
   async function toggleHandling() {
     if (!timeline) return;
@@ -276,7 +314,7 @@ export function InboxDataPage() {
           </section>
 
           <aside className="contactColumn">
-            {timeline ? <><div className="contactTabs"><button className="active" type="button">Contact</button></div><section className="contactSummary"><span className="largeAvatar">{initials(timeline.contact.name)}</span><div><strong>{timeline.contact.name ?? "Unnamed contact"}</strong><span>{timeline.contact.phone ?? "No phone"}</span><span>{timeline.contact.email ?? "No email"}</span></div></section><div className="contactChannelRow"><span className={`channelBadge ${channelLabels[latestChannel].toLowerCase().replace(" ", "-")}`}>{channelLabels[latestChannel]}</span><span className="currentChannel">Latest channel</span></div><section className="detailSection"><div className="detailHeading"><strong>Conversation state</strong></div><div className="infoRows compact"><div><span>Handling</span><strong>{timeline.conversation.handlingMode}</strong></div><div><span>Status</span><strong>{timeline.conversation.status}</strong></div><div><span>Messages</span><strong>{timeline.messages.length}</strong></div></div></section></> : null}
+            {timeline ? <><div className="contactTabs"><button className="active" type="button">Contact</button></div><section className="contactSummary"><span className="largeAvatar">{initials(timeline.contact.name)}</span><div><strong>{timeline.contact.name ?? "Unnamed contact"}</strong><span>{timeline.contact.phone ?? "No phone"}</span><span>{timeline.contact.email ?? "No email"}</span></div></section><div className="contactChannelRow"><span className={`channelBadge ${channelLabels[latestChannel].toLowerCase().replace(" ", "-")}`}>{channelLabels[latestChannel]}</span><span className="currentChannel">Latest channel</span></div><section className="detailSection"><div className="detailHeading"><strong>Conversation state</strong></div><div className="infoRows compact"><div><span>Handling</span><strong>{timeline.conversation.handlingMode}</strong></div><div><span>Status</span><strong>{timeline.conversation.status}</strong></div><div><span>Messages</span><strong>{timeline.messages.length}</strong></div><div><span>Assigned to</span><strong>{teamMembers.find((member) => member.userId === timeline.conversation.assignedUserId)?.name ?? "Unassigned"}</strong></div></div>{currentRole === "OWNER" || currentRole === "ADMIN" ? <label className="inboxAssigneeField"><span>Reassign conversation</span><select value={timeline.conversation.assignedUserId ?? ""} disabled={assignmentPending} onChange={(event) => void updateAssignment(event.target.value || null)}><option value="">Unassigned</option>{teamMembers.map((member) => <option key={member.userId} value={member.userId}>{member.name} · {member.role}</option>)}</select></label> : currentUserId && timeline.conversation.assignedUserId !== currentUserId ? <button className="inboxAssignSelf" type="button" disabled={assignmentPending} onClick={() => void updateAssignment(currentUserId)}>Assign to me</button> : null}</section></> : null}
           </aside>
         </div>
       </section>
