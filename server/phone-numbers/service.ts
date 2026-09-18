@@ -11,6 +11,7 @@ import {
   deleteTelnyxCallControlApplication,
   deleteTelnyxMessagingProfile,
   findOwnedTelnyxNumber,
+  findTelnyxNumberOrderByReference,
   orderTelnyxNumber,
   releaseTelnyxNumber,
   retrieveTelnyxNumberOrder,
@@ -148,6 +149,7 @@ async function findFreshQuote(phoneNumber: string) {
 
 const PROVISIONING_RECONCILE_DELAY_MS = 15_000;
 const REQUIREMENTS_RECONCILE_DELAY_MS = 5 * 60_000;
+const INDETERMINATE_PURCHASE_MAX_MS = 30 * 60_000;
 
 function uncertainProviderFailure(error: unknown) {
   return !(error instanceof ProviderRequestError) || error.status >= 500;
@@ -388,15 +390,47 @@ async function reconcileProvisioningRow(row: typeof hostedPhoneNumbers.$inferSel
   const now = new Date();
   try {
     if (!row.providerOrderId) {
+      if (!row.provisionRequestId) throw new Error("Managed phone provisioning request ID is missing.");
+
+      const discoveredOrder = await findTelnyxNumberOrderByReference({
+        workspaceId: row.workspaceId,
+        requestId: row.provisionRequestId,
+        phoneNumber: row.phoneNumber,
+      });
+      if (discoveredOrder?.id) {
+        const discoveredNumber = discoveredOrder.phone_numbers?.find((number) => number.phone_number === row.phoneNumber) ?? null;
+        const [withOrder] = await db.update(hostedPhoneNumbers).set({
+          providerOrderId: discoveredOrder.id,
+          providerOrderPhoneNumberId: discoveredNumber?.id ?? null,
+          providerOrderStatus: discoveredOrder.status ?? null,
+          provisioningLastCheckedAt: now,
+          reconcileAfter: new Date(),
+          failureReason: "AI Caller recovered the carrier order after an indeterminate purchase response.",
+          updatedAt: now,
+        }).where(eq(hostedPhoneNumbers.id, row.id)).returning();
+        return reconcileProvisioningRow(withOrder);
+      }
+
       const owned = await findOwnedTelnyxNumber(row.phoneNumber);
       if (ownedNumberIsUsable(owned)) {
         return activateProvisionedNumber(row, owned.id, "reconciled");
       }
+
+      if (now.getTime() - row.createdAt.getTime() >= INDETERMINATE_PURCHASE_MAX_MS) {
+        await failProvisioning(
+          row,
+          "The carrier did not create an order or own the requested number after repeated reconciliation checks.",
+          "not_found",
+        );
+        const [failed] = await db.select().from(hostedPhoneNumbers).where(eq(hostedPhoneNumbers.id, row.id)).limit(1);
+        return failed;
+      }
+
       const [pending] = await db.update(hostedPhoneNumbers).set({
         status: "RECONCILING",
         provisioningLastCheckedAt: now,
         reconcileAfter: new Date(now.getTime() + PROVISIONING_RECONCILE_DELAY_MS),
-        failureReason: "The carrier accepted an indeterminate purchase request. AI Caller is reconciling ownership before charging or retrying.",
+        failureReason: "The carrier purchase response was indeterminate. AI Caller is checking the exact order reference and phone-number ownership before charging, refunding, or retrying.",
         updatedAt: now,
       }).where(eq(hostedPhoneNumbers.id, row.id)).returning();
       return pending;
