@@ -13,7 +13,7 @@ vi.mock("@/server/env", () => ({
   }),
 }));
 
-import { findTelnyxNumberOrderByReference, orderTelnyxNumber, retrieveTelnyxNumberOrder, retrieveTelnyxOrderPhoneNumber, searchTelnyxNumbers } from "./telnyx-platform";
+import { deleteTelnyxCallControlApplication, deleteTelnyxMessagingProfile, findTelnyxNumberOrderByReference, orderTelnyxNumber, releaseTelnyxNumber, retrieveTelnyxNumberOrder, retrieveTelnyxOrderPhoneNumber, searchTelnyxNumbers } from "./telnyx-platform";
 
 describe("managed Telnyx number search", () => {
   it("sends state, city and area-code filters and requires voice + SMS", async () => {
@@ -124,6 +124,16 @@ describe("managed Telnyx number search", () => {
       id: "order-number-1",
       status: "success",
     });
+  });
+
+  it("treats already-deleted carrier resources as successful cleanup", async () => {
+    const fetcher = vi.fn(async () => new Response(JSON.stringify({
+      errors: [{ detail: "Not found" }],
+    }), { status: 404, headers: { "content-type": "application/json" } })) as typeof fetch;
+
+    await expect(releaseTelnyxNumber("number-1", fetcher)).resolves.toBeUndefined();
+    await expect(deleteTelnyxCallControlApplication("connection-1", fetcher)).resolves.toBeUndefined();
+    await expect(deleteTelnyxMessagingProfile("profile-1", fetcher)).resolves.toBeUndefined();
   });
 
   it("returns the purchased phone-number id supplied by the order response", async () => {
