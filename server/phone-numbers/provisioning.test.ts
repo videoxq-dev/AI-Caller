@@ -1,14 +1,15 @@
 import { eq } from "drizzle-orm";
 import { afterAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { ProviderRequestError } from "@/server/providers/http";
+import type { TelnyxNumberOrder } from "@/server/providers/telnyx-platform";
 
 const platform = vi.hoisted(() => ({
   createTelnyxCallControlApplication: vi.fn(async () => "call-control-1"),
   createTelnyxMessagingProfile: vi.fn(async () => "messaging-profile-1"),
   deleteTelnyxCallControlApplication: vi.fn(async () => undefined),
   deleteTelnyxMessagingProfile: vi.fn(async () => undefined),
-  findOwnedTelnyxNumber: vi.fn(async () => ({ id: "owned-number-1", phone_number: "+12025550200", status: "active" })),
-  findTelnyxNumberOrderByReference: vi.fn(async () => null),
+  findOwnedTelnyxNumber: vi.fn<() => Promise<{ id: string; phone_number: string; status: string } | null>>(async () => ({ id: "owned-number-1", phone_number: "+12025550200", status: "active" })),
+  findTelnyxNumberOrderByReference: vi.fn<() => Promise<TelnyxNumberOrder | null>>(async () => null),
   orderTelnyxNumber: vi.fn(),
   releaseTelnyxNumber: vi.fn(async () => undefined),
   retrieveTelnyxNumberOrder: vi.fn(),
