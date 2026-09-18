@@ -28,7 +28,7 @@ export const voiceConfigSchema = z.object({
   profileKey: z.string().trim().min(1).max(100).default("ava-us-1"),
   language: z.string().trim().min(2).max(20).default("en-US"),
   speakingRate: z.coerce.number().min(0.75).max(1.25).default(1),
-  recordingPolicy: z.enum(["ANNOUNCE", "EXPLICIT_CONSENT"]).default("ANNOUNCE"),
+  recordingPolicy: z.enum(["ANNOUNCE", "EXPLICIT_CONSENT"]).default("ANNOUNCE"),\n  afterHoursEnabled: z.boolean().default(true),
 }).default({
   profileKey: "ava-us-1",
   language: "en-US",
