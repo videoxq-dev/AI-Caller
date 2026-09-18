@@ -43,6 +43,7 @@ function runtimeFor(workspaceId: string, provider: SMSProvider, mode: "HOSTED" |
     providerName: "twilio",
     integrationId: mode === "BYOP" ? "22222222-2222-4222-8222-222222222222" : null,
     senderNumber: "+12025550200",
+    serviceStatus: mode === "HOSTED" ? "ACTIVE" : null,
     provider,
   };
 }
@@ -82,6 +83,25 @@ describe("SMS webhook service", () => {
 
   afterAll(async () => {
     await closeDatabase();
+  });
+
+  it("authenticates and acknowledges suspended hosted webhooks without queuing work", async () => {
+    const provider: SMSProvider = {
+      send: vi.fn(async () => ({ externalId: "unused", status: "QUEUED" as const })),
+      verifyWebhook: vi.fn(async () => true),
+      normalizeWebhook: vi.fn(async () => [inboundEvent("suspended")]),
+    };
+    const runtime = { ...runtimeFor(workspaceId, provider, "HOSTED"), serviceStatus: "SUSPENDED" as const };
+    const { service, jobs } = serviceHarness(runtime, async () => orchestratorReply("Should not run"));
+
+    await expect(service.ingest(request(), workspaceId, "twilio")).resolves.toMatchObject({
+      queued: 0,
+      processed: 0,
+      suppressed: 1,
+    });
+    expect(provider.verifyWebhook).toHaveBeenCalledTimes(1);
+    expect(provider.normalizeWebhook).not.toHaveBeenCalled();
+    expect(jobs).toHaveLength(0);
   });
 
   it("queues once, persists one inbound/outbound pair, and does not replay duplicate inbound events", async () => {
