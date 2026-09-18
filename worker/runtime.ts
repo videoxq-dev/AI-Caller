@@ -24,6 +24,7 @@ import { whatsAppWebhookService } from "@/server/whatsapp/service";
 import { dispatchAutomationEvent } from "@/server/automations/dispatcher";
 import { executeAutomationRun } from "@/server/automations/executor";
 import { listRecoverableAutomationRuns, listUndispatchedAutomationEvents } from "@/server/automations/repository";
+import { processDuePhoneNumberRenewals } from "@/server/phone-numbers/service";
 
 export async function startWorker() {
   const authBoss = await ensureQueue(AUTH_PASSWORD_RESET_EMAIL);
@@ -123,11 +124,29 @@ export async function startWorker() {
   const recoveryTimer = setInterval(() => void recoverAutomationEvents(), 15_000);
   recoveryTimer.unref();
 
+  let renewalRunning = false;
+  const renewManagedNumbers = async () => {
+    if (renewalRunning) return;
+    renewalRunning = true;
+    try {
+      const result = await processDuePhoneNumberRenewals(100);
+      if (result.checked > 0) logger.info(result, "Processed managed phone number renewals");
+    } catch (error) {
+      logger.error({ err: error }, "Failed to process managed phone number renewals");
+    } finally {
+      renewalRunning = false;
+    }
+  };
+  await renewManagedNumbers();
+  const renewalTimer = setInterval(() => void renewManagedNumbers(), 60 * 60 * 1000);
+  renewalTimer.unref();
+
   logger.info({ queues: [AUTH_PASSWORD_RESET_EMAIL, COMMERCE_WELCOME_EMAIL, ADMIN_USER_WELCOME_EMAIL, TEAM_INVITATION_EMAIL, SMS_INBOUND_RESPONSE, WHATSAPP_INBOUND_RESPONSE, AUTOMATION_DISPATCH_EVENT, AUTOMATION_EXECUTE_RUN] }, "AI Caller worker started");
 
   const shutdown = async (signal: string) => {
     logger.info({ signal }, "Stopping AI Caller worker");
     clearInterval(recoveryTimer);
+    clearInterval(renewalTimer);
     await stopBoss();
     process.exit(0);
   };
