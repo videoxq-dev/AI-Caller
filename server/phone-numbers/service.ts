@@ -540,7 +540,7 @@ export async function provisionManagedPhoneNumber(workspaceId: string, input: {
       updatedAt: new Date(),
     }).where(eq(hostedPhoneNumbers.id, row.id)).returning();
 
-    let order;
+    let order: Awaited<ReturnType<typeof orderTelnyxNumber>>;
     try {
       order = await orderTelnyxNumber({
         workspaceId,
