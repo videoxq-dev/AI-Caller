@@ -22,6 +22,7 @@ import {
   settleCreditReservation,
 } from "@/server/credits/service";
 import { quoteHostedPhoneNumber } from "./pricing";
+import { addBillingMonth } from "./billing-period";
 
 export type ManagedNumberSearch = {
   phoneNumber: string;
@@ -34,16 +35,6 @@ export type ManagedNumberSearch = {
   monthlyCostMicros: number;
   upfrontCostMicros: number;
 };
-
-export function addBillingMonth(value: Date) {
-  const source = new Date(value);
-  const day = source.getUTCDate();
-  source.setUTCDate(1);
-  source.setUTCMonth(source.getUTCMonth() + 1);
-  const lastDay = new Date(Date.UTC(source.getUTCFullYear(), source.getUTCMonth() + 1, 0)).getUTCDate();
-  source.setUTCDate(Math.min(day, lastDay));
-  return source;
-}
 
 function publicNumber(row: typeof hostedPhoneNumbers.$inferSelect | null | undefined) {
   if (!row) return null;
