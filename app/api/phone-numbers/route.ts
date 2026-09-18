@@ -15,11 +15,12 @@ const provisionSchema = z.object({
 export async function GET(request: Request) {
   try {
     const context = await resolveWorkspaceContext(request.headers);
+    const canManage = hasWorkspacePermission(context.membership.role, "billing.manage");
     const [number, creditBalance] = await Promise.all([
       getManagedPhoneNumber(context.workspace.id),
-      getCreditBalance(context.workspace.id),
+      canManage ? getCreditBalance(context.workspace.id) : Promise.resolve(null),
     ]);
-    return Response.json({ number, creditBalance, canManage: hasWorkspacePermission(context.membership.role, "billing.manage") }, { headers: { "cache-control": "no-store" } });
+    return Response.json({ number, creditBalance, canManage }, { headers: { "cache-control": "no-store" } });
   } catch (error) {
     return toErrorResponse(error);
   }
