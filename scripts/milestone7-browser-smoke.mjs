@@ -396,11 +396,14 @@ try {
   assert(transcript.rows.some((row) => row.speaker === "CUSTOMER" && row.text.includes("QA Consultation today")), "Caller transcript segment was not persisted.");
   assert(transcript.rows.some((row) => row.speaker === "AI" && row.text.includes("$120")), "AI transcript segment was not persisted.");
 
+  const secondHangup = await sendWebhook(workspaceId, eventPayload("call.hangup", "m7-hangup-distinct-2", callSessionId, callControlId, { hangup_cause: "normal_clearing" }));
+  assert(secondHangup.data?.processed === 1, "Distinct duplicate hangup callback was not processed safely.");
+
   const usage = await pool.query(
     `SELECT count(*)::int AS count, coalesce(sum(credits_charged), 0)::int AS credits FROM usage_events WHERE workspace_id = $1 AND capability = 'VOICE' AND reference_id = $2`,
     [workspaceId, callId],
   );
-  assert(usage.rows[0].count === 1, "Voice usage was not persisted exactly once for the call.");
+  assert(usage.rows[0].count === 1, "Voice usage was not persisted exactly once across distinct hangup callbacks.");
   assert(usage.rows[0].credits === 0, "BYOP voice transport incorrectly charged hosted credits.");
 
   await page.goto(`${baseUrl}/inbox`, { waitUntil: "networkidle" });
