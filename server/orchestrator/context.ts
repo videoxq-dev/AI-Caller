@@ -3,7 +3,7 @@ import { db } from "@/db";
 import { aiAgents, faqs, policies, services } from "@/db/schema";
 import { getConversationTimelinePage } from "@/server/domain/core/conversation-timeline";
 import { getContactDetail } from "@/server/domain/core/repository";
-import { getBusinessSetup } from "@/server/domain/onboarding/repository";
+import { getBusinessSetup } from "@/server/domain/onboarding/repository";\nimport { qualificationConfigFromBehaviorSettings, qualificationPrompt } from "./qualification";
 
 const DAY_NAMES = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
 
