@@ -200,6 +200,8 @@ try {
   const managedNumber = await api(context, "POST", "/api/phone-numbers", {
     phoneNumber: voiceNumber,
     requestId: provisionRequestId,
+    expectedPurchaseCredits: numberSearch.items.find((item) => item.phoneNumber === voiceNumber).purchaseCredits,
+    expectedMonthlyCredits: numberSearch.items.find((item) => item.phoneNumber === voiceNumber).monthlyCredits,
     replaceCurrent: false,
   }, "provision managed voice number");
   assert(managedNumber?.number?.status === "ACTIVE", `Managed voice number did not finish carrier activation: ${JSON.stringify(managedNumber?.number)}`);
