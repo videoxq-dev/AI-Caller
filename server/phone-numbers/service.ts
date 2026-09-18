@@ -529,8 +529,16 @@ export async function provisionManagedPhoneNumber(workspaceId: string, input: {
     eq(hostedPhoneNumbers.provisionRequestId, input.requestId),
   )).limit(1);
   if (priorRequest) {
-    if (priorRequest.phoneNumber !== input.phoneNumber) {
-      throw new AppError("PHONE_NUMBER_IDEMPOTENCY_CONFLICT", "This provisioning request was already used for a different phone number.", 409);
+    if (
+      priorRequest.phoneNumber !== input.phoneNumber
+      || priorRequest.purchaseCredits !== input.expectedPurchaseCredits
+      || priorRequest.monthlyCredits !== input.expectedMonthlyCredits
+    ) {
+      throw new AppError(
+        "PHONE_NUMBER_IDEMPOTENCY_CONFLICT",
+        "This provisioning request was already used with different phone-number or pricing details.",
+        409,
+      );
     }
     if (priorRequest.status === "FAILED" || priorRequest.status === "RELEASED") {
       throw new AppError(
