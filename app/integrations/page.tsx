@@ -1,15 +1,10 @@
 "use client";
 
 import Link from "next/link";
+import { AppNav } from "@/components/core-domain/app-nav";
 import { useEffect, useMemo, useState, type ReactNode } from "react";
 import {
-  CalendarIcon,
-  DatabaseIcon,
-  GearIcon,
-  HelpIcon,
-  LogoMark,
   MessageIcon,
-  UsersIcon,
 } from "@/components/icons";
 import "../dashboard/dashboard.css";
 import "./integrations.css";
@@ -67,17 +62,6 @@ const tabs: Array<{ id: Category; label: string }> = [
   { id: "communication", label: "Communication" },
   { id: "ai", label: "AI" },
   { id: "scheduling", label: "Scheduling" },
-];
-
-const navItems = [
-  { label: "Dashboard", href: "/dashboard", icon: <HomeIcon /> },
-  { label: "Inbox", href: "/inbox", icon: <MessageIcon size={20} />, badge: "3" },
-  { label: "Contacts", href: "/contacts", icon: <UsersIcon size={20} /> },
-  { label: "Appointments", href: "/appointments", icon: <CalendarIcon size={20} /> },
-  { label: "AI Agent", href: "/ai-agent", icon: <BotIcon /> },
-  { label: "Automations", href: "/automations", icon: <BoltIcon /> },
-  { label: "Integrations", href: "/integrations", icon: <DatabaseIcon size={20} />, active: true },
-  { label: "Settings", href: "/settings", icon: <GearIcon size={20} /> },
 ];
 
 const emptyConnected = () => Object.fromEntries(providers.map((provider) => [provider.id, provider.id === "credits"])) as Record<ProviderId, boolean>;
@@ -141,11 +125,7 @@ export default function IntegrationsPage() {
 
   return (
     <main className="appShell integrationsShell">
-      <aside className="appSidebar integrationsSidebar">
-        <Link className="appBrand" href="/dashboard"><LogoMark size={37} /><strong>AI Caller</strong></Link>
-        <nav className="appNav" aria-label="Main navigation">{navItems.map((item) => <Link key={item.label} href={item.href} className={`appNavItem ${item.active ? "active" : ""}`}><span className="appNavIcon">{item.icon}</span><span>{item.label}</span>{item.badge && <b className="navBadge">{item.badge}</b>}</Link>)}</nav>
-        <a className="integrationsHelp" href="mailto:support@aicaller.com"><span><HelpIcon size={18} /></span><div><strong>Need help?</strong><small>Contact support</small></div></a>
-      </aside>
+      <AppNav active="Integrations" className="appSidebar integrationsSidebar" />
 
       <section className="appWorkspace integrationsWorkspace">
         <header className="integrationsTopbar">
@@ -384,6 +364,3 @@ function ToggleRow({ title, subtitle }: { title: string; subtitle: string }) { r
 function Toggle({ checked }: { checked: boolean }) { return <span className={`miniToggle ${checked ? "on" : ""}`}><i /></span>; }
 function SearchIcon() { return <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg>; }
 function ChevronDown() { return <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="m6 9 6 6 6-6"/></svg>; }
-function HomeIcon() { return <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8"><path d="m3 11 9-8 9 8"/><path d="M5 10v10h14V10M9 20v-6h6v6"/></svg>; }
-function BotIcon() { return <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8"><rect x="4" y="7" width="16" height="13" rx="4"/><path d="M12 3v4M9 13h.01M15 13h.01M8 17h8"/></svg>; }
-function BoltIcon() { return <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8"><path d="m13 2-8 12h6l-1 8 9-13h-6V2Z"/></svg>; }
