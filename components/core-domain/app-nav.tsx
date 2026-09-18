@@ -133,7 +133,12 @@ export function AppNav({ active, className = "appSidebar" }: { active: string; c
 
       <nav className="appNav" aria-label="Main navigation">
         {items.map((item) => (
-          <Link key={item.label} href={item.href} className={`appNavItem ${item.label === active ? "active" : ""}`}>
+          <Link
+            key={item.label}
+            href={item.href}
+            aria-label={item.label}
+            className={`appNavItem ${item.label === active ? "active" : ""}`}
+          >
             <span className="appNavIcon">{item.icon}</span><span>{item.label}</span>
             {item.label === "Inbox" && unread > 0 && <b className="navBadge">{Math.min(unread, 99)}</b>}
           </Link>
