@@ -314,6 +314,28 @@ describe("managed phone provisioning lifecycle", () => {
     expect(await db.select().from(usageEvents)).toHaveLength(0);
   });
 
+  it("preserves a failed outcome on an idempotent retry instead of reporting accepted provisioning", async () => {
+    platform.orderTelnyxNumber.mockRejectedValueOnce(new ProviderRequestError("Invalid order", 422));
+
+    await expect(provisionManagedPhoneNumber(workspaceId, {
+      phoneNumber: "+12025550200",
+      requestId,
+      expectedPurchaseCredits: 2000,
+      expectedMonthlyCredits: 2000,
+    })).rejects.toThrow("Invalid order");
+
+    await expect(provisionManagedPhoneNumber(workspaceId, {
+      phoneNumber: "+12025550200",
+      requestId,
+      expectedPurchaseCredits: 2000,
+      expectedMonthlyCredits: 2000,
+    })).rejects.toMatchObject({
+      code: "PHONE_NUMBER_REQUEST_COMPLETE",
+      status: 409,
+    });
+    expect(platform.orderTelnyxNumber).toHaveBeenCalledTimes(1);
+  });
+
   it("releases the reservation and auxiliary resources on a definitive pre-purchase rejection", async () => {
     platform.orderTelnyxNumber.mockRejectedValueOnce(new ProviderRequestError("Invalid order", 422));
 
