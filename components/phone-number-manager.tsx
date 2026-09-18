@@ -187,7 +187,18 @@ export function PhoneNumberManager({
   if (current && !changing) {
     const attention = current.status === "PAST_DUE" || current.status === "SUSPENDED" || current.status === "PROVISIONING" || current.status === "RECONCILING";
     const phoneOperational = current.status === "ACTIVE" || current.status === "PAST_DUE";
-    const smsReady = current.messagingReadiness === "READY";
+    const callStatus = current.status === "SUSPENDED"
+      ? "Suspended"
+      : phoneOperational ? "Active" : "Pending carrier activation";
+    const smsStatus = current.status === "SUSPENDED"
+      ? "Suspended"
+      : current.messagingReadiness === "READY"
+        ? "Ready"
+        : current.messagingReadiness === "REJECTED"
+          ? "Registration rejected"
+          : current.messagingReadiness === "PENDING"
+            ? "Registration pending"
+            : "Registration required";
     return (
       <div className={styles.currentWrap}>
         <div className={styles.currentCard}>
@@ -216,8 +227,8 @@ export function PhoneNumberManager({
         <div className={styles.billingRow}>
           {canManage && <div><span>Monthly renewal</span><strong>{(current.monthlyCredits ?? 0).toLocaleString()} credits</strong></div>}
           {canManage && <div><span>Next billing</span><strong>{current.nextBillingAt ? new Date(current.nextBillingAt).toLocaleDateString() : "Pending"}</strong></div>}
-          <div><span>Calls</span><strong>{phoneOperational ? "Active" : "Pending carrier activation"}</strong></div>
-          <div><span>Outbound SMS</span><strong>{smsReady ? "Ready" : current.messagingReadiness === "REJECTED" ? "Registration rejected" : current.messagingReadiness === "PENDING" ? "Registration pending" : "Registration required"}</strong></div>
+          <div><span>Calls</span><strong>{callStatus}</strong></div>
+          <div><span>Outbound SMS</span><strong>{smsStatus}</strong></div>
           {canManage && <button type="button" onClick={() => setChanging(true)}>{settingsMode ? "Change number" : "Choose a different number"}</button>}
         </div>
       </div>
