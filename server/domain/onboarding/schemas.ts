@@ -24,6 +24,30 @@ export const businessProfileInputSchema = z.object({
   completeStep: z.boolean().default(false),
 });
 
+export const voiceConfigSchema = z.object({
+  profileKey: z.string().trim().min(1).max(100).default("ava-us-1"),
+  language: z.string().trim().min(2).max(20).default("en-US"),
+  speakingRate: z.coerce.number().min(0.75).max(1.25).default(1),
+  recordingPolicy: z.enum(["ANNOUNCE", "EXPLICIT_CONSENT"]).default("ANNOUNCE"),
+}).default({
+  profileKey: "ava-us-1",
+  language: "en-US",
+  speakingRate: 1,
+  recordingPolicy: "ANNOUNCE",
+});
+
+export const qualificationCriterionSchema = z.object({
+  id: z.string().trim().regex(/^[a-z0-9_-]{1,64}$/),
+  label: z.string().trim().min(1).max(120),
+  question: z.string().trim().min(1).max(300),
+  required: z.boolean().default(true),
+});
+
+export const qualificationConfigSchema = z.object({
+  enabled: z.boolean().default(false),
+  criteria: z.array(qualificationCriterionSchema).max(10).default([]),
+}).default({ enabled: false, criteria: [] });
+
 export const aiAgentInputSchema = z.object({
   name: z.string().trim().min(1).max(100),
   tone: z.string().trim().min(1).max(120),
