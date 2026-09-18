@@ -1,3 +1,5 @@
+ALTER TYPE "message_content_type" ADD VALUE 'CALL_RECORDING';
+
 ALTER TABLE "leads"
 ADD COLUMN "qualification_data" jsonb NOT NULL DEFAULT '{}'::jsonb,
 ADD COLUMN "qualification_score" integer NOT NULL DEFAULT 0,
