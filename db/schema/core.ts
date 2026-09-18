@@ -228,6 +228,7 @@ export const creditLedger = pgTable(
   },
   (table) => [
     index("credit_ledger_workspace_idx").on(table.workspaceId),
+    index("credit_ledger_workspace_created_idx").on(table.workspaceId, table.createdAt),
     uniqueIndex("credit_ledger_reference_uq").on(table.workspaceId, table.type, table.referenceType, table.referenceId),
   ],
 );

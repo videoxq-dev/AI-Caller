@@ -90,6 +90,7 @@ export const leads = pgTable(
   (table) => [
     uniqueIndex("leads_workspace_contact_uq").on(table.workspaceId, table.contactId),
     index("leads_workspace_status_idx").on(table.workspaceId, table.status),
+    index("leads_workspace_qualification_idx").on(table.workspaceId, table.qualificationCompletedAt),
   ],
 );
 
@@ -135,6 +136,7 @@ export const messages = pgTable(
   },
   (table) => [
     index("messages_conversation_created_idx").on(table.conversationId, table.createdAt),
+    index("messages_workspace_created_idx").on(table.workspaceId, table.createdAt),
     uniqueIndex("messages_workspace_provider_external_uq").on(table.workspaceId, table.provider, table.externalMessageId),
   ],
 );
@@ -161,6 +163,7 @@ export const appointments = pgTable(
   },
   (table) => [
     index("appointments_workspace_start_idx").on(table.workspaceId, table.startsAt),
+    index("appointments_workspace_created_idx").on(table.workspaceId, table.createdAt),
     index("appointments_contact_start_idx").on(table.contactId, table.startsAt),
     uniqueIndex("appointments_integration_external_uq").on(table.integrationId, table.externalEventId),
   ],

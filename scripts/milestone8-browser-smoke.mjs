@@ -382,14 +382,16 @@ try {
     (rows) => rows.rowCount === 1,
     "missed inquiry recovery delivery",
   );
-  const missedRun = await pool.query(
+  await waitFor(
+    pool,
     `SELECT r.status, count(d.id)::int AS deliveries
        FROM automation_runs r LEFT JOIN automation_deliveries d ON d.run_id = r.id
       WHERE r.workspace_id = $1 AND r.key = 'MISSED_INQUIRY_RECOVERY'
       GROUP BY r.id ORDER BY r.created_at DESC LIMIT 1`,
     [workspaceId],
+    (rows) => rows.rows[0]?.status === "COMPLETED" && rows.rows[0]?.deliveries === 1,
+    "missed inquiry automation completion",
   );
-  assert(missedRun.rows[0]?.status === "COMPLETED" && missedRun.rows[0]?.deliveries === 1, "Missed inquiry automation did not complete exactly one delivery.");
 
   const qualifiedContact = await pool.query(
     `INSERT INTO contacts (workspace_id, name, phone) VALUES ($1, 'M8 Qualified Lead', '+12025550830') RETURNING id`,
@@ -464,16 +466,20 @@ try {
     (rows) => rows.rows[0]?.count === 2,
     "appointment confirmation and reminder deliveries",
   );
-  const appointmentRuns = await pool.query(
+  await waitFor(
+    pool,
     `SELECT key, status FROM automation_runs
       WHERE workspace_id = $1 AND event_id IN (
         SELECT id FROM automation_events WHERE workspace_id = $1 AND aggregate_id = $2
       )
       ORDER BY key`,
     [workspaceId, appointment.rows[0].id],
+    (rows) => (
+      rows.rows.some((row) => row.key === "APPOINTMENT_CONFIRMATION" && row.status === "COMPLETED")
+      && rows.rows.some((row) => row.key === "APPOINTMENT_REMINDER" && row.status === "COMPLETED")
+    ),
+    "appointment automation run completion",
   );
-  assert(appointmentRuns.rows.some((row) => row.key === "APPOINTMENT_CONFIRMATION" && row.status === "COMPLETED"), "Appointment confirmation run did not complete.");
-  assert(appointmentRuns.rows.some((row) => row.key === "APPOINTMENT_REMINDER" && row.status === "COMPLETED"), "Appointment reminder run did not complete.");
 
   const staleAppointmentStart = new Date(Date.now() + 30 * 60_000);
   const staleAppointment = await pool.query(

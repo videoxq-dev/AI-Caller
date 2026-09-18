@@ -136,6 +136,9 @@ jobs:
       - name: Milestone 8 collaboration and automations browser acceptance verification
         run: npm run test:browser:m8
 
+      - name: Milestone 9 live dashboard browser acceptance verification
+        run: npm run test:browser:m9
+
       - name: Upload Milestone 3 browser screenshots
         if: always()
         uses: actions/upload-artifact@v4
@@ -187,6 +190,15 @@ jobs:
         with:
           name: milestone8-browser-verification
           path: artifacts/milestone8-browser
+          if-no-files-found: warn
+          retention-days: 14
+
+      - name: Upload Milestone 9 browser screenshots
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: milestone9-browser-verification
+          path: artifacts/milestone9-browser
           if-no-files-found: warn
           retention-days: 14
 
