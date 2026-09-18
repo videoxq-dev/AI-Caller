@@ -440,6 +440,12 @@ export function createVoiceWebhookService(dependencies: VoiceServiceDependencies
         return;
       }
 
+      const latestConversation = await getConversationById(workspaceId, call.conversationId);
+      if (!latestConversation || latestConversation.handlingMode !== "AI") {
+        await updateVoiceCall(workspaceId, call.id, {}, { phase: "HUMAN" });
+        return;
+      }
+
       const aiStartedMs = elapsedMs(call.startedAt, new Date());
       const aiEndedMs = aiStartedMs + estimateSpeechDurationMs(result.reply, voice.config.speakingRate);
       const aiSegment = await appendVoiceTranscriptSegment(workspaceId, call.id, {
