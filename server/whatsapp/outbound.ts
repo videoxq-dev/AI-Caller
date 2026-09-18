@@ -1,6 +1,6 @@
 import { and, eq } from "drizzle-orm";
 import { db } from "@/db";
-import { conversations, usageEvents } from "@/db/schema";
+import { conversations, messages, usageEvents } from "@/db/schema";
 import { appendMessage } from "@/server/domain/core/repository";
 import { AppError } from "@/server/http/errors";
 import { logger } from "@/server/observability/logger";
@@ -113,6 +113,17 @@ export function createWhatsAppOutboundService(dependencies: OutboundDependencies
         status: "SENDING",
         metadata: { mode: runtime.mode },
       });
+
+      if (input.senderType === "AI") {
+        const latest = await conversationState(workspaceId, conversationId);
+        if (latest.handlingMode !== "AI") {
+          await db.update(messages).set({
+            status: "SUPPRESSED",
+            metadata: { ...outbound.metadata, suppressedReason: "HUMAN_TAKEOVER" },
+          }).where(and(eq(messages.workspaceId, workspaceId), eq(messages.id, outbound.id)));
+          throw new AppError("AI_HANDLING_PAUSED", "AI reply suppressed because a human took over the conversation.", 409);
+        }
+      }
 
       try {
         const sent = await runtime.provider.sendText({ phoneNumberId: runtime.phoneNumberId, to, text });
