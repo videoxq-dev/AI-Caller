@@ -62,6 +62,30 @@ export function WebchatWidget({ widgetKey, config }: { widgetKey: string; config
     scrollerRef.current?.scrollTo({ top: scrollerRef.current.scrollHeight, behavior: "smooth" });
   }, [messages]);
 
+  useEffect(() => {
+    if (!sessionToken) return;
+    let cancelled = false;
+
+    const refresh = async () => {
+      if (sending) return;
+      const response = await fetch("/api/widget/history", {
+        headers: { authorization: `Bearer ${sessionToken}` },
+        cache: "no-store",
+      });
+      if (!response.ok) return;
+      const data = await response.json() as { history?: ChatMessage[] };
+      if (cancelled || !data.history?.length) return;
+      setMessages(data.history);
+    };
+
+    void refresh();
+    const timer = window.setInterval(() => void refresh(), 4_000);
+    return () => {
+      cancelled = true;
+      window.clearInterval(timer);
+    };
+  }, [sending, sessionToken]);
+
   function appendAssistantDelta(id: string, delta: string) {
     setMessages((current) => {
       const existing = current.find((message) => message.id === id);
