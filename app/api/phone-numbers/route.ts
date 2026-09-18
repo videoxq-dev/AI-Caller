@@ -28,6 +28,7 @@ export async function GET(request: Request) {
       locality: number.locality,
       numberType: number.numberType,
       status: number.status,
+      messagingReadiness: number.messagingReadiness,
       failureReason: number.failureReason,
     } : number;
     return Response.json({ number: visibleNumber, creditBalance, canManage }, { headers: { "cache-control": "no-store" } });
