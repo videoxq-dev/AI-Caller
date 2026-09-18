@@ -1,6 +1,6 @@
 import { z } from "zod";
 
-const businessTimeSchema = z.string().regex(/^(?:[01]\\d|2[0-3]):[0-5]\\d$/, "Time must use 24-hour HH:MM format.");
+const businessTimeSchema = z.string().regex(/^(?:[01]\d|2[0-3]):[0-5]\d$/, "Time must use 24-hour HH:MM format.");
 
 const businessTimezoneSchema = z.string().trim().min(1).max(120).refine((value) => {
   try {
