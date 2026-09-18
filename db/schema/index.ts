@@ -11,3 +11,5 @@ export * from "./voice";
 
 export * from "./collaboration";
 export * from "./automations";
+
+export * from "./telephony";
