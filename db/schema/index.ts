@@ -8,3 +8,4 @@ export * from "./sms";
 export * from "./voice";
 
 export * from "./collaboration";
+export * from "./automations";
