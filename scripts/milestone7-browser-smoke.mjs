@@ -420,7 +420,7 @@ try {
 
   await page.goto(`${baseUrl}/ai-agent`, { waitUntil: "networkidle" });
   await page.getByRole("button", { name: "Behavior" }).click();
-  await page.getByText("Lead qualification", { exact: true }).waitFor({ timeout: 10_000 });
+  await page.getByRole("heading", { name: "Lead qualification", exact: true }).waitFor({ timeout: 10_000 });
   await page.getByLabel("Phone voice").selectOption("marcus-us-1");
   await page.getByRole("button", { name: "Save changes", exact: true }).click();
   await page.getByRole("button", { name: "Saved", exact: true }).waitFor({ timeout: 10_000 });
