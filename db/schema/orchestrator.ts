@@ -15,25 +15,6 @@ import { contacts, conversations } from "./core-domain";
 import { workspaces } from "./core";
 import { capabilityType, integrationMode } from "./integrations";
 
-export const knowledgeSources = pgTable(
-  "knowledge_sources",
-  {
-    id: uuid("id").defaultRandom().primaryKey(),
-    workspaceId: uuid("workspace_id").notNull().references(() => workspaces.id, { onDelete: "cascade" }),
-    kind: text("kind").notNull(),
-    label: text("label").notNull(),
-    sourceUrl: text("source_url"),
-    content: text("content").notNull(),
-    contentHash: text("content_hash").notNull(),
-    createdAt: timestamp("created_at", { withTimezone: true, mode: "date" }).defaultNow().notNull(),
-    updatedAt: timestamp("updated_at", { withTimezone: true, mode: "date" }).defaultNow().notNull(),
-  },
-  (table) => [
-    index("knowledge_sources_workspace_created_idx").on(table.workspaceId, table.createdAt),
-    index("knowledge_sources_workspace_kind_idx").on(table.workspaceId, table.kind),
-  ],
-);
-
 export const webchatWidgets = pgTable(
   "webchat_widgets",
   {
