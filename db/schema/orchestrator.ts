@@ -96,5 +96,8 @@ export const usageEvents = pgTable(
     uniqueIndex("usage_events_sms_inbound_reference_uq")
       .on(table.workspaceId, table.referenceType, table.referenceId)
       .where(sql`${table.referenceType} = 'SMS_INBOUND' and ${table.referenceId} is not null`),
+    uniqueIndex("usage_events_phone_number_reference_uq")
+      .on(table.workspaceId, table.referenceType, table.referenceId)
+      .where(sql`${table.referenceType} in ('PHONE_NUMBER_PURCHASE', 'PHONE_NUMBER_RENEWAL') and ${table.referenceId} is not null`),
   ],
 );
