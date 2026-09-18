@@ -1,3 +1,9 @@
+import { and, eq } from "drizzle-orm";
+import { db } from "@/db";
+import { usageEvents } from "@/db/schema";
+import { analyzeSmsSegments } from "@/server/billing/sms-segments";
+import { loadHostedRateSnapshot, quoteHostedUsage } from "@/server/billing/pricing";
+import { chargeUnavoidableCredits } from "@/server/credits/service";
 import { appendMessage, getOrCreateContactByIdentity, getOrCreateOpenConversation } from "@/server/domain/core/repository";
 import { normalizePhone } from "@/server/domain/core/schemas";
 import { getEnv } from "@/server/env";
@@ -93,6 +99,54 @@ function queuedJobFromPayload(workspaceId: string, provider: SmsProviderName, ev
 
 function webhookUrl(provider: SmsProviderName, workspaceId: string) {
   return `${getEnv().BETTER_AUTH_URL.replace(/\/$/, "")}/api/webhooks/sms/${provider}/${workspaceId}`;
+}
+
+async function chargeHostedInboundSms(
+  workspaceId: string,
+  runtime: SmsRuntime,
+  externalMessageId: string,
+  text: string,
+) {
+  if (runtime.mode !== "HOSTED") return null;
+
+  const segmentUsage = analyzeSmsSegments(text);
+  const rates = await loadHostedRateSnapshot({
+    capability: "SMS",
+    provider: runtime.providerName,
+    model: "",
+    units: ["SMS_SEGMENT"],
+  });
+  const quote = quoteHostedUsage(rates, [{ unit: "SMS_SEGMENT", units: segmentUsage.segments }]);
+  if (quote.credits <= 0) throw new Error("Hosted inbound SMS charge must be positive.");
+
+  const referenceId = `${runtime.providerName}:${externalMessageId}`;
+  await chargeUnavoidableCredits(workspaceId, quote.credits, {
+    reason: "Hosted inbound SMS message",
+    referenceType: "SMS_INBOUND_MESSAGE",
+    referenceId,
+  });
+
+  await db.insert(usageEvents).values({
+    workspaceId,
+    capability: "SMS",
+    provider: runtime.providerName,
+    mode: "HOSTED",
+    providerUsage: {
+      messages: 1,
+      direction: "INBOUND",
+      encoding: segmentUsage.encoding,
+      segments: segmentUsage.segments,
+      units: segmentUsage.units,
+    },
+    creditsCharged: quote.credits,
+    providerCostMicros: quote.providerCostMicros,
+    billedUnits: quote.billedUnits,
+    pricingDetails: quote.pricingDetails,
+    referenceType: "SMS_INBOUND",
+    referenceId,
+  }).onConflictDoNothing();
+
+  return quote;
 }
 
 export function createSmsWebhookService(dependencies: SmsServiceDependencies) {
@@ -220,6 +274,7 @@ export function createSmsWebhookService(dependencies: SmsServiceDependencies) {
           status: "RECEIVED",
           metadata: { providerEventId: job.webhookEventId },
         });
+        await chargeHostedInboundSms(job.workspaceId, runtime, job.externalMessageId, job.text);
 
         const orchestrated = await dependencies.respond(job.workspaceId, conversation.id);
         if (!orchestrated.reply) {

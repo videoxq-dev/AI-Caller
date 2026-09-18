@@ -7,6 +7,7 @@ import type { PrivateIntegration } from "./connections";
 type Credentials = Record<string, string>;
 type Message = { role: "system" | "user" | "assistant"; content: string };
 type AIProviderId = "openai" | "gemini" | "openrouter";
+type GenerateInput = { messages: Message[]; model?: string; maxOutputTokens?: number };
 
 type OpenAIResponse = {
   output?: Array<{
@@ -42,6 +43,17 @@ export function normalizeAIModel(provider: AIProviderId, model: string | undefin
   return legacyModelAliases[provider][selected] ?? selected;
 }
 
+export function hostedAIModel() {
+  const env = getEnv();
+  if (env.HOSTED_AI_PROVIDER === "gemini") {
+    return normalizeAIModel("gemini", env.HOSTED_AI_MODEL, "gemini-3.8-flash");
+  }
+  if (env.HOSTED_AI_PROVIDER === "openrouter") {
+    return normalizeAIModel("openrouter", env.HOSTED_AI_MODEL, "openai/gpt-5.6-sol");
+  }
+  return normalizeAIModel("openai", env.HOSTED_AI_MODEL, "gpt-5.6-luna");
+}
+
 function decryptCredentials(input: PrivateIntegration) {
   if (!input.encryptedCredentials) throw new Error(`No saved credentials are available for ${input.provider}.`);
   return decryptIntegrationCredentials<Credentials>(input.encryptedCredentials as EncryptedSecretEnvelope);
@@ -65,14 +77,20 @@ class OpenAIResponsesProvider implements AIProvider {
     private readonly fetcher: typeof fetch = fetch,
   ) {}
 
-  async generate(input: { messages: Message[]; model?: string }) {
+  async generate(input: GenerateInput) {
     const model = input.model?.trim() || this.defaultModel;
     const instructions = input.messages.filter((message) => message.role === "system").map((message) => message.content).join("\n\n").trim();
     const messages = input.messages.filter((message) => message.role !== "system").map((message) => ({ role: message.role, content: message.content }));
     const response = await providerJson<OpenAIResponse>("https://api.openai.com/v1/responses", {
       method: "POST",
       headers: { authorization: `Bearer ${this.apiKey}`, "content-type": "application/json" },
-      body: JSON.stringify({ model, ...(instructions ? { instructions } : {}), input: messages, store: false }),
+      body: JSON.stringify({
+        model,
+        ...(instructions ? { instructions } : {}),
+        input: messages,
+        store: false,
+        ...(input.maxOutputTokens ? { max_output_tokens: input.maxOutputTokens } : {}),
+      }),
     }, this.fetcher);
 
     const text = (response.output ?? [])
@@ -96,7 +114,7 @@ class OpenAICompatibleProvider implements AIProvider {
     private readonly fetcher: typeof fetch = fetch,
   ) {}
 
-  async generate(input: { messages: Message[]; model?: string }) {
+  async generate(input: GenerateInput) {
     const model = input.model?.trim() || this.defaultModel;
     const response = await providerJson<OpenAICompatibleResponse>(this.endpoint, {
       method: "POST",
@@ -105,7 +123,11 @@ class OpenAICompatibleProvider implements AIProvider {
         "content-type": "application/json",
         ...this.extraHeaders,
       },
-      body: JSON.stringify({ model, messages: input.messages }),
+      body: JSON.stringify({
+        model,
+        messages: input.messages,
+        ...(input.maxOutputTokens ? { max_tokens: input.maxOutputTokens } : {}),
+      }),
     }, this.fetcher);
 
     const text = response.choices?.[0]?.message?.content?.trim();
@@ -121,7 +143,7 @@ class GeminiProvider implements AIProvider {
     private readonly fetcher: typeof fetch = fetch,
   ) {}
 
-  async generate(input: { messages: Message[]; model?: string }) {
+  async generate(input: GenerateInput) {
     const model = input.model?.trim() || this.defaultModel;
     const systemText = input.messages.filter((message) => message.role === "system").map((message) => message.content).join("\n\n").trim();
     const contents = input.messages
@@ -136,6 +158,7 @@ class GeminiProvider implements AIProvider {
         body: JSON.stringify({
           ...(systemText ? { systemInstruction: { parts: [{ text: systemText }] } } : {}),
           contents,
+          ...(input.maxOutputTokens ? { generationConfig: { maxOutputTokens: input.maxOutputTokens } } : {}),
         }),
       },
       this.fetcher,
@@ -179,28 +202,21 @@ export function createAIProvider(input: PrivateIntegration, fetcher: typeof fetc
 export function createHostedAIProvider(fetcher: typeof fetch = fetch): AIProvider {
   const env = getEnv();
   if (!env.HOSTED_AI_API_KEY) throw new Error("Hosted AI is not configured on the server.");
+  const model = hostedAIModel();
 
   if (env.HOSTED_AI_PROVIDER === "gemini") {
-    return new GeminiProvider(
-      env.HOSTED_AI_API_KEY,
-      normalizeAIModel("gemini", env.HOSTED_AI_MODEL, "gemini-3.8-flash"),
-      fetcher,
-    );
+    return new GeminiProvider(env.HOSTED_AI_API_KEY, model, fetcher);
   }
 
   if (env.HOSTED_AI_PROVIDER === "openrouter") {
     return new OpenAICompatibleProvider(
       env.HOSTED_AI_API_KEY,
-      normalizeAIModel("openrouter", env.HOSTED_AI_MODEL, "openai/gpt-5.6-sol"),
+      model,
       "https://openrouter.ai/api/v1/chat/completions",
       { "X-Title": "AI Caller Hosted" },
       fetcher,
     );
   }
 
-  return new OpenAIResponsesProvider(
-    env.HOSTED_AI_API_KEY,
-    normalizeAIModel("openai", env.HOSTED_AI_MODEL, "gpt-5.6-luna"),
-    fetcher,
-  );
+  return new OpenAIResponsesProvider(env.HOSTED_AI_API_KEY, model, fetcher);
 }

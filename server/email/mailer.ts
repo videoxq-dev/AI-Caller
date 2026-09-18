@@ -71,3 +71,20 @@ export async function sendTeamInvitationEmail(input: { to: string; inviterName: 
     html: `<p><strong>${safeInviter}</strong> invited you to join <strong>${safeWorkspace}</strong> on AI Caller.</p><p><a href="${safeUrl}">Accept invitation</a></p><p>This invitation expires in 7 days.</p>`,
   });
 }
+
+
+export async function sendAdminUserWelcomeEmail(input: { to: string; name: string; temporaryPassword: string; signInUrl: string }) {
+  if (isGuardedE2EFixtureMode()) return;
+  const safeName = escapeHtml(input.name);
+  const safeEmail = escapeHtml(input.to);
+  const safePassword = escapeHtml(input.temporaryPassword);
+  const safeUrl = escapeHtml(input.signInUrl);
+
+  await getTransporter().sendMail({
+    from: fromAddress(),
+    to: input.to,
+    subject: "Your AI Caller account is ready",
+    text: `Hi ${input.name},\n\nAn AI Caller platform administrator created an account for you.\n\nLogin: ${input.to}\nTemporary password: ${input.temporaryPassword}\nSign in: ${input.signInUrl}\n\nFor security, use Forgot password after your first login to choose a private password.`,
+    html: `<p>Hi ${safeName},</p><p>An AI Caller platform administrator created an account for you.</p><p><strong>Login:</strong> ${safeEmail}<br/><strong>Temporary password:</strong> ${safePassword}</p><p><a href="${safeUrl}">Sign in to AI Caller</a></p><p>For security, use <strong>Forgot password</strong> after your first login to choose a private password.</p>`,
+  });
+}

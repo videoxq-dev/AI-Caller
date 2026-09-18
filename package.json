@@ -21,7 +21,8 @@
     "voice-gateway:dev": "tsx watch voice/gateway.ts",
     "test:browser:m7": "node scripts/milestone7-browser-smoke.mjs",
     "test:browser:m8": "node scripts/milestone8-browser-smoke.mjs",
-    "test:browser:m9": "node scripts/milestone9-browser-smoke.mjs"
+    "test:browser:m9": "node scripts/milestone9-browser-smoke.mjs",
+    "test:browser:m10": "node scripts/milestone10-browser-smoke.mjs"
   },
   "dependencies": {
     "better-auth": "^1.7.5",
@@ -36,7 +37,8 @@
     "react-dom": "^19.0.0",
     "zod": "^4.6.5",
     "@aws-sdk/client-s3": "^3.1134.0",
-    "ws": "^8.18.3"
+    "ws": "^8.18.3",
+    "stripe": "^22.4.0"
   },
   "devDependencies": {
     "@types/node": "^22.0.0",

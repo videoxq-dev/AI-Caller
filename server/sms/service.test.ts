@@ -1,6 +1,6 @@
 import { afterAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { closeDatabase, db } from "@/db";
-import { contactIdentities, creditWallets, messages, providerWebhookEvents, usageEvents, workspaces } from "@/db/schema";
+import { contactIdentities, creditWallets, hostedApiRateCards, messages, providerWebhookEvents, usageEvents, workspaces } from "@/db/schema";
 import type { SmsInboundResponseJob } from "@/server/jobs/queues";
 import type { NormalizedSmsEvent, SMSProvider } from "@/server/providers/contracts";
 import { ProviderRequestError } from "@/server/providers/http";
@@ -67,6 +67,17 @@ describe("SMS webhook service", () => {
     await db.delete(workspaces);
     const [workspace] = await db.insert(workspaces).values({ name: "SMS Service Test" }).returning();
     workspaceId = workspace.id;
+    await db.insert(hostedApiRateCards).values({
+      capability: "SMS",
+      provider: "twilio",
+      model: "",
+      unit: "SMS_SEGMENT",
+      costMicros: 450,
+      unitsPerCost: 1,
+      targetMarginBps: 5500,
+      effectiveFrom: new Date("2026-01-01T00:00:00Z"),
+      metadata: { fixture: "sms-service-test" },
+    }).onConflictDoNothing();
   });
 
   afterAll(async () => {
@@ -174,10 +185,11 @@ describe("SMS webhook service", () => {
     await service.ingest(request(), workspaceId, "twilio");
     await service.processInboundJob(jobs[0]);
     const [wallet] = await db.select().from(creditWallets);
-    expect(wallet.balance).toBe(4);
+    expect(wallet.balance).toBe(3);
     const usage = await db.select().from(usageEvents);
-    expect(usage).toHaveLength(1);
-    expect(usage[0]).toMatchObject({ capability: "SMS", mode: "HOSTED", creditsCharged: 1, provider: "twilio" });
+    expect(usage).toHaveLength(2);
+    expect(usage.every((entry) => entry.capability === "SMS" && entry.mode === "HOSTED" && entry.creditsCharged === 1 && entry.provider === "twilio")).toBe(true);
+    expect(usage.map((entry) => entry.referenceType).sort()).toEqual(["MESSAGE", "SMS_INBOUND"]);
   });
 
   it("refunds hosted credits on definitive rejection but not on an uncertain provider outcome", async () => {
@@ -194,7 +206,7 @@ describe("SMS webhook service", () => {
 
     await service.ingest(request(), workspaceId, "twilio");
     await expect(service.processInboundJob(jobs.shift()!)).rejects.toThrow("Rejected");
-    expect((await db.select().from(creditWallets))[0].balance).toBe(5);
+    expect((await db.select().from(creditWallets))[0].balance).toBe(4);
     expect((await db.select().from(messages)).find((message) => message.direction === "OUTBOUND")?.status).toBe("FAILED");
     expect((await db.select().from(providerWebhookEvents))[0].status).toBe("FAILED");
 
@@ -202,7 +214,7 @@ describe("SMS webhook service", () => {
     send.mockImplementation(async () => { throw new ProviderRequestError("Timeout", 504); });
     await service.ingest(request(), workspaceId, "twilio");
     await expect(service.processInboundJob(jobs.shift()!)).rejects.toThrow("Timeout");
-    expect((await db.select().from(creditWallets))[0].balance).toBe(4);
+    expect((await db.select().from(creditWallets))[0].balance).toBe(2);
     const outbound = (await db.select().from(messages)).filter((message) => message.direction === "OUTBOUND");
     expect(outbound.at(-1)?.status).toBe("SEND_UNKNOWN");
     const usage = await db.select().from(usageEvents);

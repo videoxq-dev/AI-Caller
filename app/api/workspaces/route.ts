@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { auth } from "@/server/auth";
+import { assertPlatformUserActive } from "@/server/admin/auth";
 import { resolveWorkspaceContext } from "@/server/auth/workspace-context";
 import { activeWorkspaceCookie } from "@/server/auth/active-workspace";
 import { getMembership, listMembershipsForUser } from "@/server/auth/workspace-repository";
@@ -23,6 +24,7 @@ export async function POST(request: Request) {
   try {
     const session = await auth.api.getSession({ headers: request.headers });
     if (!session) throw new AppError("UNAUTHORIZED", "You must be signed in.", 401);
+    await assertPlatformUserActive(session.user.id);
     const input = parseInput(inputSchema, await request.json());
     const membership = await getMembership(session.user.id, input.workspaceId);
     if (!membership) throw new AppError("WORKSPACE_NOT_FOUND", "You are not a member of that workspace.", 404);

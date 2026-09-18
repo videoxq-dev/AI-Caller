@@ -32,7 +32,8 @@ jobs:
       HOSTED_SMS_PROVIDER: twilio
       HOSTED_SMS_TWILIO_ACCOUNT_SID: AC11111111111111111111111111111111
       HOSTED_SMS_TWILIO_AUTH_TOKEN: ci-twilio-signature-secret
-      HOSTED_SMS_CREDITS_PER_MESSAGE: "1"
+      STRIPE_RESTRICTED_API_KEY: rk_test_ci_milestone10
+      STRIPE_WEBHOOK_SECRET: whsec_ci_milestone10_signature_secret
       META_APP_SECRET: ci-meta-app-secret
       META_WEBHOOK_VERIFY_TOKEN: ci-meta-verify-token
       VOICE_GATEWAY_URL: ws://127.0.0.1:3002
@@ -139,6 +140,9 @@ jobs:
       - name: Milestone 9 live dashboard browser acceptance verification
         run: npm run test:browser:m9
 
+      - name: Milestone 10 billing and admin browser acceptance verification
+        run: npm run test:browser:m10
+
       - name: Upload Milestone 3 browser screenshots
         if: always()
         uses: actions/upload-artifact@v4
@@ -199,6 +203,15 @@ jobs:
         with:
           name: milestone9-browser-verification
           path: artifacts/milestone9-browser
+          if-no-files-found: warn
+          retention-days: 14
+
+      - name: Upload Milestone 10 browser screenshots
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: milestone10-browser-verification
+          path: artifacts/milestone10-browser
           if-no-files-found: warn
           retention-days: 14
 

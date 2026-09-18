@@ -1,5 +1,6 @@
 import { sql } from "drizzle-orm";
 import {
+  bigint,
   boolean,
   index,
   integer,
@@ -79,6 +80,9 @@ export const usageEvents = pgTable(
     mode: integrationMode("mode").notNull(),
     providerUsage: jsonb("provider_usage").$type<Record<string, unknown>>().default({}).notNull(),
     creditsCharged: integer("credits_charged").default(0).notNull(),
+    providerCostMicros: bigint("provider_cost_micros", { mode: "number" }).default(0).notNull(),
+    billedUnits: jsonb("billed_units").$type<Record<string, number>>().default({}).notNull(),
+    pricingDetails: jsonb("pricing_details").$type<Record<string, unknown>>().default({}).notNull(),
     referenceType: text("reference_type"),
     referenceId: text("reference_id"),
     createdAt: timestamp("created_at", { withTimezone: true, mode: "date" }).defaultNow().notNull(),
@@ -89,5 +93,8 @@ export const usageEvents = pgTable(
     uniqueIndex("usage_events_voice_call_reference_uq")
       .on(table.workspaceId, table.referenceType, table.referenceId)
       .where(sql`${table.referenceType} = 'VOICE_CALL' and ${table.referenceId} is not null`),
+    uniqueIndex("usage_events_sms_inbound_reference_uq")
+      .on(table.workspaceId, table.referenceType, table.referenceId)
+      .where(sql`${table.referenceType} = 'SMS_INBOUND' and ${table.referenceId} is not null`),
   ],
 );

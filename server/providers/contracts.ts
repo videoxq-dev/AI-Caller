@@ -16,7 +16,11 @@ export type ProviderRoute = {
 };
 
 export interface AIProvider {
-  generate(input: { messages: Array<{ role: "system" | "user" | "assistant"; content: string }>; model?: string }): Promise<{ text: string; raw?: unknown }>;
+  generate(input: {
+    messages: Array<{ role: "system" | "user" | "assistant"; content: string }>;
+    model?: string;
+    maxOutputTokens?: number;
+  }): Promise<{ text: string; raw?: unknown }>;
 }
 
 export interface CalendarProvider {
