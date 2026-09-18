@@ -16,7 +16,7 @@ import {
 } from "@/server/security/secrets";
 import { assertProviderSupportsCapability } from "@/server/providers/catalog";
 import { testProviderConnection } from "@/server/providers/connections";
-import { parseTelnyxWebhookPublicKey } from "@/server/providers/sms/telnyx";
+import { parseTelnyxWebhookPublicKey } from "@/server/providers/telnyx-webhook";
 import type { CalendarSetupInput, CommunicationSetupInput, IntegrationSaveInput } from "./schemas";
 
 const categoryByProvider: Record<string, "AI" | "COMMUNICATION" | "WHATSAPP" | "CALENDAR"> = {
