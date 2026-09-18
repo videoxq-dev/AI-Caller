@@ -105,6 +105,14 @@ export function PhoneNumberManager({
       .finally(() => setLoaded(true));
   }, []);
 
+  useEffect(() => {
+    if (current?.status !== "PROVISIONING" && current?.status !== "RECONCILING") return;
+    const timer = window.setInterval(() => {
+      void loadCurrent().catch(() => undefined);
+    }, 3_000);
+    return () => window.clearInterval(timer);
+  }, [current?.status]);
+
   const insufficient = useMemo(() => Boolean(selected && selected.purchaseCredits > creditBalance), [selected, creditBalance]);
 
   async function search() {
