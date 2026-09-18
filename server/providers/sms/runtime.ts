@@ -19,6 +19,7 @@ export type SmsRuntime = {
   integrationId: string | null;
   senderNumber: string;
   serviceStatus: "ACTIVE" | "PAST_DUE" | "SUSPENDED" | null;
+  messagingReadiness: "NOT_REGISTERED" | "PENDING" | "READY" | "REJECTED" | null;
   provider: SMSProvider;
 };
 
@@ -72,6 +73,7 @@ async function hostedNumber(workspaceId: string, allowSuspended: boolean) {
   return {
     senderNumber: normalizePhone(number.phoneNumber),
     serviceStatus: number.status as "ACTIVE" | "PAST_DUE" | "SUSPENDED",
+    messagingReadiness: number.messagingReadiness as "NOT_REGISTERED" | "PENDING" | "READY" | "REJECTED",
   };
 }
 
@@ -104,6 +106,7 @@ async function resolveSmsRuntimeInternal(
       integrationId: null,
       senderNumber: number.senderNumber,
       serviceStatus: number.serviceStatus,
+      messagingReadiness: number.messagingReadiness,
       provider: createProvider(providerName, config.secret, config.settings, fetcher),
     };
   }
@@ -131,6 +134,7 @@ async function resolveSmsRuntimeInternal(
     integrationId: route.integrationId,
     senderNumber,
     serviceStatus: null,
+    messagingReadiness: null,
     provider: createProvider(requestedProvider, secret, settings, fetcher),
   };
 }
