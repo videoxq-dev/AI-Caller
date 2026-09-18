@@ -1,8 +1,8 @@
 "use client";
 
 import Link from "next/link";
-import { useRouter, useSearchParams } from "next/navigation";
-import { useState, type FormEvent } from "react";
+import { useRouter } from "next/navigation";
+import { useEffect, useState, type FormEvent } from "react";
 import { AuthShell } from "@/components/auth-shell";
 import { ArrowRightIcon } from "@/components/icons";
 import { PasswordField } from "@/components/password-field";
@@ -11,8 +11,10 @@ import { safeReturnPath } from "@/lib/safe-return-path";
 
 export default function SignInPage() {
   const router = useRouter();
-  const searchParams = useSearchParams();
-  const returnTo = safeReturnPath(searchParams.get("returnTo"), "/dashboard");
+  const [returnTo, setReturnTo] = useState("/dashboard");
+  useEffect(() => {
+    setReturnTo(safeReturnPath(new URLSearchParams(window.location.search).get("returnTo"), "/dashboard"));
+  }, []);
   const [pending, setPending] = useState(false);
   const [error, setError] = useState("");
 
