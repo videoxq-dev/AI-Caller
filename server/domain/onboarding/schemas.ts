@@ -1,10 +1,25 @@
 import { z } from "zod";
 
+const businessTimeSchema = z.string().regex(/^(?:[01]\\d|2[0-3]):[0-5]\\d$/, "Time must use 24-hour HH:MM format.");
+
+const businessTimezoneSchema = z.string().trim().min(1).max(120).refine((value) => {
+  try {
+    new Intl.DateTimeFormat("en", { timeZone: value }).format();
+    return true;
+  } catch {
+    return false;
+  }
+}, "Timezone must be a valid IANA timezone.");
+
 export const businessHourSchema = z.object({
   dayOfWeek: z.number().int().min(0).max(6),
   enabled: z.boolean(),
-  openTime: z.string().max(16).nullable().optional(),
-  closeTime: z.string().max(16).nullable().optional(),
+  openTime: businessTimeSchema.nullable().optional(),
+  closeTime: businessTimeSchema.nullable().optional(),
+}).superRefine((value, ctx) => {
+  if (!value.enabled) return;
+  if (!value.openTime) ctx.addIssue({ code: "custom", path: ["openTime"], message: "Opening time is required for an enabled day." });
+  if (!value.closeTime) ctx.addIssue({ code: "custom", path: ["closeTime"], message: "Closing time is required for an enabled day." });
 });
 
 export const businessProfileInputSchema = z.object({
@@ -18,7 +33,7 @@ export const businessProfileInputSchema = z.object({
   postalCode: z.string().trim().max(32).nullable().optional(),
   country: z.string().trim().max(120).nullable().optional(),
   serviceRadius: z.string().trim().max(120).nullable().optional(),
-  timezone: z.string().trim().min(1).max(120),
+  timezone: businessTimezoneSchema,
   summary: z.string().trim().max(4000).nullable().optional(),
   hours: z.array(businessHourSchema).length(7).optional(),
   completeStep: z.boolean().default(false),
