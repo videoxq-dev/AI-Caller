@@ -1,6 +1,6 @@
 import { and, desc, eq, isNull, or } from "drizzle-orm";
 import { db } from "@/db";
-import { conversationHandlingEvents, conversations, memberships, notifications } from "@/db/schema";
+import { automationEvents, conversationHandlingEvents, conversations, memberships, notifications } from "@/db/schema";
 import { AppError } from "@/server/http/errors";
 
 async function conversationInWorkspace(
@@ -75,6 +75,50 @@ export async function takeOverConversation(input: {
         metadata: { assignedByUserId: input.actorUserId },
       });
     }
+    return conversation;
+  });
+}
+
+export async function escalateConversation(input: {
+  workspaceId: string;
+  conversationId: string;
+  reason?: string | null;
+}) {
+  return db.transaction(async (tx) => {
+    const current = await conversationInWorkspace(tx, input.workspaceId, input.conversationId);
+    const now = new Date();
+    const [conversation] = await tx.update(conversations).set({
+      handlingMode: "HUMAN",
+      assignedUserId: null,
+      aiPausedAt: current.aiPausedAt ?? now,
+      updatedAt: now,
+    }).where(and(
+      eq(conversations.workspaceId, input.workspaceId),
+      eq(conversations.id, input.conversationId),
+    )).returning();
+
+    const [handlingEvent] = await tx.insert(conversationHandlingEvents).values({
+      workspaceId: input.workspaceId,
+      conversationId: input.conversationId,
+      type: "ESCALATED",
+      actorUserId: null,
+      assignedUserId: null,
+      reason: input.reason?.trim() || null,
+    }).returning({ id: conversationHandlingEvents.id });
+
+    await tx.insert(automationEvents).values({
+      workspaceId: input.workspaceId,
+      type: "CONVERSATION_ESCALATED",
+      aggregateType: "HANDLING_EVENT",
+      aggregateId: handlingEvent.id,
+      payload: {
+        conversationId: input.conversationId,
+        contactId: current.contactId,
+        reason: input.reason?.trim() || null,
+      },
+      occurredAt: now,
+    }).onConflictDoNothing();
+
     return conversation;
   });
 }
