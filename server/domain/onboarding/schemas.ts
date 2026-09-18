@@ -34,6 +34,7 @@ export const voiceConfigSchema = z.object({
   language: "en-US",
   speakingRate: 1,
   recordingPolicy: "ANNOUNCE",
+  afterHoursEnabled: true,
 });
 
 export const qualificationCriterionSchema = z.object({
@@ -57,6 +58,8 @@ export const aiAgentInputSchema = z.object({
   openingMessage: z.string().trim().max(2000).nullable().optional(),
   escalationMessage: z.string().trim().max(2000).nullable().optional(),
   guardrails: z.array(z.string().trim().min(1).max(500)).max(30).default([]),
+  voice: voiceConfigSchema,
+  qualification: qualificationConfigSchema,
   completeStep: z.boolean().default(false),
 });
 
