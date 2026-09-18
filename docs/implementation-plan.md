@@ -1378,28 +1378,38 @@ Acceptance:
 
 - WhatsApp conversation appears in the same timeline and can transition between AI and human handling.
 
-### Milestone 7 — Inbound voice
+### Milestone 7 — Inbound voice + configurable qualification
 
 Branch: `feat/inbound-voice`
 
 Deliver:
 
-- voice gateway process;
-- first telephony media-stream integration;
-- transcript persistence;
-- orchestrator tool calls from voice session;
+- dedicated authenticated voice gateway process;
+- Telnyx as the first inbound Call Control/media-stream adapter behind the provider boundary;
+- recording-first call artifacts archived to private application-controlled storage;
+- synchronized speaker/timestamp transcript persistence as a derived/searchable call view;
+- recording/transcription disclosure policy with an explicit-consent option and auditable consent state;
+- stable product voice profiles mapped to provider voice IDs, selectable by the workspace;
+- shared orchestrator knowledge, lead, availability, booking, and escalation calls from voice sessions;
+- configurable cross-channel lead qualification criteria with server-authoritative completion/qualification decisions;
 - AI First mode;
-- After Hours mode;
-- Overflow mode only after AI First is stable;
-- Telnyx/Plivo/Twilio adapter compatibility where practical;
-- phone test flow;
-- voice usage accounting.
+- deterministic After Hours mode from the workspace timezone and business hours;
+- Overflow deferred until AI First is fully stable and independently verifiable;
+- authenticated recording playback and expandable transcript in the unified Inbox;
+- voice usage accounting;
+- Telnyx/Plivo/Twilio remain behind the provider capability boundary, but M7 only claims the implemented Telnyx inbound adapter.
 
 Acceptance:
 
-- inbound caller can ask a question, receive a grounded answer, book an appointment, and see the transcript in the unified conversation.
+- an inbound caller reaches the AI assistant through a signed Telnyx webhook flow;
+- recording does not begin before the configured disclosure/consent policy is satisfied;
+- the caller can provide qualification evidence, ask a grounded business question, check availability, and book an appointment through the shared orchestrator;
+- the lead is only marked qualified when configured required criteria are complete;
+- the unified Inbox shows the archived playable recording as the primary call artifact with an expandable synchronized transcript;
+- voice usage is recorded and After Hours routing is verified;
+- existing web chat, SMS, WhatsApp, booking, and Inbox regression gates continue to pass.
 
-There must still be no outbound AI calling feature.
+There must still be no outbound AI calling feature, outbound call campaign, outbound call retry scheduler, or application tool capable of originating an AI call.
 
 ### Milestone 8 — Human takeover + predefined automations
 
