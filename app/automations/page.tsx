@@ -425,7 +425,7 @@ function AutomationSettingsForm({
             <option value={5}>5 minutes</option><option value={15}>15 minutes</option><option value={30}>30 minutes</option><option value={60}>1 hour</option>
           </select>
         </Field>
-        <CustomerChannels config={config} disabled={disabled} update={update} allowWhatsAppText />
+        <CustomerChannels config={config} disabled={disabled} update={update} />
       </SettingsSection>
       <MessageEditor config={config} disabled={disabled} update={update} fallback="Hi {{name}}, we noticed we missed your message. Reply here and we’ll help you as soon as possible." />
     </>;
@@ -506,7 +506,6 @@ function CustomerChannels({
   config: Record<string, unknown>;
   disabled: boolean;
   update: (key: string, value: unknown) => void;
-  allowWhatsAppText?: boolean;
   requireWhatsAppTemplate?: boolean;
 }) {
   const channels = configChannels(config);
