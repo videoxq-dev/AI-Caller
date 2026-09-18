@@ -236,7 +236,12 @@ export async function provisionManagedPhoneNumber(workspaceId: string, input: {
   replaceCurrent?: boolean;
 }) {
   const current = await privateManagedPhoneNumber(workspaceId);
-  if (current?.phoneNumber === input.phoneNumber && current.status !== "FAILED") return publicNumber(current);
+  if (current?.phoneNumber === input.phoneNumber) {
+    if (current.status === "PROVISIONING") {
+      throw new AppError("PHONE_NUMBER_PROVISIONING_IN_PROGRESS", "This phone number is still being activated. Refresh in a moment.", 409);
+    }
+    return publicNumber(current);
+  }
   if (current && !input.replaceCurrent) {
     throw new AppError("PHONE_NUMBER_ALREADY_ASSIGNED", "This workspace already has a managed phone number.", 409);
   }
