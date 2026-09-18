@@ -120,7 +120,7 @@ export function createResponseOrchestrator(dependencies: OrchestratorDependencie
         first,
       );
 
-      if (toolResult.kind === "availability" || toolResult.kind === "booking") {
+      if (toolResult.kind === "availability" || toolResult.kind === "booking" || toolResult.kind === "qualification") {
         try {
           const finalResponse = await dependencies.generate(
             workspaceId,
