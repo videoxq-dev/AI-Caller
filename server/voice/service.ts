@@ -1,4 +1,6 @@
 import { createHash } from "node:crypto";
+import { lookup } from "node:dns/promises";
+import { isIP } from "node:net";
 import { and, eq } from "drizzle-orm";
 import { db } from "@/db";
 import { usageEvents } from "@/db/schema";
@@ -14,6 +16,7 @@ import { AppError } from "@/server/http/errors";
 import { logger } from "@/server/observability/logger";
 import { responseOrchestrator } from "@/server/orchestrator";
 import type { NormalizedVoiceEvent, VoiceWebhookInput } from "@/server/providers/contracts";
+import { isE2EProviderFixtureMode } from "@/server/providers/e2e-fixtures";
 import { resolveVoiceRuntime, type VoiceProviderName, type VoiceRuntime } from "@/server/providers/voice/runtime";
 import {
   claimProviderWebhookEvent,
@@ -140,25 +143,71 @@ function openingText(value: string | null) {
   return value?.trim() || "How can I help you today?";
 }
 
-function isAllowedRecordingUrl(value: string) {
-  const url = new URL(value);
-  if (getEnv().NODE_ENV !== "production") return url.protocol === "https:" || url.protocol === "http:";
-  return url.protocol === "https:";
+function isPrivateIp(address: string) {
+  const version = isIP(address);
+  if (version === 4) {
+    const [a, b] = address.split(".").map(Number);
+    return a === 0
+      || a === 10
+      || a === 127
+      || (a === 100 && b >= 64 && b <= 127)
+      || (a === 169 && b === 254)
+      || (a === 172 && b >= 16 && b <= 31)
+      || (a === 192 && b === 168)
+      || (a === 198 && (b === 18 || b === 19))
+      || a >= 224;
+  }
+  if (version === 6) {
+    const value = address.toLowerCase();
+    if (value === "::" || value === "::1") return true;
+    if (value.startsWith("fc") || value.startsWith("fd")) return true;
+    if (/^fe[89ab]/.test(value)) return true;
+    if (value.startsWith("::ffff:")) return isPrivateIp(value.slice("::ffff:".length));
+  }
+  return false;
 }
 
-async function recordingBytes(url: string, fetcher: typeof fetch) {
-  if (!isAllowedRecordingUrl(url)) throw new Error("The provider recording URL is not allowed.");
-  const response = await fetcher(url, { redirect: "follow" });
+async function assertSafeRecordingUrl(value: string) {
+  const url = new URL(value);
+  if (url.username || url.password) throw new Error("Provider recording URL credentials are not allowed.");
+  const fixtureLocalhost = isE2EProviderFixtureMode() && (url.hostname === "127.0.0.1" || url.hostname === "localhost");
+  if (fixtureLocalhost && url.protocol === "http:") return url;
+  if (url.protocol !== "https:") throw new Error("Provider recording URL must use HTTPS.");
+
+  const resolved = await lookup(url.hostname, { all: true, verbatim: true });
+  if (!resolved.length || resolved.some(({ address }) => isPrivateIp(address))) {
+    throw new Error("Provider recording URL resolves to a private or unsafe network address.");
+  }
+  return url;
+}
+
+async function recordingBytes(initialUrl: string, fetcher: typeof fetch) {
+  let current = await assertSafeRecordingUrl(initialUrl);
+  let response: Response | null = null;
+  for (let redirect = 0; redirect <= 3; redirect += 1) {
+    response = await fetcher(current, { redirect: "manual" });
+    if (response.status < 300 || response.status >= 400) break;
+    const location = response.headers.get("location");
+    if (!location) throw new Error("Provider recording redirect is missing a destination.");
+    current = await assertSafeRecordingUrl(new URL(location, current).toString());
+  }
+  if (!response || response.status >= 300 && response.status < 400) {
+    throw new Error("Provider recording exceeded the redirect limit.");
+  }
   if (!response.ok) throw new Error(`Unable to download call recording (${response.status}).`);
   const declared = Number(response.headers.get("content-length"));
   if (Number.isFinite(declared) && declared > MAX_RECORDING_BYTES) {
     throw new Error("Call recording exceeds the maximum archive size.");
   }
+  const contentType = response.headers.get("content-type")?.split(";")[0]?.trim().toLowerCase() || "";
+  if (!["audio/mpeg", "audio/mp3", "audio/wav", "audio/x-wav"].includes(contentType)) {
+    throw new Error("Provider recording returned an unsupported content type.");
+  }
   const buffer = new Uint8Array(await response.arrayBuffer());
   if (buffer.byteLength > MAX_RECORDING_BYTES) throw new Error("Call recording exceeds the maximum archive size.");
   return {
     bytes: buffer,
-    contentType: response.headers.get("content-type")?.split(";")[0]?.trim() || "audio/mpeg",
+    contentType: contentType === "audio/mp3" ? "audio/mpeg" : contentType === "audio/x-wav" ? "audio/wav" : contentType,
   };
 }
 
