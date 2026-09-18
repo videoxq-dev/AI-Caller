@@ -122,6 +122,87 @@ describe("automation executor safety", () => {
     expect(notices.every((notice) => notice.readAt === null)).toBe(true);
   });
 
+  it("preserves an existing lead assignment when no fixed assignee is configured", async () => {
+    const [contact] = await db.insert(contacts).values({ workspaceId, name: "Already Assigned" }).returning();
+    const [lead] = await db.insert(leads).values({
+      workspaceId,
+      contactId: contact.id,
+      status: "QUALIFIED",
+      qualificationScore: 100,
+      qualificationCompletedAt: new Date(),
+      assignedUserId: staffId,
+    }).returning();
+    await db.insert(automationSettings).values({
+      workspaceId,
+      key: "QUALIFIED_LEAD_ASSIGNMENT",
+      enabled: true,
+      config: { assignedUserId: null, notifyInApp: false },
+    });
+    const [event] = await db.insert(automationEvents).values({
+      workspaceId,
+      type: "LEAD_QUALIFIED",
+      aggregateType: "LEAD",
+      aggregateId: lead.id,
+      payload: { leadId: lead.id, contactId: contact.id, qualificationScore: 100 },
+    }).returning();
+    const run = await createAutomationRun({ workspaceId, eventId: event.id, key: "QUALIFIED_LEAD_ASSIGNMENT" });
+
+    await expect(executeAutomationRun(workspaceId, run.id)).resolves.toMatchObject({ status: "SKIPPED" });
+    const [storedLead] = await db.select().from(leads);
+    expect(storedLead.assignedUserId).toBe(staffId);
+  });
+
+  it("marks a multi-channel run failed when any requested delivery failed", async () => {
+    const [contact] = await db.insert(contacts).values({ workspaceId, name: "Partial Delivery" }).returning();
+    const occurredAt = new Date(Date.now() - 10 * 60_000);
+    const [conversation] = await db.insert(conversations).values({
+      workspaceId,
+      contactId: contact.id,
+      handlingMode: "AI",
+      lastMessageAt: occurredAt,
+    }).returning();
+    const [message] = await db.insert(messages).values({
+      workspaceId,
+      conversationId: conversation.id,
+      channel: "SMS",
+      direction: "INBOUND",
+      senderType: "CUSTOMER",
+      contentType: "TEXT",
+      body: "Please follow up",
+      provider: "test",
+      externalMessageId: "partial-delivery-inbound",
+      status: "RECEIVED",
+      createdAt: occurredAt,
+    }).returning();
+    await db.insert(automationSettings).values({
+      workspaceId,
+      key: "MISSED_INQUIRY_RECOVERY",
+      enabled: true,
+      config: { delayMinutes: 5, channels: ["SMS", "WHATSAPP"], message: "Follow up" },
+    });
+    const [event] = await db.insert(automationEvents).values({
+      workspaceId,
+      type: "INQUIRY_RECEIVED",
+      aggregateType: "MESSAGE",
+      aggregateId: message.id,
+      payload: { messageId: message.id, conversationId: conversation.id, contactId: contact.id, channel: "SMS" },
+      occurredAt,
+    }).returning();
+    const run = await createAutomationRun({ workspaceId, eventId: event.id, key: "MISSED_INQUIRY_RECOVERY" });
+    await db.insert(automationDeliveries).values([
+      { workspaceId, runId: run.id, channel: "SMS", recipient: conversation.id, status: "SENT" },
+      { workspaceId, runId: run.id, channel: "WHATSAPP", recipient: conversation.id, status: "FAILED" },
+    ]);
+
+    await expect(executeAutomationRun(workspaceId, run.id)).resolves.toMatchObject({ status: "FAILED" });
+    const [storedRun] = await db.select().from(automationRuns);
+    expect(storedRun).toMatchObject({
+      status: "FAILED",
+      errorCode: "AUTOMATION_DELIVERY_FAILED",
+      metadata: { deliverySummary: { sent: 1, skipped: 0, failed: 1 } },
+    });
+  });
+
   it("skips missed-inquiry recovery while a human owns the conversation", async () => {
     const [contact] = await db.insert(contacts).values({ workspaceId, name: "Human Contact", phone: "+12025550999" }).returning();
     await db.insert(contactIdentities).values({
