@@ -356,7 +356,7 @@ export function createVoiceWebhookService(dependencies: VoiceServiceDependencies
       if (phase(call.metadata) !== "AWAITING_RECORDING_CONSENT") return;
       const voice = await getVoiceConfig(workspaceId);
       const profile = resolveVoiceProfile(voice.config.profileKey);
-      const consentGranted = event.digits === "1" && event.status !== "invalid";
+      const consentGranted = event.digits === "1" && event.status === "valid";
 
       if (consentGranted) {
         await runtime.provider.startRecording({
