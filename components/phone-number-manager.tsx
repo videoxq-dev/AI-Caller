@@ -152,6 +152,8 @@ export function PhoneNumberManager({
         body: JSON.stringify({
           phoneNumber: selected.phoneNumber,
           requestId: crypto.randomUUID(),
+          expectedPurchaseCredits: selected.purchaseCredits,
+          expectedMonthlyCredits: selected.monthlyCredits,
           replaceCurrent: Boolean(current),
         }),
       });
