@@ -9,6 +9,7 @@ import {
   creditWallets,
   leads,
   messages,
+  voiceCalls,
   workspaces,
 } from "@/db/schema";
 import { getDashboardOverview } from "./service";
@@ -218,6 +219,57 @@ describe("dashboard aggregation", () => {
       "HUMAN_TAKEOVER",
     ]));
     expect(result.series.some((point) => point.inquiries === 2)).toBe(true);
+  });
+
+  it("counts missed voice calls as inquiries but only answered calls as AI conversations", async () => {
+    const [missedContact, answeredContact] = await db.insert(contacts).values([
+      { workspaceId, name: "Missed Caller", phone: "+12025550110" },
+      { workspaceId, name: "Answered Caller", phone: "+12025550111" },
+    ]).returning();
+    const [missedConversation, answeredConversation] = await db.insert(conversations).values([
+      { workspaceId, contactId: missedContact.id, createdAt: new Date("2026-09-18T09:00:00.000Z") },
+      { workspaceId, contactId: answeredContact.id, createdAt: new Date("2026-09-18T10:00:00.000Z") },
+    ]).returning();
+
+    await db.insert(voiceCalls).values([
+      {
+        workspaceId,
+        conversationId: missedConversation.id,
+        contactId: missedContact.id,
+        integrationId: null,
+        provider: "telnyx",
+        externalCallId: "dashboard-missed-call",
+        callControlId: "dashboard-missed-control",
+        fromNumber: "+12025550110",
+        toNumber: "+12025550999",
+        mode: "AI_FIRST",
+        status: "FAILED",
+        startedAt: new Date("2026-09-18T09:00:00.000Z"),
+      },
+      {
+        workspaceId,
+        conversationId: answeredConversation.id,
+        contactId: answeredContact.id,
+        integrationId: null,
+        provider: "telnyx",
+        externalCallId: "dashboard-answered-call",
+        callControlId: "dashboard-answered-control",
+        fromNumber: "+12025550111",
+        toNumber: "+12025550999",
+        mode: "AI_FIRST",
+        status: "COMPLETED",
+        startedAt: new Date("2026-09-18T10:00:00.000Z"),
+        answeredAt: new Date("2026-09-18T10:00:05.000Z"),
+        endedAt: new Date("2026-09-18T10:04:00.000Z"),
+      },
+    ]);
+
+    const result = await getDashboardOverview(workspaceId, 7, now);
+
+    expect(result.metrics.inquiries.value).toBe(2);
+    expect(result.metrics.aiConversations.value).toBe(1);
+    expect(result.series.reduce((sum, point) => sum + point.inquiries, 0)).toBe(2);
+    expect(result.series.reduce((sum, point) => sum + point.aiConversations, 0)).toBe(1);
   });
 
   it("never mixes records from another workspace", async () => {
