@@ -71,6 +71,14 @@ export const communicationSetupSchema = z.object({
     }
   }
 
+  if (input.voice.mode !== "BYOP" || input.voice.provider !== "telnyx") {
+    ctx.addIssue({
+      code: "custom",
+      path: ["voice", "provider"],
+      message: "Milestone 7 inbound voice currently requires a connected Telnyx BYOP integration.",
+    });
+  }
+
   if (input.completeStep && input.sms.mode === "HOSTED") {
     const number = input.sms.numberMode === "separate" ? input.sms.number : input.voice.number;
     if (!number?.trim()) {
