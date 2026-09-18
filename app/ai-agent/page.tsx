@@ -1,12 +1,11 @@
 "use client";
 
 import Link from "next/link";
+import { AppNav } from "@/components/core-domain/app-nav";
 import { useEffect, useState } from "react";
 import {
   CalendarIcon,
-  DatabaseIcon,
   GearIcon,
-  LogoMark,
   MessageIcon,
   PhoneIcon,
   UsersIcon,
@@ -39,17 +38,6 @@ type TestResult = {
   toolResult: { kind: string; data: Record<string, unknown> };
   simulated: boolean;
 };
-
-const navItems = [
-  { label: "Dashboard", href: "/dashboard", icon: <HomeIcon /> },
-  { label: "Inbox", href: "/inbox", icon: <MessageIcon size={20} />, badge: "3" },
-  { label: "Contacts", href: "/contacts", icon: <UsersIcon size={20} /> },
-  { label: "Appointments", href: "/appointments", icon: <CalendarIcon size={20} /> },
-  { label: "AI Agent", href: "/ai-agent", icon: <BotIcon />, active: true },
-  { label: "Automations", href: "/automations", icon: <BoltIcon /> },
-  { label: "Integrations", href: "/integrations", icon: <DatabaseIcon size={20} /> },
-  { label: "Settings", href: "/settings", icon: <GearIcon size={20} /> },
-];
 
 const recentConversations = [
   { name: "Chioma Okafor", initials: "CO", channel: "WhatsApp" as Channel, message: "Hi, do you have ginger shots in stock?", outcome: "Appointment booked", time: "10 min ago" },
@@ -188,18 +176,7 @@ export default function AIAgentPage() {
 
   return (
     <main className="appShell agentShell">
-      <aside className="appSidebar agentSidebar">
-        <Link className="appBrand" href="/dashboard"><LogoMark size={37} /><strong>AI Caller</strong></Link>
-        <nav className="appNav" aria-label="Main navigation">
-          {navItems.map((item) => (
-            <Link key={item.label} href={item.href} className={`appNavItem ${item.active ? "active" : ""}`}>
-              <span className="appNavIcon">{item.icon}</span>
-              <span>{item.label}</span>
-              {item.badge && <b className="navBadge">{item.badge}</b>}
-            </Link>
-          ))}
-        </nav>
-      </aside>
+      <AppNav active="AI Agent" className="appSidebar agentSidebar" />
 
       <section className="appWorkspace agentWorkspace">
         <header className="agentTopbar">
@@ -477,9 +454,6 @@ function ChecklistItem({ label, status }: { label: string; status: string }) { r
 function channelClass(channel: Channel) { return channel.toLowerCase().replace(/\s+/g, "-"); }
 function channelIcon(channel: Channel) { if (channel === "Phone") return <PhoneIcon size={15} />; if (channel === "WhatsApp") return <WhatsAppIcon />; return <MessageIcon size={15} />; }
 
-function HomeIcon() { return <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round"><path d="m3 11 9-8 9 8v10H6a3 3 0 0 1-3-3Z"/><path d="M9 21v-7h6v7"/></svg>; }
-function BotIcon() { return <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round"><rect x="4" y="7" width="16" height="12" rx="4"/><path d="M12 3v4M8 12h.01M16 12h.01M8 16h8"/></svg>; }
-function BoltIcon() { return <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round"><path d="M13 2 4 14h7l-1 8 9-12h-7Z"/></svg>; }
 function SearchIcon() { return <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg>; }
 function ChevronDown() { return <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="m6 9 6 6 6-6"/></svg>; }
 function WhatsAppIcon() { return <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M20 11.5a8 8 0 0 1-11.8 7L4 20l1.5-4.1A8 8 0 1 1 20 11.5Z"/><path d="M8.5 8.5c.8 2.4 2.4 4 4.8 4.8"/></svg>; }
