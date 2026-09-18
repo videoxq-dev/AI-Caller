@@ -22,7 +22,7 @@ async function api(context, method, route, data, label, expectedStatus = null) {
   const response = await context.request.fetch(`${baseUrl}${route}`, {
     method,
     data,
-    headers: data === undefined ? undefined : { "content-type": "application/json" },
+    headers: data === undefined ? undefined : { "content-type": "application/json", origin: baseUrl },
   });
   const text = await response.text();
   let parsed = null;
