@@ -497,6 +497,16 @@ export async function processDuePhoneNumberRenewals(limit = 100) {
   return { checked: rows.length, renewed, pastDue, suspended };
 }
 
+export async function getHostedPhoneWebhookRecord(workspaceId: string) {
+  const [row] = await db.select().from(hostedPhoneNumbers).where(and(
+    eq(hostedPhoneNumbers.workspaceId, workspaceId),
+    isNull(hostedPhoneNumbers.releasedAt),
+    inArray(hostedPhoneNumbers.status, ["ACTIVE", "PAST_DUE", "SUSPENDED"]),
+  )).orderBy(desc(hostedPhoneNumbers.createdAt)).limit(1);
+  if (!row) throw new Error("No managed phone number is available for this workspace webhook.");
+  return row;
+}
+
 export async function getHostedPhoneRuntimeRecord(workspaceId: string) {
   const [row] = await db.select().from(hostedPhoneNumbers).where(and(
     eq(hostedPhoneNumbers.workspaceId, workspaceId),
