@@ -1,6 +1,6 @@
 import { and, desc, eq, inArray, isNull, lte, sql } from "drizzle-orm";
 import { db } from "@/db";
-import { capabilityBindings, hostedPhoneNumbers } from "@/db/schema";
+import { capabilityBindings, hostedPhoneNumbers, usageEvents } from "@/db/schema";
 import { bindCapability } from "@/server/domain/integrations/repository";
 import { getEnv } from "@/server/env";
 import { AppError } from "@/server/http/errors";
@@ -331,6 +331,30 @@ export async function provisionManagedPhoneNumber(workspaceId: string, input: {
       bindCapability(workspaceId, "SMS", "HOSTED"),
     ]);
 
+    await db.insert(usageEvents).values({
+      workspaceId,
+      capability: "VOICE",
+      provider: "telnyx",
+      mode: "HOSTED",
+      providerUsage: {
+        kind: "PHONE_NUMBER_PURCHASE",
+        phoneNumberId: activated.id,
+        monthlyCostMicros: quote.monthlyCostMicros,
+        upfrontCostMicros: quote.upfrontCostMicros,
+      },
+      creditsCharged: quote.purchaseCredits,
+      providerCostMicros: quote.monthlyCostMicros + quote.upfrontCostMicros,
+      billedUnits: {
+        PHONE_NUMBER_MONTH: 1,
+        ...(quote.upfrontCostMicros > 0 ? { PHONE_NUMBER_UPFRONT: 1 } : {}),
+      },
+      pricingDetails: {
+        targetMarginBps: getEnv().HOSTED_TELEPHONY_TARGET_MARGIN_BPS,
+      },
+      referenceType: "PHONE_NUMBER_PURCHASE",
+      referenceId: input.requestId,
+    }).onConflictDoNothing();
+
     if (current && current.id !== activated.id) {
       await markReleasePending(current);
       try {
@@ -373,6 +397,9 @@ export async function provisionManagedPhoneNumber(workspaceId: string, input: {
         releasedAt: released ? new Date() : null,
         updatedAt: new Date(),
       }).where(eq(hostedPhoneNumbers.id, row.id));
+      await clearHostedTelephonyBindingsIfUnused(workspaceId).catch((bindingError) => {
+        logger.error({ err: bindingError, workspaceId }, "Failed to reconcile hosted telephony bindings after provisioning failure");
+      });
     }
     if (creditsSettled) {
       await refundCredits(workspaceId, quote.purchaseCredits, {
@@ -463,6 +490,25 @@ export async function processDuePhoneNumberRenewals(limit = 100) {
         referenceType: "PHONE_NUMBER_RENEWAL",
         referenceId,
       });
+      await db.insert(usageEvents).values({
+        workspaceId: row.workspaceId,
+        capability: "VOICE",
+        provider: row.provider,
+        mode: "HOSTED",
+        providerUsage: {
+          kind: "PHONE_NUMBER_RENEWAL",
+          phoneNumberId: row.id,
+          periodStart: row.nextBillingAt.toISOString(),
+        },
+        creditsCharged: row.monthlyCredits,
+        providerCostMicros: row.providerMonthlyCostMicros,
+        billedUnits: { PHONE_NUMBER_MONTH: 1 },
+        pricingDetails: {
+          targetMarginBps: getEnv().HOSTED_TELEPHONY_TARGET_MARGIN_BPS,
+        },
+        referenceType: "PHONE_NUMBER_RENEWAL",
+        referenceId,
+      }).onConflictDoNothing();
       const next = addBillingMonth(row.nextBillingAt);
       await db.update(hostedPhoneNumbers).set({
         status: "ACTIVE",
