@@ -1,4 +1,4 @@
-import { appendMessage } from "@/server/domain/core/repository";
+import { appendMessage, getConversationById } from "@/server/domain/core/repository";
 import { AppError, toErrorResponse } from "@/server/http/errors";
 import { parseInput } from "@/server/http/validation";
 import { logger } from "@/server/observability/logger";
@@ -92,6 +92,15 @@ export async function POST(request: Request) {
             await completeWebchatTurn(workspaceId, claim.turnId, null);
             controller.enqueue(event("handoff", { message: "A team member is handling this conversation." }));
             controller.enqueue(event("done", { handlingMode: result.handlingMode }));
+            controller.close();
+            return;
+          }
+
+          const latestConversation = await getConversationById(workspaceId, resolved.session.conversationId);
+          if (!latestConversation || latestConversation.handlingMode !== "AI") {
+            await completeWebchatTurn(workspaceId, claim.turnId, null);
+            controller.enqueue(event("handoff", { message: "A team member is handling this conversation." }));
+            controller.enqueue(event("done", { handlingMode: "HUMAN" }));
             controller.close();
             return;
           }
