@@ -54,12 +54,12 @@ export default function CommunicationSetupPage() {
   const [saving, setSaving] = useState(false);
 
   useEffect(() => {
-    Promise.all([
-      fetch("/api/setup/communication", { cache: "no-store" }).then((response) => response.ok ? response.json() : null),
-      fetch("/api/integrations", { cache: "no-store" }).then((response) => response.ok ? response.json() : null),
-    ]).then(([_setupPayload, integrationPayload]) => {
-      if (Array.isArray(integrationPayload?.integrations)) setIntegrations(integrationPayload.integrations);
-    }).catch(() => showToast("Some communication settings could not be loaded. You can still continue setup.", "error"));
+    fetch("/api/integrations", { cache: "no-store" })
+      .then((response) => response.ok ? response.json() : null)
+      .then((payload) => {
+        if (Array.isArray(payload?.integrations)) setIntegrations(payload.integrations);
+      })
+      .catch(() => showToast("Some communication settings could not be loaded. You can still continue setup.", "error"));
   }, []);
 
   const connected = useMemo(
