@@ -32,6 +32,25 @@ export function createE2EAIProvider(): AIProvider {
         if (toolResult.includes('"kind":"availability"')) {
           return { text: JSON.stringify({ reply: "I have a 10:00 AM opening tomorrow.", action: { type: "NONE" } }) };
         }
+        if (toolResult.includes('"kind":"qualification"')) {
+          const configuredPrice = system.match(/- QA Consultation\s+—\s+([^:\n]+)/)?.[1]?.trim() ?? "$120";
+          return { text: JSON.stringify({ reply: `QA Consultation is ${configuredPrice}. I can also check tomorrow's availability.`, action: { type: "NONE" } }) };
+        }
+      }
+
+      if (system.includes("LEAD QUALIFICATION") && lastUser.includes("qa consultation") && (lastUser.includes("today") || lastUser.includes("urgent"))) {
+        return {
+          text: JSON.stringify({
+            lead: { intent: "Interested in QA Consultation", serviceRequested: "QA Consultation" },
+            action: {
+              type: "QUALIFY_LEAD",
+              answers: [
+                { criterionId: "service_needed", answer: "QA Consultation" },
+                { criterionId: "urgency", answer: "Today" },
+              ],
+            },
+          }),
+        };
       }
 
       if (lastUser.includes("available") || lastUser.includes("availability") || lastUser.includes("time")) {
