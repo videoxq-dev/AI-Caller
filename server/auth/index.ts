@@ -3,6 +3,7 @@ import { drizzleAdapter } from "better-auth/adapters/drizzle";
 import { db } from "@/db";
 import { authSchema } from "@/db/schema";
 import { getEnv } from "@/server/env";
+import { isGuardedE2EFixtureMode } from "@/server/e2e-mode";
 import { enqueueJob } from "@/server/jobs";
 import { AUTH_PASSWORD_RESET_EMAIL } from "@/server/jobs/queues";
 import { logger } from "@/server/observability/logger";
@@ -14,6 +15,7 @@ export const auth = betterAuth({
   appName: "AI Caller",
   baseURL: env.BETTER_AUTH_URL,
   secret: env.BETTER_AUTH_SECRET,
+  rateLimit: { enabled: !isGuardedE2EFixtureMode() },
   database: drizzleAdapter(db, {
     provider: "pg",
     schema: authSchema,
