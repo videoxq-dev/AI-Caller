@@ -123,8 +123,6 @@ describe("managed phone provisioning lifecycle", () => {
 
   it("keeps an ambiguous carrier timeout reconcilable and adopts the number before charging/refunding again", async () => {
     platform.orderTelnyxNumber.mockRejectedValueOnce(new ProviderRequestError("Provider connection timed out.", 504));
-    platform.findOwnedTelnyxNumber.mockResolvedValueOnce(null);
-
     const number = await provisionManagedPhoneNumber(workspaceId, {
       phoneNumber: "+12025550200",
       requestId,
