@@ -154,7 +154,7 @@ export function createResponseOrchestrator(dependencies: OrchestratorDependencie
 
       if (toolResult.kind === "escalation") {
         return {
-          reply: first.reply ?? context.agent?.escalationMessage ?? "I’m handing this over to a member of the team.",
+          reply: first.reply ?? "I’m handing this over to a member of the team.",
           handlingMode: "HUMAN" as const,
           action: first.action,
           toolResult,
