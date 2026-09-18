@@ -1,5 +1,3 @@
-import { z } from "zod";
-import { requireWorkspacePermission } from "@/server/auth/permissions";
 import { resolveWorkspaceContext } from "@/server/auth/workspace-context";
 import { listAutomationSettings } from "@/server/automations/repository";
 import { toErrorResponse } from "@/server/http/errors";
