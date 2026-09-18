@@ -358,7 +358,7 @@ async function assignPlanInTx(
   const [seatUsage] = await tx.select({
     active: sql<number>`(select count(*)::int from memberships m where m.workspace_id = ${workspaceId} and m.role <> 'OWNER')`,
     pending: sql<number>`(select count(*)::int from workspace_invitations wi where wi.workspace_id = ${workspaceId} and wi.status = 'PENDING' and wi.expires_at > now())`,
-  });
+  }).from(workspaces).where(eq(workspaces.id, workspaceId)).limit(1);
   const used = (seatUsage?.active ?? 0) + (seatUsage?.pending ?? 0);
   if (used > target.subUserLimit) {
     throw new AppError("PLAN_DOWNGRADE_BLOCKED", "Remove team members or pending invitations before changing to this plan.", 409, {

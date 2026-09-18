@@ -70,7 +70,7 @@ export function quoteHostedUsage(rates: HostedRate[], lines: UsageLine[]) {
     if (!usedRates.some((candidate) => candidate.id === rate.id)) usedRates.push(rate);
   }
 
-  const credits = retailMicros === BigInt(0) ? 0 : ceilDiv(retailMicros, BigInt(1_000));
+  const credits = retailMicros === BigInt(0) ? BigInt(0) : ceilDiv(retailMicros, BigInt(1_000));
   return {
     credits: safeNumber(credits, "Credit charge"),
     providerCostMicros: safeNumber(providerCostMicros, "Provider cost"),
