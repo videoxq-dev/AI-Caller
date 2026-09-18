@@ -1,3 +1,4 @@
+import { escalateConversation } from "@/server/collaboration/service";
 import { z } from "zod";
 import { evaluateQualification, getQualificationConfig } from "./qualification";
 import { calendarBookingService } from "@/server/domain/core/calendar-booking";
@@ -6,7 +7,6 @@ import { getActiveConversationChannel, type ConversationChannel } from "@/server
 import {
   appendMessage,
   getContactDetail,
-  setConversationHandlingMode,
   upsertLead,
 } from "@/server/domain/core/repository";
 
@@ -263,7 +263,11 @@ export async function executeOrchestratorTools(
     };
   }
 
-  const conversation = await setConversationHandlingMode(workspaceId, conversationId, "HUMAN", null);
+  const conversation = await escalateConversation({
+    workspaceId,
+    conversationId,
+    reason: envelope.action.reason ?? null,
+  });
   await appendMessage(workspaceId, conversationId, {
     channel,
     direction: "INTERNAL",
