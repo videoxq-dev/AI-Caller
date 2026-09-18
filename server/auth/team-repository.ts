@@ -1,7 +1,7 @@
 import { createHash, randomBytes } from "node:crypto";
 import { and, asc, eq, gt, lte, sql } from "drizzle-orm";
 import { db } from "@/db";
-import { memberships, user, workspaceInvitations } from "@/db/schema";
+import { conversations, leads, memberships, user, workspaceInvitations } from "@/db/schema";
 import { AppError } from "@/server/http/errors";
 
 export type InviteRole = "ADMIN" | "STAFF";
@@ -170,9 +170,22 @@ export async function updateWorkspaceMemberRole(workspaceId: string, userId: str
 }
 
 export async function removeWorkspaceMember(workspaceId: string, userId: string) {
-  const [member] = await db.delete(memberships)
-    .where(and(eq(memberships.workspaceId, workspaceId), eq(memberships.userId, userId)))
-    .returning({ userId: memberships.userId, role: memberships.role });
-  if (!member) throw new AppError("MEMBER_NOT_FOUND", "Workspace member not found.", 404);
-  return member;
+  return db.transaction(async (tx) => {
+    const [member] = await tx.delete(memberships)
+      .where(and(eq(memberships.workspaceId, workspaceId), eq(memberships.userId, userId)))
+      .returning({ userId: memberships.userId, role: memberships.role });
+    if (!member) throw new AppError("MEMBER_NOT_FOUND", "Workspace member not found.", 404);
+
+    await Promise.all([
+      tx.update(conversations).set({ assignedUserId: null, updatedAt: new Date() }).where(and(
+        eq(conversations.workspaceId, workspaceId),
+        eq(conversations.assignedUserId, userId),
+      )),
+      tx.update(leads).set({ assignedUserId: null, updatedAt: new Date() }).where(and(
+        eq(leads.workspaceId, workspaceId),
+        eq(leads.assignedUserId, userId),
+      )),
+    ]);
+    return member;
+  });
 }
