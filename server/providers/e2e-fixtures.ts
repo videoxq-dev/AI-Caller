@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto";
+import { isGuardedE2EFixtureMode } from "@/server/e2e-mode";
 import type { AIProvider, CalendarProvider, SMSProvider, VoiceProvider, WhatsAppProvider } from "./contracts";
 
 function nextUtcDay(hour: number, minute = 0) {
@@ -7,13 +8,7 @@ function nextUtcDay(hour: number, minute = 0) {
 }
 
 export function isE2EProviderFixtureMode() {
-  if (process.env.CI !== "true" || process.env.AI_CALLER_E2E_FIXTURES !== "1") return false;
-  try {
-    const host = new URL(process.env.BETTER_AUTH_URL ?? "").hostname;
-    return host === "localhost" || host === "127.0.0.1";
-  } catch {
-    return false;
-  }
+  return isGuardedE2EFixtureMode();
 }
 
 export function createE2EAIProvider(): AIProvider {
