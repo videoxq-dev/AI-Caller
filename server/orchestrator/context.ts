@@ -4,6 +4,7 @@ import { aiAgents, faqs, policies, services } from "@/db/schema";
 import { getConversationTimelinePage } from "@/server/domain/core/conversation-timeline";
 import { getContactDetail } from "@/server/domain/core/repository";
 import { getBusinessSetup } from "@/server/domain/onboarding/repository";
+import { qualificationConfigFromBehaviorSettings, qualificationPrompt } from "./qualification";
 
 const DAY_NAMES = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
 
@@ -24,6 +25,7 @@ type CustomerPromptState = {
   leadStatus?: string | null;
   leadIntent?: string | null;
   serviceRequested?: string | null;
+  qualificationData?: Record<string, string> | null;
   currentAppointment?: {
     title: string;
     startsAt: Date;
@@ -84,6 +86,10 @@ function buildSystemPrompt(
   const policyText = agentSetup.policies.length
     ? agentSetup.policies.map((policy) => `- ${clip(policy.title, 300)} (${clip(policy.type, 100)}): ${clip(policy.content, 1000)}`).join("\n")
     : "No policies configured.";
+  const qualificationText = qualificationPrompt(
+    qualificationConfigFromBehaviorSettings(agent?.behaviorSettings),
+    customer.qualificationData,
+  );
 
   return [
     `You are ${clip(agent?.name, 120) || "the business AI assistant"} for ${clip(profile?.businessName, 200) || "this business"}.`,
@@ -108,6 +114,7 @@ function buildSystemPrompt(
     faqText,
     "\nPOLICIES",
     policyText,
+    `\n${qualificationText}`,
     "\nCUSTOMER STATE",
     `Name: ${clip(customer.name, 200) || "Unknown"}`,
     `Email: ${clip(customer.email, 320) || "Unknown"}`,
@@ -135,18 +142,26 @@ export async function buildConversationContext(workspaceId: string, conversation
   const currentAppointment = contact.appointments.find((appointment) =>
     appointment.status === "CONFIRMED" || appointment.status === "PENDING",
   ) ?? null;
-  const systemPrompt = buildSystemPrompt(businessSetup, agentSetup, {
+  let systemPrompt = buildSystemPrompt(businessSetup, agentSetup, {
     name: contact.name,
     email: contact.email,
     phone: contact.phone,
     leadStatus: contact.lead?.status,
     leadIntent: contact.lead?.intent,
     serviceRequested: contact.lead?.serviceRequested,
+    qualificationData: contact.lead?.qualificationData,
     currentAppointment,
   });
 
+  const latestPhoneMode = [...timeline.messages].reverse().find((message) =>
+    message.channel === "PHONE" && typeof message.metadata?.voiceMode === "string",
+  )?.metadata?.voiceMode;
+  if (latestPhoneMode === "AFTER_HOURS") {
+    systemPrompt += "\n\nVOICE MODE: AFTER_HOURS. The business is currently closed. You may answer approved business questions and book appointments, but never imply that staff are currently available or that same-day service is guaranteed.";
+  }
+
   const messages = timeline.messages
-    .filter((message) => message.contentType === "TEXT")
+    .filter((message) => message.contentType === "TEXT" || message.contentType === "CALL_TRANSCRIPT")
     .map((message) => {
       if (message.senderType === "CUSTOMER") return { role: "user" as const, content: clip(message.body, 4000) };
       if (message.senderType === "USER") return { role: "assistant" as const, content: `[Human teammate] ${clip(message.body, 4000)}` };

@@ -45,6 +45,14 @@ describe("onboarding persistence", () => {
       whenUnsure: "Escalate to a human",
       escalationMessage: "Escalate complaints to the team.",
       guardrails: ["Never invent pricing", "Only answer based on approved business information"],
+      voice: {
+        profileKey: "ava-us-1",
+        language: "en-US",
+        speakingRate: 1,
+        recordingPolicy: "ANNOUNCE",
+        afterHoursEnabled: true,
+      },
+      qualification: { enabled: false, criteria: [] },
       completeStep: true,
     });
 
@@ -57,6 +65,14 @@ describe("onboarding persistence", () => {
     expect(agent.agent?.name).toBe("Mia");
     expect(agent.agent?.behaviorSettings).toEqual({
       guardrails: ["Never invent pricing", "Only answer based on approved business information"],
+      voice: {
+        profileKey: "ava-us-1",
+        language: "en-US",
+        speakingRate: 1,
+        recordingPolicy: "ANNOUNCE",
+        afterHoursEnabled: true,
+      },
+      qualification: { enabled: false, criteria: [] },
     });
     expect(status.completedCount).toBe(2);
     expect(status.steps.business).toBe(true);

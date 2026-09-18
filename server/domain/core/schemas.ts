@@ -58,6 +58,9 @@ export const leadInputSchema = z.object({
   serviceRequested: optionalText(500),
   source: optionalText(100),
   estimatedValue: z.number().int().nonnegative().nullable().optional(),
+  qualificationData: z.record(z.string(), z.string().trim().max(2000)).optional(),
+  qualificationScore: z.number().int().min(0).max(100).optional(),
+  qualificationCompletedAt: z.coerce.date().nullable().optional(),
   assignedUserId: optionalText(200),
 });
 
@@ -69,7 +72,7 @@ export const messageInputSchema = z.object({
   channel: channelSchema,
   direction: z.enum(["INBOUND", "OUTBOUND", "INTERNAL"]),
   senderType: z.enum(["CUSTOMER", "AI", "USER", "SYSTEM"]),
-  contentType: z.enum(["TEXT", "CALL_TRANSCRIPT", "APPOINTMENT_EVENT", "SYSTEM_EVENT"]).default("TEXT"),
+  contentType: z.enum(["TEXT", "CALL_TRANSCRIPT", "CALL_RECORDING", "APPOINTMENT_EVENT", "SYSTEM_EVENT"]).default("TEXT"),
   body: z.string().trim().min(1).max(100_000),
   provider: optionalText(100),
   externalMessageId: optionalText(500),

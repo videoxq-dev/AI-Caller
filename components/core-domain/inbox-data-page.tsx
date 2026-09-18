@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { MessageIcon, PhoneIcon, UsersIcon } from "@/components/icons";
 import { AppNav } from "./app-nav";
 
@@ -8,8 +8,116 @@ type Channel = "PHONE" | "SMS" | "WHATSAPP" | "WEBCHAT";
 type Contact = { id: string; name: string | null; email: string | null; phone: string | null };
 type Conversation = { id: string; contactId: string; status: "OPEN" | "CLOSED"; handlingMode: "AI" | "HUMAN"; lastMessageAt: string | null; createdAt: string };
 type ConversationRow = { conversation: Conversation; contact: Contact; channels: Channel[] };
-type Message = { id: string; channel: Channel; direction: "INBOUND" | "OUTBOUND" | "INTERNAL"; senderType: "CUSTOMER" | "AI" | "USER" | "SYSTEM"; contentType: string; body: string; createdAt: string };
+type Message = { id: string; channel: Channel; direction: "INBOUND" | "OUTBOUND" | "INTERNAL"; senderType: "CUSTOMER" | "AI" | "USER" | "SYSTEM"; contentType: string; body: string; createdAt: string; metadata: Record<string, unknown> };
 type Timeline = { conversation: Conversation; contact: Contact; messages: Message[] };
+
+
+type VoiceCallDetail = {
+  call: {
+    id: string;
+    mode: "AI_FIRST" | "AFTER_HOURS" | "OVERFLOW";
+    status: string;
+    startedAt: string;
+    endedAt: string | null;
+    durationSeconds: number | null;
+    recordingStatus: string;
+    recordingDurationSeconds: number | null;
+    recordingConsentStatus: string;
+    transcriptStatus: string;
+  };
+  transcript: Array<{
+    id: string;
+    speaker: "CUSTOMER" | "AI" | "HUMAN";
+    text: string;
+    startedMs: number | null;
+    endedMs: number | null;
+    sequence: number;
+    confidence: number | null;
+  }>;
+};
+
+function formatDuration(seconds: number | null | undefined) {
+  const total = Math.max(0, Math.round(seconds ?? 0));
+  const minutes = Math.floor(total / 60);
+  const remainder = total % 60;
+  return `${minutes}:${String(remainder).padStart(2, "0")}`;
+}
+
+function VoiceCallCard({ message }: { message: Message }) {
+  const callId = typeof message.metadata.voiceCallId === "string" ? message.metadata.voiceCallId : null;
+  const duration = typeof message.metadata.durationSeconds === "number" ? message.metadata.durationSeconds : null;
+  const mode = typeof message.metadata.voiceMode === "string" ? message.metadata.voiceMode : null;
+  const [expanded, setExpanded] = useState(false);
+  const [detail, setDetail] = useState<VoiceCallDetail | null>(null);
+  const [loadingDetail, setLoadingDetail] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const audioRef = useRef<HTMLAudioElement | null>(null);
+
+  async function toggleTranscript() {
+    if (!callId) return;
+    if (expanded) {
+      setExpanded(false);
+      return;
+    }
+    if (!detail) {
+      setLoadingDetail(true);
+      setError(null);
+      try {
+        const response = await fetch(`/api/voice/calls/${callId}`, { cache: "no-store" });
+        if (!response.ok) throw new Error("Unable to load the call transcript.");
+        setDetail(await response.json() as VoiceCallDetail);
+      } catch (err) {
+        setError(err instanceof Error ? err.message : "Unable to load the call transcript.");
+      } finally {
+        setLoadingDetail(false);
+      }
+    }
+    setExpanded(true);
+  }
+
+  function seekTo(startedMs: number | null) {
+    if (!audioRef.current || startedMs == null) return;
+    audioRef.current.currentTime = Math.max(0, startedMs / 1000);
+    void audioRef.current.play().catch(() => undefined);
+  }
+
+  return (
+    <article className="callTranscript voiceCallArtifact">
+      <div className="transcriptHeader">
+        <PhoneIcon size={15} />
+        <strong>Incoming call</strong>
+        {mode === "AFTER_HOURS" && <span className="smallTag blue">After hours</span>}
+        <time>{displayTime(message.createdAt)}</time>
+      </div>
+      <div className="callPlayback">
+        <span className="voiceCallDuration">{formatDuration(duration)}</span>
+        {callId ? <audio ref={audioRef} controls preload="metadata" src={`/api/voice/calls/${callId}/recording`} /> : <span>Recording unavailable</span>}
+      </div>
+      <div className="voiceCallActions">
+        <button type="button" disabled={!callId || loadingDetail} onClick={() => void toggleTranscript()}>
+          {loadingDetail ? "Loading…" : expanded ? "Hide transcript" : "View transcript"}
+        </button>
+      </div>
+      {error && <p className="voiceCallError">{error}</p>}
+      {expanded && detail && (
+        <div className="voiceTranscriptPanel">
+          {detail.transcript.length ? detail.transcript.map((segment) => (
+            <button
+              type="button"
+              className="voiceTranscriptSegment"
+              key={segment.id}
+              onClick={() => seekTo(segment.startedMs)}
+            >
+              <span>{segment.startedMs == null ? "—" : formatDuration(segment.startedMs / 1000)}</span>
+              <strong>{segment.speaker === "CUSTOMER" ? "Caller" : segment.speaker === "AI" ? "AI Assistant" : "Team"}</strong>
+              <p>{segment.text}</p>
+            </button>
+          )) : <p>No transcript is available for this call.</p>}
+        </div>
+      )}
+    </article>
+  );
+}
 
 const channelLabels: Record<Channel, string> = { PHONE: "Call", SMS: "SMS", WHATSAPP: "WhatsApp", WEBCHAT: "Web Chat" };
 
@@ -157,6 +265,8 @@ export function InboxDataPage() {
               <div className="threadBody">
                 {!timeline.messages.length && <div className="dayDivider"><span>No messages yet</span></div>}
                 {timeline.messages.map((message) => {
+                  if (message.contentType === "CALL_TRANSCRIPT") return null;
+                  if (message.contentType === "CALL_RECORDING") return <VoiceCallCard key={message.id} message={message} />;
                   const customer = message.senderType === "CUSTOMER";
                   return <div key={message.id} className={`messageRow ${customer ? "customer" : "agent"}`}>{customer && <span className="miniAvatar">{initials(timeline.contact.name)}</span>}<div className={`messageBubble ${customer ? "incoming" : "outgoing"}`}><div className="messageMeta"><span className={`channelBadge ${channelLabels[message.channel].toLowerCase().replace(" ", "-")}`}>{message.channel === "PHONE" ? <PhoneIcon size={13} /> : <MessageIcon size={13} />}{channelLabels[message.channel]}</span><time>{displayTime(message.createdAt)}</time></div><p>{message.body}</p></div>{!customer && <span className="botAvatar">{message.senderType === "USER" ? <UsersIcon size={16} /> : "✦"}</span>}</div>;
                 })}

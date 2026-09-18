@@ -36,6 +36,15 @@ const envSchema = z.object({
   META_GRAPH_API_VERSION: z.string().regex(/^v\d+\.\d+$/).default("v22.0"),
   META_WEBHOOK_VERIFY_TOKEN: z.string().min(8).optional(),
   META_PHONE_REGISTRATION_PIN: z.string().regex(/^\d{6}$/).optional(),
+  VOICE_GATEWAY_URL: z.string().url().optional(),
+  VOICE_GATEWAY_PORT: z.coerce.number().int().min(1).max(65535).default(3002),
+  VOICE_RECORDING_STORAGE_BACKEND: z.enum(["filesystem", "s3"]).default("filesystem"),
+  VOICE_RECORDING_DIR: z.string().min(1).default(".data/recordings"),
+  VOICE_RECORDING_S3_BUCKET: z.string().min(1).optional(),
+  VOICE_RECORDING_S3_REGION: z.string().min(1).default("us-east-1"),
+  VOICE_RECORDING_S3_ENDPOINT: z.string().url().optional(),
+  VOICE_RECORDING_S3_ACCESS_KEY_ID: z.string().min(1).optional(),
+  VOICE_RECORDING_S3_SECRET_ACCESS_KEY: z.string().min(1).optional(),
   NODE_ENV: z.enum(["development", "test", "production"]).default("development"),
 });
 

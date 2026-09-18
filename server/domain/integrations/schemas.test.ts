@@ -3,7 +3,7 @@ import { calendarSetupSchema, communicationSetupSchema } from "./schemas";
 
 function validCommunicationSetup() {
   return {
-    voice: { mode: "HOSTED", provider: null, numberMode: "new", number: "+15550001111" },
+    voice: { mode: "BYOP", provider: "telnyx", numberMode: "existing", number: "+15550001111" },
     sms: { mode: "BYOP", provider: "telnyx", numberMode: "same", displayName: "Acme", replyWindow: "Always respond", afterHoursBehavior: "Auto-reply + collect details" },
     whatsapp: { mode: "BYOP", provider: "whatsapp", accountMode: "existing" },
     webchat: { enabled: true },
@@ -30,8 +30,16 @@ function validCalendarSetup() {
 }
 
 describe("communication setup provider validation", () => {
-  it("accepts supported hosted/BYOP combinations and Meta WhatsApp", () => {
+  it("accepts Telnyx BYOP voice, supported SMS routing, and Meta WhatsApp", () => {
     expect(communicationSetupSchema.safeParse(validCommunicationSetup()).success).toBe(true);
+  });
+
+  it("allows unsupported voice routes only as drafts and rejects them on completion", () => {
+    const base = validCommunicationSetup();
+    expect(communicationSetupSchema.safeParse({ ...base, voice: { ...base.voice, mode: "HOSTED", provider: null }, completeStep: false }).success).toBe(true);
+    expect(communicationSetupSchema.safeParse({ ...base, voice: { ...base.voice, provider: "twilio" }, completeStep: false }).success).toBe(true);
+    expect(communicationSetupSchema.safeParse({ ...base, voice: { ...base.voice, mode: "HOSTED", provider: null }, completeStep: true }).success).toBe(false);
+    expect(communicationSetupSchema.safeParse({ ...base, voice: { ...base.voice, provider: "twilio" }, completeStep: true }).success).toBe(false);
   });
 
   it("rejects non-communication providers for voice and SMS", () => {

@@ -1,3 +1,4 @@
+import { sql } from "drizzle-orm";
 import {
   boolean,
   index,
@@ -85,5 +86,8 @@ export const usageEvents = pgTable(
   (table) => [
     index("usage_events_workspace_created_idx").on(table.workspaceId, table.createdAt),
     index("usage_events_reference_idx").on(table.workspaceId, table.referenceType, table.referenceId),
+    uniqueIndex("usage_events_voice_call_reference_uq")
+      .on(table.workspaceId, table.referenceType, table.referenceId)
+      .where(sql`${table.referenceType} = 'VOICE_CALL' and ${table.referenceId} is not null`),
   ],
 );

@@ -4,3 +4,5 @@ export * from "./integrations";
 export * from "./core-domain";
 export * from "./orchestrator";
 export * from "./sms";
+
+export * from "./voice";

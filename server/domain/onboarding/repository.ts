@@ -109,7 +109,19 @@ export async function getAgentSetup(workspaceId: string) {
 
 export async function saveAgentSetup(workspaceId: string, input: AIAgentInput) {
   const now = new Date();
-  const behaviorSettings = { guardrails: input.guardrails };
+  const [existingAgent] = await db.select({ behaviorSettings: aiAgents.behaviorSettings })
+    .from(aiAgents)
+    .where(eq(aiAgents.workspaceId, workspaceId))
+    .limit(1);
+  const existingBehavior = existingAgent?.behaviorSettings && typeof existingAgent.behaviorSettings === "object"
+    ? existingAgent.behaviorSettings
+    : {};
+  const behaviorSettings = {
+    ...existingBehavior,
+    guardrails: input.guardrails,
+    voice: input.voice,
+    qualification: input.qualification,
+  };
   const [agent] = await db
     .insert(aiAgents)
     .values({

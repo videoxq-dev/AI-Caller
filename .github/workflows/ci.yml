@@ -35,6 +35,10 @@ jobs:
       HOSTED_SMS_CREDITS_PER_MESSAGE: "1"
       META_APP_SECRET: ci-meta-app-secret
       META_WEBHOOK_VERIFY_TOKEN: ci-meta-verify-token
+      VOICE_GATEWAY_URL: ws://127.0.0.1:3002
+      VOICE_GATEWAY_PORT: "3002"
+      VOICE_RECORDING_STORAGE_BACKEND: filesystem
+      VOICE_RECORDING_DIR: /tmp/ai-caller-recordings
 
     services:
       postgres:
@@ -101,6 +105,19 @@ jobs:
             exit 1
           fi
 
+      - name: Start voice gateway
+        run: |
+          npm run voice-gateway > /tmp/ai-caller-voice.log 2>&1 &
+          echo $! > /tmp/ai-caller-voice.pid
+          for attempt in {1..20}; do
+            if curl --fail --silent http://127.0.0.1:3002/health > /dev/null; then
+              exit 0
+            fi
+            sleep 1
+          done
+          cat /tmp/ai-caller-voice.log
+          exit 1
+
       - name: Milestone 3 browser regression verification
         run: npm run test:browser
 
@@ -112,6 +129,9 @@ jobs:
 
       - name: Milestone 6 WhatsApp browser acceptance verification
         run: npm run test:browser:m6
+
+      - name: Milestone 7 inbound voice browser acceptance verification
+        run: npm run test:browser:m7
 
       - name: Upload Milestone 3 browser screenshots
         if: always()
@@ -148,6 +168,22 @@ jobs:
           path: artifacts/milestone6-browser
           if-no-files-found: warn
           retention-days: 14
+
+      - name: Upload Milestone 7 browser screenshots
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: milestone7-browser-verification
+          path: artifacts/milestone7-browser
+          if-no-files-found: warn
+          retention-days: 14
+
+      - name: Stop voice gateway
+        if: always()
+        run: |
+          if [ -f /tmp/ai-caller-voice.pid ]; then
+            kill "$(cat /tmp/ai-caller-voice.pid)" || true
+          fi
 
       - name: Stop background worker
         if: always()

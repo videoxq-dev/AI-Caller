@@ -1,5 +1,6 @@
 import { randomUUID } from "node:crypto";
-import type { AIProvider, CalendarProvider, SMSProvider, WhatsAppProvider } from "./contracts";
+import { isGuardedE2EFixtureMode } from "@/server/e2e-mode";
+import type { AIProvider, CalendarProvider, SMSProvider, VoiceProvider, WhatsAppProvider } from "./contracts";
 
 function nextUtcDay(hour: number, minute = 0) {
   const now = new Date();
@@ -7,13 +8,7 @@ function nextUtcDay(hour: number, minute = 0) {
 }
 
 export function isE2EProviderFixtureMode() {
-  if (process.env.CI !== "true" || process.env.AI_CALLER_E2E_FIXTURES !== "1") return false;
-  try {
-    const host = new URL(process.env.BETTER_AUTH_URL ?? "").hostname;
-    return host === "localhost" || host === "127.0.0.1";
-  } catch {
-    return false;
-  }
+  return isGuardedE2EFixtureMode();
 }
 
 export function createE2EAIProvider(): AIProvider {
@@ -32,6 +27,25 @@ export function createE2EAIProvider(): AIProvider {
         if (toolResult.includes('"kind":"availability"')) {
           return { text: JSON.stringify({ reply: "I have a 10:00 AM opening tomorrow.", action: { type: "NONE" } }) };
         }
+        if (toolResult.includes('"kind":"qualification"')) {
+          const configuredPrice = system.match(/- QA Consultation\s+—\s+([^:\n]+)/)?.[1]?.trim() ?? "$120";
+          return { text: JSON.stringify({ reply: `QA Consultation is ${configuredPrice}. I can also check tomorrow's availability.`, action: { type: "NONE" } }) };
+        }
+      }
+
+      if (system.includes("LEAD QUALIFICATION") && lastUser.includes("qa consultation") && (lastUser.includes("today") || lastUser.includes("urgent"))) {
+        return {
+          text: JSON.stringify({
+            lead: { intent: "Interested in QA Consultation", serviceRequested: "QA Consultation" },
+            action: {
+              type: "QUALIFY_LEAD",
+              answers: [
+                { criterionId: "service_needed", answer: "QA Consultation" },
+                { criterionId: "urgency", answer: "Today" },
+              ],
+            },
+          }),
+        };
       }
 
       if (lastUser.includes("available") || lastUser.includes("availability") || lastUser.includes("time")) {
@@ -126,5 +140,20 @@ export function createE2EWhatsAppProvider(base: WhatsAppProvider): WhatsAppProvi
     async sendTemplate() {
       return { externalId: `e2e-wa-template-${randomUUID()}`, status: "SENT" };
     },
+  };
+}
+
+
+export function createE2EVoiceProvider(base: VoiceProvider): VoiceProvider {
+  if (!isE2EProviderFixtureMode()) throw new Error("E2E provider fixtures are not available outside guarded CI localhost mode.");
+  return {
+    verifyWebhook: (input) => base.verifyWebhook(input),
+    normalizeWebhook: (input) => base.normalizeWebhook(input),
+    async answer() {},
+    async gatherConsent() {},
+    async startTranscription() {},
+    async startRecording() {},
+    async speak() {},
+    async hangup() {},
   };
 }

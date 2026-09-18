@@ -18,6 +18,7 @@ import { getAgentSetup, getBusinessSetup, getSetupStatus } from "@/server/domain
 import { saveAISetupAction } from "../actions";
 import { SetupProgressPanel } from "../setup-progress";
 import { KnowledgeEditor } from "./knowledge-editor";
+import { QualificationEditor } from "./qualification-editor";
 import "./ai-assistant.css";
 
 const defaultGuardrails = [
@@ -36,6 +37,8 @@ export default async function AIAssistantSetupPage() {
   ]);
   const agent = saved.agent;
   const configuredGuardrails = agent?.behaviorSettings?.guardrails;
+  const voiceSettings = agent?.behaviorSettings?.voice && typeof agent.behaviorSettings.voice === "object" ? agent.behaviorSettings.voice as Record<string, unknown> : {};
+  const qualificationSettings = agent?.behaviorSettings?.qualification && typeof agent.behaviorSettings.qualification === "object" ? agent.behaviorSettings.qualification as { enabled?: boolean; criteria?: Array<{ id: string; label: string; question: string; required: boolean }> } : null;
   const guardrails = Array.isArray(configuredGuardrails) && configuredGuardrails.every((item) => typeof item === "string")
     ? configuredGuardrails as string[]
     : defaultGuardrails;
@@ -78,6 +81,20 @@ export default async function AIAssistantSetupPage() {
               </div>
             </section>
 
+            <section className="aiSection voiceSection">
+              <div className="sectionHeading">
+                <span className="sectionIcon green"><SparkleIcon size={22} /></span>
+                <div><h2>Voice &amp; call behavior</h2><p>Choose how your assistant sounds on inbound phone calls.</p></div>
+              </div>
+              <div className="voiceSetupGrid">
+                <label className="aiField"><span>Preferred voice</span><select name="voiceProfile" defaultValue={typeof voiceSettings.profileKey === "string" ? voiceSettings.profileKey : "ava-us-1"}><option value="ava-us-1">Ava — warm &amp; professional</option><option value="marcus-us-1">Marcus — calm &amp; confident</option><option value="sofia-us-1">Sofia — friendly &amp; upbeat</option><option value="james-us-1">James — clear &amp; direct</option></select></label>
+                <label className="aiField"><span>Language</span><select name="voiceLanguage" defaultValue={typeof voiceSettings.language === "string" ? voiceSettings.language : "en-US"}><option value="en-US">English (US)</option><option value="en-GB">English (UK)</option><option value="es-US">Spanish (US)</option></select></label>
+                <label className="aiField"><span>Speaking speed</span><select name="voiceSpeed" defaultValue={String(typeof voiceSettings.speakingRate === "number" ? voiceSettings.speakingRate : 1)}><option value="0.85">Relaxed</option><option value="1">Natural</option><option value="1.15">Brisk</option></select></label>
+                <label className="aiField"><span>Recording consent</span><select name="recordingPolicy" defaultValue={typeof voiceSettings.recordingPolicy === "string" ? voiceSettings.recordingPolicy : "ANNOUNCE"}><option value="ANNOUNCE">Announce recording before it starts</option><option value="EXPLICIT_CONSENT">Require explicit consent</option></select></label><label className="aiField"><span>After-hours handling</span><select name="afterHoursEnabled" defaultValue={voiceSettings.afterHoursEnabled === false ? "off" : "on"}><option value="on">AI answers using after-hours context</option><option value="off">Use AI First behavior at all hours</option></select></label>
+              </div>
+              <p className="voiceSetupNote">Inbound calls only. The recording is the primary Inbox artifact and the synchronized transcript is available on demand.</p>
+            </section>
+
             <section className="aiSection knowledgeSection">
               <div className="sectionHeading">
                 <span className="sectionIcon blue"><FileIcon size={22} /></span>
@@ -106,6 +123,14 @@ export default async function AIAssistantSetupPage() {
                   <textarea name="escalationInstructions" rows={4} defaultValue={agent?.escalationMessage ?? "If the customer asks about special pricing, complaints, or anything uncertain, offer to connect them with the team."} />
                 </label>
               </div>
+            </section>
+
+            <section className="aiSection qualificationSection">
+              <div className="sectionHeading">
+                <span className="sectionIcon orange"><UsersIcon size={22} /></span>
+                <div><h2>Lead qualification</h2><p>Define the information every channel should collect before a lead is considered qualified.</p></div>
+              </div>
+              <QualificationEditor initial={qualificationSettings} />
             </section>
 
             <section className="aiSection importSection">

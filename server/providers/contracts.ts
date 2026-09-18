@@ -101,8 +101,88 @@ export interface WhatsAppProvider {
   normalizeWebhook(input: WhatsAppWebhookInput): Promise<NormalizedWhatsAppEvent[]>;
 }
 
+export type VoiceWebhookInput = {
+  request: Request;
+  rawBody: string;
+};
+
+export type NormalizedVoiceEvent =
+  | {
+      type: "CALL_INITIATED";
+      externalEventId: string;
+      externalCallId: string;
+      callControlId: string;
+      from: string;
+      to: string;
+      occurredAt: Date | null;
+    }
+  | {
+      type: "CALL_ANSWERED";
+      externalEventId: string;
+      externalCallId: string;
+      callControlId: string;
+      occurredAt: Date | null;
+    }
+  | {
+      type: "DTMF_GATHERED";
+      externalEventId: string;
+      externalCallId: string;
+      callControlId: string;
+      digits: string;
+      status: string | null;
+      occurredAt: Date | null;
+    }
+  | {
+      type: "TRANSCRIPTION";
+      externalEventId: string;
+      externalCallId: string;
+      callControlId: string;
+      transcript: string;
+      isFinal: boolean;
+      confidence: number | null;
+      occurredAt: Date | null;
+    }
+  | {
+      type: "SPEAK_ENDED";
+      externalEventId: string;
+      externalCallId: string;
+      callControlId: string;
+      occurredAt: Date | null;
+    }
+  | {
+      type: "RECORDING_SAVED";
+      externalEventId: string;
+      externalCallId: string;
+      recordingId: string | null;
+      recordingUrl: string;
+      format: "mp3" | "wav";
+      startedAt: Date | null;
+      endedAt: Date | null;
+      occurredAt: Date | null;
+    }
+  | {
+      type: "RECORDING_FAILED";
+      externalEventId: string;
+      externalCallId: string;
+      error: string | null;
+      occurredAt: Date | null;
+    }
+  | {
+      type: "CALL_HANGUP";
+      externalEventId: string;
+      externalCallId: string;
+      callControlId: string;
+      cause: string | null;
+      occurredAt: Date | null;
+    };
+
 export interface VoiceProvider {
-  verifyWebhook(request: Request): Promise<boolean>;
-  normalizeCallEvent(payload: unknown): Promise<unknown>;
-  buildInboundResponse(input: { websocketUrl: string }): Promise<string>;
+  verifyWebhook(input: VoiceWebhookInput): Promise<boolean>;
+  normalizeWebhook(input: VoiceWebhookInput): Promise<NormalizedVoiceEvent[]>;
+  answer(input: { callControlId: string; streamUrl?: string | null; commandId?: string }): Promise<void>;
+  gatherConsent(input: { callControlId: string; text: string; voice: string; language: string; commandId?: string }): Promise<void>;
+  startTranscription(input: { callControlId: string; language: string; commandId?: string }): Promise<void>;
+  startRecording(input: { callControlId: string; commandId?: string }): Promise<void>;
+  speak(input: { callControlId: string; text: string; voice: string; language: string; speakingRate?: number; commandId?: string }): Promise<void>;
+  hangup(input: { callControlId: string; commandId?: string }): Promise<void>;
 }

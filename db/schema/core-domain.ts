@@ -21,7 +21,7 @@ export const conversationStatus = pgEnum("conversation_status", ["OPEN", "CLOSED
 export const handlingMode = pgEnum("handling_mode", ["AI", "HUMAN"]);
 export const messageDirection = pgEnum("message_direction", ["INBOUND", "OUTBOUND", "INTERNAL"]);
 export const messageSenderType = pgEnum("message_sender_type", ["CUSTOMER", "AI", "USER", "SYSTEM"]);
-export const messageContentType = pgEnum("message_content_type", ["TEXT", "CALL_TRANSCRIPT", "APPOINTMENT_EVENT", "SYSTEM_EVENT"]);
+export const messageContentType = pgEnum("message_content_type", ["TEXT", "CALL_TRANSCRIPT", "CALL_RECORDING", "APPOINTMENT_EVENT", "SYSTEM_EVENT"]);
 export const appointmentStatus = pgEnum("appointment_status", ["PENDING", "CONFIRMED", "COMPLETED", "CANCELLED", "NO_SHOW"]);
 
 export const contacts = pgTable(
@@ -80,6 +80,9 @@ export const leads = pgTable(
     serviceRequested: text("service_requested"),
     source: text("source"),
     estimatedValue: integer("estimated_value"),
+    qualificationData: jsonb("qualification_data").$type<Record<string, string>>().default({}).notNull(),
+    qualificationScore: integer("qualification_score").default(0).notNull(),
+    qualificationCompletedAt: timestamp("qualification_completed_at", { withTimezone: true, mode: "date" }),
     assignedUserId: text("assigned_user_id").references(() => user.id, { onDelete: "set null" }),
     createdAt: timestamp("created_at", { withTimezone: true, mode: "date" }).defaultNow().notNull(),
     updatedAt: timestamp("updated_at", { withTimezone: true, mode: "date" }).defaultNow().notNull(),
