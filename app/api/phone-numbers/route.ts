@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { resolveWorkspaceContext } from "@/server/auth/workspace-context";
+import { requireWorkspacePermission } from "@/server/auth/permissions";
 import { AppError, toErrorResponse } from "@/server/http/errors";
 import { getManagedPhoneNumber, provisionManagedPhoneNumber } from "@/server/phone-numbers/service";
 import { getCreditBalance } from "@/server/credits/service";
@@ -27,6 +28,7 @@ export async function GET(request: Request) {
 export async function POST(request: Request) {
   try {
     const context = await resolveWorkspaceContext(request.headers);
+    requireWorkspacePermission(context.membership.role, "billing.manage");
     const input = parseInput(provisionSchema, await request.json());
     const number = await provisionManagedPhoneNumber(context.workspace.id, input);
     return Response.json({ number }, { status: 201, headers: { "cache-control": "no-store" } });
