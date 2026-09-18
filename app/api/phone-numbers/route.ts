@@ -1,6 +1,6 @@
 import { z } from "zod";
 import { resolveWorkspaceContext } from "@/server/auth/workspace-context";
-import { requireWorkspacePermission } from "@/server/auth/permissions";
+import { hasWorkspacePermission, requireWorkspacePermission } from "@/server/auth/permissions";
 import { AppError, toErrorResponse } from "@/server/http/errors";
 import { getManagedPhoneNumber, provisionManagedPhoneNumber } from "@/server/phone-numbers/service";
 import { getCreditBalance } from "@/server/credits/service";
@@ -19,7 +19,7 @@ export async function GET(request: Request) {
       getManagedPhoneNumber(context.workspace.id),
       getCreditBalance(context.workspace.id),
     ]);
-    return Response.json({ number, creditBalance }, { headers: { "cache-control": "no-store" } });
+    return Response.json({ number, creditBalance, canManage: hasWorkspacePermission(context.membership.role, "billing.manage") }, { headers: { "cache-control": "no-store" } });
   } catch (error) {
     return toErrorResponse(error);
   }
