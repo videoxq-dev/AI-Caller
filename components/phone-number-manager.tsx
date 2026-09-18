@@ -74,6 +74,7 @@ export function PhoneNumberManager({
 }) {
   const [current, setCurrent] = useState<ManagedPhoneNumber | null>(null);
   const [creditBalance, setCreditBalance] = useState(0);
+  const [canManage, setCanManage] = useState(false);
   const [state, setState] = useState("");
   const [city, setCity] = useState("");
   const [areaCode, setAreaCode] = useState("");
@@ -87,11 +88,12 @@ export function PhoneNumberManager({
 
   async function loadCurrent() {
     const response = await fetch("/api/phone-numbers", { cache: "no-store" });
-    const payload = await response.json().catch(() => null) as { number?: ManagedPhoneNumber | null; creditBalance?: number; error?: { message?: string } } | null;
+    const payload = await response.json().catch(() => null) as { number?: ManagedPhoneNumber | null; creditBalance?: number; canManage?: boolean; error?: { message?: string } } | null;
     if (!response.ok) throw new Error(apiError(payload, "Unable to load your business phone number."));
     const number = payload?.number ?? null;
     setCurrent(number);
     setCreditBalance(payload?.creditBalance ?? 0);
+    setCanManage(payload?.canManage === true);
     onNumberChange?.(number);
   }
 
@@ -187,7 +189,18 @@ export function PhoneNumberManager({
           <div><span>Monthly renewal</span><strong>{current.monthlyCredits.toLocaleString()} credits</strong></div>
           <div><span>Next billing</span><strong>{current.nextBillingAt ? new Date(current.nextBillingAt).toLocaleDateString() : "Pending"}</strong></div>
           <div><span>Features</span><strong>Calls + SMS</strong></div>
-          <button type="button" onClick={() => setChanging(true)}>{settingsMode ? "Change number" : "Choose a different number"}</button>
+          {canManage && <button type="button" onClick={() => setChanging(true)}>{settingsMode ? "Change number" : "Choose a different number"}</button>}
+        </div>
+      </div>
+    );
+  }
+
+  if (!canManage) {
+    return (
+      <div className={styles.manager}>
+        <div className={styles.autoNote}>
+          <CheckIcon size={16} />
+          <span><strong>Workspace owner action required.</strong> Only the workspace owner can choose a managed number or incur recurring telephony charges.</span>
         </div>
       </div>
     );
