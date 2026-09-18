@@ -39,8 +39,10 @@ function parseMinute(value: string | null) {
   return hour * 60 + minute;
 }
 
+type BusinessHour = { dayOfWeek: number; enabled: boolean; openTime: string | null; closeTime: string | null };
+
 export function isWithinBusinessHours(
-  hours: Awaited<ReturnType<typeof getBusinessSetup>>["hours"],
+  hours: readonly BusinessHour[],
   day: number,
   minuteOfDay: number,
 ) {
