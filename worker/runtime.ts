@@ -24,7 +24,7 @@ import { whatsAppWebhookService } from "@/server/whatsapp/service";
 import { dispatchAutomationEvent } from "@/server/automations/dispatcher";
 import { executeAutomationRun } from "@/server/automations/executor";
 import { listRecoverableAutomationRuns, listUndispatchedAutomationEvents } from "@/server/automations/repository";
-import { processDuePhoneNumberRenewals } from "@/server/phone-numbers/service";
+import { processDuePhoneNumberRenewals, processPendingPhoneNumberReleases } from "@/server/phone-numbers/service";
 
 export async function startWorker() {
   const authBoss = await ensureQueue(AUTH_PASSWORD_RESET_EMAIL);
@@ -129,8 +129,12 @@ export async function startWorker() {
     if (renewalRunning) return;
     renewalRunning = true;
     try {
-      const result = await processDuePhoneNumberRenewals(100);
-      if (result.checked > 0) logger.info(result, "Processed managed phone number renewals");
+      const [renewals, releases] = await Promise.all([
+        processDuePhoneNumberRenewals(100),
+        processPendingPhoneNumberReleases(50),
+      ]);
+      if (renewals.checked > 0) logger.info(renewals, "Processed managed phone number renewals");
+      if (releases.checked > 0) logger.info(releases, "Processed managed phone number release retries");
     } catch (error) {
       logger.error({ err: error }, "Failed to process managed phone number renewals");
     } finally {
