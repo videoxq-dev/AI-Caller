@@ -218,7 +218,8 @@ export default function AIAgentPage() {
             <div className="agentTitleActions"><span className={`agentState ${agentOnline ? "online" : "paused"}`}><i />{agentOnline ? "Agent Online" : "Agent Paused"}</span><button type="button" disabled={savingSettings} onClick={() => void saveChanges()}>{savingSettings ? "Saving…" : saved ? "Saved" : "Save changes"}</button></div>
           </div>
 
-          {settingsError && <div className="agentSettingsError">{settingsError}</div>}\n          <div className="agentTabs" role="tablist" aria-label="AI Agent sections">
+          {settingsError && <div className="agentSettingsError">{settingsError}</div>}
+          <div className="agentTabs" role="tablist" aria-label="AI Agent sections">
             {(["overview", "knowledge", "behavior", "test"] as AgentTab[]).map((item) => <button key={item} type="button" className={tab === item ? "active" : ""} onClick={() => setTab(item)}>{item[0].toUpperCase() + item.slice(1)}</button>)}
           </div>
 
