@@ -56,6 +56,19 @@ describe("Telnyx 10DLC and toll-free transport contracts", () => {
     expect(url.searchParams.get("page_size")).toBe("30");
   });
 
+  it("uses the sole proprietor PIN request and verification endpoints", async () => {
+    const { client, requests } = httpFixture({ referenceId: "otp-1" });
+    await client.requestSoleProprietorOtp("brand-1");
+    await client.verifySoleProprietorOtp("brand-1", "654321");
+    expect(requests).toHaveLength(2);
+    expect(requests[0].url).toBe("https://api.telnyx.com/v2/10dlc/brand/brand-1/smsOtp");
+    expect(requests[0].init.method).toBe("POST");
+    expect(JSON.parse(String(requests[0].init.body)).pinSms).toContain("@OTP_PIN@");
+    expect(requests[1].url).toBe(requests[0].url);
+    expect(requests[1].init.method).toBe("PUT");
+    expect(JSON.parse(String(requests[1].init.body))).toEqual({ otpPin: "654321" });
+  });
+
   it("does not treat Telnyx API errors as successful registration", async () => {
     const { client } = httpFixture({ error: "Invalid business data" }, 422);
     await expect(client.getBrand("invalid-brand")).rejects.toMatchObject({
