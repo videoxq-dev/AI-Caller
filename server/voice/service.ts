@@ -549,7 +549,7 @@ export function createVoiceWebhookService(dependencies: VoiceServiceDependencies
         contentType: "CALL_RECORDING",
         body: "Incoming call recording",
         provider: "telnyx-voice",
-        externalMessageId: `recording:${event.recordingId ?? event.externalEventId}`,
+        externalMessageId: `voice-call:${call.id}:artifact`,
         status: "AVAILABLE",
         metadata: {
           voiceCallId: call.id,
@@ -581,6 +581,24 @@ export function createVoiceWebhookService(dependencies: VoiceServiceDependencies
       }, {
         phase: "ENDED",
         hangupCause: event.cause,
+      });
+      // A call artifact belongs in the Inbox even when Telnyx has not yet
+      // archived audio or storage delivery is delayed/failed. Stable id allows
+      // recording.saved and hangup callbacks in either order without two cards.
+      await appendMessage(workspaceId, call.conversationId, {
+        channel: "PHONE",
+        direction: "INBOUND",
+        senderType: "SYSTEM",
+        contentType: "CALL_RECORDING",
+        body: "Incoming call",
+        provider: "telnyx-voice",
+        externalMessageId: `voice-call:${call.id}:artifact`,
+        status: updated.recordingStatus,
+        metadata: {
+          voiceCallId: call.id,
+          durationSeconds,
+          voiceMode: call.mode,
+        },
       });
       await recordVoiceUsage(workspaceId, runtime, updated);
     }
