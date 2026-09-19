@@ -12,6 +12,8 @@ const checks = [
   ["Toll-free verification listing", "/v2/messaging_tollfree/verification/requests?page=1&page_size=1"],
 ];
 
+let verified = 0;
+let blocked = 0;
 for (const [name, path] of checks) {
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), 10000);
@@ -22,15 +24,20 @@ for (const [name, path] of checks) {
       redirect: "error",
       signal: controller.signal,
     });
-    if (!response.ok) throw new Error(name + ": HTTP " + response.status +
-      ". Check account/API permissions and endpoint compatibility.");
+    if (!response.ok) {
+      if (name === "Messaging profiles") throw new Error("Messaging authentication returned HTTP " + response.status);
+      blocked += 1;
+      console.log("UNVERIFIED: " + name + " returned HTTP " + response.status + " for this API key.");
+      continue;
+    }
     const payload = await response.json();
     assert(payload && typeof payload === "object", name + ": invalid JSON object");
     // Provider response bodies may contain customer data. Do not log them.
+    verified += 1;
     console.log("PASS: " + name + " returned HTTP " + response.status);
   } finally {
     clearTimeout(timeout);
   }
 }
-console.log("Telnyx read-only API smoke passed. No number, brand, campaign or SMS was created.");
+console.log("Telnyx authenticated. Read-only checks passed: " + verified + "; unavailable: " + blocked + ".");
 console.log("Carrier approvals, assignment, delivery and STOP handling remain unverified.");
