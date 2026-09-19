@@ -1,4 +1,6 @@
 import { z } from "zod";
+import { getEnv } from "@/server/env";
+import { hostedAIModel } from "@/server/providers/ai";
 import { resolveWorkspaceContext } from "@/server/auth/workspace-context";
 import { requireWorkspacePermission } from "@/server/auth/permissions";
 import {
@@ -90,7 +92,16 @@ function filterSettings(provider: string, settings: Record<string, unknown>) {
 export async function GET(request: Request) {
   try {
     const context = await resolveWorkspaceContext(request.headers);
-    return Response.json({ integrations: await listIntegrations(context.workspace.id) });
+    const env = getEnv();
+    return Response.json({
+      integrations: await listIntegrations(context.workspace.id),
+      hostedAI: {
+        configured: Boolean(env.HOSTED_AI_API_KEY?.trim()),
+        provider: env.HOSTED_AI_PROVIDER,
+        model: hostedAIModel(),
+        liveVerified: false, // Configuration presence is not a provider health check.
+      },
+    });
   } catch (error) {
     return toErrorResponse(error);
   }
