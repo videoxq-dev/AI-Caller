@@ -128,7 +128,7 @@ describe("SMS registration reconciliation", () => {
 
   it("never grants approval from a campaign without number assignment", async () => {
     await seed("local");
-    const client = carrier({ getAssignment: vi.fn(async () => ({ campaignId: "campaign-1", assignmentStatus: "PENDING_ASSIGNMENT" })) });
+    const client = carrier({ getAssignment: vi.fn(async () => ({ phoneNumber: "+12025550200", campaignId: "campaign-1", assignmentStatus: "PENDING_ASSIGNMENT" })) });
     expect(await reconcileSmsRegistration(workspaceId, registrationId, { submitting: true }, client)).toBe("PENDING");
     expect((await current()).number.messagingReadiness).toBe("PENDING");
   });
