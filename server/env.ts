@@ -45,7 +45,7 @@ const envSchema = z.object({
   VOICE_GATEWAY_URL: z.string().url().optional(),
   VOICE_GATEWAY_PORT: z.coerce.number().int().min(1).max(65535).default(3002),
   VOICE_RECORDING_STORAGE_BACKEND: z.enum(["filesystem", "s3"]).default("filesystem"),
-  VOICE_RECORDING_ALLOW_PERSISTENT_FILESYSTEM: z.enum(["true", "false"]).transform((value) => value === "true").default("false"),
+  VOICE_RECORDING_ALLOW_PERSISTENT_FILESYSTEM: z.enum(["true", "false"]).default("false").transform((value) => value === "true"),
   VOICE_RECORDING_DIR: z.string().min(1).default(".data/recordings"),
   VOICE_RECORDING_S3_BUCKET: z.string().min(1).optional(),
   VOICE_RECORDING_S3_REGION: z.string().min(1).default("us-east-1"),
