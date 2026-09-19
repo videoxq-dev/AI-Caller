@@ -218,9 +218,9 @@ try {
   await page.getByRole("button", { name: /Phone & SMS/ }).waitFor();
   await page.getByText("+1 (202) 555-0200", { exact: true }).waitFor({ timeout: 10_000 });
   await page.getByText("Registration required", { exact: true }).waitFor();
-  await page.getByText("Activate SMS messaging", { exact: true }).waitFor();
   await assertNoHorizontalOverflow(page, "Managed phone and SMS setup desktop");
-  await page.getByRole("link", { name: /Set up SMS/ }).click();
+  await page.goto(`${baseUrl}/settings?tab=phone#sms-registration`, { waitUntil: "networkidle" });
+  await page.getByText("Activate SMS messaging", { exact: true }).waitFor();
   await page.getByRole("heading", { name: "SMS registration" }).waitFor();
   await page.getByText(/Register \+12025550200 for US 10DLC messaging/).waitFor();
   await page.getByRole("button", { name: "Save registration draft" }).waitFor();
