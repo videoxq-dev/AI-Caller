@@ -27,7 +27,7 @@ function smsText(value: string) {
   if (!text) throw new AppError("EMPTY_SMS_MESSAGE", "SMS message cannot be empty.", 400);
   const characters = Array.from(text);
   if (characters.length <= MAX_SMS_TEXT_CHARACTERS) return text;
-  return `${characters.slice(0, MAX_SMS_TEXT_CHARACTERS - 1).join("")}…`;
+  throw new AppError("SMS_TOO_LONG", "SMS message exceeds the 1,600-character limit. Shorten the text before sending.", 422);
 }
 
 function statusCallbackUrl(provider: string, workspaceId: string) {
@@ -237,7 +237,7 @@ export async function sendSmsConversationTextWithRuntime(
     provider: runtime.providerName,
     externalMessageId: null,
     status: "SENDING",
-    metadata: { mode: runtime.mode, ...(runtime.mode === "HOSTED" ? { smsPurpose: actualPurpose } : {}), ...(input.metadata ?? {}) },
+    metadata: { ...input.metadata, mode: runtime.mode, ...(runtime.mode === "HOSTED" ? { smsPurpose: actualPurpose } : {}) },
   });
 
   let hostedCharge: HostedSmsCharge | null = null;
@@ -260,6 +260,7 @@ export async function sendSmsConversationTextWithRuntime(
     }
   }
 
+  let acceptedByCarrier: Awaited<ReturnType<SmsRuntime["provider"]["send"]>> | null = null;
   try {
     if (runtime.mode === "HOSTED") {
       // Recheck just before dispatch: a contact can unsubscribe or a campaign can
@@ -279,8 +280,9 @@ export async function sendSmsConversationTextWithRuntime(
       statusCallbackUrl: statusCallbackUrl(runtime.providerName, workspaceId),
       idempotencyKey: input.idempotencyKey ?? outbound.id,
     });
-    await settleHostedCredits(workspaceId, hostedCharge, outbound.id);
+    acceptedByCarrier = sent;
     const updated = await attachSmsProviderMessage(workspaceId, outbound.id, runtime.providerName, sent.externalId, sent.status);
+    await settleHostedCredits(workspaceId, hostedCharge, outbound.id);
     await recordUsage(workspaceId, runtime, outbound.id, hostedCharge, {
       messages: 1,
       status: sent.status,
@@ -290,6 +292,17 @@ export async function sendSmsConversationTextWithRuntime(
     });
     return updated;
   } catch (error) {
+    if (acceptedByCarrier) {
+      // Carrier acceptance is irreversible. A local persistence/billing error must
+      // never be reported as a suppressed message or refunded as an unsent SMS.
+      logger.error({ err: error, workspaceId, messageId: outbound.id, externalId: acceptedByCarrier.externalId }, "Accepted SMS could not be finalized locally");
+      try { await attachSmsProviderMessage(workspaceId, outbound.id, runtime.providerName, acceptedByCarrier.externalId, acceptedByCarrier.status); }
+      catch (recordError) { logger.error({ err: recordError, messageId: outbound.id }, "Unable to persist accepted carrier SMS ID"); }
+      try { await settleHostedCredits(workspaceId, hostedCharge, outbound.id); }
+      catch (billingError) { logger.error({ err: billingError, messageId: outbound.id }, "Unable to settle accepted SMS credits"); }
+      // No automatic retry: Telnyx already has this message and could deliver it.
+      throw new AppError("SMS_ACCEPTED_FINALIZATION_FAILED", "The carrier accepted this SMS, but local confirmation is incomplete. Check delivery before attempting another send.", 503);
+    }
     if (error instanceof AppError) {
       // A policy change or late opt-out is a local suppression, not an uncertain carrier
       // send. Release credits and preserve an explicit, non-delivered message status.
