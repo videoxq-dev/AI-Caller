@@ -28,6 +28,12 @@ services:
       timeout: 5s
       retries: 20
       start_period: 10s
+    networks:
+      default:
+        aliases:
+          - postgres
+          - ai-caller
+          - aicaller
 
   migrate:
     <<: *app
