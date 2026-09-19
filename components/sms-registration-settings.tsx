@@ -142,7 +142,7 @@ export function SmsRegistrationSettings() {
           <p>Sole proprietor verification requires a code sent to the mobile number on the registration. The code expires after 24 hours. Only the workspace owner can request or verify it.</p>
           {canSubmit && <>
             <button type="button" disabled={otpBusy} onClick={() => void submitOtp("POST")}>Request verification code</button>
-            <label>Six-digit verification code<input value={otpPin} inputMode="numeric" autoComplete="one-time-code" maxLength={6} pattern="[0-9]{6}" onChange={(event) => setOtpPin(event.target.value.replace(/\\D/g, ""))} /></label>
+            <label>Six-digit verification code<input value={otpPin} inputMode="numeric" autoComplete="one-time-code" maxLength={6} pattern="[0-9]{6}" onChange={(event) => setOtpPin(event.target.value.replace(/\D/g, ""))} /></label>
             <button type="button" disabled={otpBusy || !/^[0-9]{6}$/.test(otpPin)} onClick={() => void submitOtp("PUT")}>Verify identity code</button>
           </>}
         </div>}
