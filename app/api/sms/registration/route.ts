@@ -64,6 +64,9 @@ export async function GET(request: Request) {
       business: business && { businessName: business.businessName, website: business.websiteUrl, phone: business.phone, address: business.address, city: business.city, state: business.state, postalCode: business.postalCode },
       registration: registration && {
         status: registration.status,
+        soleProprietorOtpAvailable: Boolean(registration.carrierBrandId &&
+          (registration.draft as { entityType?: string }).entityType === "SOLE_PROPRIETOR" &&
+          ["SUBMITTING", "PENDING"].includes(registration.status)),
         carrierStatus: registration.carrierStatus,
         rejectionReason: registration.rejectionReason,
         draft: registration.draft,
