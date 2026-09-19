@@ -107,6 +107,7 @@ export function brandPayload(draft: TelnyxRegistrationDraft) {
     email: draft.contactEmail, businessContactEmail: draft.contactEmail,
     vertical: draft.vertical, firstName, lastName, ein: draft.ein || undefined,
     phone: draft.contactPhone, street: draft.businessAddress, city: draft.businessCity,
+    ...(draft.entityType === "SOLE_PROPRIETOR" ? { mobilePhone: draft.contactPhone } : {}),
     ...(draft.entityType === "PUBLIC_PROFIT" ? { stockSymbol: draft.stockSymbol, stockExchange: draft.stockExchange } : {}),
     state: draft.businessState, postalCode: draft.businessZip, website: draft.website,
     isReseller: false, mock: false,
@@ -116,7 +117,8 @@ export function brandPayload(draft: TelnyxRegistrationDraft) {
 export function campaignPayload(draft: TelnyxRegistrationDraft, brandId: string, referenceId: string) {
   const marketing = draft.categories.includes("MARKETING");
   const transactional = draft.categories.includes("TRANSACTIONAL");
-  const usecase = marketing && transactional ? "MIXED" : marketing ? "MARKETING" : "CUSTOMER_CARE";
+  const usecase = draft.entityType === "SOLE_PROPRIETOR" ? "SOLE_PROPRIETOR"
+    : marketing && transactional ? "MIXED" : marketing ? "MARKETING" : "CUSTOMER_CARE";
   const brand = draft.legalName.slice(0, 65);
   return {
     brandId, referenceId, usecase, description: draft.messagingUseCase,
@@ -170,6 +172,15 @@ export function telnyxRegistrationClient(fetcher: typeof fetch = fetch) {
     createBrand: (draft: TelnyxRegistrationDraft) =>
       request<TelnyxBrand>("/10dlc/brand", "POST", brandPayload(draft)),
     getBrand: (id: string) => request<TelnyxBrand>("/10dlc/brand/" + encodeURIComponent(id)),
+    requestSoleProprietorOtp: (id: string) => request<{ referenceId?: string }>(
+      "/10dlc/brand/" + encodeURIComponent(id) + "/smsOtp", "POST", {
+        pinSms: "Your Telnyx brand verification code is @OTP_PIN@. This expires in 24 hours.",
+        successSms: "Your SMS brand is verified. Reply STOP to unsubscribe from verification notices.",
+      }),
+    verifySoleProprietorOtp: (id: string, pin: string) => request<unknown>(
+      "/10dlc/brand/" + encodeURIComponent(id) + "/smsOtp", "PUT", { otpPin: pin }),
+    getSoleProprietorOtpStatus: (id: string) => request<{ deliveryStatus?: string }>(
+      "/10dlc/brand/" + encodeURIComponent(id) + "/smsOtp"),
     updateBrand: (id: string, draft: TelnyxRegistrationDraft) =>
       request<TelnyxBrand>("/10dlc/brand/" + encodeURIComponent(id), "PUT", brandPayload(draft)),
     createCampaign: (draft: TelnyxRegistrationDraft, brandId: string, referenceId: string) =>
