@@ -13,15 +13,9 @@ export async function POST(request: Request) {
     const context = await resolveWorkspaceContext(request.headers);
     requireWorkspacePermission(context.membership.role, "integration.manage");
     const input = parseInput(schema, await request.json());
+    let imported;
     try {
-      const imported = await importWebsiteText(input.url);
-      const source = await saveKnowledgeSource(context.workspace.id, {
-        kind: "WEBSITE",
-        label: imported.label,
-        sourceUrl: imported.sourceUrl,
-        content: imported.content,
-      });
-      return Response.json({ source: { ...source, content: undefined } }, { status: 201 });
+      imported = await importWebsiteText(input.url);
     } catch (error) {
       throw new AppError(
         "KNOWLEDGE_IMPORT_FAILED",
@@ -29,6 +23,13 @@ export async function POST(request: Request) {
         422,
       );
     }
+    const source = await saveKnowledgeSource(context.workspace.id, {
+      kind: "WEBSITE",
+      label: imported.label,
+      sourceUrl: imported.sourceUrl,
+      content: imported.content,
+    });
+    return Response.json({ source: { ...source, content: undefined } }, { status: 201 });
   } catch (error) {
     return toErrorResponse(error);
   }

@@ -1,4 +1,5 @@
 import { createHash } from "node:crypto";
+import { AppError } from "@/server/http/errors";
 import { and, count, desc, eq } from "drizzle-orm";
 import { db } from "@/db";
 import { knowledgeSources } from "@/db/schema";
@@ -56,7 +57,7 @@ export async function saveKnowledgeSource(
   const [total] = await db.select({ value: count() }).from(knowledgeSources)
     .where(eq(knowledgeSources.workspaceId, workspaceId));
   if ((total?.value ?? 0) >= MAX_KNOWLEDGE_SOURCES)
-    throw new Error("Remove an existing knowledge source before importing more (limit: 50).");
+    throw new AppError("KNOWLEDGE_SOURCE_LIMIT", "Remove an existing knowledge source before importing more (limit: 50).", 409);
 
   const [created] = await db.insert(knowledgeSources).values({
     workspaceId,

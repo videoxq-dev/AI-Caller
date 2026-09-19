@@ -5,6 +5,29 @@ import { saveKnowledgeSource } from "@/server/knowledge/repository";
 
 const MAX_FILE_BYTES = 256 * 1024;
 const ALLOWED_EXTENSIONS = new Set([".txt", ".md"]);
+const MAX_MULTIPART_BYTES = MAX_FILE_BYTES + 64 * 1024;
+
+// Stream-limit before parsing multipart; Request.formData() alone buffers
+// the entire untrusted request before uploaded.size can be checked.
+async function limitedFormData(request: Request) {
+  if (!request.body) throw new AppError("KNOWLEDGE_FILE_REQUIRED", "Choose a file to upload.", 422);
+  const chunks: Buffer[] = [];
+  const reader = request.body.getReader();
+  let bytes = 0;
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    bytes += value.byteLength;
+    if (bytes > MAX_MULTIPART_BYTES) {
+      await reader.cancel();
+      throw new AppError("KNOWLEDGE_FILE_TOO_LARGE", "Knowledge files must be 256 KB or smaller.", 413);
+    }
+    chunks.push(Buffer.from(value));
+  }
+  const headers = new Headers(request.headers);
+  headers.delete("content-length");
+  return new Request(request.url, { method: "POST", headers, body: Buffer.concat(chunks) }).formData();
+}
 
 function extension(filename: string) {
   const index = filename.lastIndexOf(".");
@@ -18,7 +41,7 @@ export async function POST(request: Request) {
     const declaredLength = Number(request.headers.get("content-length"));
     if (Number.isFinite(declaredLength) && declaredLength > MAX_FILE_BYTES + 65_536)
       throw new AppError("KNOWLEDGE_FILE_TOO_LARGE", "Knowledge files must be 256 KB or smaller.", 413);
-    const form = await request.formData();
+    const form = await limitedFormData(request);
     const uploaded = form.get("file");
     if (!(uploaded instanceof File)) throw new AppError("KNOWLEDGE_FILE_REQUIRED", "Choose a TXT or MD file to upload.", 422);
     if (!ALLOWED_EXTENSIONS.has(extension(uploaded.name))) {
