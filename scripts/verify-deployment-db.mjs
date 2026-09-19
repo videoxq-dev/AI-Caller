@@ -14,9 +14,9 @@ export function connectionTarget(value) {
   try {
     const url = new URL(value);
     if (!["postgres:", "postgresql:"].includes(url.protocol)) throw new Error("not PostgreSQL");
-    const host = url.hostname.replace(/^\\[|\\]$/g, "").toLowerCase();
+    const host = url.hostname.replace(/^\[|\]$/g, "").toLowerCase();
     const loopback = host === "localhost" || host === "::1"
-      || /^127(?:\\.\\d{1,3}){3}$/.test(host);
+      || /^127(?:\.\d{1,3}){3}$/.test(host);
     return { valid: true, loopback, host, port: url.port || "5432" };
   } catch {
     return { valid: false, loopback: false, host: "unknown", port: "5432" };
