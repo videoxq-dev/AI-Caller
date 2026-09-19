@@ -25,6 +25,7 @@ const envSchema = z.object({
   HOSTED_AI_MODEL: z.string().min(1).optional(),
   HOSTED_AI_MAX_OUTPUT_TOKENS: z.coerce.number().int().min(64).max(8192).default(1200),
   HOSTED_TELNYX_API_KEY: z.string().min(1).optional(),
+  HOSTED_WEBHOOK_BASE_URL: z.preprocess((v) => v === "" ? undefined : v, z.string().url().optional()),
   HOSTED_TELNYX_WEBHOOK_PUBLIC_KEY: z.string().min(1).optional(),
   HOSTED_TELEPHONY_TARGET_MARGIN_BPS: z.coerce.number().int().min(0).max(9500).default(5000),
   HOSTED_SMS_TELNYX_API_KEY: z.string().min(1).optional(),
