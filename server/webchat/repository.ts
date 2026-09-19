@@ -5,6 +5,8 @@ import {
   aiAgents,
   businessProfiles,
   messages,
+  hostedPhoneNumbers,
+  smsRegistrations,
   webchatSessions,
   webchatTurns,
   webchatWidgets,
@@ -105,7 +107,17 @@ export async function getPublicWebchatWidget(widgetKey: string) {
     .where(and(eq(webchatWidgets.publicKey, widgetKey), eq(webchatWidgets.enabled, true)))
     .limit(1);
   if (!row) return null;
+  const [registration] = await db.select({ draft: smsRegistrations.draft }).from(smsRegistrations)
+    .innerJoin(hostedPhoneNumbers, and(
+      eq(hostedPhoneNumbers.id, smsRegistrations.phoneNumberId),
+      eq(hostedPhoneNumbers.workspaceId, smsRegistrations.workspaceId),
+      eq(hostedPhoneNumbers.status, "ACTIVE"),
+    )).where(eq(smsRegistrations.workspaceId, row.widget.workspaceId)).limit(1);
+  const candidateTermsUrl = registration?.draft?.termsUrl;
+  const smsTermsUrl = typeof candidateTermsUrl === "string" && /^https:\/\//i.test(candidateTermsUrl)
+    ? candidateTermsUrl : null;
   return {
+    smsTermsUrl,
     workspaceId: row.widget.workspaceId,
     publicKey: row.widget.publicKey,
     launcherLabel: row.widget.launcherLabel,
