@@ -57,7 +57,7 @@ export async function submitSmsRegistration(workspaceId: string) {
     logger.error({ err: error, workspaceId, registrationId: registration.id }, "SMS registration submission failed; readiness stays blocked");
     if (error instanceof ProviderRequestError && error.status >= 400 && error.status < 500) {
       await db.update(smsRegistrations).set({
-        status: "REJECTED", rejectionReason: error.message.slice(0, 1000),
+        status: "REJECTED", carrierStatus: "SUBMISSION_REJECTED", rejectionReason: error.message.slice(0, 1000),
         updatedAt: new Date(),
       }).where(and(eq(smsRegistrations.workspaceId, workspaceId), eq(smsRegistrations.id, registration.id)));
       await db.update(hostedPhoneNumbers).set({ messagingReadiness: "REJECTED", updatedAt: new Date() })
@@ -109,7 +109,7 @@ export async function reconcileSmsRegistration(
         updatedAt: now,
       }).where(and(eq(smsRegistrations.id, registration.id), eq(smsRegistrations.workspaceId, workspaceId)));
     }
-    if (registration.status === "REJECTED" && options.submitting) {
+    if (registration.carrierVerificationId && options.submitting) {
       await client.updateTollFree(verificationId, draft, number.phoneNumber);
     }
     const verified = await client.getTollFree(verificationId);
@@ -132,12 +132,23 @@ export async function reconcileSmsRegistration(
     reason = brand.failureReasons ?? null;
     if (brand.status === "REGISTRATION_FAILED") status = "REJECTED";
     else if (brand.status === "OK" && ["VERIFIED", "VETTED_VERIFIED"].includes(brand.identityStatus ?? "")) {
-      if (!campaignId && options.submitting) {
+      if (!campaignId && (options.submitting || registration.carrierStatus !== "CAMPAIGN_SUBMITTING")) {
+        // Persist the remote-create intent before making the potentially billable POST.
+        // A timeout cannot safely be retried without a campaign ID: leave it blocked
+        // and surface a carrier investigation instead of submitting duplicates.
+        await db.update(smsRegistrations).set({
+          carrierStatus: "CAMPAIGN_SUBMITTING", checkedAt: now, updatedAt: now,
+        }).where(and(eq(smsRegistrations.id, registration.id), eq(smsRegistrations.workspaceId, workspaceId)));
+
         const campaign = await client.createCampaign(draft, brandId, registration.id);
         campaignId = campaign.campaignId ?? null;
         if (!campaignId) throw new Error("Telnyx did not return a campaign ID; do not resubmit.");
         await db.update(smsRegistrations).set({ carrierCampaignId: campaignId, updatedAt: now })
           .where(and(eq(smsRegistrations.id, registration.id), eq(smsRegistrations.workspaceId, workspaceId)));
+      }
+      if (!campaignId && registration.carrierStatus === "CAMPAIGN_SUBMITTING") {
+        carrierStatus = "CAMPAIGN_SUBMISSION_UNCERTAIN";
+        reason = "The last carrier campaign submission could not be confirmed. Contact support rather than resubmitting.";
       }
       if (campaignId) {
         const campaign = await client.getCampaign(campaignId);
