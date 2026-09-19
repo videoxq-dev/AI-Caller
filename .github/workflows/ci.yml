@@ -90,6 +90,18 @@ jobs:
       - name: Build
         run: npm run build
 
+      - name: Validate deployment Compose configuration
+        run: |
+          cp .env.deploy.example .env.deploy
+          docker compose --env-file .env.deploy config --quiet
+          rm .env.deploy
+
+      - name: Build deployable app image and check runtime tooling
+        run: |
+          docker build --tag ai-caller-ci:latest .
+          docker run --rm --entrypoint sh ai-caller-ci:latest -ec \
+            'test -f .next/BUILD_ID && test -f db/migrations/0019_knowledge_sources.sql && test -x node_modules/.bin/tsx'
+
       - name: Install Chromium for browser verification
         run: npx playwright install --with-deps chromium
 
