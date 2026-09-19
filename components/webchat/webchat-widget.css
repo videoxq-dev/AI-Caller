@@ -113,3 +113,5 @@ button, textarea { font: inherit; }
   .webchatHeader { padding-top: max(16px, env(safe-area-inset-top)); }
   .webchatMessage span { max-width: 88%; }
 }
+
+.webchatContactForm{display:grid;gap:7px;margin:10px;padding:11px;border:1px solid #d9e5f5;border-radius:10px;background:#f7faff;color:#344660;font-size:11px}.webchatContactForm>strong{font-size:14px}.webchatContactForm label{display:grid;gap:4px}.webchatContactForm input:not([type=checkbox]){padding:8px;border:1px solid #cfdae8;border-radius:7px;background:#fff;font:inherit}.webchatContactForm .webchatConsentChoice{display:flex;align-items:start;gap:7px;line-height:1.4}.webchatContactForm small{font-size:9px;line-height:1.5}.webchatContactForm a{color:#1769ee}.webchatContactForm button{padding:9px;border:0;border-radius:8px;background:#1769ee;color:#fff;cursor:pointer}.webchatContactForm p{color:#a42323}
