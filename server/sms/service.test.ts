@@ -1,11 +1,13 @@
 import { afterAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { closeDatabase, db } from "@/db";
-import { contactIdentities, creditWallets, hostedApiRateCards, messages, providerWebhookEvents, usageEvents, workspaces } from "@/db/schema";
+import { contactIdentities, creditWallets, hostedApiRateCards, hostedPhoneNumbers, messages, providerWebhookEvents, smsRegistrations, usageEvents, workspaces } from "@/db/schema";
 import type { SmsInboundResponseJob } from "@/server/jobs/queues";
 import type { NormalizedSmsEvent, SMSProvider } from "@/server/providers/contracts";
 import { ProviderRequestError } from "@/server/providers/http";
 import type { SmsRuntime } from "@/server/providers/sms/runtime";
 import { createSmsWebhookService } from "./service";
+
+vi.mock("./classification", () => ({ classifySmsPurpose: vi.fn(async () => "TRANSACTIONAL") }));
 
 function request(body = "{}") {
   return new Request("https://app.example.com/api/webhooks/sms/twilio/11111111-1111-4111-8111-111111111111", {
@@ -69,6 +71,22 @@ describe("SMS webhook service", () => {
     await db.delete(workspaces);
     const [workspace] = await db.insert(workspaces).values({ name: "SMS Service Test" }).returning();
     workspaceId = workspace.id;
+    const [managed] = await db.insert(hostedPhoneNumbers).values({
+      workspaceId,
+      phoneNumber: "+12025550200",
+      countryCode: "US",
+      numberType: "local",
+      status: "ACTIVE",
+      messagingReadiness: "READY",
+      providerMonthlyCostMicros: 1000000,
+      providerUpfrontCostMicros: 0,
+      monthlyCredits: 1,
+      purchaseCredits: 1,
+    }).returning();
+    await db.insert(smsRegistrations).values({
+      workspaceId, phoneNumberId: managed.id, numberType: "local", status: "READY",
+      approvedPolicy: { categories: ["TRANSACTIONAL"], allowEmbeddedLinks: true, description: "Appointment reminders and customer replies" },
+    });
     await db.insert(hostedApiRateCards).values({
       capability: "SMS",
       provider: "twilio",
