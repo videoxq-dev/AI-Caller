@@ -233,7 +233,7 @@ export async function finishVoiceTurn(
     if (call.status !== "ACTIVE" || call.metadata.phase !== "AI_RESPONDING"
       || call.metadata.respondingVoiceTurnEventId !== eventId) return null;
     const [updated] = await tx.update(voiceCalls).set({
-      metadata: { ...call.metadata, phase: nextPhase, respondingVoiceTurnEventId: null },
+      metadata: { ...call.metadata, phase: nextPhase, respondingVoiceTurnEventId: nextPhase === "AI_SPEAKING" ? eventId : null },
       updatedAt: new Date(),
     }).where(and(eq(voiceCalls.workspaceId, workspaceId), eq(voiceCalls.id, callId))).returning();
     return updated;
@@ -242,7 +242,7 @@ export async function finishVoiceTurn(
 
 export async function restoreVoiceTurn(workspaceId: string, callId: string, eventId: string) {
   return lockedVoiceCall(workspaceId, callId, async (tx, call) => {
-    if (call.status !== "ACTIVE" || call.metadata.phase !== "AI_RESPONDING"
+    if (call.status !== "ACTIVE" || !["AI_RESPONDING", "AI_SPEAKING"].includes(String(call.metadata.phase))
       || call.metadata.respondingVoiceTurnEventId !== eventId) return null;
     const pending = typeof call.metadata.pendingVoiceTurnEventId === "string"
       ? call.metadata.pendingVoiceTurnEventId : eventId;
@@ -265,7 +265,7 @@ export async function releaseVoiceSpeech(workspaceId: string, callId: string) {
     const pending = typeof call.metadata.pendingVoiceTurnEventId === "string"
       ? call.metadata.pendingVoiceTurnEventId : null;
     await tx.update(voiceCalls).set({
-      metadata: { ...call.metadata, phase: "ACTIVE" },
+      metadata: { ...call.metadata, phase: "ACTIVE", respondingVoiceTurnEventId: null },
       updatedAt: new Date(),
     }).where(and(eq(voiceCalls.workspaceId, workspaceId), eq(voiceCalls.id, callId)));
     return pending;
