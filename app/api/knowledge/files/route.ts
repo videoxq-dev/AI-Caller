@@ -1,4 +1,5 @@
 import { resolveWorkspaceContext } from "@/server/auth/workspace-context";
+import { requireWorkspacePermission } from "@/server/auth/permissions";
 import { AppError, toErrorResponse } from "@/server/http/errors";
 import { saveKnowledgeSource } from "@/server/knowledge/repository";
 
@@ -13,6 +14,10 @@ function extension(filename: string) {
 export async function POST(request: Request) {
   try {
     const context = await resolveWorkspaceContext(request.headers);
+    requireWorkspacePermission(context.membership.role, "integration.manage");
+    const declaredLength = Number(request.headers.get("content-length"));
+    if (Number.isFinite(declaredLength) && declaredLength > MAX_FILE_BYTES + 65_536)
+      throw new AppError("KNOWLEDGE_FILE_TOO_LARGE", "Knowledge files must be 256 KB or smaller.", 413);
     const form = await request.formData();
     const uploaded = form.get("file");
     if (!(uploaded instanceof File)) throw new AppError("KNOWLEDGE_FILE_REQUIRED", "Choose a TXT or MD file to upload.", 422);

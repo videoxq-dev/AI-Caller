@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { resolveWorkspaceContext } from "@/server/auth/workspace-context";
+import { requireWorkspacePermission } from "@/server/auth/permissions";
 import { AppError, toErrorResponse } from "@/server/http/errors";
 import { parseInput } from "@/server/http/validation";
 import { saveKnowledgeSource } from "@/server/knowledge/repository";
@@ -10,6 +11,7 @@ const schema = z.object({ url: z.string().trim().min(1).max(2000) });
 export async function POST(request: Request) {
   try {
     const context = await resolveWorkspaceContext(request.headers);
+    requireWorkspacePermission(context.membership.role, "integration.manage");
     const input = parseInput(schema, await request.json());
     try {
       const imported = await importWebsiteText(input.url);

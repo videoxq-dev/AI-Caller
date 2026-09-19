@@ -9,6 +9,10 @@ describe("website knowledge import safety", () => {
     expect(isPublicAddress("192.168.1.12")).toBe(false);
     expect(isPublicAddress("::1")).toBe(false);
     expect(isPublicAddress("fd00::1")).toBe(false);
+    expect(isPublicAddress("::ffff:127.0.0.1")).toBe(false);
+    expect(isPublicAddress("2001:0db8:1::1")).toBe(false);
+    expect(isPublicAddress("2002:0a00:0001::")).toBe(false);
+    expect(isPublicAddress("2001:0::1")).toBe(false);
   });
 
   it("allows ordinary public addresses", () => {

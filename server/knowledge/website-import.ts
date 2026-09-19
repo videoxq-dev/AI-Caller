@@ -29,12 +29,12 @@ export function isPublicAddress(address: string) {
   if (family === 4) return !isPrivateIpv4(address);
   if (family !== 6) return false;
 
-  const normalized = address.toLowerCase();
+  const normalized = new URL("http://[" + address + "]/").hostname.slice(1, -1).toLowerCase();
   if (normalized === "::" || normalized === "::1") return false;
-  if (normalized.startsWith("::ffff:")) return isPublicAddress(normalized.slice(7));
+  if (normalized.startsWith("::ffff:")) return false;
   if (normalized.startsWith("fc") || normalized.startsWith("fd") || normalized.startsWith("ff")) return false;
   if (/^fe[89ab]/.test(normalized)) return false;
-  if (normalized.startsWith("2001:db8")) return false;
+  if (normalized.startsWith("2001:db8") || normalized === "2001::" || normalized.startsWith("2001:0:") || normalized.startsWith("2002:")) return false;
   return true;
 }
 
