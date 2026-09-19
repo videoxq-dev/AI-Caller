@@ -82,12 +82,14 @@ describe("managed Telnyx number search", () => {
     const fetcher = vi.fn(async (input: RequestInfo | URL) => {
       const params = new URL(String(input)).searchParams;
       expect(params.get("filter[national_destination_code]")).toBe("307");
-      expect(params.get("filter[starts_with]")).toBe("555");
-      expect(params.get("filter[ends_with]")).toBe("0184");
+      expect(params.get("filter[phone_number][starts_with]")).toBe("555");
+      expect(params.get("filter[phone_number][ends_with]")).toBe("0184");
       expect(params.get("filter[best_effort]")).toBe("false");
       expect(params.get("filter[exclude_held_numbers]")).toBe("true");
       expect(params.get("filter[phone_number_type]")).toBe("local");
       expect(params.get("filter[limit]")).toBe("30");
+      expect(params.has("filter[starts_with]")).toBe(false);
+      expect(params.has("filter[ends_with]")).toBe(false);
       return new Response(JSON.stringify({
         data: [{
           phone_number: "+13075550184",
