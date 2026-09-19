@@ -1,6 +1,6 @@
-import { and, eq } from "drizzle-orm";
+import { and, desc, eq } from "drizzle-orm";
 import { db } from "@/db";
-import { contactIdentities, conversations, messages, usageEvents } from "@/db/schema";
+import { contactIdentities, conversations, hostedPhoneNumbers, messages, smsRegistrations, usageEvents } from "@/db/schema";
 import { analyzeSmsSegments } from "@/server/billing/sms-segments";
 import { loadHostedRateSnapshot, quoteHostedUsage } from "@/server/billing/pricing";
 import {
@@ -16,6 +16,9 @@ import { ProviderRequestError } from "@/server/providers/http";
 import { outboundSmsReady } from "@/server/phone-numbers/lifecycle";
 import { resolveSmsRuntimeForWorkspace, type SmsRuntime } from "@/server/providers/sms/runtime";
 import { attachSmsProviderMessage, markSmsSendFailure } from "./repository";
+import { classifySmsPurpose } from "./classification";
+import { consentAllowsSend, getSmsConsentStatus } from "./consent";
+import { validateApprovedSmsMessage, type ApprovedSmsPolicy, type SmsPurpose } from "./policy";
 
 const MAX_SMS_TEXT_CHARACTERS = 1600;
 
@@ -136,6 +139,41 @@ async function destination(workspaceId: string, conversationId: string) {
   return identity.value;
 }
 
+async function managedSmsPolicy(workspaceId: string, senderNumber: string) {
+  const [row] = await db.select({
+    readiness: hostedPhoneNumbers.messagingReadiness,
+    registrationStatus: smsRegistrations.status,
+    policy: smsRegistrations.approvedPolicy,
+  }).from(hostedPhoneNumbers)
+    .leftJoin(smsRegistrations, and(
+      eq(smsRegistrations.workspaceId, hostedPhoneNumbers.workspaceId),
+      eq(smsRegistrations.phoneNumberId, hostedPhoneNumbers.id),
+    ))
+    .where(and(
+      eq(hostedPhoneNumbers.workspaceId, workspaceId),
+      eq(hostedPhoneNumbers.phoneNumber, senderNumber),
+      eq(hostedPhoneNumbers.status, "ACTIVE"),
+    )).limit(1);
+  if (!row || row.readiness !== "READY" || row.registrationStatus !== "READY" || !row.policy) {
+    throw new AppError("SMS_CAMPAIGN_NOT_APPROVED", "Your phone number does not have a verified SMS campaign.", 409);
+  }
+  return row.policy as ApprovedSmsPolicy;
+}
+
+async function smsReplyContext(workspaceId: string, conversationId: string) {
+  const [last] = await db.select({ body: messages.body, createdAt: messages.createdAt })
+    .from(messages).where(and(
+      eq(messages.workspaceId, workspaceId),
+      eq(messages.conversationId, conversationId),
+      eq(messages.channel, "SMS"),
+      eq(messages.direction, "INBOUND"),
+    )).orderBy(desc(messages.createdAt)).limit(1);
+  return {
+    lastCustomerMessage: last?.body ?? null,
+    currentConversationReply: Boolean(last && Date.now() - last.createdAt.getTime() <= 24 * 60 * 60 * 1000),
+  };
+}
+
 export async function sendSmsConversationTextWithRuntime(
   workspaceId: string,
   conversationId: string,
@@ -163,6 +201,25 @@ export async function sendSmsConversationTextWithRuntime(
 
   const text = smsText(input.text);
   const to = input.to ?? await destination(workspaceId, conversationId);
+  // Treat a free-form human draft and an AI-generated message identically: the caller
+  // does not get to choose its compliance category. Approved scope is carrier-derived.
+  let actualPurpose: SmsPurpose = "TRANSACTIONAL";
+  if (runtime.mode === "HOSTED") {
+    const policy = await managedSmsPolicy(workspaceId, runtime.senderNumber);
+    const reply = await smsReplyContext(workspaceId, conversationId);
+    actualPurpose = validateApprovedSmsMessage({
+      policy,
+      classifiedPurpose: await classifySmsPurpose({
+        workspaceId, referenceId: conversationId, message: text,
+        campaignDescription: policy.description, lastCustomerMessage: reply.lastCustomerMessage,
+      }),
+      text,
+    });
+    const consent = await getSmsConsentStatus(workspaceId, to, actualPurpose);
+    if (!consentAllowsSend({ consent, purpose: actualPurpose, currentConversationReply: reply.currentConversationReply })) {
+      throw new AppError("SMS_CONSENT_REQUIRED", "This contact has not opted in to this type of message or has opted out.", 409);
+    }
+  }
   const segmentUsage = analyzeSmsSegments(text);
   const outbound = await appendMessage(workspaceId, conversationId, {
     channel: "SMS",
@@ -197,6 +254,16 @@ export async function sendSmsConversationTextWithRuntime(
   }
 
   try {
+    if (runtime.mode === "HOSTED") {
+      // Recheck just before dispatch: a contact can unsubscribe or a campaign can
+      // lose approval while a queued message is waiting for credits or AI generation.
+      await managedSmsPolicy(workspaceId, runtime.senderNumber);
+      const consent = await getSmsConsentStatus(workspaceId, to, actualPurpose);
+      const reply = await smsReplyContext(workspaceId, conversationId);
+      if (!consentAllowsSend({ consent, purpose: actualPurpose, currentConversationReply: reply.currentConversationReply })) {
+        throw new AppError("SMS_CONSENT_REQUIRED", "This contact has opted out or lacks consent for this message.", 409);
+      }
+    }
     const sent = await runtime.provider.send({
       to,
       from: runtime.senderNumber,
