@@ -25,7 +25,7 @@ function carrier(overrides: Record<string, ReturnType<typeof vi.fn>> = {}) {
     getBrand: vi.fn(async () => ({ brandId: "brand-1", status: "OK", identityStatus: "VERIFIED" })),
     updateBrand: vi.fn(async () => ({ brandId: "brand-1", status: "OK", identityStatus: "VERIFIED" })),
     createCampaign: vi.fn(async () => ({ campaignId: "campaign-1" })),
-    getCampaign: vi.fn(async () => ({ campaignId: "campaign-1", submissionStatus: "CREATED", campaignStatus: "MNO_PROVISIONED" })),
+    getCampaign: vi.fn(async () => ({ campaignId: "campaign-1", submissionStatus: "CREATED", campaignStatus: "MNO_PROVISIONED", usecase: "CUSTOMER_CARE", embeddedLink: true })),
     updateCampaign: vi.fn(async () => ({ campaignId: "campaign-1" })),
     appealCampaign: vi.fn(async () => ({ appealed_at: "2026-09-19T00:00:00Z" })),
     getAssignment: vi.fn(async () => ({ phoneNumber: "+12025550200", campaignId: "campaign-1", assignmentStatus: "ASSIGNED" })),
@@ -43,7 +43,7 @@ describe("Telnyx registration contracts", () => {
     expect(brandPayload(draft).state).toBe("TX");
     expect(tollFreePayload(draft, "+18885550200").businessState).toBe("Texas");
     expect(tollFreePayload(draft, "+18885550200").phoneNumbers).toEqual([{ phoneNumber: "+18885550200" }]);
-    expect(campaignPayload(draft, "brand-1", "reference-1")).embeddedLink).toBe(true);
+    expect(campaignPayload(draft, "brand-1", "reference-1").embeddedLink).toBe(true);
   });
   it("fails closed unless the brand, campaign and number assignment all qualify", () => {
     expect(tenDlcCarrierStatus({ brandStatus: "OK", identityStatus: "VERIFIED", submissionStatus: "CREATED", campaignStatus: "MNO_PROVISIONED", assignmentStatus: "ASSIGNED" })).toBe("READY");

@@ -145,6 +145,13 @@ export function createResponseOrchestrator(dependencies: OrchestratorDependencie
             toolResult,
           };
         } catch (error) {
+          if (toolResult.kind === "sms") {
+            logger.error({ err: error, workspaceId, conversationId }, "SMS tool finalized but AI response failed; returning authoritative SMS status");
+            return {
+              reply: toolResult.data.sent === true ? "I have sent the requested text message." : String(toolResult.data.reason ?? "I could not send that text message."),
+              handlingMode: "AI" as const, action: first.action, toolResult,
+            };
+          }
           if (toolResult.kind !== "booking") throw error;
           logger.error(
             { err: error, workspaceId, conversationId },

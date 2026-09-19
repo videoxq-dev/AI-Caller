@@ -10,10 +10,10 @@ import { telnyxRegistrationClient, type TelnyxRegistrationDraft } from "./regist
 const BATCH_MAX = 50;
 const CHECK_INTERVAL_MS = 5 * 60 * 1000;
 
-export function approvedPolicyFromDraft(draft: TelnyxRegistrationDraft): ApprovedSmsPolicy {
+export function approvedPolicyFromDraft(draft: TelnyxRegistrationDraft, carrierAllowsLinks = false): ApprovedSmsPolicy {
   return {
     categories: draft.categories,
-    allowEmbeddedLinks: draft.allowEmbeddedLinks,
+    allowEmbeddedLinks: draft.allowEmbeddedLinks && carrierAllowsLinks,
     description: draft.messagingUseCase,
   };
 }
@@ -89,6 +89,7 @@ export async function reconcileSmsRegistration(
   const draft = registration.draft as TelnyxRegistrationDraft;
   const resubmission = options.submitting === true && registration.submittedAt !== null;
   let carrierStatus = "";
+  let carrierAllowsLinks = number.numberType === "toll_free" && draft.allowEmbeddedLinks;
   let reason: string | null = null;
   let status: "PENDING" | "READY" | "REJECTED" = "PENDING";
   let brandId = registration.carrierBrandId;
@@ -137,7 +138,7 @@ export async function reconcileSmsRegistration(
     reason = brand.failureReasons ?? null;
     if (brand.status === "REGISTRATION_FAILED") status = "REJECTED";
     else if (brand.status === "OK" && ["VERIFIED", "VETTED_VERIFIED"].includes(brand.identityStatus ?? "")) {
-      if (!campaignId && (options.submitting || registration.carrierStatus !== "CAMPAIGN_SUBMITTING")) {
+      if (!campaignId && !["CAMPAIGN_SUBMITTING", "CAMPAIGN_SUBMISSION_UNCERTAIN"].includes(registration.carrierStatus ?? "")) {
         // Persist the remote-create intent before making the potentially billable POST.
         // A timeout cannot safely be retried without a campaign ID: leave it blocked
         // and surface a carrier investigation instead of submitting duplicates.
@@ -151,7 +152,7 @@ export async function reconcileSmsRegistration(
         await db.update(smsRegistrations).set({ carrierCampaignId: campaignId, updatedAt: now })
           .where(and(eq(smsRegistrations.id, registration.id), eq(smsRegistrations.workspaceId, workspaceId)));
       }
-      if (!campaignId && registration.carrierStatus === "CAMPAIGN_SUBMITTING") {
+      if (!campaignId && ["CAMPAIGN_SUBMITTING", "CAMPAIGN_SUBMISSION_UNCERTAIN"].includes(registration.carrierStatus ?? "")) {
         carrierStatus = "CAMPAIGN_SUBMISSION_UNCERTAIN";
         reason = "The last carrier campaign submission could not be confirmed. Contact support rather than resubmitting.";
       }
@@ -163,12 +164,13 @@ export async function reconcileSmsRegistration(
           campaign = await client.getCampaign(campaignId);
         }
         const expectedUsecase = draft.categories.includes("MARKETING") ? "MIXED" : "CUSTOMER_CARE";
-        if (campaign.usecase && campaign.usecase !== expectedUsecase) {
+        if (campaign.usecase !== expectedUsecase) {
           carrierStatus = "CAMPAIGN_PURPOSE_MISMATCH";
           reason = "The carrier campaign use case does not match the corrected registration. Contact support to register a different messaging program.";
           status = "REJECTED";
         } else {
         carrierStatus = campaign.campaignStatus ?? campaign.submissionStatus ?? "UNKNOWN";
+        carrierAllowsLinks = campaign.embeddedLink === true;
         reason = campaign.failureReasons ?? null;
         let assignment = null;
         if (campaign.campaignStatus === "MNO_PROVISIONED" && campaign.submissionStatus === "CREATED") {
@@ -203,7 +205,7 @@ export async function reconcileSmsRegistration(
     await tx.update(smsRegistrations).set({
       status, carrierStatus, rejectionReason: status === "REJECTED" || carrierStatus === "Waiting For Customer" ? reason : null,
       carrierBrandId: brandId, carrierCampaignId: campaignId, carrierVerificationId: verificationId,
-      ...(status === "READY" ? { approvedPolicy: approvedPolicyFromDraft(draft) } : { approvedPolicy: null }),
+      ...(status === "READY" ? { approvedPolicy: approvedPolicyFromDraft(draft, carrierAllowsLinks) } : { approvedPolicy: null }),
       submittedAt: registration.submittedAt ?? now, checkedAt: now, updatedAt: now,
     }).where(and(eq(smsRegistrations.workspaceId, workspaceId), eq(smsRegistrations.id, registration.id)));
     await tx.update(hostedPhoneNumbers).set({
