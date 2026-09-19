@@ -117,6 +117,7 @@ V2 result: PASS / FAIL / BLOCKED
 
 ## V2 failure isolation
 
+- **Search returns a number but purchase says “no longer available”:** before a carrier order, AI Caller rechecks the exact selected E.164 number using Telnyx area code, exchange, and final-four pattern filters, then verifies an exact response match and confirms the quote. Earlier revisions rechecked the entire 10-digit national number as `starts_with`, which could produce a false empty result. Deploy the corrected revision, search again and explicitly confirm the displayed price; do not repeatedly click purchase or buy a number manually. This preflight error occurs before credits are reserved or a carrier order is created. A carrier order rejection *after* preflight is a separate failure; inspect its sanitized provider code and reconciliation state.
 - **No number / no Call Control app:** inspect managed-number status and worker; do not manually buy a duplicate number.
 - **Telnyx app points to localhost or stale tunnel:** fix deployment/tunnel and click **Repair voice routing**. Do not retry purchasing the number. This action updates the existing voice app only; if you also need to fix a stale SMS webhook, handle that separately under the messaging compliance workstream.
 - **No webhook arrives:** validate public HTTPS tunnel, number's exact Call Control assignment and callback URL.
