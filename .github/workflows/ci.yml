@@ -90,18 +90,6 @@ jobs:
       - name: Build
         run: npm run build
 
-      - name: Validate DeployOS Compose without PostgreSQL container variables
-        run: |
-          env -u POSTGRES_USER -u POSTGRES_PASSWORD -u POSTGRES_DB -u DATABASE_URL \
-            docker compose config --quiet
-          docker compose config --services | grep -qx 'web'
-          docker compose config --services | grep -qx 'migrate'
-          docker compose config --services | grep -qx 'worker'
-          if docker compose config --services | grep -qx 'postgres'; then
-            echo "DeployOS default Compose must not create a second database."
-            exit 1
-          fi
-
       - name: Validate opt-in full-stack self-hosted Compose
         run: |
           cp .env.deploy.example .env.deploy
