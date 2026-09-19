@@ -16,6 +16,26 @@ If DeployOS reports `ECONNREFUSED 127.0.0.1:5432` **after** it can read the Comp
 
 **Important:** An existing `DATABASE_URL` alone does not set `POSTGRES_USER`/`POSTGRES_PASSWORD`/`POSTGRES_DB`, and a runtime container environment is different from Compose file interpolation. This is why the previous default Compose failed even though your app variables were configured.
 
+## DeployOS migration failed with exit 1
+
+An exit code from `migrate` is a **summary**, not the error cause. Open the DeployOS deployment's `migrate` service log (or from its app Compose directory run `docker compose logs --tail=100 migrate`) and find the FIRST `FAIL:` line or PostgreSQL error immediately before the container exits. Do not use the blank web log as evidence: the web container has not started yet.
+
+The migration job now runs `npm run verify:database-connection` **before** SQL migrations. It prints the resolved database hostname/port, a sanitized `PASS` or `FAIL`, and the error code (for example `ENOTFOUND`, `ECONNREFUSED`, `28P01`, or `3D000`). When diagnosing an earlier deployed revision, run the probe manually from a disposable container using the existing DeployOS configuration:
+
+```sh
+docker compose run --rm --no-deps migrate npm run verify:database-connection
+```
+
+Run this in the app Compose directory; never paste `DATABASE_URL` or `docker compose config` with secrets into a support message.
+
+- **`ENOTFOUND` or `EAI_AGAIN`** for a name like `ai-caller-postgres-1`: the name is not resolvable from the app container. DeployOS may create the database and application in **separate Compose projects and Docker networks**. A container's displayed name is not proof that it can resolve across networks. Compare network **names only** using `docker inspect -f '{{range $name, $_ := .NetworkSettings.Networks}}{{$name}} {{end}}' ai-caller-postgres-1` and the corresponding app migration container. Use DeployOS's actual application-reachable DB hostname, or attach the app's web, worker, and migration services and the DB to the same appropriately scoped private Docker network. Do not publish PostgreSQL to the Internet just to solve DNS.
+- **`ECONNREFUSED`**: the name resolved but port 5432 refused the connection. Confirm the database is healthy, listens on its container network interface, and the host/port target is correct.
+- **`28P01`/`28000`**: use the credentials and database name shown on the database's DeployOS card; `user` and `password` are often **placeholders**, not actual database credentials. URL-encode special characters in a connection-string password.
+- **`3D000`**: the requested database does not exist; select an existing DB or create it intentionally.
+- **Connection PASS, then migration SQL error**: keep the FIRST migration error and its file name; back up an existing database before schema repair. Do not delete volumes or replace a used DB with an empty one.
+
+DeployOS documents that standalone databases run alongside apps and should have their actual connection strings added to the app. Separate Compose project networks are isolated unless deliberately connected. See `docs/cloud-deployment-signup-database.md` for the signup acceptance gate.
+
 ## Manual all-in-one VPS deployment: create a NEW private PostgreSQL database
 
 Use **`compose.selfhost.yaml`**, not the DeployOS default `compose.yaml`. This optional file starts private PostgreSQL 16, performs migrations, starts web and worker, and persists the database and recordings in named volumes.
