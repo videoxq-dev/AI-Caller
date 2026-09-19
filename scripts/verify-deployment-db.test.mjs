@@ -81,3 +81,44 @@ test("connected and migrated database is signup-ready", async () => {
   assert.equal(ok, true);
   assert.match(logs.join("\n"), /Signup tables and application migration history exist/);
 });
+
+
+test("connection-only preflight succeeds before migrations exist", async () => {
+  const logs = [];
+  let queried = false;
+  const ok = await verifyDeploymentDatabase({
+    env: { DATABASE_URL: "postgres://u:p@ai-caller-postgres-1:5432/ai_caller" },
+    connectOnly: true,
+    ClientCtor: class {
+      async connect() {}
+      async query() { queried = true; throw new Error("migrations not applied"); }
+      async end() {}
+    },
+    log: (message) => logs.push(message),
+  });
+  assert.equal(ok, true);
+  assert.equal(queried, false);
+  assert.match(logs.join("\n"), /PASS: PostgreSQL connection established/);
+  assert.doesNotMatch(logs.join("\n"), /u:p/);
+});
+
+test("connection-only preflight identifies DNS isolation without disclosing connection string", async () => {
+  const logs = [];
+  const ok = await verifyDeploymentDatabase({
+    env: { DATABASE_URL: "postgres://some-user:secret@ai-caller-postgres-1:5432/ai_caller" },
+    connectOnly: true,
+    ClientCtor: class {
+      async connect() {
+        const error = new Error("postgres://some-user:secret@ai-caller-postgres-1:5432/ai_caller");
+        error.code = "ENOTFOUND";
+        throw error;
+      }
+      async end() {}
+    },
+    log: (message) => logs.push(message),
+  });
+  assert.equal(ok, false);
+  assert.match(logs.join("\n"), /ENOTFOUND/);
+  assert.match(logs.join("\n"), /Docker service name/);
+  assert.doesNotMatch(logs.join("\n"), /some-user|secret/);
+});
