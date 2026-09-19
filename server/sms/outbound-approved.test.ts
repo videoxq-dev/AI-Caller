@@ -1,7 +1,7 @@
 import { afterAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { and, eq } from "drizzle-orm";
 import { db, closeDatabase } from "@/db";
-import { contacts, conversations, creditWallets, hostedApiRateCards, hostedPhoneNumbers, messages, smsRegistrations, workspaces } from "@/db/schema";
+import { contacts, conversations, creditWallets, hostedApiRateCards, hostedPhoneNumbers, messages, smsRegistrations, usageEvents, workspaces } from "@/db/schema";
 import { appendMessage, getOrCreateOpenConversation } from "@/server/domain/core/repository";
 import type { SmsRuntime } from "@/server/providers/sms/runtime";
 import { getSmsConsentStatus, recordSmsConsent } from "./consent";
@@ -73,7 +73,13 @@ describe("approved managed number outbound SMS", () => {
     expect(msg.externalMessageId).toBe("telnyx-message-1");
     expect(msg.status).toBe("QUEUED");
     expect(msg.metadata.smsPurpose).toBe("TRANSACTIONAL");
-    expect((await db.select().from(creditWallets))[0].balance).toBe(19);
+    const [wallet] = await db.select().from(creditWallets);
+    const billed = await db.select().from(usageEvents).where(and(
+      eq(usageEvents.workspaceId, workspaceId), eq(usageEvents.referenceId, msg.id),
+    ));
+    expect(billed).toHaveLength(1);
+    expect(billed[0].creditsCharged).toBeGreaterThan(0);
+    expect(wallet.balance).toBe(20 - billed[0].creditsCharged);
     expect(await getSmsConsentStatus(workspaceId, phone, "TRANSACTIONAL")).toBe("OPTED_IN");
   });
 
