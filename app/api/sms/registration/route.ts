@@ -1,4 +1,4 @@
-import { and, eq } from "drizzle-orm";
+import { and, eq, inArray } from "drizzle-orm";
 import { z } from "zod";
 import { db } from "@/db";
 import { businessProfiles, hostedPhoneNumbers, smsRegistrations } from "@/db/schema";
@@ -97,13 +97,22 @@ export async function PUT(request: Request) {
       if (before !== after) throw new AppError("SMS_CAMPAIGN_USECASE_LOCKED",
         "The existing carrier campaign cannot change messaging categories. Contact support to register a new campaign.", 409);
     }
-    const [registration] = await db.insert(smsRegistrations).values({
-      workspaceId: context.workspace.id, phoneNumberId: number.id, numberType: number.numberType,
-      status: "DRAFT", draft: input, updatedAt: new Date(),
-    }).onConflictDoUpdate({
-      target: smsRegistrations.phoneNumberId,
-      set: { draft: input, status: "DRAFT", rejectionReason: null, approvedPolicy: null, updatedAt: new Date() },
-    }).returning();
+    // A submit may start after the read above. Never let a late draft save
+    // reset a registration that has already been claimed for carrier review.
+    const [registration] = existing
+      ? await db.update(smsRegistrations).set({
+        draft: input, status: "DRAFT", rejectionReason: null,
+        approvedPolicy: null, updatedAt: new Date(),
+      }).where(and(
+        eq(smsRegistrations.id, existing.id),
+        eq(smsRegistrations.workspaceId, context.workspace.id),
+        inArray(smsRegistrations.status, ["DRAFT", "REJECTED"]),
+      )).returning()
+      : await db.insert(smsRegistrations).values({
+        workspaceId: context.workspace.id, phoneNumberId: number.id,
+        numberType: number.numberType, status: "DRAFT", draft: input, updatedAt: new Date(),
+      }).onConflictDoNothing().returning();
+    if (!registration) throw new AppError("SMS_REGISTRATION_IN_REVIEW", "Refresh the page; registration has changed.", 409);
     await db.update(hostedPhoneNumbers).set({ messagingReadiness: "NOT_REGISTERED", updatedAt: new Date() })
       .where(and(eq(hostedPhoneNumbers.workspaceId, context.workspace.id), eq(hostedPhoneNumbers.id, number.id)));
     return Response.json({ registration: { status: registration.status, draft: registration.draft } });
