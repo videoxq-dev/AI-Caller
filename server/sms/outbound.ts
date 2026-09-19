@@ -1,6 +1,6 @@
-import { and, desc, eq } from "drizzle-orm";
+import { and, desc, eq, inArray } from "drizzle-orm";
 import { db } from "@/db";
-import { contactIdentities, conversations, hostedPhoneNumbers, messages, smsRegistrations, usageEvents } from "@/db/schema";
+import { contactIdentities, contacts, conversations, hostedPhoneNumbers, messages, smsRegistrations, usageEvents } from "@/db/schema";
 import { analyzeSmsSegments } from "@/server/billing/sms-segments";
 import { loadHostedRateSnapshot, quoteHostedUsage } from "@/server/billing/pricing";
 import {
@@ -17,7 +17,7 @@ import { outboundSmsReady } from "@/server/phone-numbers/lifecycle";
 import { resolveSmsRuntimeForWorkspace, type SmsRuntime } from "@/server/providers/sms/runtime";
 import { attachSmsProviderMessage, markSmsSendFailure } from "./repository";
 import { classifySmsPurpose } from "./classification";
-import { consentAllowsSend, getSmsConsentStatus } from "./consent";
+import { consentAllowsSend, getSmsConsentStatus, normalizedSmsPhone } from "./consent";
 import { validateApprovedSmsMessage, type ApprovedSmsPolicy, type SmsPurpose } from "./policy";
 
 const MAX_SMS_TEXT_CHARACTERS = 1600;
@@ -135,8 +135,15 @@ async function destination(workspaceId: string, conversationId: string) {
     ))
     .where(and(eq(conversations.workspaceId, workspaceId), eq(conversations.id, conversationId)))
     .limit(1);
-  if (!identity) throw new AppError("SMS_IDENTITY_NOT_FOUND", "This conversation does not have an SMS identity.", 409);
-  return identity.value;
+  if (identity) return identity.value;
+  // Web Chat and phone-call contacts have a verified conversation, but often do not yet
+  // have an inbound SMS identity. An explicitly saved phone may be used as a destination;
+  // consent and carrier scope are still checked below before any hosted send.
+  const [contact] = await db.select({ phone: contacts.phone }).from(conversations)
+    .innerJoin(contacts, and(eq(contacts.id, conversations.contactId), eq(contacts.workspaceId, workspaceId)))
+    .where(and(eq(conversations.workspaceId, workspaceId), eq(conversations.id, conversationId))).limit(1);
+  if (!contact?.phone) throw new AppError("SMS_DESTINATION_REQUIRED", "Collect a phone number before sending SMS.", 409);
+  return normalizedSmsPhone(contact.phone);
 }
 
 async function managedSmsPolicy(workspaceId: string, senderNumber: string) {
@@ -152,7 +159,7 @@ async function managedSmsPolicy(workspaceId: string, senderNumber: string) {
     .where(and(
       eq(hostedPhoneNumbers.workspaceId, workspaceId),
       eq(hostedPhoneNumbers.phoneNumber, senderNumber),
-      eq(hostedPhoneNumbers.status, "ACTIVE"),
+      inArray(hostedPhoneNumbers.status, ["ACTIVE", "PAST_DUE"]),
     )).limit(1);
   if (!row || row.readiness !== "READY" || row.registrationStatus !== "READY" || !row.policy) {
     throw new AppError("SMS_CAMPAIGN_NOT_APPROVED", "Your phone number does not have a verified SMS campaign.", 409);
