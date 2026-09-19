@@ -72,8 +72,11 @@ export async function putVoiceRecording(key: string, bytes: Uint8Array, contentT
     return;
   }
 
-  if (env.NODE_ENV === "production" && !isE2EProviderFixtureMode()) {
-    throw new Error("Filesystem voice recording storage is not allowed in production.");
+  // The Docker image persists this absolute directory on a private named volume.
+  // Fail closed for accidental ephemeral storage or unapproved filesystem usage.
+  if (env.NODE_ENV === "production" && !isE2EProviderFixtureMode()
+    && (!env.VOICE_RECORDING_ALLOW_PERSISTENT_FILESYSTEM || !path.isAbsolute(env.VOICE_RECORDING_DIR))) {
+    throw new Error("Production filesystem recording requires VOICE_RECORDING_ALLOW_PERSISTENT_FILESYSTEM=true and an absolute VOICE_RECORDING_DIR backed by a persistent private volume, or configure S3.");
   }
   const target = filesystemPath(env.VOICE_RECORDING_DIR, key);
   await mkdir(path.dirname(target), { recursive: true });
