@@ -8,6 +8,7 @@ import { appendMessage, getOrCreateContactByIdentity, getOrCreateOpenConversatio
 import { normalizePhone } from "@/server/domain/core/schemas";
 import { getEnv } from "@/server/env";
 import { AppError } from "@/server/http/errors";
+import { logger } from "@/server/observability/logger";
 import { enqueueUniqueJob } from "@/server/jobs";
 import { SMS_INBOUND_RESPONSE, smsInboundResponseJobSchema, type SmsInboundResponseJob } from "@/server/jobs/queues";
 import { responseOrchestrator } from "@/server/orchestrator";
@@ -281,10 +282,8 @@ export function createSmsWebhookService(dependencies: SmsServiceDependencies) {
           status: "RECEIVED",
           metadata: { providerEventId: job.webhookEventId, senderNumber: job.customerNumber },
         });
-        await chargeHostedInboundSms(job.workspaceId, runtime, job.externalMessageId, job.text);
-
-        // Process carrier keywords before the readiness gate or AI. STOP must always
-        // be honored, even while this business cannot send outbound messages.
+        // Opt-out evidence must be recorded even when the hosted wallet cannot pay
+        // inbound usage charges. Billing failures cannot authorize further messages.
         const keyword = smsKeyword(job.text);
         if (keyword === "STOP" || keyword === "START") {
           const status = keyword === "STOP" ? "OPTED_OUT" : "OPTED_IN";
@@ -295,9 +294,17 @@ export function createSmsWebhookService(dependencies: SmsServiceDependencies) {
               consentStatement: job.text,
             });
           }
+          try {
+            await chargeHostedInboundSms(job.workspaceId, runtime, job.externalMessageId, job.text);
+          } catch (billingError) {
+            logger.error({ err: billingError, workspaceId: job.workspaceId, webhookEventId: job.webhookEventId },
+              "Inbound SMS keyword processed but carrier usage could not be charged");
+          }
           await completeProviderWebhookEvent(job.workspaceId, job.webhookEventId);
           return { skipped: false as const, replied: false as const, consentUpdated: true as const };
         }
+
+        await chargeHostedInboundSms(job.workspaceId, runtime, job.externalMessageId, job.text);
 
         if (runtime.mode === "HOSTED" && !outboundSmsReady(runtime.messagingReadiness)) {
           await completeProviderWebhookEvent(job.workspaceId, job.webhookEventId);
