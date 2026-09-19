@@ -78,7 +78,7 @@ User-reported local execution on macOS (Darwin x86_64), Node v22.19.0, commit `b
 - `npm run test:voice-readiness` **PASS**: all seven standalone Node unit tests.
 - `npm run verify:voice-providers` **PASS**: direct OpenAI and Telnyx global key preflight.
 - `npm run verify:voice-providers:live` **PASS**: direct OpenAI Responses generated expected result with `gpt-5.6-luna` (3,479 ms); Telnyx Call Control listing authenticated (973 ms).
-- **V2 prerequisite outstanding:** the Telnyx account returned no Call Control applications. Authentication is verified, but there is no configured Call Control application to route a real inbound call yet.
+- **V2 prerequisite outstanding:** the Telnyx account returned no Call Control applications. This is expected before the product provisions its first managed number: `provisionManagedPhoneNumber` creates the Call Control application and messaging profile as part of a customer-authorized purchase. Do not create a duplicate manually merely to satisfy V1. V2 must verify the provisioning flow creates the app, assigns the exact owned number, and exposes a reachable public webhook.
 - Integrations `Our Credits` displayed **Server configured**; response reported `liveVerified: false`, correctly avoiding a misleading health claim.
 - User reported no observed errors or secret leakage. Do not confuse this with the V2 real-call acceptance evidence.
 
@@ -90,7 +90,7 @@ Note: this repository does not currently track `package-lock.json`; use `npm ins
 
 | Stage | Commit | Automated checks | Owner local feedback | Status |
 |---|---|---|---|---|
-| V1 | Local provider probe: `b7a0140`; final PR head: see PR #26 | 7/7 local probe tests passed; CI #853 failed at test discovery; final CI pending | Direct OpenAI + Telnyx authentication PASS; no Call Control app exists | Live provider probe accepted; repository close pending green CI; V2 telephony provisioning pending |
+| V1 | Local provider probe: `b7a0140`; final PR head: see PR #26 | 7/7 local probe tests passed; CI #853 failed at test discovery; final CI pending | Direct OpenAI + Telnyx authentication PASS; no Call Control app yet (managed provisioning creates it) | Live provider probe accepted; repository close pending green CI; V2 telephony provisioning pending |
 | V2 | — | — | — | Not started |
 | V3 | — | — | — | Not started |
 | V4 | — | — | — | Not started |
