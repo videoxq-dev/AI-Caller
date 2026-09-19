@@ -36,6 +36,9 @@ describe("outbound SMS compliance", () => {
     expect(smsKeyword("stop.")).toBe("STOP");
     expect(smsKeyword("UNSTOP")).toBe("START");
     expect(smsKeyword("HELP")).toBe("HELP");
+    expect(smsKeyword("Stop texting me")).toBe("STOP");
+    expect(smsKeyword("Please don't text me anymore")).toBe("STOP");
+    expect(smsKeyword("No more messages")).toBe("STOP");
     expect(smsKeyword("stop by tomorrow")).toBe(null);
   });
 });
