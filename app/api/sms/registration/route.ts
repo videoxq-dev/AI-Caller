@@ -11,16 +11,16 @@ import { ensureWebchatWidget } from "@/server/webchat/repository";
 import { getEnv } from "@/server/env";
 
 const draftSchema = z.object({
-  legalName: z.string().trim().min(2).max(200),
-  contactName: z.string().trim().min(2).max(200),
-  contactEmail: z.string().trim().email().max(320),
-  contactPhone: z.string().trim().min(8).max(40),
-  website: z.string().trim().url().max(500),
+  legalName: z.string().trim().min(2).max(100),
+  contactName: z.string().trim().min(2).max(150),
+  contactEmail: z.string().trim().email().max(100),
+  contactPhone: z.string().trim().regex(/^\+1[2-9]\d{9}$/),
+  website: z.string().trim().url().max(100),
   privacyPolicyUrl: z.string().trim().url().max(500),
   termsUrl: z.string().trim().url().max(500),
-  messagingUseCase: z.string().trim().min(30).max(3000),
-  optInFlow: z.string().trim().min(30).max(3000),
-  sampleMessages: z.array(z.string().trim().min(10).max(1000)).min(2).max(5),
+  messagingUseCase: z.string().trim().min(40).max(500),
+  optInFlow: z.string().trim().min(40).max(500),
+  sampleMessages: z.array(z.string().trim().min(10).max(400)).min(2).max(5).refine((examples) => examples.join("\n").length <= 1000, "Combined sample messages must not exceed 1,000 characters."),
   categories: z.array(z.enum(["TRANSACTIONAL", "MARKETING"])).min(1).max(2),
   allowEmbeddedLinks: z.boolean(),
   businessAddress: z.string().trim().min(4).max(200),
@@ -28,10 +28,12 @@ const draftSchema = z.object({
   businessState: z.string().trim().regex(/^[A-Z]{2}$/),
   businessZip: z.string().trim().regex(/^\d{5}(?:-\d{4})?$/),
   entityType: z.enum(["PRIVATE_PROFIT", "PUBLIC_PROFIT", "NON_PROFIT", "GOVERNMENT", "SOLE_PROPRIETOR"]),
-  vertical: z.enum(["AGRICULTURE","COMMUNICATION","CONSTRUCTION","EDUCATION","ENERGY","ENTERTAINMENT","FINANCIAL","GAMBLING","GOVERNMENT","HEALTHCARE","HOSPITALITY","HUMAN_RESOURCES","INSURANCE","LEGAL","MANUFACTURING","NGO","POLITICAL","POSTAL","PROFESSIONAL","REAL_ESTATE","RETAIL","TECHNOLOGY","TRANSPORTATION"]),
+  vertical: z.enum(["AGRICULTURE","COMMUNICATION","CONSTRUCTION","EDUCATION","ENERGY","ENTERTAINMENT","FINANCIAL","GAMBLING","GOVERNMENT","HEALTHCARE","HOSPITALITY","INSURANCE","MANUFACTURING","NGO","REAL_ESTATE","RETAIL","TECHNOLOGY"]),
   ein: z.string().trim().regex(/^(?:\d{2}-?\d{7})?$/),
   messageVolume: z.enum(["10","100","1,000","10,000","100,000","250,000","500,000","750,000","1,000,000","5,000,000","10,000,000+"]),
   optInEvidenceUrl: z.string().trim().url().max(500),
+  stockSymbol: z.string().trim().max(10),
+  stockExchange: z.enum(["NONE","NASDAQ","NYSE","AMEX","AMX","ASX","B3","BME","BSE","FRA","ICEX","JPX","JSE","KRX","LON","NSE","OMX","SEHK","SSE","STO","SWX","SZSE","TWSE","VSE"]),
 }).strict();
 
 async function managedNumber(workspaceId: string) {
@@ -77,8 +79,10 @@ export async function PUT(request: Request) {
     const input = parseInput(draftSchema, await request.json());
     const number = await managedNumber(context.workspace.id);
     if (!number) throw new AppError("NO_ACTIVE_PHONE_NUMBER", "Activate your managed number before preparing SMS registration.", 409);
-    if (number.numberType === "local" && input.entityType !== "SOLE_PROPRIETOR" && !input.ein)
+    if (!input.ein)
       throw new AppError("EIN_REQUIRED", "Enter your registered business tax ID for 10DLC brand registration.", 422);
+    if (input.entityType === "PUBLIC_PROFIT" && (!input.stockSymbol || input.stockExchange === "NONE"))
+      throw new AppError("PUBLIC_BRAND_STOCK_DETAILS_REQUIRED", "Enter the public company stock symbol and exchange.", 422);
     if (number.messagingReadiness === "READY") throw new AppError("SMS_REGISTRATION_APPROVED", "Approved registration details cannot be edited.", 409);
     const [existing] = await db.select().from(smsRegistrations).where(and(
       eq(smsRegistrations.workspaceId, context.workspace.id), eq(smsRegistrations.phoneNumberId, number.id),

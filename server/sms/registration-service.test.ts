@@ -16,7 +16,7 @@ const draft: TelnyxRegistrationDraft = {
   categories: ["TRANSACTIONAL"], allowEmbeddedLinks: true, businessAddress: "123 Main St",
   businessCity: "Austin", businessState: "TX", businessZip: "78701",
   entityType: "PRIVATE_PROFIT", vertical: "HEALTHCARE", ein: "123456789",
-  messageVolume: "1,000", optInEvidenceUrl: "https://example.com/optin",
+  messageVolume: "1,000", optInEvidenceUrl: "https://example.com/optin", stockSymbol: "", stockExchange: "NONE",
 };
 
 function carrier(overrides: Record<string, ReturnType<typeof vi.fn>> = {}) {
@@ -129,7 +129,7 @@ describe("SMS registration reconciliation", () => {
 
   it("removes previously approved scope after carrier rejection", async () => {
     await seed("local", { status: "READY", carrierBrandId: "brand-1", carrierCampaignId: "campaign-1", approvedPolicy: { categories: ["TRANSACTIONAL"], allowEmbeddedLinks: true, description: "Appointments" } });
-    const client = carrier({ getCampaign: vi.fn(async () => ({ campaignId: "campaign-1", submissionStatus: "CREATED", campaignStatus: "MNO_REJECTED", failureReasons: "Carrier rejected website." })) });
+    const client = carrier({ getCampaign: vi.fn(async () => ({ campaignId: "campaign-1", submissionStatus: "CREATED", campaignStatus: "MNO_REJECTED", usecase: "CUSTOMER_CARE", embeddedLink: true, failureReasons: "Carrier rejected website." })) });
     expect(await reconcileSmsRegistration(workspaceId, registrationId, {}, client)).toBe("REJECTED");
     const { number, registration } = await current();
     expect(number.messagingReadiness).toBe("REJECTED");

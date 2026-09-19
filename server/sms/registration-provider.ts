@@ -81,6 +81,7 @@ export type TelnyxRegistrationDraft = {
   businessAddress: string; businessCity: string; businessState: string; businessZip: string;
   entityType: "PRIVATE_PROFIT" | "PUBLIC_PROFIT" | "NON_PROFIT" | "GOVERNMENT" | "SOLE_PROPRIETOR";
   vertical: string; ein: string; messageVolume: string; optInEvidenceUrl: string;
+  stockSymbol: string; stockExchange: string;
 };
 
 function telnyxRequest(fetcher: typeof fetch) {
@@ -106,6 +107,7 @@ export function brandPayload(draft: TelnyxRegistrationDraft) {
     email: draft.contactEmail, businessContactEmail: draft.contactEmail,
     vertical: draft.vertical, firstName, lastName, ein: draft.ein || undefined,
     phone: draft.contactPhone, street: draft.businessAddress, city: draft.businessCity,
+    ...(draft.entityType === "PUBLIC_PROFIT" ? { stockSymbol: draft.stockSymbol, stockExchange: draft.stockExchange } : {}),
     state: draft.businessState, postalCode: draft.businessZip, website: draft.website,
     isReseller: false, mock: false,
   };
@@ -113,10 +115,12 @@ export function brandPayload(draft: TelnyxRegistrationDraft) {
 
 export function campaignPayload(draft: TelnyxRegistrationDraft, brandId: string, referenceId: string) {
   const marketing = draft.categories.includes("MARKETING");
-  const usecase = marketing ? "MIXED" : "CUSTOMER_CARE";
+  const transactional = draft.categories.includes("TRANSACTIONAL");
+  const usecase = marketing && transactional ? "MIXED" : marketing ? "MARKETING" : "CUSTOMER_CARE";
+  const brand = draft.legalName.slice(0, 65);
   return {
     brandId, referenceId, usecase, description: draft.messagingUseCase,
-    ...(marketing ? { subUsecases: ["CUSTOMER_CARE", "MARKETING"] } : {}),
+    ...(marketing && transactional ? { subUsecases: ["CUSTOMER_CARE", "MARKETING"] } : {}),
     messageFlow: draft.optInFlow, sample1: draft.sampleMessages[0], sample2: draft.sampleMessages[1],
     ...(draft.sampleMessages[2] ? { sample3: draft.sampleMessages[2] } : {}),
     ...(draft.sampleMessages[3] ? { sample4: draft.sampleMessages[3] } : {}),
@@ -127,9 +131,10 @@ export function campaignPayload(draft: TelnyxRegistrationDraft, brandId: string,
     termsAndConditionsLink: draft.termsUrl,
     termsAndConditions: true, subscriberHelp: true, subscriberOptin: true, subscriberOptout: true,
     helpKeywords: "HELP", optinKeywords: "START,UNSTOP", optoutKeywords: "STOP,UNSUBSCRIBE",
-    helpMessage: "Reply STOP to stop receiving messages or contact the business for help.",
-    optinMessage: "You are subscribed to messaging. Reply STOP to unsubscribe.",
-    optoutMessage: "You have been unsubscribed. Reply START to resubscribe.",
+    helpMessage: brand + ": For messaging help email " + draft.contactEmail + ". Reply STOP to unsubscribe.",
+    optinMessage: brand + ": Thanks for subscribing to " + (marketing ? "business updates" : "appointment updates") +
+      ". Msg frequency varies. Msg&data rates may apply. Reply HELP for help or STOP to opt out.",
+    optoutMessage: brand + ": You are unsubscribed and will receive no further messages.",
     ageGated: false, autoRenewal: true, directLending: false,
   };
 }
@@ -143,16 +148,19 @@ export function tollFreePayload(draft: TelnyxRegistrationDraft, phoneNumber: str
     businessContactFirstName: firstName, businessContactLastName: lastName,
     businessContactEmail: draft.contactEmail, businessContactPhone: draft.contactPhone,
     messageVolume: draft.messageVolume, phoneNumbers: [{ phoneNumber }],
-    useCase: draft.categories.includes("MARKETING") ? "Marketing" : "Appointments",
-    useCaseSummary: draft.messagingUseCase,
+    useCase: draft.categories.includes("MARKETING")
+      ? draft.categories.includes("TRANSACTIONAL") ? "Mixed" : "General Marketing"
+      : "Appointments",
+    useCaseSummary: draft.messagingUseCase.slice(0, 500),
     productionMessageContent: draft.sampleMessages.join("\n"),
-    optInWorkflow: draft.optInFlow, optInWorkflowImageURLs: [{ url: draft.optInEvidenceUrl }],
+    optInWorkflow: draft.optInFlow.slice(0, 500), optInWorkflowImageURLs: [{ url: draft.optInEvidenceUrl }],
+    isvReseller: "AI Caller",
     additionalInformation: draft.messagingUseCase.slice(0, 500),
     privacyPolicyURL: draft.privacyPolicyUrl, termsAndConditionURL: draft.termsUrl,
     entityType: draft.entityType, optInKeywords: "START,UNSTOP",
     ...(draft.ein ? { businessRegistrationNumber: draft.ein.replace(/-/g, ""), businessRegistrationType: "EIN", businessRegistrationCountry: "US" } : {}),
-    helpMessageResponse: "Reply STOP to unsubscribe or contact the business for help.",
-    optInConfirmationResponse: "You are subscribed to appointment messaging. Reply STOP to opt out.",
+    helpMessageResponse: draft.legalName + ": Contact " + draft.contactEmail + " for help, or reply STOP to unsubscribe.",
+    optInConfirmationResponse: draft.legalName + ": You are subscribed. Reply STOP to opt out or HELP for help.",
   };
 }
 

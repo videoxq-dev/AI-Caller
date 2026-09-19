@@ -10,13 +10,15 @@ type Draft = {
   businessAddress: string; businessCity: string; businessState: string; businessZip: string;
   entityType: "PRIVATE_PROFIT" | "PUBLIC_PROFIT" | "NON_PROFIT" | "GOVERNMENT" | "SOLE_PROPRIETOR";
   vertical: string; ein: string; messageVolume: string; optInEvidenceUrl: string;
+  stockSymbol: string; stockExchange: string;
 };
 const initial: Draft = {
   legalName: "", contactName: "", contactEmail: "", contactPhone: "", website: "",
   privacyPolicyUrl: "", termsUrl: "", messagingUseCase: "", optInFlow: "",
   sampleMessages: ["", ""], categories: ["TRANSACTIONAL"], allowEmbeddedLinks: true,
   businessAddress: "", businessCity: "", businessState: "", businessZip: "",
-  entityType: "PRIVATE_PROFIT", vertical: "PROFESSIONAL", ein: "", messageVolume: "1,000", optInEvidenceUrl: "",
+  entityType: "PRIVATE_PROFIT", vertical: "RETAIL", ein: "", messageVolume: "1,000", optInEvidenceUrl: "",
+  stockSymbol: "", stockExchange: "NONE",
 };
 
 export function SmsRegistrationSettings() {
@@ -105,9 +107,9 @@ export function SmsRegistrationSettings() {
         <div className="smsRegistrationGrid">
           <label>Legal business name<input required minLength={2} maxLength={200} value={draft.legalName} onChange={(e) => field("legalName", e.target.value)} /></label>
           <label>Contact full name<input required minLength={2} value={draft.contactName} onChange={(e) => field("contactName", e.target.value)} /></label>
-          <label>Contact email<input required type="email" value={draft.contactEmail} onChange={(e) => field("contactEmail", e.target.value)} /></label>
+          <label>Contact email<input required type="email" maxLength={100} value={draft.contactEmail} onChange={(e) => field("contactEmail", e.target.value)} /></label>
           <label>Contact phone<input required value={draft.contactPhone} onChange={(e) => field("contactPhone", e.target.value)} /></label>
-          <label>Business website<input required type="url" value={draft.website} onChange={(e) => field("website", e.target.value)} /></label>
+          <label>Business website<input required type="url" maxLength={100} value={draft.website} onChange={(e) => field("website", e.target.value)} /></label>
           <label>Privacy policy URL<input required type="url" value={draft.privacyPolicyUrl} onChange={(e) => field("privacyPolicyUrl", e.target.value)} /></label>
           <label>SMS terms URL<input required type="url" value={draft.termsUrl} onChange={(e) => field("termsUrl", e.target.value)} /></label>
           <label>Street address<input required value={draft.businessAddress} onChange={(e) => field("businessAddress", e.target.value)} /></label>
@@ -119,16 +121,22 @@ export function SmsRegistrationSettings() {
             <option value="NON_PROFIT">Nonprofit</option><option value="GOVERNMENT">Government</option>
             <option value="SOLE_PROPRIETOR">Sole proprietor</option></select></label>
           <label>Business industry<select value={draft.vertical} onChange={(e) => field("vertical", e.target.value)}>
-            {["PROFESSIONAL","HEALTHCARE","RETAIL","TECHNOLOGY","HOSPITALITY","EDUCATION","LEGAL","REAL_ESTATE","FINANCIAL","CONSTRUCTION","MANUFACTURING","TRANSPORTATION","ENTERTAINMENT","INSURANCE"].map((v) => <option key={v} value={v}>{v.replaceAll("_"," ")}</option>)}
+            {["AGRICULTURE","COMMUNICATION","CONSTRUCTION","EDUCATION","ENERGY","ENTERTAINMENT","FINANCIAL","GAMBLING","GOVERNMENT","HEALTHCARE","HOSPITALITY","INSURANCE","MANUFACTURING","NGO","REAL_ESTATE","RETAIL","TECHNOLOGY"].map((v) => <option key={v} value={v}>{v.replaceAll("_"," ")}</option>)}
           </select></label>
-          <label>Business tax ID (EIN)<input value={draft.ein} onChange={(e) => field("ein", e.target.value)} required={draft.entityType !== "SOLE_PROPRIETOR" && number.numberType === "local"} /></label>
+          <label>Business tax ID (EIN)<input value={draft.ein} onChange={(e) => field("ein", e.target.value)} required /></label>
+          {draft.entityType === "PUBLIC_PROFIT" && <>
+            <label>Stock symbol<input required maxLength={10} value={draft.stockSymbol} onChange={(e) => field("stockSymbol", e.target.value.toUpperCase())} /></label>
+            <label>Stock exchange<select required value={draft.stockExchange} onChange={(e) => field("stockExchange", e.target.value)}>
+              {["NONE","NASDAQ","NYSE","AMEX","AMX","ASX","B3","BME","BSE","FRA","ICEX","JPX","JSE","KRX","LON","NSE","OMX","SEHK","SSE","STO","SWX","SZSE","TWSE","VSE"].map((v) => <option key={v} value={v}>{v}</option>)}
+            </select></label>
+          </>}
           <label>Estimated monthly SMS volume<select value={draft.messageVolume} onChange={(e) => field("messageVolume", e.target.value)}>
             {["10","100","1,000","10,000","100,000","250,000","500,000","750,000","1,000,000","5,000,000","10,000,000+"].map((v) => <option key={v} value={v}>{v}</option>)}
           </select></label>
           <label>Public opt-in form or screenshot URL<input type="url" required value={draft.optInEvidenceUrl} onChange={(e) => field("optInEvidenceUrl", e.target.value)} /></label>
         </div>
-        <label>Messaging use case<textarea required minLength={30} maxLength={3000} rows={3} placeholder="e.g. Appointment confirmations, reminders and rescheduling updates" value={draft.messagingUseCase} onChange={(e) => field("messagingUseCase", e.target.value)} /></label>
-        <label>How customers opt in<textarea required minLength={30} maxLength={3000} rows={3} placeholder="Describe website consent, inbound text and verbal opt-in flows" value={draft.optInFlow} onChange={(e) => field("optInFlow", e.target.value)} /></label>
+        <label>Messaging use case<textarea required minLength={40} maxLength={500} rows={3} placeholder="e.g. Appointment confirmations, reminders and rescheduling updates" value={draft.messagingUseCase} onChange={(e) => field("messagingUseCase", e.target.value)} /></label>
+        <label>How customers opt in<textarea required minLength={40} maxLength={500} rows={3} placeholder="Describe website consent, inbound text and verbal opt-in flows" value={draft.optInFlow} onChange={(e) => field("optInFlow", e.target.value)} /></label>
         {draft.sampleMessages.map((example, i) => <label key={i}>Example message {i + 1}<textarea required minLength={10} rows={2} value={example} onChange={(e) => field("sampleMessages", draft.sampleMessages.map((item, j) => j === i ? e.target.value : item))} /></label>)}
         <div className="smsRegistrationChoices">
           <label><input type="checkbox" checked={draft.categories.includes("TRANSACTIONAL")} onChange={(e) => field("categories", e.target.checked ? [...draft.categories, "TRANSACTIONAL"] : draft.categories.filter((c) => c !== "TRANSACTIONAL"))} /> Transactional appointment / service updates</label>
