@@ -53,7 +53,7 @@ For production/staging, do not terminate TLS incorrectly or publicly expose the 
 5. Confirm in Telnyx that the application's **v2 voice callback** is the public tunnel URL ending in `/api/webhooks/voice/telnyx/<workspace-id>`, and the purchased number is assigned to it. Do not paste the private account details or raw webhook signatures.
 6. Phone UI should show `Calls: Active` while outbound SMS may independently show `Registration required` or `Registration pending`. This is expected while Issue #24 is unresolved.
 
-**If you change your tunnel hostname after purchasing the number, the previously created Telnyx voice application will still point at its old webhook URL.** Keep the original tunnel online for the first V2 call; updating an existing carrier application is a separate safe repair flow, not an excuse to buy another number.
+**If you change your tunnel hostname after purchasing the number**, update `HOSTED_WEBHOOK_BASE_URL`, restart the local app, then use **Settings → Phone & Messaging → Repair voice routing**. This owner-only action PATCHes the exact persisted Telnyx Call Control application with the new voice callback. It does not repurchase, release, or replace the number and does not change SMS approval. Repeat the live probe and call test after repair. Keep a stable tunnel for the test where possible.
 
 ## 3. Make a live call
 
@@ -116,7 +116,7 @@ V2 result: PASS / FAIL / BLOCKED
 ## V2 failure isolation
 
 - **No number / no Call Control app:** inspect managed-number status and worker; do not manually buy a duplicate number.
-- **Telnyx app points to localhost or stale tunnel:** fix deployment/tunnel; do not retry purchasing the number. Existing Telnyx app needs its webhook updated through a safe provider repair operation.
+- **Telnyx app points to localhost or stale tunnel:** fix deployment/tunnel and click **Repair voice routing**. Do not retry purchasing the number. This action updates the existing voice app only; if you also need to fix a stale SMS webhook, handle that separately under the messaging compliance workstream.
 - **No webhook arrives:** validate public HTTPS tunnel, number's exact Call Control assignment and callback URL.
 - **Webhook returns 401:** inspect the public signing-key configuration and raw-body handling; do not disable verification.
 - **Webhook returns 409:** investigate workspace/number/call lifecycle mismatch or out-of-order events, not the AI API key.
