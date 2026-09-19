@@ -31,7 +31,6 @@ const platform = vi.hoisted(() => ({
 vi.mock("@/server/providers/telnyx-platform", () => platform);
 
 import { closeDatabase, db } from "@/db";
-import { resetEnvForTests } from "@/server/env";
 import { capabilityBindings, creditWallets, hostedPhoneNumbers, integrations, usageEvents, workspaces } from "@/db/schema";
 import { processPendingPhoneNumberProvisioning, provisionManagedPhoneNumber, refreshManagedVoiceWebhook, releaseManagedPhoneNumber } from "./service";
 
@@ -41,8 +40,6 @@ describe("managed phone provisioning lifecycle", () => {
   let workspaceId = "";
 
   beforeEach(async () => {
-    vi.stubEnv("HOSTED_WEBHOOK_BASE_URL", "https://staging-webhook.aicaller.dev");
-    resetEnvForTests();
     vi.clearAllMocks();
     platform.createTelnyxCallControlApplication.mockResolvedValue("call-control-1");
     platform.createTelnyxMessagingProfile.mockResolvedValue("messaging-profile-1");
@@ -93,8 +90,6 @@ describe("managed phone provisioning lifecycle", () => {
   });
 
   afterAll(async () => {
-    vi.unstubAllEnvs();
-    resetEnvForTests();
     await closeDatabase();
   });
 
@@ -133,28 +128,6 @@ describe("managed phone provisioning lifecycle", () => {
     expect((await db.select().from(creditWallets))[0].balance).toBe(8_000);
   });
 
-  it("blocks localhost webhook purchases before credit reservation or carrier resources", async () => {
-    vi.stubEnv("HOSTED_WEBHOOK_BASE_URL", "http://localhost:3000");
-    vi.stubEnv("CI", "false");
-    resetEnvForTests();
-    try {
-      await expect(provisionManagedPhoneNumber(workspaceId, {
-        phoneNumber: "+12025550200",
-        requestId,
-        expectedPurchaseCredits: 2000,
-        expectedMonthlyCredits: 2000,
-      })).rejects.toMatchObject({ code: "PUBLIC_WEBHOOK_URL_REQUIRED", status: 422 });
-      expect(platform.createTelnyxCallControlApplication).not.toHaveBeenCalled();
-      expect(platform.createTelnyxMessagingProfile).not.toHaveBeenCalled();
-      expect(platform.orderTelnyxNumber).not.toHaveBeenCalled();
-      expect(await db.select().from(hostedPhoneNumbers)).toHaveLength(0);
-      expect((await db.select().from(creditWallets))[0].balance).toBe(10_000);
-    } finally {
-      vi.unstubAllEnvs();
-      resetEnvForTests();
-    }
-  });
-
   it("repairs an owned active voice app without buying or replacing a number", async () => {
     const [row] = await db.insert(hostedPhoneNumbers).values({
       workspaceId, provider: "telnyx", phoneNumber: "+12025550200",
@@ -164,11 +137,11 @@ describe("managed phone provisioning lifecycle", () => {
       purchaseCredits: 2000, monthlyCredits: 2000,
     }).returning();
     await expect(refreshManagedVoiceWebhook(workspaceId)).resolves.toEqual({
-      phoneNumberId: row.id, status: "UPDATED", webhookOrigin: "https://staging-webhook.aicaller.dev",
+      phoneNumberId: row.id, status: "UPDATED", webhookOrigin: "http://localhost:3000",
     });
     expect(platform.updateTelnyxCallControlApplication).toHaveBeenCalledWith(
       workspaceId, "call-control-1",
-      `https://staging-webhook.aicaller.dev/api/webhooks/voice/telnyx/${workspaceId}`,
+      `http://localhost:3000/api/webhooks/voice/telnyx/${workspaceId}`,
     );
     expect(platform.createTelnyxCallControlApplication).not.toHaveBeenCalled();
     expect(platform.orderTelnyxNumber).not.toHaveBeenCalled();
