@@ -5,6 +5,30 @@ export type ApprovedSmsPolicy = {
   allowEmbeddedLinks: boolean;
   description: string;
 };
+const SHORTENER_DOMAINS = new Set(["bit.ly", "tinyurl.com", "t.co", "goo.gl", "ow.ly", "is.gd", "rebrand.ly", "shorturl.at"]);
+export function validateSmsLinks(text: string, linksAllowed: boolean) {
+  const links = text.match(/(?:https?:\/\/|www\.)[^\s<>]+/gi) ?? [];
+  if (links.length && !linksAllowed) {
+    throw new AppError("SMS_CAMPAIGN_LINKS_NOT_APPROVED", "Embedded links are not approved for your SMS campaign.", 409);
+  }
+  for (const rawLink of links) {
+    const value = rawLink.replace(/[.,;!?]+$/, "");
+    let link: URL;
+    try { link = new URL(value.startsWith("www.") ? "https://" + value : value); }
+    catch { throw new AppError("SMS_UNSAFE_LINK", "The SMS contains an invalid web address.", 409); }
+    const host = link.hostname.toLowerCase().replace(/\.$/, "");
+    const digits = host.match(/^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/);
+    const internal = digits && (Number(digits[1]) === 10 || Number(digits[1]) === 127 ||
+      Number(digits[1]) === 0 || Number(digits[1]) === 192 && Number(digits[2]) === 168 ||
+      Number(digits[1]) === 172 && Number(digits[2]) >= 16 && Number(digits[2]) <= 31);
+    if (link.protocol !== "https:" || link.username || link.password ||
+        !host.includes(".") || host === "localhost" || host.endsWith(".local") ||
+        SHORTENER_DOMAINS.has(host) || internal) {
+      throw new AppError("SMS_UNSAFE_LINK", "Use a trusted HTTPS link rather than a shortened, local or insecure destination.", 409);
+    }
+  }
+}
+
 export function validateApprovedSmsMessage(input: {
   policy: ApprovedSmsPolicy;
   classifiedPurpose: SmsPurpose | "UNCERTAIN";
@@ -12,7 +36,7 @@ export function validateApprovedSmsMessage(input: {
 }) {
   if (input.classifiedPurpose === "UNCERTAIN") throw new AppError("SMS_CAMPAIGN_REVIEW_REQUIRED", "Please edit this message: its purpose could not be confirmed.", 409);
   if (!input.policy.categories.includes(input.classifiedPurpose)) throw new AppError("SMS_CAMPAIGN_PURPOSE_NOT_APPROVED", "This message is outside your approved SMS campaign.", 409);
-  if (!input.policy.allowEmbeddedLinks && /https?:\/\/|www\./i.test(input.text)) throw new AppError("SMS_CAMPAIGN_LINKS_NOT_APPROVED", "Embedded links are not approved for your SMS campaign.", 409);
+  validateSmsLinks(input.text, input.policy.allowEmbeddedLinks);
   return input.classifiedPurpose;
 }
 
