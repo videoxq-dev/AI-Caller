@@ -1,4 +1,4 @@
-import { createCipheriv, generateKeyPairSync, randomBytes, sign } from "node:crypto";
+import { createPrivateKey, randomUUID, sign } from "node:crypto";
 import { mkdir } from "node:fs/promises";
 import path from "node:path";
 import pg from "pg";
@@ -7,9 +7,7 @@ import { chromium } from "playwright";
 const { Pool } = pg;
 const baseUrl = process.env.BETTER_AUTH_URL ?? "http://127.0.0.1:3000";
 const databaseUrl = process.env.DATABASE_URL;
-const encryptionKey = process.env.INTEGRATION_ENCRYPTION_KEY;
 if (!databaseUrl) throw new Error("DATABASE_URL is required for Milestone 7 browser verification.");
-if (!encryptionKey) throw new Error("INTEGRATION_ENCRYPTION_KEY is required for Milestone 7 browser verification.");
 
 const outputDir = path.join(process.cwd(), "artifacts", "milestone7-browser");
 await mkdir(outputDir, { recursive: true });
@@ -18,35 +16,20 @@ function assert(condition, message) {
   if (!condition) throw new Error(message);
 }
 
-function encryptCredentials(value) {
-  const key = Buffer.from(encryptionKey, "base64");
-  if (key.length !== 32) throw new Error("CI integration key must decode to 32 bytes.");
-  const iv = randomBytes(12);
-  const cipher = createCipheriv("aes-256-gcm", key, iv);
-  cipher.setAAD(Buffer.from("ai-caller/provider-credentials/v1", "utf8"));
-  const ciphertext = Buffer.concat([cipher.update(JSON.stringify(value), "utf8"), cipher.final()]);
-  return {
-    version: 1,
-    algorithm: "A256GCM",
-    iv: iv.toString("base64"),
-    tag: cipher.getAuthTag().toString("base64"),
-    ciphertext: ciphertext.toString("base64"),
-  };
-}
-
-const { publicKey, privateKey } = generateKeyPairSync("ed25519");
-const webhookPublicKey = publicKey.export({ type: "spki", format: "pem" }).toString();
+const privateKey = createPrivateKey(`-----BEGIN PRIVATE KEY-----
+MC4CAQAwBQYDK2VwBCIEIOgDv5zaVsY5ojeyMYHRlFb2ZKLJp62/+AxAzM+9lRMB
+-----END PRIVATE KEY-----`);
 
 function telnyxSignature(timestamp, rawBody) {
   return sign(null, Buffer.from(`${timestamp}|${rawBody}`, "utf8"), privateKey).toString("base64");
 }
 
-function eventPayload(eventType, id, callSessionId, callControlId, extra = {}) {
+function eventPayload(eventType, id, callSessionId, callControlId, extra = {}, occurredAt = new Date()) {
   return {
     data: {
       event_type: eventType,
       id,
-      occurred_at: new Date().toISOString(),
+      occurred_at: occurredAt.toISOString(),
       payload: {
         call_session_id: callSessionId,
         ...(callControlId ? { call_control_id: callControlId } : {}),
@@ -190,8 +173,8 @@ try {
     [workspaceId],
   );
   await pool.query(
-    `INSERT INTO credit_wallets (workspace_id, balance) VALUES ($1, 100)
-     ON CONFLICT (workspace_id) DO UPDATE SET balance = 100, updated_at = now()`,
+    `INSERT INTO credit_wallets (workspace_id, balance) VALUES ($1, 5000)
+     ON CONFLICT (workspace_id) DO UPDATE SET balance = 5000, updated_at = now()`,
     [workspaceId],
   );
 
@@ -202,26 +185,34 @@ try {
     [workspaceId],
   );
 
-  const voiceNumber = "+12025550400";
-  const voiceCredentials = encryptCredentials({ apiKey: "ci-telnyx-api-key" });
-  const voiceSettings = {
-    phone: voiceNumber,
-    connectionId: "ci-call-control-connection",
-    webhookPublicKey,
-  };
-  const voiceIntegration = await pool.query(
-    `INSERT INTO integrations (workspace_id, category, provider, mode, status, encrypted_credentials, settings)
-     VALUES ($1, 'COMMUNICATION', 'telnyx', 'BYOP', 'CONNECTED', $2::jsonb, $3::jsonb)
-     RETURNING id`,
-    [workspaceId, JSON.stringify(voiceCredentials), JSON.stringify(voiceSettings)],
-  );
-
   await pool.query(
     `INSERT INTO capability_bindings (workspace_id, capability, integration_id, mode)
-     VALUES ($1, 'CALENDAR', $2, 'BYOP'), ($1, 'VOICE', $3, 'BYOP')
+     VALUES ($1, 'CALENDAR', $2, 'BYOP')
      ON CONFLICT (workspace_id, capability) DO UPDATE SET integration_id = EXCLUDED.integration_id, mode = EXCLUDED.mode, updated_at = now()`,
-    [workspaceId, calendarIntegration.rows[0].id, voiceIntegration.rows[0].id],
+    [workspaceId, calendarIntegration.rows[0].id],
   );
+
+  const numberSearch = await api(context, "GET", "/api/phone-numbers/search?country=US&areaCode=646&type=local", undefined, "search managed voice number");
+  const voiceNumber = "+16465550200";
+  assert(numberSearch?.items?.some((item) => item.phoneNumber === voiceNumber), "Managed voice number search did not return the guarded Telnyx fixture.");
+
+  const provisionRequestId = randomUUID();
+  const managedNumber = await api(context, "POST", "/api/phone-numbers", {
+    phoneNumber: voiceNumber,
+    requestId: provisionRequestId,
+    expectedPurchaseCredits: numberSearch.items.find((item) => item.phoneNumber === voiceNumber).purchaseCredits,
+    expectedMonthlyCredits: numberSearch.items.find((item) => item.phoneNumber === voiceNumber).monthlyCredits,
+    replaceCurrent: false,
+  }, "provision managed voice number");
+  assert(managedNumber?.number?.status === "ACTIVE", `Managed voice number did not finish carrier activation: ${JSON.stringify(managedNumber?.number)}`);
+  assert(managedNumber?.number?.messagingReadiness === "NOT_REGISTERED", "Voice activation incorrectly implied outbound SMS readiness.");
+
+  const hostedRoutes = await pool.query(
+    `SELECT capability, mode, integration_id FROM capability_bindings
+      WHERE workspace_id = $1 AND capability IN ('VOICE', 'SMS') ORDER BY capability`,
+    [workspaceId],
+  );
+  assert(hostedRoutes.rows.length === 2 && hostedRoutes.rows.every((row) => row.mode === "HOSTED" && row.integration_id === null), "Managed number did not bind hosted Voice and SMS routes.");
 
   const invalid = await sendWebhook(
     workspaceId,
@@ -242,9 +233,10 @@ try {
      VALUES ($1, $2, 'SMS', $3, $3)`,
     [workspaceId, preexistingContact.rows[0].id, caller],
   );
+  const callClock = Date.now();
   const initiated = await sendWebhook(
     workspaceId,
-    eventPayload("call.initiated", "m7-call-1", callSessionId, callControlId, { from: caller, to: voiceNumber }),
+    eventPayload("call.initiated", "m7-call-1", callSessionId, callControlId, { from: caller, to: voiceNumber }, new Date(callClock - 70_000)),
   );
   assert(initiated.response.status === 200 && initiated.data?.processed === 1, `Inbound call initiation failed: ${initiated.text}`);
 
@@ -259,7 +251,7 @@ try {
   assert(callRow.rows[0].mode === "AI_FIRST", `Expected AI_FIRST mode, got ${callRow.rows[0].mode}.`);
   assert(callRow.rows[0].recording_consent_status === "PENDING", "Recording consent was persisted before disclosure/consent.");
 
-  const answered = await sendWebhook(workspaceId, eventPayload("call.answered", "m7-call-2", callSessionId, callControlId));
+  const answered = await sendWebhook(workspaceId, eventPayload("call.answered", "m7-call-2", callSessionId, callControlId, {}, new Date(callClock - 65_000)));
   assert(answered.data?.processed === 1, "Answered voice event was not processed.");
 
   let consentState = await pool.query(
@@ -363,7 +355,7 @@ try {
   );
   assert(callerIdentities.rows.some((row) => row.channel === "SMS") && callerIdentities.rows.some((row) => row.channel === "PHONE"), "Unified caller contact is missing SMS/PHONE identities.");
 
-  const hangup = await sendWebhook(workspaceId, eventPayload("call.hangup", "m7-hangup", callSessionId, callControlId, { hangup_cause: "normal_clearing" }));
+  const hangup = await sendWebhook(workspaceId, eventPayload("call.hangup", "m7-hangup", callSessionId, callControlId, { hangup_cause: "normal_clearing" }, new Date(callClock)));
   assert(hangup.data?.processed === 1, "Voice hangup event failed.");
 
   const recording = await sendWebhook(
@@ -404,7 +396,7 @@ try {
     [workspaceId, callId],
   );
   assert(usage.rows[0].count === 1, "Voice usage was not persisted exactly once across distinct hangup callbacks.");
-  assert(usage.rows[0].credits === 0, "BYOP voice transport incorrectly charged hosted credits.");
+  assert(usage.rows[0].credits === 160, `Expected 2 started hosted voice minutes (160 credits), received ${usage.rows[0].credits}.`);
 
   await page.goto(`${baseUrl}/inbox`, { waitUntil: "networkidle" });
   await page.getByLabel("Channel filter").selectOption("PHONE");
@@ -466,7 +458,7 @@ try {
   assert(afterDuplicate.rows[0].count === beforeDuplicate.rows[0].count, "Duplicate voice webhook created a second call.");
 
   assert(runtimeErrors.length === 0, `Browser/runtime errors detected: ${runtimeErrors.join(" | ")}`);
-  console.log("Milestone 7 browser verification passed for signed Telnyx inbound webhooks, explicit recording consent, shared qualification/knowledge/availability/booking, durable recording archival, synchronized transcript, BYOP usage, after-hours routing, and responsive unified Inbox.");
+  console.log("Milestone 7 browser verification passed for a freshly provisioned managed Telnyx number, signed hosted inbound voice webhooks, explicit recording consent, shared qualification/knowledge/availability/booking, durable recording archival, synchronized transcript, hosted voice credit metering, after-hours routing, and responsive unified Inbox.");
 } finally {
   await pool.end();
   await browser.close();

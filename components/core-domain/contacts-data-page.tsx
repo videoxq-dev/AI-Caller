@@ -66,13 +66,12 @@ export function ContactsDataPage() {
       const data = await response.json() as ContactListResponse;
       setContacts(data.items);
       setTotal(data.total);
-      if (!selectedId && data.items[0]) setSelectedId(data.items[0].id);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Unable to load contacts.");
     } finally {
       setLoading(false);
     }
-  }, [channel, leadStatus, query, selectedId]);
+  }, [channel, leadStatus, query]);
 
   useEffect(() => {
     const timer = window.setTimeout(() => void loadContacts(), 200);

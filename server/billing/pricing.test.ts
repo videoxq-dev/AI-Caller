@@ -8,7 +8,7 @@ const aiRates: HostedRate[] = [
     unit: "AI_INPUT_TOKEN",
     costMicros: 200_000,
     unitsPerCost: 1_000_000,
-    targetMarginBps: 5500,
+    targetMarginBps: 5000,
     provider: "openai",
     model: "gpt-5.6-luna",
     effectiveFrom: now,
@@ -18,7 +18,7 @@ const aiRates: HostedRate[] = [
     unit: "AI_CACHED_INPUT_TOKEN",
     costMicros: 20_000,
     unitsPerCost: 1_000_000,
-    targetMarginBps: 5500,
+    targetMarginBps: 5000,
     provider: "openai",
     model: "gpt-5.6-luna",
     effectiveFrom: now,
@@ -28,7 +28,7 @@ const aiRates: HostedRate[] = [
     unit: "AI_OUTPUT_TOKEN",
     costMicros: 1_200_000,
     unitsPerCost: 1_000_000,
-    targetMarginBps: 5500,
+    targetMarginBps: 5000,
     provider: "openai",
     model: "gpt-5.6-luna",
     effectiveFrom: now,
@@ -44,7 +44,7 @@ describe("hosted API pricing", () => {
     ]);
 
     expect(quote.providerCostMicros).toBe(906);
-    expect(quote.credits).toBe(3);
+    expect(quote.credits).toBe(2);
     expect(quote.billedUnits).toEqual({
       AI_INPUT_TOKEN: 2700,
       AI_CACHED_INPUT_TOKEN: 300,
@@ -52,14 +52,14 @@ describe("hosted API pricing", () => {
     });
   });
 
-  it("prices a conservative US hosted SMS segment at 23 credits", () => {
+  it("prices a conservative US hosted SMS segment at 20 credits", () => {
     const quote = quoteHostedUsage([
       {
         id: "sms",
         unit: "SMS_SEGMENT",
         costMicros: 10000,
         unitsPerCost: 1,
-        targetMarginBps: 5500,
+        targetMarginBps: 5000,
         provider: "telnyx",
         model: "",
         effectiveFrom: now,
@@ -67,7 +67,25 @@ describe("hosted API pricing", () => {
     ], [{ unit: "SMS_SEGMENT", units: 1 }]);
 
     expect(quote.providerCostMicros).toBe(10000);
-    expect(quote.credits).toBe(23);
+    expect(quote.credits).toBe(20);
+  });
+
+  it("prices a conservative managed inbound voice minute at 80 credits", () => {
+    const quote = quoteHostedUsage([
+      {
+        id: "voice",
+        unit: "VOICE_MINUTE",
+        costMicros: 40000,
+        unitsPerCost: 1,
+        targetMarginBps: 5000,
+        provider: "telnyx",
+        model: "",
+        effectiveFrom: now,
+      },
+    ], [{ unit: "VOICE_MINUTE", units: 1 }]);
+
+    expect(quote.providerCostMicros).toBe(40000);
+    expect(quote.credits).toBe(80);
   });
 
   it("does not charge for zero billable units", () => {

@@ -1,9 +1,10 @@
-import { and, eq } from "drizzle-orm";
+import { and, eq, isNull } from "drizzle-orm";
 import { db } from "@/db";
 import {
   calendarSetupSettings,
   capabilityBindings,
   communicationSetupSettings,
+  hostedPhoneNumbers,
   integrations,
 } from "@/db/schema";
 import { markSetupStep } from "@/server/domain/onboarding/repository";
@@ -16,7 +17,6 @@ import {
 } from "@/server/security/secrets";
 import { assertProviderSupportsCapability } from "@/server/providers/catalog";
 import { testProviderConnection } from "@/server/providers/connections";
-import { parseTelnyxWebhookPublicKey } from "@/server/providers/telnyx-webhook";
 import type { CalendarSetupInput, CommunicationSetupInput, IntegrationSaveInput } from "./schemas";
 
 const categoryByProvider: Record<string, "AI" | "COMMUNICATION" | "WHATSAPP" | "CALENDAR"> = {
@@ -186,66 +186,6 @@ async function requireConnectedProvider(workspaceId: string, provider: string, l
   if (row?.status !== "CONNECTED") throw new Error(`${label} provider ${provider} must be connected before this setup step can be completed.`);
 }
 
-async function requireVoiceIntegrationReady(workspaceId: string, provider: string) {
-  if (provider !== "telnyx") {
-    await requireConnectedProvider(workspaceId, provider, "Voice");
-    return;
-  }
-  const row = await getPrivateIntegration(workspaceId, provider);
-  if (!row || row.status !== "CONNECTED") {
-    throw new Error("Voice provider telnyx must be connected before this setup step can be completed.");
-  }
-  const settings = row.settings && typeof row.settings === "object" ? row.settings as Record<string, unknown> : {};
-  const credentials = decryptCredentialMap(row.encryptedCredentials);
-  const phone = typeof settings.phone === "string" && settings.phone.trim()
-    ? settings.phone.trim()
-    : credentials.phone?.trim();
-  if (!phone) throw new Error("Telnyx voice needs an inbound phone number before setup can be completed.");
-  const connectionId = typeof settings.connectionId === "string" && settings.connectionId.trim()
-    ? settings.connectionId.trim()
-    : credentials.connectionId?.trim();
-  if (!connectionId) throw new Error("Telnyx voice needs a Call Control connection ID before setup can be completed.");
-  const publicKey = typeof settings.webhookPublicKey === "string" && settings.webhookPublicKey.trim()
-    ? settings.webhookPublicKey.trim()
-    : credentials.webhookPublicKey?.trim();
-  if (!publicKey) throw new Error("Telnyx voice needs its webhook signing public key before setup can be completed.");
-  try {
-    parseTelnyxWebhookPublicKey(publicKey);
-  } catch (error) {
-    throw new Error(error instanceof Error ? error.message : "Telnyx voice webhook signing public key is invalid.");
-  }
-}
-
-async function requireSmsIntegrationReady(workspaceId: string, provider: string) {
-  const row = await getPrivateIntegration(workspaceId, provider);
-  if (!row || row.status !== "CONNECTED") {
-    throw new Error(`SMS provider ${provider} must be connected before this setup step can be completed.`);
-  }
-
-  const settings = row.settings && typeof row.settings === "object" ? row.settings as Record<string, unknown> : {};
-  const credentials = decryptCredentialMap(row.encryptedCredentials);
-  const phone = typeof settings.phone === "string" && settings.phone.trim()
-    ? settings.phone.trim()
-    : credentials.phone?.trim();
-  if (!phone) {
-    throw new Error(`SMS provider ${provider} needs a sender phone number before this setup step can be completed.`);
-  }
-
-  if (provider === "telnyx") {
-    const publicKey = typeof settings.webhookPublicKey === "string" && settings.webhookPublicKey.trim()
-      ? settings.webhookPublicKey.trim()
-      : credentials.webhookPublicKey?.trim();
-    if (!publicKey) {
-      throw new Error("Telnyx SMS needs its webhook signing public key before this setup step can be completed.");
-    }
-    try {
-      parseTelnyxWebhookPublicKey(publicKey);
-    } catch (error) {
-      throw new Error(error instanceof Error ? error.message : "Telnyx SMS webhook signing public key is invalid.");
-    }
-  }
-}
-
 export async function bindCapability(workspaceId: string, capability: "AI_TEXT" | "SMS" | "VOICE" | "WHATSAPP" | "CALENDAR", mode: "HOSTED" | "BYOP", provider?: string | null) {
   if (mode === "BYOP") {
     if (!provider) throw new Error(`${capability} requires a provider when using BYOP mode.`);
@@ -277,22 +217,32 @@ export async function getCommunicationSetup(workspaceId: string) {
   return row?.settings ?? null;
 }
 
+async function requireManagedPhoneReady(workspaceId: string) {
+  const [number] = await db.select({ id: hostedPhoneNumbers.id })
+    .from(hostedPhoneNumbers)
+    .where(and(
+      eq(hostedPhoneNumbers.workspaceId, workspaceId),
+      eq(hostedPhoneNumbers.status, "ACTIVE"),
+      isNull(hostedPhoneNumbers.releasedAt),
+    ))
+    .limit(1);
+  if (!number) {
+    throw new Error("Choose and activate an AI Caller phone number before completing communication setup.");
+  }
+}
+
 export async function saveCommunicationSetup(workspaceId: string, input: CommunicationSetupInput) {
-  if (input.completeStep) {
-    if (input.voice.mode === "BYOP" && input.voice.provider) await requireVoiceIntegrationReady(workspaceId, input.voice.provider);
-    if (input.sms.mode === "BYOP" && input.sms.provider) await requireSmsIntegrationReady(workspaceId, input.sms.provider);
-    if (input.whatsapp.mode === "BYOP") await requireConnectedProvider(workspaceId, input.whatsapp.provider ?? "whatsapp", "WhatsApp");
+  if (input.completeStep && (input.voice.mode === "HOSTED" || input.sms.mode === "HOSTED")) {
+    await requireManagedPhoneReady(workspaceId);
   }
   const settings = { voice: input.voice, sms: input.sms, whatsapp: input.whatsapp, webchat: input.webchat };
   const now = new Date();
   await db.insert(communicationSetupSettings).values({ workspaceId, settings, updatedAt: now }).onConflictDoUpdate({ target: communicationSetupSettings.workspaceId, set: { settings, updatedAt: now } });
   const capabilityWrites = [
+    bindCapability(workspaceId, "VOICE", input.voice.mode, input.voice.provider),
     bindCapability(workspaceId, "SMS", input.sms.mode, input.sms.provider),
     bindCapability(workspaceId, "WHATSAPP", input.whatsapp.mode, input.whatsapp.provider ?? "whatsapp"),
   ];
-  if (input.voice.mode === "BYOP" && input.voice.provider === "telnyx") {
-    capabilityWrites.push(bindCapability(workspaceId, "VOICE", "BYOP", "telnyx"));
-  }
   await Promise.all(capabilityWrites);
   if (input.completeStep) await markSetupStep(workspaceId, "communication", now);
   return settings;

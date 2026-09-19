@@ -29,9 +29,8 @@ jobs:
       PG_BOSS_SCHEMA: pgboss
       LOG_LEVEL: silent
       AI_CALLER_E2E_FIXTURES: "1"
-      HOSTED_SMS_PROVIDER: twilio
-      HOSTED_SMS_TWILIO_ACCOUNT_SID: AC11111111111111111111111111111111
-      HOSTED_SMS_TWILIO_AUTH_TOKEN: ci-twilio-signature-secret
+      HOSTED_TELNYX_API_KEY: ci-managed-telnyx-api-key
+      HOSTED_TELNYX_WEBHOOK_PUBLIC_KEY: S5YG8mnUcwIiUkm8C8qHrHXRDMR0gIKJBNGj3GZyWb0=
       STRIPE_RESTRICTED_API_KEY: rk_test_ci_milestone10
       STRIPE_WEBHOOK_SECRET: whsec_ci_milestone10_signature_secret
       META_APP_SECRET: ci-meta-app-secret

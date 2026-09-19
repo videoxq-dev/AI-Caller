@@ -34,12 +34,14 @@ describe("communication setup provider validation", () => {
     expect(communicationSetupSchema.safeParse(validCommunicationSetup()).success).toBe(true);
   });
 
-  it("allows unsupported voice routes only as drafts and rejects them on completion", () => {
+  it("allows onboarding completion before optional voice and hosted SMS activation", () => {
     const base = validCommunicationSetup();
-    expect(communicationSetupSchema.safeParse({ ...base, voice: { ...base.voice, mode: "HOSTED", provider: null }, completeStep: false }).success).toBe(true);
-    expect(communicationSetupSchema.safeParse({ ...base, voice: { ...base.voice, provider: "twilio" }, completeStep: false }).success).toBe(true);
-    expect(communicationSetupSchema.safeParse({ ...base, voice: { ...base.voice, mode: "HOSTED", provider: null }, completeStep: true }).success).toBe(false);
-    expect(communicationSetupSchema.safeParse({ ...base, voice: { ...base.voice, provider: "twilio" }, completeStep: true }).success).toBe(false);
+    expect(communicationSetupSchema.safeParse({
+      ...base,
+      voice: { ...base.voice, mode: "HOSTED", provider: null, number: null },
+      sms: { ...base.sms, mode: "HOSTED", provider: null, numberMode: "same" },
+      completeStep: true,
+    }).success).toBe(true);
   });
 
   it("rejects non-communication providers for voice and SMS", () => {

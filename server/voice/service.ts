@@ -4,6 +4,8 @@ import { isIP } from "node:net";
 import { and, eq } from "drizzle-orm";
 import { db } from "@/db";
 import { usageEvents } from "@/db/schema";
+import { loadHostedRateSnapshot, quoteHostedUsage } from "@/server/billing/pricing";
+import { chargeUnavoidableCredits } from "@/server/credits/service";
 import {
   appendMessage,
   getConversationById,
@@ -197,23 +199,59 @@ async function recordingBytes(initialUrl: string, fetcher: typeof fetch) {
   };
 }
 
-async function recordVoiceUsage(workspaceId: string, call: NonNullable<Awaited<ReturnType<typeof getVoiceCallByExternalId>>>) {
+async function recordVoiceUsage(
+  workspaceId: string,
+  runtime: VoiceRuntime,
+  call: NonNullable<Awaited<ReturnType<typeof getVoiceCallByExternalId>>>,
+) {
   try {
+    const durationSeconds = Math.max(0, call.durationSeconds ?? 0);
+    let creditsCharged = 0;
+    let providerCostMicros = 0;
+    let billedUnits: Record<string, number> = {};
+    let pricingDetails: Record<string, unknown> = {};
+
+    if (runtime.mode === "HOSTED" && durationSeconds > 0) {
+      const minutes = Math.max(1, Math.ceil(durationSeconds / 60));
+      const rates = await loadHostedRateSnapshot({
+        capability: "VOICE",
+        provider: runtime.providerName,
+        model: "",
+        units: ["VOICE_MINUTE"],
+      });
+      const quote = quoteHostedUsage(rates, [{ unit: "VOICE_MINUTE", units: minutes }]);
+      creditsCharged = quote.credits;
+      providerCostMicros = quote.providerCostMicros;
+      billedUnits = quote.billedUnits;
+      pricingDetails = quote.pricingDetails;
+      if (creditsCharged > 0) {
+        await chargeUnavoidableCredits(workspaceId, creditsCharged, {
+          reason: "Hosted inbound voice call",
+          referenceType: "VOICE_CALL",
+          referenceId: call.id,
+        });
+      }
+    }
+
     await db.insert(usageEvents).values({
       workspaceId,
       capability: "VOICE",
       provider: call.provider,
-      mode: "BYOP",
+      mode: runtime.mode,
       providerUsage: {
-        durationSeconds: call.durationSeconds ?? 0,
+        durationSeconds,
         voiceMode: call.mode,
       },
-      creditsCharged: 0,
+      creditsCharged,
+      providerCostMicros,
+      billedUnits,
+      pricingDetails,
       referenceType: "VOICE_CALL",
       referenceId: call.id,
     }).onConflictDoNothing();
   } catch (error) {
-    logger.error({ err: error, workspaceId, callId: call.id }, "Failed to persist voice usage event");
+    logger.error({ err: error, workspaceId, callId: call.id }, "Failed to meter voice usage");
+    throw error;
   }
 }
 
@@ -522,7 +560,10 @@ export function createVoiceWebhookService(dependencies: VoiceServiceDependencies
 
     if (event.type === "CALL_HANGUP") {
       const endedAt = event.occurredAt ?? new Date();
-      const durationSeconds = Math.max(0, Math.round((endedAt.getTime() - call.startedAt.getTime()) / 1000));
+      const billableStart = call.answeredAt ?? call.startedAt;
+      const durationSeconds = call.answeredAt
+        ? Math.max(0, Math.round((endedAt.getTime() - billableStart.getTime()) / 1000))
+        : 0;
       const updated = await updateVoiceCall(workspaceId, call.id, {
         status: "COMPLETED",
         endedAt,
@@ -532,7 +573,7 @@ export function createVoiceWebhookService(dependencies: VoiceServiceDependencies
         phase: "ENDED",
         hangupCause: event.cause,
       });
-      await recordVoiceUsage(workspaceId, updated);
+      await recordVoiceUsage(workspaceId, runtime, updated);
     }
   }
 
@@ -548,8 +589,20 @@ export function createVoiceWebhookService(dependencies: VoiceServiceDependencies
       let processed = 0;
       let duplicates = 0;
       let failed = 0;
+      let suppressed = 0;
 
       for (const event of events) {
+        if (runtime.mode === "HOSTED" && runtime.serviceStatus === "SUSPENDED") {
+          if (event.type === "CALL_INITIATED") {
+            suppressed += 1;
+            continue;
+          }
+          const existingCall = await getVoiceCallByExternalId(workspaceId, runtime.providerName, event.externalCallId);
+          if (!existingCall) {
+            suppressed += 1;
+            continue;
+          }
+        }
         const payload = safeEventPayload(event);
         const claim = await claimProviderWebhookEvent(workspaceId, {
           provider: `${providerName}-voice`,
@@ -595,7 +648,7 @@ export function createVoiceWebhookService(dependencies: VoiceServiceDependencies
         }
       }
 
-      return { ok: true as const, processed, duplicates, failed };
+      return { ok: true as const, processed, duplicates, failed, suppressed };
     },
   };
 }

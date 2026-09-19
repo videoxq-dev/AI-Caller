@@ -147,6 +147,7 @@ async function verifyDesktop() {
   await page.goto(`${baseUrl}/contacts`, { waitUntil: "networkidle" });
   await page.getByRole("heading", { name: "Contacts", level: 1 }).waitFor();
   await waitForText(page, "Browser QA Contact");
+  await page.locator("tbody tr", { hasText: "Browser QA Contact" }).click();
   await page.getByRole("heading", { name: "Browser QA Contact" }).waitFor();
   await waitForText(page, "Channel identities");
   for (const label of ["Phone · +1 (415) 555-0123", "SMS · +1 (415) 555-0123", "WhatsApp · +1 (415) 555-0123", "Web Chat · browser-qa-session-001"]) await waitForText(page, label);

@@ -1,6 +1,8 @@
-import { getEnv } from "@/server/env";
+import { getHostedPhoneRuntimeRecord, getHostedPhoneWebhookRecord } from "@/server/phone-numbers/service";
+import type { MessagingReadiness } from "@/server/phone-numbers/lifecycle";
+import { getHostedTelnyxCredentials } from "@/server/providers/telnyx-platform";
 import { decryptIntegrationCredentials, type EncryptedSecretEnvelope } from "@/server/security/secrets";
-import { getCommunicationSetup, getPrivateIntegration } from "@/server/domain/integrations/repository";
+import { getPrivateIntegration } from "@/server/domain/integrations/repository";
 import { normalizePhone } from "@/server/domain/core/schemas";
 import { createE2ESmsProvider, isE2EProviderFixtureMode } from "../e2e-fixtures";
 import { resolveProviderRoute } from "../resolver";
@@ -17,6 +19,8 @@ export type SmsRuntime = {
   providerName: SmsProviderName;
   integrationId: string | null;
   senderNumber: string;
+  serviceStatus: "ACTIVE" | "PAST_DUE" | "SUSPENDED" | null;
+  messagingReadiness: MessagingReadiness | null;
   provider: SMSProvider;
 };
 
@@ -63,68 +67,47 @@ function createProvider(provider: SmsProviderName, secret: Record<string, unknow
   return isE2EProviderFixtureMode() ? createE2ESmsProvider(runtimeProvider) : runtimeProvider;
 }
 
-async function hostedSenderNumber(workspaceId: string) {
-  const setup = await getCommunicationSetup(workspaceId) as {
-    voice?: { number?: unknown };
-    sms?: { numberMode?: unknown; number?: unknown };
-  } | null;
-  const usesSeparateNumber = setup?.sms?.numberMode === "separate";
-  const candidate = usesSeparateNumber ? setup?.sms?.number : setup?.voice?.number;
-  if (typeof candidate !== "string" || !candidate.trim()) {
-    throw new Error("A hosted SMS sender number has not been assigned to this workspace.");
-  }
-  return normalizePhone(candidate);
+async function hostedNumber(workspaceId: string, allowSuspended: boolean) {
+  const number = allowSuspended
+    ? await getHostedPhoneWebhookRecord(workspaceId)
+    : await getHostedPhoneRuntimeRecord(workspaceId);
+  return {
+    senderNumber: normalizePhone(number.phoneNumber),
+    serviceStatus: number.status as "ACTIVE" | "PAST_DUE" | "SUSPENDED",
+    messagingReadiness: number.messagingReadiness as MessagingReadiness,
+  };
 }
 
-function hostedProviderConfig(provider: SmsProviderName) {
-  const env = getEnv();
-  switch (provider) {
-    case "twilio":
-      return {
-        secret: {
-          sid: env.HOSTED_SMS_TWILIO_ACCOUNT_SID,
-          authToken: env.HOSTED_SMS_TWILIO_AUTH_TOKEN,
-        },
-        settings: {},
-      };
-    case "plivo":
-      return {
-        secret: {
-          authId: env.HOSTED_SMS_PLIVO_AUTH_ID,
-          authToken: env.HOSTED_SMS_PLIVO_AUTH_TOKEN,
-        },
-        settings: {},
-      };
-    case "telnyx":
-      return {
-        secret: {
-          apiKey: env.HOSTED_SMS_TELNYX_API_KEY,
-        },
-        settings: {
-          webhookPublicKey: env.HOSTED_SMS_TELNYX_WEBHOOK_PUBLIC_KEY,
-        },
-      };
-  }
+function hostedProviderConfig() {
+  const hosted = getHostedTelnyxCredentials();
+  return {
+    secret: { apiKey: hosted.apiKey },
+    settings: { webhookPublicKey: hosted.webhookPublicKey },
+  };
 }
 
-export async function resolveSmsRuntime(
+async function resolveSmsRuntimeInternal(
   workspaceId: string,
   requestedProvider: SmsProviderName,
-  fetcher: typeof fetch = fetch,
+  fetcher: typeof fetch,
+  allowSuspended: boolean,
 ): Promise<SmsRuntime> {
   const route = await resolveProviderRoute(workspaceId, "SMS");
   if (!route) throw new Error("No SMS provider route is configured for this workspace.");
 
   if (route.mode === "HOSTED") {
-    const providerName = getEnv().HOSTED_SMS_PROVIDER;
-    if (requestedProvider !== providerName) throw new Error("The webhook provider is not the active hosted SMS provider.");
-    const config = hostedProviderConfig(providerName);
+    const providerName: SmsProviderName = "telnyx";
+    if (requestedProvider !== providerName) throw new Error("Managed SMS uses the Telnyx adapter.");
+    const config = hostedProviderConfig();
+    const number = await hostedNumber(workspaceId, allowSuspended);
     return {
       workspaceId,
       mode: "HOSTED",
       providerName,
       integrationId: null,
-      senderNumber: await hostedSenderNumber(workspaceId),
+      senderNumber: number.senderNumber,
+      serviceStatus: number.serviceStatus,
+      messagingReadiness: number.messagingReadiness,
       provider: createProvider(providerName, config.secret, config.settings, fetcher),
     };
   }
@@ -151,10 +134,28 @@ export async function resolveSmsRuntime(
     providerName: requestedProvider,
     integrationId: route.integrationId,
     senderNumber,
+    serviceStatus: null,
+    messagingReadiness: null,
     provider: createProvider(requestedProvider, secret, settings, fetcher),
   };
 }
 
+
+export async function resolveSmsRuntime(
+  workspaceId: string,
+  requestedProvider: SmsProviderName,
+  fetcher: typeof fetch = fetch,
+): Promise<SmsRuntime> {
+  return resolveSmsRuntimeInternal(workspaceId, requestedProvider, fetcher, false);
+}
+
+export async function resolveSmsWebhookRuntime(
+  workspaceId: string,
+  requestedProvider: SmsProviderName,
+  fetcher: typeof fetch = fetch,
+): Promise<SmsRuntime> {
+  return resolveSmsRuntimeInternal(workspaceId, requestedProvider, fetcher, true);
+}
 
 function isSmsProviderName(value: string): value is SmsProviderName {
   return value === "telnyx" || value === "twilio" || value === "plivo";
@@ -166,7 +167,7 @@ export async function resolveSmsRuntimeForWorkspace(
 ): Promise<SmsRuntime> {
   const route = await resolveProviderRoute(workspaceId, "SMS");
   if (!route) throw new Error("No SMS provider route is configured for this workspace.");
-  const providerName = route.mode === "HOSTED" ? getEnv().HOSTED_SMS_PROVIDER : route.provider;
+  const providerName = route.mode === "HOSTED" ? "telnyx" : route.provider;
   if (!isSmsProviderName(providerName)) throw new Error("The active SMS provider is not supported.");
   return resolveSmsRuntime(workspaceId, providerName, fetcher);
 }

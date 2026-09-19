@@ -39,6 +39,8 @@ describe("SMS webhook workspace routing", () => {
       providerName: "telnyx",
       integrationId: null,
       senderNumber: "+12025550200",
+      serviceStatus: "ACTIVE",
+      messagingReadiness: "READY",
       provider,
     };
     const enqueueResponseJob = vi.fn(async () => "unused-job");

@@ -1,4 +1,4 @@
-import type { SMTPTransport } from "nodemailer/lib/smtp-transport";
+import type SMTPTransport from "nodemailer/lib/smtp-transport";
 
 export type SmtpEnvironment = {
   SMTP_URL?: string;
@@ -14,11 +14,11 @@ export function smtpTransportConfig(env: SmtpEnvironment): string | SMTPTranspor
 
   const host = env.SMTP_HOST?.trim();
   const user = env.SMTP_USER?.trim();
-  const password = env.SMTP_PASSWORD?.trim();
+  const password = env.SMTP_PASSWORD;
   if (!host) throw new Error("SMTP_HOST is required to send email.");
-  if (!env.SMTP_PORT) throw new Error("SMTP_PORT is required to send email.");
+  if (!env.SMTP_PORT || !Number.isInteger(env.SMTP_PORT) || env.SMTP_PORT < 1 || env.SMTP_PORT > 65535) throw new Error("A valid SMTP_PORT is required to send email.");
   if (!user) throw new Error("SMTP_USER is required to send email.");
-  if (!password) throw new Error("SMTP_PASSWORD is required to send email.");
+  if (!password?.trim()) throw new Error("SMTP_PASSWORD is required to send email.");
 
   return {
     host,

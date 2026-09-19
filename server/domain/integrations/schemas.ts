@@ -71,27 +71,6 @@ export const communicationSetupSchema = z.object({
     }
   }
 
-  if (input.completeStep && (input.voice.mode !== "BYOP" || input.voice.provider !== "telnyx")) {
-    ctx.addIssue({
-      code: "custom",
-      path: ["voice", "provider"],
-      message: "Milestone 7 inbound voice currently requires a connected Telnyx BYOP integration before setup can be completed.",
-    });
-  }
-
-  if (input.completeStep && input.sms.mode === "HOSTED") {
-    const number = input.sms.numberMode === "separate" ? input.sms.number : input.voice.number;
-    if (!number?.trim()) {
-      ctx.addIssue({
-        code: "custom",
-        path: ["sms", "number"],
-        message: input.sms.numberMode === "separate"
-          ? "Assign a dedicated SMS number before completing setup."
-          : "Choose a business phone number before completing hosted SMS setup.",
-      });
-    }
-  }
-
   if (input.whatsapp.mode !== "BYOP" || input.whatsapp.provider !== "whatsapp") {
     ctx.addIssue({ code: "custom", path: ["whatsapp", "provider"], message: "WhatsApp must use the Meta Embedded Signup integration." });
   }

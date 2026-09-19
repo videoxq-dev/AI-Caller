@@ -14,3 +14,9 @@
 .teamPlanNotice{display:flex;align-items:center;justify-content:space-between;gap:12px;margin:12px 0;padding:10px 11px;border:1px solid #cfe0f5;border-radius:8px;color:#50657d;background:#f4f9ff;font-size:9px}
 .teamPlanNotice a{color:#1769ee;font-weight:750;text-decoration:none}
 @media(max-width:760px){.settingsBillingTopLink{display:none}.settingsTabsWithBilling{overflow:auto}.settingsBillingTabLink{white-space:nowrap}.teamPlanNotice{align-items:flex-start;flex-direction:column}}
+
+.settingsPhoneSection{display:grid;grid-template-columns:minmax(0,1.75fr) minmax(260px,.58fr);gap:16px;margin-top:16px;align-items:start}
+.phoneManagementCard{min-width:0}
+.settingsPhoneManager{margin-top:14px}
+.phoneBillingHelp{position:sticky;top:84px}
+@media(max-width:980px){.settingsPhoneSection{grid-template-columns:1fr}.phoneBillingHelp{position:static}}

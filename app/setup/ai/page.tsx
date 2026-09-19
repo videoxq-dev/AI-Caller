@@ -14,6 +14,7 @@ import {
   UsersIcon,
 } from "@/components/icons";
 import { resolveWorkspaceContext } from "@/server/auth/workspace-context";
+import { listVoiceProfiles } from "@/server/voice/voices";
 import { getAgentSetup, getBusinessSetup, getSetupStatus } from "@/server/domain/onboarding/repository";
 import { saveAISetupAction } from "../actions";
 import { SetupProgressPanel } from "../setup-progress";
@@ -36,6 +37,7 @@ export default async function AIAssistantSetupPage() {
     getSetupStatus(context.workspace.id),
   ]);
   const agent = saved.agent;
+  const voiceProfiles = listVoiceProfiles();
   const configuredGuardrails = agent?.behaviorSettings?.guardrails;
   const voiceSettings = agent?.behaviorSettings?.voice && typeof agent.behaviorSettings.voice === "object" ? agent.behaviorSettings.voice as Record<string, unknown> : {};
   const qualificationSettings = agent?.behaviorSettings?.qualification && typeof agent.behaviorSettings.qualification === "object" ? agent.behaviorSettings.qualification as { enabled?: boolean; criteria?: Array<{ id: string; label: string; question: string; required: boolean }> } : null;
@@ -74,9 +76,9 @@ export default async function AIAssistantSetupPage() {
 
               <div className="aiFieldGrid twoColumns">
                 <label className="aiField"><span>Assistant name</span><input name="assistantName" defaultValue={agent?.name ?? "Mia"} required /></label>
-                <label className="aiField"><span>Primary goal</span><select name="primaryGoal" defaultValue={agent?.primaryGoal ?? "Book appointments"}><option>Book appointments</option><option>Capture leads</option><option>Answer questions</option><option>Combination</option></select></label>
+                <label className="aiField"><span>Primary goal</span><select name="primaryGoal" defaultValue={agent?.primaryGoal ?? "Book appointments"}><option>Book appointments</option><option>Capture leads</option><option>Answer questions</option><option>Combination</option></select><small>This sets the assistant&apos;s priority; it can still handle the other configured tasks.</small></label>
                 <label className="aiField"><span>Tone</span><select name="tone" defaultValue={agent?.tone ?? "Friendly & professional"}><option>Friendly &amp; professional</option><option>Professional</option><option>Casual</option></select></label>
-                <label className="aiField"><span>When unsure</span><select name="fallback" defaultValue={agent?.whenUnsure ?? "Escalate to a human"}><option>Escalate to a human</option><option>Take a message</option></select></label>
+                <label className="aiField"><span>When unsure</span><select name="fallback" defaultValue={agent?.whenUnsure ?? "Escalate to a human"}><option>Escalate to a human</option><option>Take a message</option></select><small>This chooses the fallback action. Escalation instructions below define when and how to hand off.</small></label>
                 <label className="aiField summaryField"><span>Business summary</span><textarea name="summary" rows={2} defaultValue={business.profile?.summary ?? ""} /></label>
               </div>
             </section>
@@ -87,7 +89,7 @@ export default async function AIAssistantSetupPage() {
                 <div><h2>Voice &amp; call behavior</h2><p>Choose how your assistant sounds on inbound phone calls.</p></div>
               </div>
               <div className="voiceSetupGrid">
-                <label className="aiField"><span>Preferred voice</span><select name="voiceProfile" defaultValue={typeof voiceSettings.profileKey === "string" ? voiceSettings.profileKey : "ava-us-1"}><option value="ava-us-1">Ava — warm &amp; professional</option><option value="marcus-us-1">Marcus — calm &amp; confident</option><option value="sofia-us-1">Sofia — friendly &amp; upbeat</option><option value="james-us-1">James — clear &amp; direct</option></select></label>
+                <label className="aiField"><span>Preferred voice</span><select name="voiceProfile" defaultValue={typeof voiceSettings.profileKey === "string" ? voiceSettings.profileKey : "ava-us-1"}>{voiceProfiles.map((voice) => <option value={voice.key} key={voice.key}>{voice.displayName} — {voice.description.toLowerCase()}</option>)}</select></label>
                 <label className="aiField"><span>Language</span><select name="voiceLanguage" defaultValue={typeof voiceSettings.language === "string" ? voiceSettings.language : "en-US"}><option value="en-US">English (US)</option><option value="en-GB">English (UK)</option><option value="es-US">Spanish (US)</option></select></label>
                 <label className="aiField"><span>Speaking speed</span><select name="voiceSpeed" defaultValue={String(typeof voiceSettings.speakingRate === "number" ? voiceSettings.speakingRate : 1)}><option value="0.85">Relaxed</option><option value="1">Natural</option><option value="1.15">Brisk</option></select></label>
                 <label className="aiField"><span>Recording consent</span><select name="recordingPolicy" defaultValue={typeof voiceSettings.recordingPolicy === "string" ? voiceSettings.recordingPolicy : "ANNOUNCE"}><option value="ANNOUNCE">Announce recording before it starts</option><option value="EXPLICIT_CONSENT">Require explicit consent</option></select></label><label className="aiField"><span>After-hours handling</span><select name="afterHoursEnabled" defaultValue={voiceSettings.afterHoursEnabled === false ? "off" : "on"}><option value="on">AI answers using after-hours context</option><option value="off">Use AI First behavior at all hours</option></select></label>
@@ -120,6 +122,7 @@ export default async function AIAssistantSetupPage() {
                 </div>
                 <label className="aiField escalationField">
                   <span>Escalation instructions</span>
+                  <small>Used with the “When unsure” fallback and for requests that need a human.</small>
                   <textarea name="escalationInstructions" rows={4} defaultValue={agent?.escalationMessage ?? "If the customer asks about special pricing, complaints, or anything uncertain, offer to connect them with the team."} />
                 </label>
               </div>

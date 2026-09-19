@@ -27,6 +27,20 @@ describe("SMTP transport configuration", () => {
     });
   });
 
+  it("ignores a blank legacy URL and uses structured credentials", () => {
+    expect(smtpTransportConfig({
+      SMTP_URL: "  ", SMTP_HOST: "smtp.example.com",
+      SMTP_PORT: 587, SMTP_USER: "mailer", SMTP_PASSWORD: "secret",
+    })).toMatchObject({ host: "smtp.example.com", secure: false });
+  });
+
+  it("preserves meaningful whitespace in SMTP passwords", () => {
+    expect(smtpTransportConfig({
+      SMTP_HOST: "smtp.example.com", SMTP_PORT: 587,
+      SMTP_USER: "mailer", SMTP_PASSWORD: " pass with trailing space ",
+    })).toMatchObject({ auth: { user: "mailer", pass: " pass with trailing space " } });
+  });
+
   it("defaults port 465 to a secure connection", () => {
     expect(smtpTransportConfig({
       SMTP_HOST: "smtp.example.com",
@@ -34,6 +48,13 @@ describe("SMTP transport configuration", () => {
       SMTP_USER: "mailer",
       SMTP_PASSWORD: "secret",
     })).toMatchObject({ secure: true });
+  });
+
+  it("rejects invalid SMTP ports", () => {
+    expect(() => smtpTransportConfig({
+      SMTP_HOST: "smtp.example.com", SMTP_PORT: 65536,
+      SMTP_USER: "mailer", SMTP_PASSWORD: "secret",
+    })).toThrow("valid SMTP_PORT");
   });
 
   it("fails clearly when required custom SMTP fields are missing", () => {
