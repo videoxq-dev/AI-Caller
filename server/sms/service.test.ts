@@ -124,6 +124,32 @@ describe("SMS webhook service", () => {
     expect(jobs).toHaveLength(0);
   });
 
+  it("preserves START and STOP consent updates when hosted service is suspended", async () => {
+    const keywordEvents = [
+      { ...inboundEvent("suspended-start"), text: "START" },
+      { ...inboundEvent("suspended-stop"), text: "STOP" },
+    ];
+    const provider: SMSProvider = {
+      send: vi.fn(async () => ({ externalId: "unused", status: "QUEUED" as const })),
+      verifyWebhook: vi.fn(async () => true),
+      normalizeWebhook: vi.fn(async () => [keywordEvents.shift()!]),
+    };
+    const runtime = { ...runtimeFor(workspaceId, provider, "HOSTED"), serviceStatus: "SUSPENDED" as const };
+    const { service, jobs } = serviceHarness(runtime, async () => orchestratorReply("Should not respond"));
+    const { getSmsConsentStatus } = await import("./consent");
+
+    await expect(service.ingest(request(), workspaceId, "twilio")).resolves.toMatchObject({ queued: 1, suppressed: 0 });
+    await expect(service.processInboundJob(jobs[0])).resolves.toMatchObject({ consentUpdated: true });
+    expect(await getSmsConsentStatus(workspaceId, "+12025550100", "TRANSACTIONAL")).toBe("OPTED_IN");
+    expect(await getSmsConsentStatus(workspaceId, "+12025550100", "MARKETING")).toBe("UNKNOWN");
+
+    await expect(service.ingest(request(), workspaceId, "twilio")).resolves.toMatchObject({ queued: 1, suppressed: 0 });
+    await expect(service.processInboundJob(jobs[1])).resolves.toMatchObject({ consentUpdated: true });
+    expect(await getSmsConsentStatus(workspaceId, "+12025550100", "TRANSACTIONAL")).toBe("OPTED_OUT");
+    expect(await getSmsConsentStatus(workspaceId, "+12025550100", "MARKETING")).toBe("OPTED_OUT");
+    expect(provider.send).not.toHaveBeenCalled();
+  });
+
   it("persists a STOP opt-out even if hosted inbound billing cannot charge credits", async () => {
     const provider: SMSProvider = {
       send: vi.fn(async () => ({ externalId: "unused", status: "QUEUED" as const })),
