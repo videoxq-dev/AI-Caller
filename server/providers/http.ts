@@ -1,8 +1,33 @@
 export class ProviderRequestError extends Error {
-  constructor(message: string, public readonly status: number) {
+  constructor(
+    message: string,
+    public readonly status: number,
+    // Carrier error metadata is untrusted. Only validated identifiers/pointers
+    // are retained here; never log an entire provider response or request.
+    public readonly providerCode?: string,
+    public readonly providerField?: string,
+  ) {
     super(message);
     this.name = "ProviderRequestError";
   }
+}
+
+function providerErrorMetadata(payload: unknown) {
+  if (!payload || typeof payload !== "object") return {};
+  const errors = (payload as Record<string, unknown>).errors;
+  if (!Array.isArray(errors)) return {};
+  const first = errors.find((value) => value && typeof value === "object") as Record<string, unknown> | undefined;
+  if (!first) return {};
+  const code = first.code;
+  const source = first.source && typeof first.source === "object"
+    ? first.source as Record<string, unknown>
+    : null;
+  const pointer = source?.pointer;
+  return {
+    providerCode: typeof code === "string" && /^[a-zA-Z0-9_.-]{1,80}$/.test(code) ? code : undefined,
+    providerField: typeof pointer === "string" && /^\/(?:data\/attributes\/)?[a-z_]+(?:\/[0-9]+)?(?:\/[a-z_]+)?$/.test(pointer)
+      ? pointer : undefined,
+  };
 }
 
 function providerMessage(payload: unknown) {
@@ -29,7 +54,8 @@ export async function providerJson<T>(url: string, init: RequestInit = {}, fetch
       try { payload = JSON.parse(text); } catch { payload = null; }
     }
     if (!response.ok) {
-      throw new ProviderRequestError(providerMessage(payload) ?? `Provider returned HTTP ${response.status}.`, response.status);
+      const { providerCode, providerField } = providerErrorMetadata(payload);
+      throw new ProviderRequestError(providerMessage(payload) ?? `Provider returned HTTP ${response.status}.`, response.status, providerCode, providerField);
     }
     return payload as T;
   } catch (error) {
