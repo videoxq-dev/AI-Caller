@@ -34,7 +34,7 @@ services:
       postgres:
         condition: service_healthy
     restart: "no"
-    command: ["sh", "-ec", "npm run db:migrate && npm run verify:deployment"]
+    command: ["sh", "-ec", "npm run verify:database-connection && npm run db:migrate && npm run verify:deployment"]
 
   web:
     image: ai-caller-app:local
