@@ -47,9 +47,14 @@ export async function verifyDeploymentDatabase({
   log = console.log,
   connectOnly = false,
 } = {}) {
-  const target = connectionTarget(env.DATABASE_URL);
+  const databaseUrl = env.DATABASE_URL;
+  if (typeof databaseUrl !== "string" || databaseUrl.trim() === "") {
+    log("FAIL: DATABASE_URL is missing or empty in this container. Set it in the deployed application environment and ensure the migrate, web, and worker services all receive it.");
+    return false;
+  }
+  const target = connectionTarget(databaseUrl);
   if (!target.valid) {
-    log("FAIL: DATABASE_URL is missing or is not a valid PostgreSQL connection URL.");
+    log("FAIL: DATABASE_URL is present but not a valid PostgreSQL URL. Use postgresql://USER:URL_ENCODED_PASSWORD@HOST:5432/DB and check quotes, whitespace, password encoding, and environment variable overrides.");
     return false;
   }
 
