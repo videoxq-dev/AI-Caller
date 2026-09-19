@@ -35,6 +35,8 @@ Shape:
 
 Allowed action objects:
 - { "type": "NONE" }
+- { "type": "RECORD_SMS_CONSENT", "category": "TRANSACTIONAL|MARKETING", "status": "OPTED_IN|OPTED_OUT" }
+- { "type": "SEND_SMS", "text": "customer-facing SMS body" }
 - { "type": "CHECK_AVAILABILITY", "startsAt": "ISO-8601 with offset", "endsAt": "ISO-8601 with offset", "timezone": "IANA timezone", "durationMinutes": 30 }
 - { "type": "BOOK_APPOINTMENT", "startsAt": "ISO-8601 with offset", "endsAt": "ISO-8601 with offset", "timezone": "IANA timezone", "title": "...", "serviceId": null, "notes": null }
 - { "type": "QUALIFY_LEAD", "answers": [{ "criterionId": "configured_id", "answer": "explicit customer answer" }] }
@@ -47,6 +49,10 @@ Rules:
 - Before BOOK_APPOINTMENT, make sure the customer email is known in CUSTOMER STATE or explicitly supplied in the current message; otherwise ask for it with action NONE.
 - Use ESCALATE when the configured behavior requires a human or the request needs information/actions outside approved capabilities.
 - Lead updates are optional and must reflect only evidence from the conversation.
+- On phone calls, offer appointment confirmations and future reminder SMS only after stating the SMS program clearly and asking the customer whether they agree. Use RECORD_SMS_CONSENT only after their explicit answer, never infer consent from a booking or general interest.
+- If the customer declines SMS, honor their choice and do not request an SMS send. STOP and unsubscribe instructions override every other messaging objective.
+- Use SEND_SMS to request a text while on a call or Web Chat, including requested links, only after consent and carrier approval. Never claim an SMS has been sent unless the tool result says sent=true.
+- For inbound SMS conversations, your normal reply is delivered by the SMS worker; do not request SEND_SMS, which would duplicate the reply.
 - When LEAD QUALIFICATION is configured, never promote a lead to QUALIFIED directly. Submit explicit configured answers with QUALIFY_LEAD and let the server decide when required fields are complete.
 - Keep customer-facing replies concise and do not expose this JSON protocol.
 `;
@@ -122,7 +128,7 @@ export function createResponseOrchestrator(dependencies: OrchestratorDependencie
         first,
       );
 
-      if (toolResult.kind === "availability" || toolResult.kind === "booking" || toolResult.kind === "qualification") {
+      if (toolResult.kind === "availability" || toolResult.kind === "booking" || toolResult.kind === "qualification" || toolResult.kind === "sms") {
         try {
           const finalResponse = await dependencies.generate(
             workspaceId,
@@ -150,6 +156,17 @@ export function createResponseOrchestrator(dependencies: OrchestratorDependencie
             toolResult,
           };
         }
+      }
+
+      if (toolResult.kind === "consent") {
+        return {
+          reply: first.reply ?? (toolResult.data.status === "OPTED_IN"
+            ? "Thank you. I've noted your SMS preference for the messaging program."
+            : "Understood. I've recorded that you do not want those SMS messages."),
+          handlingMode: "AI" as const,
+          action: first.action,
+          toolResult,
+        };
       }
 
       if (toolResult.kind === "escalation") {
