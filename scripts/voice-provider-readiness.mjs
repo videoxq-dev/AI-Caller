@@ -12,6 +12,9 @@ export function preflight(env) {
   if (env.HOSTED_AI_PROVIDER && env.HOSTED_AI_PROVIDER !== "openai") {
     failures.push("HOSTED_AI_PROVIDER must be openai for this acceptance stage.");
   }
+  if (env.HOSTED_AI_MODEL?.trim() && env.HOSTED_AI_MODEL.trim() !== MODEL) {
+    failures.push("HOSTED_AI_MODEL must be gpt-5.6-luna for V1 acceptance.");
+  }
   if (!env.HOSTED_AI_API_KEY?.trim()) failures.push("HOSTED_AI_API_KEY is missing.");
   if (!env.HOSTED_TELNYX_API_KEY?.trim()) failures.push("HOSTED_TELNYX_API_KEY is missing.");
   if (!env.HOSTED_TELNYX_WEBHOOK_PUBLIC_KEY?.trim()) {
@@ -46,7 +49,8 @@ export async function checkOpenAI({ key, model = MODEL, fetcher = fetch }) {
     method: "POST",
     headers: { Authorization: "Bearer " + key, "Content-Type": "application/json" },
     body: JSON.stringify({
-      model, store: false, max_output_tokens: 64,
+      model, store: false, max_output_tokens: 128,
+      reasoning: { effort: "none" },
       input: "Return exactly the word READY, in capitals, and nothing else.",
     }),
   }, fetcher);
