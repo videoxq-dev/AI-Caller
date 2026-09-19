@@ -1,7 +1,13 @@
 import { describe, expect, it } from "vitest";
-import { normalizeAIModel } from "./ai";
+import { normalizeAIModel, openAIReasoningSettings } from "./ai";
 
 describe("AI model compatibility", () => {
+  it("uses the V1-verified no-reasoning path for direct Luna, not every OpenAI model", () => {
+    expect(openAIReasoningSettings("gpt-5.6-luna")).toEqual({ reasoning: { effort: "none" } });
+    expect(openAIReasoningSettings("gpt-5.6")).toEqual({});
+    expect(openAIReasoningSettings("gpt-5.6-terra")).toEqual({});
+  });
+
   it("keeps current provider model IDs unchanged", () => {
     expect(normalizeAIModel("openai", "gpt-5.6-terra", "gpt-5.6")).toBe("gpt-5.6-terra");
     expect(normalizeAIModel("gemini", "gemini-3.8-flash", "gemini-3.8-flash")).toBe("gemini-3.8-flash");
