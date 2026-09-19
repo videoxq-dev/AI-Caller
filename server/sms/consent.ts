@@ -53,10 +53,12 @@ export async function recordSmsConsent(workspaceId: string, contactId: string, p
 // Query by destination, not only contact: merged contacts must not bypass a newer opt-out.
 export async function getSmsConsentStatus(workspaceId: string, phone: string, category: SmsPurpose): Promise<SmsConsentStatus> {
   const phoneNumber = normalizedSmsPhone(phone);
-  const [latest] = await db.select({ status: smsConsentEvents.status })
-    .from(smsConsentEvents)
-    .where(and(eq(smsConsentEvents.workspaceId, workspaceId), eq(smsConsentEvents.phoneNumber, phoneNumber), eq(smsConsentEvents.category, category)))
-    .orderBy(desc(smsConsentEvents.occurredAt), desc(smsConsentEvents.id)).limit(1);
+  // Use the indexed current-state table for send-path lookups. Audit history can
+  // grow indefinitely and is not appropriate for every outbound message.
+  const [latest] = await db.select({ status: smsConsents.status })
+    .from(smsConsents)
+    .where(and(eq(smsConsents.workspaceId, workspaceId), eq(smsConsents.phoneNumber, phoneNumber), eq(smsConsents.category, category)))
+    .orderBy(desc(smsConsents.updatedAt), desc(smsConsents.status)).limit(1);
   return latest?.status === "OPTED_IN" || latest?.status === "OPTED_OUT" ? latest.status : "UNKNOWN";
 }
 
