@@ -87,12 +87,24 @@ describe("approved managed number outbound SMS", () => {
     await appendMessage(workspaceId, conversationId, {
       channel: "SMS", direction: "INBOUND", senderType: "CUSTOMER", contentType: "TEXT",
       body: "Where is my appointment?", provider: "telnyx", externalMessageId: "in-1",
-      metadata: {}, metadata: {},
+      metadata: { senderNumber: phone }, metadata: {},
     });
     await expect(sendSmsConversationTextWithRuntime(workspaceId, conversationId, runtime(), {
       senderType: "AI", text: "Your appointment is at the downtown office.",
     })).resolves.toMatchObject({ status: "QUEUED" });
     expect(await getSmsConsentStatus(workspaceId, phone, "TRANSACTIONAL")).toBe("UNKNOWN");
+  });
+
+  it("does not reuse an inbound reply exemption for a different destination", async () => {
+    await appendMessage(workspaceId, conversationId, {
+      channel: "SMS", direction: "INBOUND", senderType: "CUSTOMER", contentType: "TEXT",
+      body: "Where is my appointment?", provider: "telnyx", externalMessageId: "reply-to-original",
+      metadata: { senderNumber: phone },
+    });
+    await expect(sendSmsConversationTextWithRuntime(workspaceId, conversationId, runtime(), {
+      senderType: "AI", text: "Your appointment is tomorrow.", to: "+12025550108",
+    })).rejects.toMatchObject({ code: "SMS_CONSENT_REQUIRED" });
+    expect(send).not.toHaveBeenCalled();
   });
 
   it("uses identical purpose enforcement for staff and AI: promotional SMS cannot masquerade as appointment news", async () => {
