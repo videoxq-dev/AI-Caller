@@ -193,7 +193,7 @@ export function createSmsWebhookService(dependencies: SmsServiceDependencies) {
       let suppressed = 0;
 
       for (const event of events) {
-        if (runtime.mode === "HOSTED" && runtime.serviceStatus === "SUSPENDED" && event.type === "MESSAGE_RECEIVED" && smsKeyword(event.text) !== "STOP") {
+        if (runtime.mode === "HOSTED" && runtime.serviceStatus === "SUSPENDED" && event.type === "MESSAGE_RECEIVED" && !["STOP", "START"].includes(smsKeyword(event.text) ?? "")) {
           suppressed += 1;
           continue;
         }
