@@ -47,6 +47,8 @@ services:
       DATABASE_URL: ${DATABASE_URL:?Set DATABASE_URL with host postgres in .env.deploy}
       PORT: "8080"
       HOSTNAME: 0.0.0.0
+      VOICE_RECORDING_ALLOW_PERSISTENT_FILESYSTEM: "true"
+      VOICE_RECORDING_DIR: /app/.data/recordings
     depends_on:
       migrate:
         condition: service_completed_successfully
