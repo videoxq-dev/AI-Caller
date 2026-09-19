@@ -4,6 +4,7 @@ import { contactIdentities, creditWallets, hostedApiRateCards, hostedPhoneNumber
 import type { SmsInboundResponseJob } from "@/server/jobs/queues";
 import type { NormalizedSmsEvent, SMSProvider } from "@/server/providers/contracts";
 import { ProviderRequestError } from "@/server/providers/http";
+import { appendMessage, getOrCreateContactByIdentity, getOrCreateOpenConversation } from "@/server/domain/core/repository";
 import type { SmsRuntime } from "@/server/providers/sms/runtime";
 import { createSmsWebhookService } from "./service";
 
@@ -226,6 +227,40 @@ describe("SMS webhook service", () => {
     const outbound = stored.find((message) => message.direction === "OUTBOUND");
     expect(outbound?.externalMessageId).toBe("msg-out-2");
     expect(outbound?.status).toBe("DELIVERED");
+  });
+
+  it("requests a carrier retry when delivery races ahead of outbound persistence", async () => {
+    const id = "early-delivery-provider-id";
+    const provider: SMSProvider = {
+      send: vi.fn(async () => ({ externalId: id, status: "QUEUED" as const })),
+      verifyWebhook: vi.fn(async () => true),
+      normalizeWebhook: vi.fn(async () => [{
+        type: "DELIVERY_UPDATED" as const,
+        externalEventId: "evt-early-delivery",
+        externalMessageId: id,
+        status: "DELIVERED" as const,
+        error: null,
+        occurredAt: null,
+      }]),
+    };
+    const { service } = serviceHarness(runtimeFor(workspaceId, provider), async () => orchestratorReply("unused"));
+    await expect(service.ingest(request(), workspaceId, "twilio"))
+      .rejects.toMatchObject({ code: "SMS_DELIVERY_DEFERRED", status: 503 });
+    expect((await db.select().from(providerWebhookEvents))[0].status).toBe("FAILED");
+
+    const contact = await getOrCreateContactByIdentity(workspaceId, {
+      channel: "SMS", externalId: "+12025550110",
+    });
+    const conversation = await getOrCreateOpenConversation(workspaceId, contact.id);
+    await appendMessage(workspaceId, conversation.id, {
+      channel: "SMS", direction: "OUTBOUND", senderType: "AI",
+      contentType: "TEXT", body: "Your appointment is confirmed.",
+      provider: "twilio", externalMessageId: id, status: "SENT",
+    });
+    await expect(service.ingest(request(), workspaceId, "twilio"))
+      .resolves.toMatchObject({ processed: 1 });
+    expect((await db.select().from(messages))[0].status).toBe("DELIVERED");
+    expect((await db.select().from(providerWebhookEvents))[0].status).toBe("PROCESSED");
   });
 
   it("blocks hosted outbound SMS until carrier registration is ready", async () => {
