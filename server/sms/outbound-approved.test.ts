@@ -87,7 +87,7 @@ describe("approved managed number outbound SMS", () => {
     await appendMessage(workspaceId, conversationId, {
       channel: "SMS", direction: "INBOUND", senderType: "CUSTOMER", contentType: "TEXT",
       body: "Where is my appointment?", provider: "telnyx", externalMessageId: "in-1",
-      metadata: { senderNumber: phone }, metadata: {},
+      metadata: { senderNumber: phone },
     });
     await expect(sendSmsConversationTextWithRuntime(workspaceId, conversationId, runtime(), {
       senderType: "AI", text: "Your appointment is at the downtown office.",
@@ -144,7 +144,7 @@ describe("approved managed number outbound SMS", () => {
     await appendMessage(workspaceId, conversationId, {
       channel: "SMS", direction: "INBOUND", senderType: "CUSTOMER", contentType: "TEXT",
       body: "Stop texting me", provider: "telnyx", externalMessageId: "in-stop",
-      metadata: {}, metadata: {},
+      metadata: { senderNumber: phone },
     });
     await recordSmsConsent(workspaceId, contactId, phone, {
       category: "TRANSACTIONAL", status: "OPTED_OUT", source: "INBOUND_SMS",
