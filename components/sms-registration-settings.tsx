@@ -29,6 +29,9 @@ export function SmsRegistrationSettings() {
   const [notice, setNotice] = useState("");
   const [hostedOptinUrl, setHostedOptinUrl] = useState<string | null>(null);
   const [canSubmit, setCanSubmit] = useState(false);
+  const [soleProprietorOtpAvailable, setSoleProprietorOtpAvailable] = useState(false);
+  const [otpPin, setOtpPin] = useState("");
+  const [otpBusy, setOtpBusy] = useState(false);
   const [saving, setSaving] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [loaded, setLoaded] = useState(false);
@@ -43,6 +46,7 @@ export function SmsRegistrationSettings() {
       setNumber(data.number ?? null);
       setHostedOptinUrl(data.hostedOptinUrl ?? null);
       setCanSubmit(data.canSubmit === true);
+      setSoleProprietorOtpAvailable(data.registration?.soleProprietorOtpAvailable === true);
       setStatus(data.registration?.status ?? "NOT_STARTED");
       setRejection(data.registration?.rejectionReason ?? null);
       setDraft({
@@ -72,6 +76,34 @@ export function SmsRegistrationSettings() {
     } catch (error) {
       setNotice(error instanceof Error ? error.message : "Carrier submission status is uncertain.");
     } finally { setSubmitting(false); }
+  }
+
+  async function submitOtp(method: "POST" | "PUT") {
+    setOtpBusy(true); setNotice("");
+    try {
+      const response = await fetch("/api/sms/registration/otp", {
+        method, ...(method === "PUT" ? {
+          headers: { "content-type": "application/json" }, body: JSON.stringify({ pin: otpPin }),
+        } : {}),
+      });
+      const result = await response.json();
+      if (!response.ok) throw new Error(result.error?.message ?? "Unable to verify sole proprietor identity.");
+      setNotice(method === "POST"
+        ? "Telnyx has been asked to send a six-digit code to the mobile number registered for this brand."
+        : "Code accepted. The carrier will review the brand and campaign before SMS becomes ready.");
+      if (method === "PUT" || result.verified) {
+        setOtpPin("");
+        const refreshed = await fetch("/api/sms/registration", { cache: "no-store" });
+        if (refreshed.ok) {
+          const data = await refreshed.json();
+          setStatus(data.registration?.status ?? "NOT_STARTED");
+          setNumber(data.number ?? null);
+          setSoleProprietorOtpAvailable(data.registration?.soleProprietorOtpAvailable === true);
+        }
+      }
+    } catch (error) {
+      setNotice(error instanceof Error ? error.message : "Carrier verification was not confirmed.");
+    } finally { setOtpBusy(false); }
   }
 
   function field<K extends keyof Draft>(key: K, value: Draft[K]) {
@@ -104,7 +136,17 @@ export function SmsRegistrationSettings() {
       <p className="smsRegistrationStatus">Outbound SMS: <strong>{number.messagingReadiness.replaceAll("_", " ")}</strong> · Registration: <strong>{status.replaceAll("_", " ")}</strong></p>
       {rejection && <p role="alert">Carrier response: {rejection}</p>}
       {status === "READY" ? <p>Carrier approval is recorded. Your number's readiness status controls outbound SMS.</p> :
-      ["PENDING","SUBMITTING"].includes(status) ? <p>Your submission is being reviewed. Registration details are locked until a carrier response arrives.</p> :
+      ["PENDING","SUBMITTING"].includes(status) ? <>
+        <p>Your submission is being reviewed. Registration details are locked until a carrier response arrives.</p>
+        {soleProprietorOtpAvailable && <div className="smsOtpControls">
+          <p>Sole proprietor verification requires a code sent to the mobile number on the registration. The code expires after 24 hours. Only the workspace owner can request or verify it.</p>
+          {canSubmit && <>
+            <button type="button" disabled={otpBusy} onClick={() => void submitOtp("POST")}>Request verification code</button>
+            <label>Six-digit verification code<input value={otpPin} inputMode="numeric" autoComplete="one-time-code" maxLength={6} pattern="[0-9]{6}" onChange={(event) => setOtpPin(event.target.value.replace(/\\D/g, ""))} /></label>
+            <button type="button" disabled={otpBusy || !/^[0-9]{6}$/.test(otpPin)} onClick={() => void submitOtp("PUT")}>Verify identity code</button>
+          </>}
+        </div>}
+      </> :
       <form onSubmit={(event) => void save(event)}>
         <div className="smsRegistrationGrid">
           <label>Legal business name<input required minLength={2} maxLength={200} value={draft.legalName} onChange={(e) => field("legalName", e.target.value)} /></label>
