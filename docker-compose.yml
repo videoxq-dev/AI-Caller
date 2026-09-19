@@ -13,6 +13,9 @@ x-app: &app
   env_file:
     - path: .env
       required: false
+  networks:
+    - default
+    - edge
 
 services:
   migrate:
@@ -53,3 +56,9 @@ services:
 
 volumes:
   recordings:
+
+networks:
+  default:
+  edge:
+    name: edge
+    external: true
