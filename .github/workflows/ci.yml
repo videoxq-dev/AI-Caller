@@ -7,6 +7,7 @@ on:
   push:
     branches:
       - main
+      - feat/issue-24-messaging-compliance
   workflow_dispatch:
 
 permissions:
