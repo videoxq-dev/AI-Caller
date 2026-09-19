@@ -75,6 +75,9 @@ jobs:
       - name: Test
         run: npm test
 
+      - name: Voice provider readiness unit tests (no network or secrets)
+        run: npm run test:voice-readiness
+
       - name: Typecheck
         run: npm run typecheck
 
