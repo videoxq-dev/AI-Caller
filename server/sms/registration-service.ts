@@ -92,6 +92,7 @@ export async function reconcileSmsRegistration(
   let carrierAllowsLinks = number.numberType === "toll_free" && draft.allowEmbeddedLinks;
   let reason: string | null = null;
   let status: "PENDING" | "READY" | "REJECTED" = "PENDING";
+  let claimCarrierStatus = registration.carrierStatus;
   let brandId = registration.carrierBrandId;
   let campaignId = registration.carrierCampaignId;
   let verificationId = registration.carrierVerificationId;
@@ -132,6 +133,7 @@ export async function reconcileSmsRegistration(
           : eq(smsRegistrations.carrierStatus, registration.carrierStatus),
       )).returning({ id: smsRegistrations.id });
       if (!claimedBrand) return registration.status;
+      claimCarrierStatus = "BRAND_SUBMITTING";
       const brand = await client.createBrand(draft);
       brandId = brand.brandId ?? null;
       if (!brandId) throw new Error("Telnyx did not return a brand ID. Carrier state requires investigation.");
@@ -159,9 +161,9 @@ export async function reconcileSmsRegistration(
           eq(smsRegistrations.id, registration.id),
           eq(smsRegistrations.workspaceId, workspaceId),
           isNull(smsRegistrations.carrierCampaignId),
-          registration.carrierStatus === null
+          claimCarrierStatus === null
             ? isNull(smsRegistrations.carrierStatus)
-            : eq(smsRegistrations.carrierStatus, registration.carrierStatus),
+            : eq(smsRegistrations.carrierStatus, claimCarrierStatus),
         )).returning({ id: smsRegistrations.id });
         // A second web/worker instance may have claimed this potentially billable POST.
         if (!claimedCampaign) return registration.status;

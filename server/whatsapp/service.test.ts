@@ -130,11 +130,13 @@ describe("WhatsApp webhook service", () => {
     expect(sendText).toHaveBeenCalledTimes(1);
     const stored = await db.select().from(messages);
     expect(stored).toHaveLength(2);
-    expect(stored[0].metadata).toMatchObject({ whatsappWaId: "15551234567" });
-    expect(stored.map((message) => [message.channel, message.direction, message.externalMessageId])).toEqual([
-      ["WHATSAPP", "INBOUND", "wamid.inbound"],
-      ["WHATSAPP", "OUTBOUND", "wamid.outbound"],
-    ]);
+    expect(stored.find((message) => message.direction === "INBOUND")?.metadata).toMatchObject({ whatsappWaId: "15551234567" });
+    expect(stored.map((message) => [message.channel, message.direction, message.externalMessageId])).toEqual(
+      expect.arrayContaining([
+        ["WHATSAPP", "INBOUND", "wamid.inbound"],
+        ["WHATSAPP", "OUTBOUND", "wamid.outbound"],
+      ]),
+    );
     const identities = await db.select().from(contactIdentities);
     expect(identities).toHaveLength(1);
     expect(identities[0]).toMatchObject({ channel: "WHATSAPP", normalizedValue: "+15551234567" });
