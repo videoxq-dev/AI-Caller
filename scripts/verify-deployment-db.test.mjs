@@ -27,7 +27,7 @@ test("missing connection does not instantiate a client", async () => {
     log: (msg) => logs.push(msg),
   });
   assert.equal(ok, false);
-  assert.match(logs.join("\n"), /DATABASE_URL is missing/);
+  assert.match(logs.join("\n"), /DATABASE_URL is missing or empty/);
 });
 
 test("refused Docker loopback is reported without a credential or error body", async () => {
@@ -121,4 +121,28 @@ test("connection-only preflight identifies DNS isolation without disclosing conn
   assert.match(logs.join("\n"), /ENOTFOUND/);
   assert.match(logs.join("\n"), /Docker service name/);
   assert.doesNotMatch(logs.join("\n"), /some-user|secret/);
+});
+
+test("malformed URL is distinct from missing injection and does not log supplied value", async () => {
+  const logs = [];
+  const malformed = "not a url with super-secret-value";
+  const ok = await verifyDeploymentDatabase({
+    env: { DATABASE_URL: malformed },
+    ClientCtor: class { constructor() { throw new Error("should not connect"); } },
+    log: (message) => logs.push(message),
+  });
+  assert.equal(ok, false);
+  assert.match(logs.join("\n"), /present but not a valid PostgreSQL URL/);
+  assert.doesNotMatch(logs.join("\n"), /super-secret-value/);
+});
+
+test("an empty injected database URL is reported as missing", async () => {
+  const logs = [];
+  const ok = await verifyDeploymentDatabase({
+    env: { DATABASE_URL: " " },
+    ClientCtor: class { constructor() { throw new Error("should not connect"); } },
+    log: (message) => logs.push(message),
+  });
+  assert.equal(ok, false);
+  assert.match(logs.join("\n"), /missing or empty in this container/);
 });
