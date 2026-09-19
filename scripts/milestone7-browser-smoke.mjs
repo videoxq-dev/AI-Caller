@@ -448,7 +448,9 @@ try {
   assert(await audio.count() === 1, "Inbox did not render the archived recording as the primary call artifact.");
   await page.getByRole("button", { name: "View transcript" }).click();
   await page.locator(".voiceTranscriptPanel").first().waitFor({ timeout: 10_000 });
-  assert(await page.locator(".voiceTranscriptPanel .voiceTranscriptSegment").count() >= 2, "Expandable transcript panel is incomplete.");
+  await page.locator(".voiceTranscriptPanel").getByText("I need a QA Consultation today. How much is it?", { exact: true }).waitFor({ timeout: 10_000 });
+  assert(await page.locator(".voiceTranscriptPanel").getByText("QA Consultation is $120. I can also check tomorrow's availability.", { exact: true }).count() === 1,
+    "Expanded call transcript did not contain the spoken AI response.");
   await assertNoHorizontalOverflow(page, "Voice Inbox desktop");
   await page.screenshot({ path: path.join(outputDir, "voice-inbox-desktop.png"), fullPage: true });
 
