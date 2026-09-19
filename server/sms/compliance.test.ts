@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { consentAllowsSend, smsKeyword } from "./consent";
-import { validateApprovedSmsMessage, validateSmsLinks } from "./policy";
+import { validateApprovedSmsMessage, validateSmsLinks, classifySmsForPolicy } from "./policy";
 import { parseSmsClassification } from "./classification";
 
 describe("outbound SMS compliance", () => {
@@ -13,6 +13,11 @@ describe("outbound SMS compliance", () => {
   it("requires separate marketing consent and respects revocations", () => {
     expect(consentAllowsSend({ consent: "UNKNOWN", purpose: "MARKETING", currentConversationReply: true })).toBe(false);
     expect(consentAllowsSend({ consent: "OPTED_OUT", purpose: "TRANSACTIONAL", currentConversationReply: true })).toBe(false);
+  });
+  it("does not trust transactional model classification for unmistakably promotional offers", () => {
+    expect(classifySmsForPolicy("Get 25% off whitening this weekend", "TRANSACTIONAL")).toBe("MARKETING");
+    expect(classifySmsForPolicy("Your appointment is Friday. Use your booking link.", "TRANSACTIONAL")).toBe("TRANSACTIONAL");
+    expect(classifySmsForPolicy("We cannot confirm this message", "UNCERTAIN")).toBe("UNCERTAIN");
   });
   it("allows contextual booking links but rejects campaign-incompatible promotion", () => {
     expect(validateApprovedSmsMessage({ policy, classifiedPurpose: "TRANSACTIONAL", text: "Your booking: https://clinic.com/a" })).toBe("TRANSACTIONAL");
