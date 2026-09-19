@@ -473,7 +473,9 @@ export function createVoiceWebhookService(dependencies: VoiceServiceDependencies
         metadata: { voiceCallId: call.id, transcriptSegmentId: segment.id, voiceMode: call.mode, startedMs, endedMs },
       });
 
+      const responseStartedAt = Date.now();
       const result = await dependencies.respond(workspaceId, call.conversationId);
+      const orchestrationMs = Date.now() - responseStartedAt;
       if (!result.reply) {
         await updateVoiceCall(workspaceId, call.id, {}, { phase: result.handlingMode === "HUMAN" ? "HUMAN" : "ACTIVE" });
         return;
@@ -513,6 +515,13 @@ export function createVoiceWebhookService(dependencies: VoiceServiceDependencies
         speakingRate: voice.config.speakingRate,
         commandId: deterministicCommandId(`${event.externalEventId}:reply`),
       });
+      logger.info({
+        workspaceId,
+        callId: call.id,
+        transcriptionEventId: event.externalEventId,
+        orchestrationMs,
+        voiceTurnMs: Date.now() - responseStartedAt,
+      }, "Voice AI reply accepted by telephony provider");
       if (result.handlingMode === "HUMAN") {
         await updateVoiceCall(workspaceId, call.id, {}, { phase: "HUMAN" });
       }
