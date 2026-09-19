@@ -28,6 +28,7 @@ export function SmsRegistrationSettings() {
   const [rejection, setRejection] = useState<string | null>(null);
   const [notice, setNotice] = useState("");
   const [hostedOptinUrl, setHostedOptinUrl] = useState<string | null>(null);
+  const [canSubmit, setCanSubmit] = useState(false);
   const [saving, setSaving] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [loaded, setLoaded] = useState(false);
@@ -41,6 +42,7 @@ export function SmsRegistrationSettings() {
       if (cancelled) return;
       setNumber(data.number ?? null);
       setHostedOptinUrl(data.hostedOptinUrl ?? null);
+      setCanSubmit(data.canSubmit === true);
       setStatus(data.registration?.status ?? "NOT_STARTED");
       setRejection(data.registration?.rejectionReason ?? null);
       setDraft({
@@ -146,7 +148,8 @@ export function SmsRegistrationSettings() {
         <button type="submit" disabled={saving || !draft.categories.length}>{saving ? "Saving…" : "Save registration draft"}</button>
       </form>}
     </>}
-    {number && status === "DRAFT" && <button type="button" className="smsRegistrationSubmit" disabled={submitting || saving} onClick={() => void submitRegistration()}>{submitting ? "Submitting…" : "Submit for carrier approval"}</button>}
+    {number && status === "DRAFT" && <p>Carrier registration can incur non-refundable Telnyx brand, campaign, and review fees. Submission requires workspace owner approval.</p>}
+    {number && status === "DRAFT" && canSubmit && <button type="button" className="smsRegistrationSubmit" disabled={submitting || saving} onClick={() => void submitRegistration()}>{submitting ? "Submitting…" : "Submit for carrier approval"}</button>}
     {notice && <p role="status">{notice}</p>}
   </section>;
 }

@@ -20,6 +20,17 @@ export function createE2EAIProvider(): AIProvider {
       const lastUser = lastUserMessage.toLowerCase();
       const toolResult = [...messages].reverse().find((message) => message.role === "system" && message.content.includes("SERVER TOOL RESULT"))?.content;
 
+      if (system.includes("Classify an outbound business SMS")) {
+        let body = "";
+        try {
+          const details = JSON.parse(lastUserMessage) as { outboundSms?: string };
+          body = details.outboundSms ?? "";
+        } catch {
+          return { text: JSON.stringify({ purpose: "UNCERTAIN" }) };
+        }
+        const marketing = /\b(discount|promo|offer|sale|coupon|% off|save money|special deal)\b/i.test(body);
+        return { text: JSON.stringify({ purpose: marketing ? "MARKETING" : "TRANSACTIONAL" }) };
+      }
       if (toolResult) {
         if (toolResult.includes('"kind":"booking"')) {
           return { text: JSON.stringify({ reply: "Your QA Consultation is booked for 10:00 AM tomorrow.", action: { type: "NONE" } }) };

@@ -58,6 +58,7 @@ export async function GET(request: Request) {
     const widget = number ? await ensureWebchatWidget(context.workspace.id) : null;
     const hostedOptinUrl = widget ? new URL("/sms/opt-in/" + widget.publicKey, getEnv().BETTER_AUTH_URL).toString() : null;
     return Response.json({
+      canSubmit: context.membership.role === "OWNER",
       hostedOptinUrl,
       number: number && { id: number.id, phoneNumber: number.phoneNumber, numberType: number.numberType, messagingReadiness: number.messagingReadiness },
       business: business && { businessName: business.businessName, website: business.websiteUrl, phone: business.phone, address: business.address, city: business.city, state: business.state, postalCode: business.postalCode },
@@ -89,12 +90,19 @@ export async function PUT(request: Request) {
     )).limit(1);
     if (existing && ["SUBMITTING", "PENDING"].includes(existing.status))
       throw new AppError("SMS_REGISTRATION_IN_REVIEW", "Carrier review is already in progress.", 409);
+    if (existing?.carrierCampaignId) {
+      const previous = existing.draft as { categories?: string[] };
+      const before = [...(previous.categories ?? [])].sort().join(",");
+      const after = [...input.categories].sort().join(",");
+      if (before !== after) throw new AppError("SMS_CAMPAIGN_USECASE_LOCKED",
+        "The existing carrier campaign cannot change messaging categories. Contact support to register a new campaign.", 409);
+    }
     const [registration] = await db.insert(smsRegistrations).values({
       workspaceId: context.workspace.id, phoneNumberId: number.id, numberType: number.numberType,
       status: "DRAFT", draft: input, updatedAt: new Date(),
     }).onConflictDoUpdate({
       target: smsRegistrations.phoneNumberId,
-      set: { draft: input, status: "DRAFT", rejectionReason: null, carrierCampaignId: null, approvedPolicy: null, updatedAt: new Date() },
+      set: { draft: input, status: "DRAFT", rejectionReason: null, approvedPolicy: null, updatedAt: new Date() },
     }).returning();
     await db.update(hostedPhoneNumbers).set({ messagingReadiness: "NOT_REGISTERED", updatedAt: new Date() })
       .where(and(eq(hostedPhoneNumbers.workspaceId, context.workspace.id), eq(hostedPhoneNumbers.id, number.id)));
@@ -105,7 +113,7 @@ export async function PUT(request: Request) {
 export async function POST(request: Request) {
   try {
     const context = await resolveWorkspaceContext(request.headers);
-    requireWorkspacePermission(context.membership.role, "integration.manage");
+    requireWorkspacePermission(context.membership.role, "billing.manage");
     return Response.json(await submitSmsRegistration(context.workspace.id), { status: 202, headers: { "cache-control": "no-store" } });
   } catch (error) { return toErrorResponse(error); }
 }

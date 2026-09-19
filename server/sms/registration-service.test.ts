@@ -44,6 +44,10 @@ describe("Telnyx registration contracts", () => {
     expect(tollFreePayload(draft, "+18885550200").businessState).toBe("Texas");
     expect(tollFreePayload(draft, "+18885550200").phoneNumbers).toEqual([{ phoneNumber: "+18885550200" }]);
     expect(campaignPayload(draft, "brand-1", "reference-1").embeddedLink).toBe(true);
+    expect(tollFreePayload(draft, "+18885550200").isvReseller).toBe("AI Caller");
+    expect(tollFreePayload({ ...draft, categories: ["TRANSACTIONAL", "MARKETING"] }, "+18885550200").useCase).toBe("Mixed");
+    expect(tollFreePayload({ ...draft, categories: ["MARKETING"] }, "+18885550200").useCase).toBe("General Marketing");
+    expect(campaignPayload({ ...draft, categories: ["MARKETING"] }, "brand-1", "reference-1").usecase).toBe("MARKETING");
   });
   it("fails closed unless the brand, campaign and number assignment all qualify", () => {
     expect(tenDlcCarrierStatus({ brandStatus: "OK", identityStatus: "VERIFIED", submissionStatus: "CREATED", campaignStatus: "MNO_PROVISIONED", assignmentStatus: "ASSIGNED" })).toBe("READY");
