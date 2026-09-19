@@ -15,6 +15,20 @@ If cloud signup returns `Unable to create account` with PostgreSQL `ECONNREFUSED
 - `HOSTED_WEBHOOK_BASE_URL` must point to the **app** on port 3000, not to the voice media gateway on port 3002.
 - The current `voice/gateway.ts` only authenticates/counts media; V2 uses Telnyx Call Control transcription webhooks and `speak`. Leave `VOICE_GATEWAY_URL` unset unless you intentionally have a publicly reachable gateway. The worker remains required for phone order reconciliation.
 
+## September 19 live-cloud acceptance follow-up — persistence and turn pacing
+
+The real V2 test on `adacertifyexperts.com` established that the carrier answered, disclosed recording, greeted with the correct assistant/voice, and grounded answers in configured knowledge. **V2 remains failed until a repeat real call proves archiving, visible dialogue, and coherent turn-taking.** A successful fixture browser test or green CI alone does not close that live gate.
+
+The previous call's caller/AI `CALL_TRANSCRIPT` messages were persisted but hidden by the Inbox UI; they should become visible on redeploy. A recording that was never archived is **not recoverable from AI Caller's filesystem**: only Telnyx retention/a valid re-delivered `call.recording.saved` can restore it.
+
+For DeployOS's bundled Docker Compose deployment:
+
+- The web service mounts its private `recordings` volume at `/app/.data/recordings`. Its Compose configuration explicitly sets `VOICE_RECORDING_ALLOW_PERSISTENT_FILESYSTEM=true` and `VOICE_RECORDING_DIR=/app/.data/recordings`. **Do not set the flag on an ephemeral path.** Include this volume in encrypted backups, define a retention/access policy, and test that recording playback survives a web container restart.
+- For S3 instead, set `VOICE_RECORDING_STORAGE_BACKEND=s3` and the actual application env names `VOICE_RECORDING_S3_BUCKET`, `VOICE_RECORDING_S3_REGION`, and optional `VOICE_RECORDING_S3_ENDPOINT` / `VOICE_RECORDING_S3_ACCESS_KEY_ID` / `VOICE_RECORDING_S3_SECRET_ACCESS_KEY`. Use least-privileged private bucket permissions. Generic `S3_BUCKET` / `AWS_ACCESS_KEY_ID` variables alone are not this app's supported configuration.
+- Telnyx `call.recording.saved` should change `voice_calls.recording_status` to `AVAILABLE`, store the object, and expose a protected `/api/voice/calls/<callId>/recording` endpoint in the Inbox card. A completed call must show its card/transcript **even when the archive has not arrived**.
+- Final inbound transcription events are persisted immediately, but AI generation is scheduled after **900 ms** of quiet using `voice.respond-turn` in the worker. Additional final fragments supersede earlier queued events, a database per-call phase prevents concurrent speaks, and `call.speak.ended` returns the call to listening. The background worker must remain running. This is conservative turn-taking, **not** V3 natural barge-in or streamed low-latency dialogue.
+- Retest with a multi-clause question and a deliberate mid-sentence pause; verify one grounded answer to the whole question, one visible caller transcript and one visible AI transcript per actual segment, and no back-to-back fragmented AI speaks. Record caller-perceived response latency after this pacing change rather than carrying forward the earlier ~0–1s figure.
+
 ## 1. Configure and start
 
 Use a non-production workspace and an external test phone. If your local auth currently works with `BETTER_AUTH_URL=http://localhost:3000`, **keep it**; the new webhook base is independent.
