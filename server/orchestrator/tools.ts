@@ -31,7 +31,7 @@ export const orchestratorActionSchema = z.discriminatedUnion("type", [
   z.object({ type: z.literal("NONE") }),
   z.object({
     type: z.literal("RECORD_SMS_CONSENT"),
-    category: z.enum(["TRANSACTIONAL", "MARKETING"]),
+    category: z.enum(["TRANSACTIONAL", "MARKETING", "ALL"]),
     status: z.enum(["OPTED_IN", "OPTED_OUT"]),
   }),
   z.object({
@@ -157,7 +157,7 @@ async function updateLeadFromEnvelope(
 async function verifyVoiceConsent(
   workspaceId: string,
   conversationId: string,
-  category: "TRANSACTIONAL" | "MARKETING",
+  category: "TRANSACTIONAL" | "MARKETING" | "ALL",
   status: "OPTED_IN" | "OPTED_OUT",
 ) {
   const history = await db.select().from(messages).where(and(
@@ -220,11 +220,17 @@ export async function executeOrchestratorTools(
     const evidence = await verifyVoiceConsent(
       workspaceId, conversationId, envelope.action.category, envelope.action.status,
     );
-    await recordSmsConsent(workspaceId, contactId, detail.phone, {
-      category: envelope.action.category, status: envelope.action.status,
-      source: "AI_CALL", sourceReference: evidence.customer.id,
-      consentStatement: evidence.consentStatement,
-    });
+    if (envelope.action.category === "ALL" && envelope.action.status !== "OPTED_OUT")
+      throw new AppError("SMS_CONSENT_CATEGORY_REQUIRED", "Choose an individual messaging category for opt-in.", 409);
+    const categories = envelope.action.category === "ALL"
+      ? ["TRANSACTIONAL", "MARKETING"] as const : [envelope.action.category];
+    for (const category of categories) {
+      await recordSmsConsent(workspaceId, contactId, detail.phone, {
+        category, status: envelope.action.status,
+        source: "AI_CALL", sourceReference: evidence.customer.id,
+        consentStatement: evidence.consentStatement,
+      });
+    }
     return { kind: "consent", data: { category: envelope.action.category, status: envelope.action.status } };
   }
 
