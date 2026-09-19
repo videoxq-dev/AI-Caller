@@ -194,6 +194,12 @@ export async function buildConversationContext(workspaceId: string, conversation
   });
 
   systemPrompt += await approvedSmsPrompt(workspaceId, contact.phone);
+  const mostRecentCustomerMessage = [...timeline.messages].reverse().find((message) =>
+    message.senderType === "CUSTOMER" && ["TEXT", "CALL_TRANSCRIPT"].includes(message.contentType),
+  );
+  if (mostRecentCustomerMessage?.channel === "PHONE") {
+    systemPrompt += "\n\nLIVE PHONE RECEPTIONIST: Listen to the caller's complete question before answering. Respond naturally and briefly, usually one or two spoken sentences; ask at most one clear follow-up at a time. Avoid monologues, repeated greetings, lists, and reading internal notes aloud. State business facts only when grounded in approved knowledge.";
+  }
   const latestPhoneMode = [...timeline.messages].reverse().find((message) =>
     message.channel === "PHONE" && typeof message.metadata?.voiceMode === "string",
   )?.metadata?.voiceMode;
