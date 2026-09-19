@@ -12,7 +12,7 @@ import { getEnv } from "@/server/env";
 
 const draftSchema = z.object({
   legalName: z.string().trim().min(2).max(100),
-  contactName: z.string().trim().min(2).max(150),
+  contactName: z.string().trim().min(3).max(150).refine((value) => value.split(/\s+/).length >= 2, "Enter a first and last name for the carrier business contact."),
   contactEmail: z.string().trim().email().max(100),
   contactPhone: z.string().trim().regex(/^\+1[2-9]\d{9}$/),
   website: z.string().trim().url().max(100),
