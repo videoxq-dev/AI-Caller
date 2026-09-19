@@ -6,7 +6,7 @@ import { resolveWorkspaceContext } from "@/server/auth/workspace-context";
 import { requireWorkspacePermission } from "@/server/auth/permissions";
 import { AppError, toErrorResponse } from "@/server/http/errors";
 import { parseInput } from "@/server/http/validation";
-import { getSmsConsentStatus, recordSmsConsent } from "@/server/sms/consent";
+import { getSmsConsentStatus, normalizedSmsPhone, recordSmsConsent } from "@/server/sms/consent";
 
 const inputSchema = z.object({
   phoneNumber: z.string().trim().min(8).max(40),
@@ -50,7 +50,10 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
     requireWorkspacePermission(context.membership.role, "conversation.reply");
     const { id } = await params;
     const input = parseInput(inputSchema, await request.json());
-    await contactPhone(context.workspace.id, id);
+    const savedPhone = await contactPhone(context.workspace.id, id);
+    if (!savedPhone || normalizedSmsPhone(savedPhone) !== normalizedSmsPhone(input.phoneNumber)) {
+      throw new AppError("SMS_CONSENT_PHONE_MISMATCH", "Record consent for the phone number currently saved on this contact.", 409);
+    }
     const consent = await recordSmsConsent(context.workspace.id, id, input.phoneNumber, {
       category: input.category, status: input.status, source: "STAFF_ENTRY",
       sourceReference: input.sourceReference ?? context.session.user.id,
