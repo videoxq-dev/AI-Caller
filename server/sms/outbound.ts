@@ -18,7 +18,7 @@ import { resolveSmsRuntimeForWorkspace, type SmsRuntime } from "@/server/provide
 import { attachSmsProviderMessage, markSmsSendFailure } from "./repository";
 import { classifySmsPurpose } from "./classification";
 import { consentAllowsSend, getSmsConsentStatus, normalizedSmsPhone } from "./consent";
-import { validateApprovedSmsMessage, type ApprovedSmsPolicy, type SmsPurpose } from "./policy";
+import { classifySmsForPolicy, validateApprovedSmsMessage, type ApprovedSmsPolicy, type SmsPurpose } from "./policy";
 
 const MAX_SMS_TEXT_CHARACTERS = 1600;
 
@@ -216,10 +216,10 @@ export async function sendSmsConversationTextWithRuntime(
     const reply = await smsReplyContext(workspaceId, conversationId, to);
     actualPurpose = validateApprovedSmsMessage({
       policy,
-      classifiedPurpose: await classifySmsPurpose({
+      classifiedPurpose: classifySmsForPolicy(text, await classifySmsPurpose({
         workspaceId, referenceId: conversationId, message: text,
         campaignDescription: policy.description, lastCustomerMessage: reply.lastCustomerMessage,
-      }),
+      })),
       text,
     });
     const consent = await getSmsConsentStatus(workspaceId, to, actualPurpose);
