@@ -8,6 +8,7 @@ import { logger } from "@/server/observability/logger";
 import {
   createTelnyxCallControlApplication,
   createTelnyxMessagingProfile,
+  updateTelnyxCallControlApplication,
   deleteTelnyxCallControlApplication,
   deleteTelnyxMessagingProfile,
   findOwnedTelnyxNumber,
@@ -98,6 +99,21 @@ async function privateManagedPhoneNumber(workspaceId: string) {
     .orderBy(desc(hostedPhoneNumbers.createdAt))
     .limit(1);
   return row ?? null;
+}
+
+/**
+ * Rebind the persisted, workspace-owned Call Control application when a
+ * staging/tunnel hostname changes. This is idempotent and never purchases,
+ * releases or replaces a telephone number.
+ */
+export async function refreshManagedVoiceWebhook(workspaceId: string) {
+  const row = await privateManagedPhoneNumber(workspaceId);
+  if (!row || !["ACTIVE", "PAST_DUE", "SUSPENDED"].includes(row.status) || !row.voiceConnectionId) {
+    throw new AppError("VOICE_CONNECTION_NOT_READY", "Activate a managed phone number before repairing its voice callback.", 409);
+  }
+  const { voice } = managedNumberWebhookUrls(workspaceId, getEnv(), isE2EProviderFixtureMode());
+  await updateTelnyxCallControlApplication(workspaceId, row.voiceConnectionId, voice);
+  return { phoneNumberId: row.id, status: "UPDATED" as const, webhookOrigin: new URL(voice).origin };
 }
 
 export async function searchManagedPhoneNumbers(input: {
