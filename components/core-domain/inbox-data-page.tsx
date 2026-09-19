@@ -53,6 +53,31 @@ function VoiceCallCard({ message }: { message: Message }) {
   const [loadingDetail, setLoadingDetail] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const audioRef = useRef<HTMLAudioElement | null>(null);
+  const recordingStatus = detail?.call.recordingStatus
+    ?? (typeof message.metadata.recordingStatus === "string" ? message.metadata.recordingStatus : "PENDING");
+
+  useEffect(() => {
+    if (!callId) return;
+    let cancelled = false;
+    let checks = 0;
+    const refresh = async () => {
+      try {
+        const response = await fetch(`/api/voice/calls/${callId}`, { cache: "no-store" });
+        if (!response.ok) return;
+        const updated = await response.json() as VoiceCallDetail;
+        if (!cancelled) setDetail(updated);
+      } catch {
+        // The transcript button provides an explicit retry/error state.
+      }
+    };
+    void refresh();
+    const timer = window.setInterval(() => {
+      // A recording callback can arrive after hangup. Stop polling after 1 min.
+      if (++checks > 10 || cancelled) { window.clearInterval(timer); return; }
+      void refresh();
+    }, 6_000);
+    return () => { cancelled = true; window.clearInterval(timer); };
+  }, [callId]);
 
   async function toggleTranscript() {
     if (!callId) return;
@@ -92,7 +117,9 @@ function VoiceCallCard({ message }: { message: Message }) {
       </div>
       <div className="callPlayback">
         <span className="voiceCallDuration">{formatDuration(duration)}</span>
-        {callId ? <audio ref={audioRef} controls preload="metadata" src={`/api/voice/calls/${callId}/recording`} /> : <span>Recording unavailable</span>}
+        {callId && recordingStatus === "AVAILABLE"
+          ? <audio ref={audioRef} controls preload="metadata" src={`/api/voice/calls/${callId}/recording`} />
+          : <span>{recordingStatus === "DECLINED" ? "Recording declined" : recordingStatus === "FAILED" ? "Recording unavailable" : "Recording processing or unavailable"}</span>}
       </div>
       <div className="voiceCallActions">
         <button type="button" disabled={!callId || loadingDetail} onClick={() => void toggleTranscript()}>
@@ -312,7 +339,6 @@ export function InboxDataPage() {
               <div className="threadBody">
                 {!timeline.messages.length && <div className="dayDivider"><span>No messages yet</span></div>}
                 {timeline.messages.map((message) => {
-                  if (message.contentType === "CALL_TRANSCRIPT") return null;
                   if (message.contentType === "CALL_RECORDING") return <VoiceCallCard key={message.id} message={message} />;
                   const customer = message.senderType === "CUSTOMER";
                   return <div key={message.id} className={`messageRow ${customer ? "customer" : "agent"}`}>{customer && <span className="miniAvatar">{initials(timeline.contact.name)}</span>}<div className={`messageBubble ${customer ? "incoming" : "outgoing"}`}><div className="messageMeta"><span className={`channelBadge ${channelLabels[message.channel].toLowerCase().replace(" ", "-")}`}>{message.channel === "PHONE" ? <PhoneIcon size={13} /> : <MessageIcon size={13} />}{channelLabels[message.channel]}</span><time>{displayTime(message.createdAt)}</time></div><p>{message.body}</p></div>{!customer && <span className="botAvatar">{message.senderType === "USER" ? <UsersIcon size={16} /> : "✦"}</span>}</div>;
