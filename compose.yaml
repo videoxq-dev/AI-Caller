@@ -50,6 +50,12 @@ services:
     depends_on:
       migrate:
         condition: service_completed_successfully
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:8080/api/health', {signal:AbortSignal.timeout(5000)}).then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 30s
+      timeout: 8s
+      start_period: 30s
+      retries: 3
     ports:
       # Defaults to loopback for a host-side HTTPS reverse proxy.
       # Set AI_CALLER_BIND_ADDRESS=0.0.0.0 only when platform networking needs it;
