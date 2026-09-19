@@ -7,6 +7,7 @@ on:
   push:
     branches:
       - main
+      - feat/issue-24-messaging-compliance
   workflow_dispatch:
 
 permissions:
@@ -18,6 +19,7 @@ concurrency:
 
 jobs:
   build:
+    if: github.event_name != 'push' || github.ref == 'refs/heads/main'
     name: Test, Typecheck, Build & Browser Smoke
     runs-on: ubuntu-latest
     timeout-minutes: 25
@@ -234,3 +236,21 @@ jobs:
           if [ -f /tmp/ai-caller-next.pid ]; then
             kill "$(cat /tmp/ai-caller-next.pid)" || true
           fi
+
+  telnyx_readonly:
+    name: Telnyx read-only API smoke
+    if: github.event_name == 'push' && github.ref == 'refs/heads/feat/issue-24-messaging-compliance'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    environment: AI-Caller
+    env:
+      HOSTED_TELNYX_API_KEY: ${{ secrets.HOSTED_TELNYX_API_KEY }}
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22.12.0
+      - name: Read-only Telnyx API verification
+        run: node scripts/telnyx-readonly-smoke.mjs

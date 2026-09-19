@@ -13,3 +13,4 @@ export * from "./collaboration";
 export * from "./automations";
 
 export * from "./telephony";
+export * from "./messaging-compliance";

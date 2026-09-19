@@ -67,6 +67,12 @@ async function executeTestTools(
     };
   }
 
+  if (envelope.action.type === "RECORD_SMS_CONSENT") return {
+    kind: "consent", data: { ...captured, simulated: true, category: envelope.action.category, status: envelope.action.status },
+  };
+  if (envelope.action.type === "SEND_SMS") return {
+    kind: "sms", data: { ...captured, simulated: true, sent: false, reason: "Agent test mode does not send real SMS." },
+  };
   return {
     kind: "escalation",
     data: {

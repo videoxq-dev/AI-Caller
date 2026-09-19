@@ -1,6 +1,7 @@
 "use client";
 
 import Link from "next/link";
+import { SmsRegistrationBanner } from "./sms-registration-banner";
 import "./app-nav.css";
 import { useEffect, useMemo, useState } from "react";
 import { CalendarIcon, DatabaseIcon, GearIcon, HelpIcon, LogoMark, MessageIcon, UsersIcon } from "@/components/icons";
@@ -85,6 +86,7 @@ export function AppNav({ active, className = "appSidebar" }: { active: string; c
   }
 
   return (
+    <>
     <aside className={className}>
       <Link className="appBrand" href="/dashboard"><LogoMark size={37} /><strong>AI Caller</strong></Link>
 
@@ -146,5 +148,7 @@ export function AppNav({ active, className = "appSidebar" }: { active: string; c
       </nav>
       <a className="sidebarHelp" href="mailto:support@aicaller.com"><span><HelpIcon size={18} /></span><div><strong>Need help?</strong><small>Contact support</small></div></a>
     </aside>
+    <SmsRegistrationBanner />
+    </>
   );
 }

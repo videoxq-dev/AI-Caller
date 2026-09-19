@@ -7,6 +7,8 @@ type WidgetConfig = {
   businessName: string;
   assistantName: string;
   greeting: string;
+  smsTermsUrl?: string | null;
+  marketingProgramApproved?: boolean;
 };
 
 type ChatMessage = {
@@ -25,6 +27,12 @@ export function WebchatWidget({ widgetKey, config }: { widgetKey: string; config
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [sessionToken, setSessionToken] = useState<string | null>(null);
   const [input, setInput] = useState("");
+  const [captured, setCaptured] = useState(false);
+  const [profile, setProfile] = useState({ name: "", email: "", phone: "", transactionalSmsConsent: false, marketingSmsConsent: false });
+  const [contactSaving, setContactSaving] = useState(false);
+  const [contactError, setContactError] = useState("");
+  const [termsUrl, setTermsUrl] = useState<string | null>(null);
+  const [marketingAllowed, setMarketingAllowed] = useState(false);
   const [loading, setLoading] = useState(true);
   const [sending, setSending] = useState(false);
   const [status, setStatus] = useState("AI online");
@@ -45,6 +53,15 @@ export function WebchatWidget({ widgetKey, config }: { widgetKey: string; config
       if (cancelled) return;
       window.localStorage.setItem(sessionStorageKey, data.sessionToken);
       setSessionToken(data.sessionToken);
+      setTermsUrl(data.widget.smsTermsUrl ?? null);
+      setMarketingAllowed(data.widget.marketingProgramApproved === true);
+      void fetch("/api/widget/contact", { headers: { authorization: "Bearer " + data.sessionToken }, cache: "no-store" })
+        .then((response) => response.ok ? response.json() : null)
+        .then((details) => {
+          if (cancelled || !details) return;
+          setCaptured(Boolean(details.captured));
+          setProfile((current) => ({ ...current, name: details.name ?? "", email: details.email ?? "", phone: details.phone ?? "" }));
+        }).catch(() => undefined);
       setMessages(data.history.length ? data.history : [{ id: "greeting", role: "assistant", text: data.widget.greeting || config.greeting }]);
       setLoading(false);
     }
@@ -85,6 +102,25 @@ export function WebchatWidget({ widgetKey, config }: { widgetKey: string; config
       window.clearInterval(timer);
     };
   }, [sending, sessionToken]);
+
+  async function submitProfile(event: React.FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!sessionToken || contactSaving) return;
+    setContactSaving(true);
+    setContactError("");
+    try {
+      const response = await fetch("/api/widget/contact", {
+        method: "POST",
+        headers: { authorization: "Bearer " + sessionToken, "content-type": "application/json" },
+        body: JSON.stringify(profile),
+      });
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.error?.message ?? "Unable to save your contact details.");
+      setCaptured(true);
+    } catch (error) {
+      setContactError(error instanceof Error ? error.message : "Unable to save your contact details.");
+    } finally { setContactSaving(false); }
+  }
 
   function appendAssistantDelta(id: string, delta: string) {
     setMessages((current) => {
@@ -163,6 +199,21 @@ export function WebchatWidget({ widgetKey, config }: { widgetKey: string; config
         <button type="button" aria-label="Close chat" onClick={() => window.parent.postMessage({ type: "ai-caller-close" }, "*")}>×</button>
       </header>
 
+      {!loading && sessionToken && !captured && <form className="webchatContactForm" onSubmit={(event) => void submitProfile(event)}>
+        <strong>Stay connected</strong>
+        <label>Name<input required maxLength={200} autoComplete="name" value={profile.name} onChange={(event) => setProfile((p) => ({ ...p, name: event.target.value }))} /></label>
+        <label>Email<input required type="email" autoComplete="email" value={profile.email} onChange={(event) => setProfile((p) => ({ ...p, email: event.target.value }))} /></label>
+        <label>Phone<input required type="tel" autoComplete="tel" value={profile.phone} onChange={(event) => setProfile((p) => ({ ...p, phone: event.target.value }))} /></label>
+        {termsUrl && <><label className="webchatConsentChoice"><input type="checkbox" checked={profile.transactionalSmsConsent} onChange={(event) => setProfile((p) => ({ ...p, transactionalSmsConsent: event.target.checked }))} />
+          I agree to receive appointment confirmations, reminders, and related SMS updates from {config.businessName}.
+        </label>
+        {marketingAllowed && <label className="webchatConsentChoice"><input type="checkbox" checked={profile.marketingSmsConsent} onChange={(event) => setProfile((p) => ({ ...p, marketingSmsConsent: event.target.checked }))} />
+          I separately agree to receive promotional SMS messages and offers from {config.businessName}.
+        </label>}
+        <small>Message frequency varies. Msg &amp; data rates may apply. Reply STOP to opt out or HELP for help. <a href={termsUrl} target="_blank" rel="noopener noreferrer">Our SMS Terms &amp; Policy</a></small></>}
+        {contactError && <p role="alert">{contactError}</p>}
+        <button type="submit" disabled={contactSaving}>{contactSaving ? "Saving…" : "Save contact details"}</button>
+      </form>}
       <div className="webchatMessages" ref={scrollerRef} aria-live="polite">
         {loading && <p className="webchatLoading">Starting chat…</p>}
         {messages.map((message) => (

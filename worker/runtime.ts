@@ -20,6 +20,7 @@ import {
 import { sendAdminUserWelcomeEmail, sendPasswordResetEmail, sendTeamInvitationEmail, sendWelcomeEmail } from "@/server/email/mailer";
 import { logger } from "@/server/observability/logger";
 import { smsWebhookService } from "@/server/sms/service";
+import { processPendingSmsRegistrations } from "@/server/sms/registration-service";
 import { whatsAppWebhookService } from "@/server/whatsapp/service";
 import { dispatchAutomationEvent } from "@/server/automations/dispatcher";
 import { executeAutomationRun } from "@/server/automations/executor";
@@ -141,6 +142,21 @@ export async function startWorker() {
   const provisioningTimer = setInterval(() => void reconcileManagedNumberProvisioning(), 30_000);
   provisioningTimer.unref();
 
+  let registrationRunning = false;
+  const reconcileMessagingRegistration = async () => {
+    if (registrationRunning) return;
+    registrationRunning = true;
+    try {
+      const result = await processPendingSmsRegistrations(50);
+      if (result.checked) logger.info(result, "Reconciled Telnyx SMS registrations");
+    } catch (error) {
+      logger.error({ err: error }, "Failed to reconcile SMS carrier registration");
+    } finally { registrationRunning = false; }
+  };
+  await reconcileMessagingRegistration();
+  const registrationTimer = setInterval(() => void reconcileMessagingRegistration(), 60_000);
+  registrationTimer.unref();
+
   let renewalRunning = false;
   const renewManagedNumbers = async () => {
     if (renewalRunning) return;
@@ -168,6 +184,7 @@ export async function startWorker() {
     logger.info({ signal }, "Stopping AI Caller worker");
     clearInterval(recoveryTimer);
     clearInterval(provisioningTimer);
+    clearInterval(registrationTimer);
     clearInterval(renewalTimer);
     await stopBoss();
     process.exit(0);

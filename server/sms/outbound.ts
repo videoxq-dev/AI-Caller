@@ -1,6 +1,6 @@
-import { and, eq } from "drizzle-orm";
+import { and, desc, eq, inArray } from "drizzle-orm";
 import { db } from "@/db";
-import { contactIdentities, conversations, messages, usageEvents } from "@/db/schema";
+import { contactIdentities, contacts, conversations, hostedPhoneNumbers, messages, smsRegistrations, usageEvents } from "@/db/schema";
 import { analyzeSmsSegments } from "@/server/billing/sms-segments";
 import { loadHostedRateSnapshot, quoteHostedUsage } from "@/server/billing/pricing";
 import {
@@ -16,6 +16,9 @@ import { ProviderRequestError } from "@/server/providers/http";
 import { outboundSmsReady } from "@/server/phone-numbers/lifecycle";
 import { resolveSmsRuntimeForWorkspace, type SmsRuntime } from "@/server/providers/sms/runtime";
 import { attachSmsProviderMessage, markSmsSendFailure } from "./repository";
+import { classifySmsPurpose } from "./classification";
+import { consentAllowsSend, getSmsConsentStatus, normalizedSmsPhone } from "./consent";
+import { classifySmsForPolicy, validateApprovedSmsMessage, type ApprovedSmsPolicy, type SmsPurpose } from "./policy";
 
 const MAX_SMS_TEXT_CHARACTERS = 1600;
 
@@ -24,7 +27,7 @@ function smsText(value: string) {
   if (!text) throw new AppError("EMPTY_SMS_MESSAGE", "SMS message cannot be empty.", 400);
   const characters = Array.from(text);
   if (characters.length <= MAX_SMS_TEXT_CHARACTERS) return text;
-  return `${characters.slice(0, MAX_SMS_TEXT_CHARACTERS - 1).join("")}…`;
+  throw new AppError("SMS_TOO_LONG", "SMS message exceeds the 1,600-character limit. Shorten the text before sending.", 422);
 }
 
 function statusCallbackUrl(provider: string, workspaceId: string) {
@@ -132,8 +135,50 @@ async function destination(workspaceId: string, conversationId: string) {
     ))
     .where(and(eq(conversations.workspaceId, workspaceId), eq(conversations.id, conversationId)))
     .limit(1);
-  if (!identity) throw new AppError("SMS_IDENTITY_NOT_FOUND", "This conversation does not have an SMS identity.", 409);
-  return identity.value;
+  if (identity) return identity.value;
+  // Web Chat and phone-call contacts have a verified conversation, but often do not yet
+  // have an inbound SMS identity. An explicitly saved phone may be used as a destination;
+  // consent and carrier scope are still checked below before any hosted send.
+  const [contact] = await db.select({ phone: contacts.phone }).from(conversations)
+    .innerJoin(contacts, and(eq(contacts.id, conversations.contactId), eq(contacts.workspaceId, workspaceId)))
+    .where(and(eq(conversations.workspaceId, workspaceId), eq(conversations.id, conversationId))).limit(1);
+  if (!contact?.phone) throw new AppError("SMS_DESTINATION_REQUIRED", "Collect a phone number before sending SMS.", 409);
+  return normalizedSmsPhone(contact.phone);
+}
+
+async function managedSmsPolicy(workspaceId: string, senderNumber: string) {
+  const [row] = await db.select({
+    readiness: hostedPhoneNumbers.messagingReadiness,
+    registrationStatus: smsRegistrations.status,
+    policy: smsRegistrations.approvedPolicy,
+  }).from(hostedPhoneNumbers)
+    .leftJoin(smsRegistrations, and(
+      eq(smsRegistrations.workspaceId, hostedPhoneNumbers.workspaceId),
+      eq(smsRegistrations.phoneNumberId, hostedPhoneNumbers.id),
+    ))
+    .where(and(
+      eq(hostedPhoneNumbers.workspaceId, workspaceId),
+      eq(hostedPhoneNumbers.phoneNumber, senderNumber),
+      inArray(hostedPhoneNumbers.status, ["ACTIVE", "PAST_DUE"]),
+    )).limit(1);
+  if (!row || row.readiness !== "READY" || row.registrationStatus !== "READY" || !row.policy) {
+    throw new AppError("SMS_CAMPAIGN_NOT_APPROVED", "Your phone number does not have a verified SMS campaign.", 409);
+  }
+  return row.policy as ApprovedSmsPolicy;
+}
+
+async function smsReplyContext(workspaceId: string, conversationId: string, recipient: string) {
+  const [last] = await db.select({ body: messages.body, createdAt: messages.createdAt, metadata: messages.metadata })
+    .from(messages).where(and(
+      eq(messages.workspaceId, workspaceId),
+      eq(messages.conversationId, conversationId),
+      eq(messages.channel, "SMS"),
+      eq(messages.direction, "INBOUND"),
+    )).orderBy(desc(messages.createdAt)).limit(1);
+  return {
+    lastCustomerMessage: last?.body ?? null,
+    currentConversationReply: Boolean(last && last.metadata?.senderNumber === recipient && Date.now() - last.createdAt.getTime() <= 24 * 60 * 60 * 1000),
+  };
 }
 
 export async function sendSmsConversationTextWithRuntime(
@@ -163,6 +208,25 @@ export async function sendSmsConversationTextWithRuntime(
 
   const text = smsText(input.text);
   const to = input.to ?? await destination(workspaceId, conversationId);
+  // Treat a free-form human draft and an AI-generated message identically: the caller
+  // does not get to choose its compliance category. Approved scope is carrier-derived.
+  let actualPurpose: SmsPurpose = "TRANSACTIONAL";
+  if (runtime.mode === "HOSTED") {
+    const policy = await managedSmsPolicy(workspaceId, runtime.senderNumber);
+    const reply = await smsReplyContext(workspaceId, conversationId, to);
+    actualPurpose = validateApprovedSmsMessage({
+      policy,
+      classifiedPurpose: classifySmsForPolicy(text, await classifySmsPurpose({
+        workspaceId, referenceId: conversationId, message: text,
+        campaignDescription: policy.description, lastCustomerMessage: reply.lastCustomerMessage,
+      })),
+      text,
+    });
+    const consent = await getSmsConsentStatus(workspaceId, to, actualPurpose);
+    if (!consentAllowsSend({ consent, purpose: actualPurpose, currentConversationReply: reply.currentConversationReply })) {
+      throw new AppError("SMS_CONSENT_REQUIRED", "This contact has not opted in to this type of message or has opted out.", 409);
+    }
+  }
   const segmentUsage = analyzeSmsSegments(text);
   const outbound = await appendMessage(workspaceId, conversationId, {
     channel: "SMS",
@@ -173,7 +237,7 @@ export async function sendSmsConversationTextWithRuntime(
     provider: runtime.providerName,
     externalMessageId: null,
     status: "SENDING",
-    metadata: { mode: runtime.mode, ...(input.metadata ?? {}) },
+    metadata: { ...input.metadata, mode: runtime.mode, ...(runtime.mode === "HOSTED" ? { smsPurpose: actualPurpose } : {}) },
   });
 
   let hostedCharge: HostedSmsCharge | null = null;
@@ -196,7 +260,19 @@ export async function sendSmsConversationTextWithRuntime(
     }
   }
 
+  let acceptedByCarrier: Awaited<ReturnType<SmsRuntime["provider"]["send"]>> | null = null;
   try {
+    if (runtime.mode === "HOSTED") {
+      // Recheck just before dispatch: a contact can unsubscribe or a campaign can
+      // lose approval while a queued message is waiting for credits or AI generation.
+      const currentPolicy = await managedSmsPolicy(workspaceId, runtime.senderNumber);
+      validateApprovedSmsMessage({ policy: currentPolicy, classifiedPurpose: actualPurpose, text });
+      const consent = await getSmsConsentStatus(workspaceId, to, actualPurpose);
+      const reply = await smsReplyContext(workspaceId, conversationId, to);
+      if (!consentAllowsSend({ consent, purpose: actualPurpose, currentConversationReply: reply.currentConversationReply })) {
+        throw new AppError("SMS_CONSENT_REQUIRED", "This contact has opted out or lacks consent for this message.", 409);
+      }
+    }
     const sent = await runtime.provider.send({
       to,
       from: runtime.senderNumber,
@@ -204,8 +280,9 @@ export async function sendSmsConversationTextWithRuntime(
       statusCallbackUrl: statusCallbackUrl(runtime.providerName, workspaceId),
       idempotencyKey: input.idempotencyKey ?? outbound.id,
     });
-    await settleHostedCredits(workspaceId, hostedCharge, outbound.id);
+    acceptedByCarrier = sent;
     const updated = await attachSmsProviderMessage(workspaceId, outbound.id, runtime.providerName, sent.externalId, sent.status);
+    await settleHostedCredits(workspaceId, hostedCharge, outbound.id);
     await recordUsage(workspaceId, runtime, outbound.id, hostedCharge, {
       messages: 1,
       status: sent.status,
@@ -215,6 +292,24 @@ export async function sendSmsConversationTextWithRuntime(
     });
     return updated;
   } catch (error) {
+    if (acceptedByCarrier) {
+      // Carrier acceptance is irreversible. A local persistence/billing error must
+      // never be reported as a suppressed message or refunded as an unsent SMS.
+      logger.error({ err: error, workspaceId, messageId: outbound.id, externalId: acceptedByCarrier.externalId }, "Accepted SMS could not be finalized locally");
+      try { await attachSmsProviderMessage(workspaceId, outbound.id, runtime.providerName, acceptedByCarrier.externalId, acceptedByCarrier.status); }
+      catch (recordError) { logger.error({ err: recordError, messageId: outbound.id }, "Unable to persist accepted carrier SMS ID"); }
+      try { await settleHostedCredits(workspaceId, hostedCharge, outbound.id); }
+      catch (billingError) { logger.error({ err: billingError, messageId: outbound.id }, "Unable to settle accepted SMS credits"); }
+      // No automatic retry: Telnyx already has this message and could deliver it.
+      throw new AppError("SMS_ACCEPTED_FINALIZATION_FAILED", "The carrier accepted this SMS, but local confirmation is incomplete. Check delivery before attempting another send.", 503);
+    }
+    if (error instanceof AppError) {
+      // A policy change or late opt-out is a local suppression, not an uncertain carrier
+      // send. Release credits and preserve an explicit, non-delivered message status.
+      await markSmsSendFailure(workspaceId, outbound.id, "SUPPRESSED", error);
+      await releaseHostedCredits(workspaceId, hostedCharge);
+      throw error;
+    }
     const uncertain = uncertainProviderFailure(error);
     await markSmsSendFailure(workspaceId, outbound.id, uncertain ? "SEND_UNKNOWN" : "FAILED", error);
     if (hostedCharge && definitiveProviderRejection(error)) {

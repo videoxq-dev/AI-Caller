@@ -9,6 +9,7 @@ import {
 } from "@/components/icons";
 import { AppNav } from "@/components/core-domain/app-nav";
 import { PhoneNumberManager } from "@/components/phone-number-manager";
+import { SmsRegistrationSettings } from "@/components/sms-registration-settings";
 import "../dashboard/dashboard.css";
 import "./settings.css";
 
@@ -41,6 +42,10 @@ export default function SettingsPage() {
   const [teamLoading, setTeamLoading] = useState(false);
   const [teamError, setTeamError] = useState<string | null>(null);
   const [teamActionPending, setTeamActionPending] = useState(false);
+
+  useEffect(() => {
+    if (new URLSearchParams(window.location.search).get("tab") === "phone") setTab("phone");
+  }, []);
 
   const activeMembers = team.length;
   const canManageTeam = currentRole === "OWNER" || currentRole === "ADMIN";
@@ -176,6 +181,7 @@ export default function SettingsPage() {
               <article className="settingsCard phoneManagementCard">
                 <div className="sectionHeading"><div><h2>Phone &amp; Messaging</h2><p>Manage your AI Caller voice + SMS-capable number and see its current outbound messaging readiness.</p></div><span className="statusPill">Managed by AI Caller</span></div>
                 <div className="settingsPhoneManager"><PhoneNumberManager settingsMode /></div>
+                <SmsRegistrationSettings />
               </article>
               <aside className="settingsCard compactCard phoneBillingHelp">
                 <h2>How billing works</h2>

@@ -20,6 +20,8 @@ export async function POST(request: Request) {
         assistantName: result.widget.assistantName,
         greeting: result.widget.greeting,
         launcherLabel: result.widget.launcherLabel,
+        smsTermsUrl: result.widget.smsTermsUrl,
+        marketingProgramApproved: result.widget.marketingProgramApproved,
       },
     }, {
       headers: {

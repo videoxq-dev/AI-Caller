@@ -203,6 +203,17 @@ try {
        1000000, 0, 2000, 2000, now(), now() + interval '30 days', now() + interval '30 days')`,
     [workspaceId],
   );
+  // Guarded acceptance fixture: carrier approval must include a program policy.
+  await pool.query(
+    `INSERT INTO sms_registrations
+       (workspace_id, phone_number_id, number_type, status, approved_policy, draft)
+       SELECT $1, id, 'local', 'READY', $2::jsonb, '{}'::jsonb
+         FROM hosted_phone_numbers WHERE workspace_id = $1 AND phone_number = '+12025550800'`,
+    [workspaceId, JSON.stringify({
+      categories: ["TRANSACTIONAL"], allowEmbeddedLinks: true,
+      description: "Customer care, appointment confirmations, reminders and follow-ups",
+    })],
+  );
 
   const phoneNumberId = `phone-m8-${stamp}`;
   const waCredentials = encryptCredentials({
@@ -295,6 +306,12 @@ try {
     identity: "+12025550810",
     body: "I need help by text.",
   });
+  await pool.query(
+    `INSERT INTO sms_consents
+       (workspace_id, contact_id, phone_number, category, status, source, consent_statement, granted_at)
+       VALUES ($1, $2, '+12025550810', 'TRANSACTIONAL', 'OPTED_IN', 'WEB_FORM', $3, now())`,
+    [workspaceId, sms.contactId, "Customer agreed to appointment and service text updates"],
+  );
   const whatsapp = await createTextConversation(pool, {
     workspaceId,
     name: "M8 WhatsApp Customer",
@@ -383,6 +400,12 @@ try {
     createdAt: past,
   });
   await pool.query(
+    `INSERT INTO sms_consents
+       (workspace_id, contact_id, phone_number, category, status, source, consent_statement, granted_at)
+       VALUES ($1, $2, '+12025550820', 'TRANSACTIONAL', 'OPTED_IN', 'WEB_FORM', $3, now())`,
+    [workspaceId, missed.contactId, "Customer agreed to requested service text follow-ups"],
+  );
+  await pool.query(
     `INSERT INTO automation_events (workspace_id, type, aggregate_type, aggregate_id, payload, occurred_at)
      VALUES ($1, 'INQUIRY_RECEIVED', 'MESSAGE', $2, $3::jsonb, $4)`,
     [workspaceId, randomUUID(), JSON.stringify({
@@ -448,6 +471,12 @@ try {
   const appointmentContact = await pool.query(
     `INSERT INTO contacts (workspace_id, name, phone) VALUES ($1, 'M8 Appointment Customer', '+12025550840') RETURNING id`,
     [workspaceId],
+  );
+  await pool.query(
+    `INSERT INTO sms_consents
+       (workspace_id, contact_id, phone_number, category, status, source, consent_statement, granted_at)
+       VALUES ($1, $2, '+12025550840', 'TRANSACTIONAL', 'OPTED_IN', 'WEB_FORM', $3, now())`,
+    [workspaceId, appointmentContact.rows[0].id, "Customer agreed to appointment confirmation and reminders"],
   );
   await pool.query(
     `INSERT INTO contact_identities (workspace_id, contact_id, channel, external_id, normalized_value)

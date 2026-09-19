@@ -1,11 +1,14 @@
 import { afterAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { closeDatabase, db } from "@/db";
-import { contactIdentities, creditWallets, hostedApiRateCards, messages, providerWebhookEvents, usageEvents, workspaces } from "@/db/schema";
+import { contactIdentities, creditWallets, hostedApiRateCards, hostedPhoneNumbers, messages, providerWebhookEvents, smsRegistrations, usageEvents, workspaces } from "@/db/schema";
 import type { SmsInboundResponseJob } from "@/server/jobs/queues";
 import type { NormalizedSmsEvent, SMSProvider } from "@/server/providers/contracts";
 import { ProviderRequestError } from "@/server/providers/http";
+import { appendMessage, getOrCreateContactByIdentity, getOrCreateOpenConversation } from "@/server/domain/core/repository";
 import type { SmsRuntime } from "@/server/providers/sms/runtime";
 import { createSmsWebhookService } from "./service";
+
+vi.mock("./classification", () => ({ classifySmsPurpose: vi.fn(async () => "TRANSACTIONAL") }));
 
 function request(body = "{}") {
   return new Request("https://app.example.com/api/webhooks/sms/twilio/11111111-1111-4111-8111-111111111111", {
@@ -69,6 +72,22 @@ describe("SMS webhook service", () => {
     await db.delete(workspaces);
     const [workspace] = await db.insert(workspaces).values({ name: "SMS Service Test" }).returning();
     workspaceId = workspace.id;
+    const [managed] = await db.insert(hostedPhoneNumbers).values({
+      workspaceId,
+      phoneNumber: "+12025550200",
+      countryCode: "US",
+      numberType: "local",
+      status: "ACTIVE",
+      messagingReadiness: "READY",
+      providerMonthlyCostMicros: 1000000,
+      providerUpfrontCostMicros: 0,
+      monthlyCredits: 1,
+      purchaseCredits: 1,
+    }).returning();
+    await db.insert(smsRegistrations).values({
+      workspaceId, phoneNumberId: managed.id, numberType: "local", status: "READY",
+      approvedPolicy: { categories: ["TRANSACTIONAL"], allowEmbeddedLinks: true, description: "Appointment reminders and customer replies" },
+    });
     await db.insert(hostedApiRateCards).values({
       capability: "SMS",
       provider: "twilio",
@@ -103,6 +122,49 @@ describe("SMS webhook service", () => {
     expect(provider.verifyWebhook).toHaveBeenCalledTimes(1);
     expect(provider.normalizeWebhook).toHaveBeenCalledTimes(1);
     expect(jobs).toHaveLength(0);
+  });
+
+  it("preserves START and STOP consent updates when hosted service is suspended", async () => {
+    const keywordEvents = [
+      { ...inboundEvent("suspended-start"), text: "START" },
+      { ...inboundEvent("suspended-stop"), text: "STOP" },
+    ];
+    const provider: SMSProvider = {
+      send: vi.fn(async () => ({ externalId: "unused", status: "QUEUED" as const })),
+      verifyWebhook: vi.fn(async () => true),
+      normalizeWebhook: vi.fn(async () => [keywordEvents.shift()!]),
+    };
+    const runtime = { ...runtimeFor(workspaceId, provider, "HOSTED"), serviceStatus: "SUSPENDED" as const };
+    const { service, jobs } = serviceHarness(runtime, async () => orchestratorReply("Should not respond"));
+    const { getSmsConsentStatus } = await import("./consent");
+
+    await expect(service.ingest(request(), workspaceId, "twilio")).resolves.toMatchObject({ queued: 1, suppressed: 0 });
+    await expect(service.processInboundJob(jobs[0])).resolves.toMatchObject({ consentUpdated: true });
+    expect(await getSmsConsentStatus(workspaceId, "+12025550100", "TRANSACTIONAL")).toBe("OPTED_IN");
+    expect(await getSmsConsentStatus(workspaceId, "+12025550100", "MARKETING")).toBe("UNKNOWN");
+
+    await expect(service.ingest(request(), workspaceId, "twilio")).resolves.toMatchObject({ queued: 1, suppressed: 0 });
+    await expect(service.processInboundJob(jobs[1])).resolves.toMatchObject({ consentUpdated: true });
+    expect(await getSmsConsentStatus(workspaceId, "+12025550100", "TRANSACTIONAL")).toBe("OPTED_OUT");
+    expect(await getSmsConsentStatus(workspaceId, "+12025550100", "MARKETING")).toBe("OPTED_OUT");
+    expect(provider.send).not.toHaveBeenCalled();
+  });
+
+  it("persists a STOP opt-out even if hosted inbound billing cannot charge credits", async () => {
+    const provider: SMSProvider = {
+      send: vi.fn(async () => ({ externalId: "unused", status: "QUEUED" as const })),
+      verifyWebhook: vi.fn(async () => true),
+      normalizeWebhook: vi.fn(async () => [{ ...inboundEvent("optout-without-wallet"), text: "Stop texting me" }]),
+    };
+    const { service, jobs } = serviceHarness(runtimeFor(workspaceId, provider, "HOSTED"), async () =>
+      orchestratorReply("Should not respond"));
+    await service.ingest(request(), workspaceId, "twilio");
+    await expect(service.processInboundJob(jobs[0])).resolves.toMatchObject({ consentUpdated: true });
+    const { getSmsConsentStatus } = await import("./consent");
+    expect(await getSmsConsentStatus(workspaceId, "+12025550100", "TRANSACTIONAL")).toBe("OPTED_OUT");
+    expect(await getSmsConsentStatus(workspaceId, "+12025550100", "MARKETING")).toBe("OPTED_OUT");
+    expect(provider.send).not.toHaveBeenCalled();
+    expect((await db.select().from(providerWebhookEvents))[0].status).toBe("PROCESSED");
   });
 
   it("queues once, persists one inbound/outbound pair, and does not replay duplicate inbound events", async () => {
@@ -191,6 +253,40 @@ describe("SMS webhook service", () => {
     const outbound = stored.find((message) => message.direction === "OUTBOUND");
     expect(outbound?.externalMessageId).toBe("msg-out-2");
     expect(outbound?.status).toBe("DELIVERED");
+  });
+
+  it("requests a carrier retry when delivery races ahead of outbound persistence", async () => {
+    const id = "early-delivery-provider-id";
+    const provider: SMSProvider = {
+      send: vi.fn(async () => ({ externalId: id, status: "QUEUED" as const })),
+      verifyWebhook: vi.fn(async () => true),
+      normalizeWebhook: vi.fn(async () => [{
+        type: "DELIVERY_UPDATED" as const,
+        externalEventId: "evt-early-delivery",
+        externalMessageId: id,
+        status: "DELIVERED" as const,
+        error: null,
+        occurredAt: null,
+      }]),
+    };
+    const { service } = serviceHarness(runtimeFor(workspaceId, provider), async () => orchestratorReply("unused"));
+    await expect(service.ingest(request(), workspaceId, "twilio"))
+      .rejects.toMatchObject({ code: "SMS_DELIVERY_DEFERRED", status: 503 });
+    expect((await db.select().from(providerWebhookEvents))[0].status).toBe("FAILED");
+
+    const contact = await getOrCreateContactByIdentity(workspaceId, {
+      channel: "SMS", externalId: "+12025550110",
+    });
+    const conversation = await getOrCreateOpenConversation(workspaceId, contact.id);
+    await appendMessage(workspaceId, conversation.id, {
+      channel: "SMS", direction: "OUTBOUND", senderType: "AI",
+      contentType: "TEXT", body: "Your appointment is confirmed.",
+      provider: "twilio", externalMessageId: id, status: "SENT", metadata: {},
+    });
+    await expect(service.ingest(request(), workspaceId, "twilio"))
+      .resolves.toMatchObject({ processed: 1 });
+    expect((await db.select().from(messages))[0].status).toBe("DELIVERED");
+    expect((await db.select().from(providerWebhookEvents))[0].status).toBe("PROCESSED");
   });
 
   it("blocks hosted outbound SMS until carrier registration is ready", async () => {

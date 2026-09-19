@@ -219,12 +219,71 @@ try {
   await page.getByText("+1 (202) 555-0200", { exact: true }).waitFor({ timeout: 10_000 });
   await page.getByText("Registration required", { exact: true }).waitFor();
   await assertNoHorizontalOverflow(page, "Managed phone and SMS setup desktop");
+  await page.goto(`${baseUrl}/settings?tab=phone#sms-registration`, { waitUntil: "networkidle" });
+  await page.getByText("Activate SMS messaging", { exact: true }).waitFor();
+  await page.getByRole("heading", { name: "SMS registration" }).waitFor();
+  await page.getByText(/Register \+12025550200 for US 10DLC messaging/).waitFor();
+  await page.getByRole("button", { name: "Save registration draft" }).waitFor();
+  await assertNoHorizontalOverflow(page, "Not-started SMS registration settings");
+  await page.screenshot({ path: path.join(outputDir, "sms-registration-not-started-desktop.png"), fullPage: true });
+
+  // Exercise every optional registration UI state without calling the live carrier.
+  // The DB fixture represents externally observed states; it does not prove approval.
+  await pool.query(
+    `INSERT INTO sms_registrations (workspace_id, phone_number_id, number_type, status, draft)
+       SELECT $1, id, 'local', 'PENDING', '{}'::jsonb
+       FROM hosted_phone_numbers WHERE workspace_id = $1 AND provision_request_id = $2`,
+    [workspaceId, provisionRequestId],
+  );
+  await pool.query(
+    `UPDATE hosted_phone_numbers SET messaging_readiness = 'PENDING', updated_at = now()
+      WHERE workspace_id = $1 AND provision_request_id = $2`,
+    [workspaceId, provisionRequestId],
+  );
+  await page.reload({ waitUntil: "networkidle" });
+  await page.getByText("SMS registration pending", { exact: true }).waitFor();
+  await page.getByRole("link", { name: /View status/ }).click();
+  await page.getByRole("heading", { name: "SMS registration" }).waitFor();
+  await page.getByText(/Your submission is being reviewed/).waitFor();
+  await assertNoHorizontalOverflow(page, "Pending SMS registration settings");
+  await page.screenshot({ path: path.join(outputDir, "sms-registration-pending-desktop.png"), fullPage: true });
+
+  await pool.query(
+    `UPDATE sms_registrations SET status = 'REJECTED',
+       rejection_reason = 'Carrier rejected missing opt-in evidence.', updated_at = now()
+      WHERE workspace_id = $1 AND phone_number_id IN (
+        SELECT id FROM hosted_phone_numbers WHERE workspace_id = $1 AND provision_request_id = $2
+      )`,
+    [workspaceId, provisionRequestId],
+  );
+  await pool.query(
+    `UPDATE hosted_phone_numbers SET messaging_readiness = 'REJECTED', updated_at = now()
+      WHERE workspace_id = $1 AND provision_request_id = $2`,
+    [workspaceId, provisionRequestId],
+  );
+  await page.reload({ waitUntil: "networkidle" });
+  await page.getByText("SMS registration needs attention", { exact: true }).waitFor();
+  await page.getByText("Carrier response: Carrier rejected missing opt-in evidence.").waitFor();
+  await page.getByRole("button", { name: "Save registration draft" }).waitFor();
+  await assertNoHorizontalOverflow(page, "Rejected SMS registration settings");
+  await page.screenshot({ path: path.join(outputDir, "sms-registration-rejected-desktop.png"), fullPage: true });
 
   await pool.query(
     `UPDATE hosted_phone_numbers SET messaging_readiness = 'READY', updated_at = now()
       WHERE workspace_id = $1 AND provision_request_id = $2`,
     [workspaceId, provisionRequestId],
   );
+  // Guarded CI carrier fixture: both readiness and approved-policy records are required.
+  await pool.query(
+    `UPDATE sms_registrations SET status = 'READY', rejection_reason = NULL,
+       approved_policy = '{"categories":["TRANSACTIONAL"],"allowEmbeddedLinks":true,"description":"Appointment replies"}'::jsonb,
+       updated_at = now()
+      WHERE workspace_id = $1 AND phone_number_id IN (
+        SELECT id FROM hosted_phone_numbers WHERE workspace_id = $1 AND provision_request_id = $2
+      )`,
+    [workspaceId, provisionRequestId],
+  );
+  await page.goto(`${baseUrl}/setup/communication`, { waitUntil: "networkidle" });
   await page.reload({ waitUntil: "networkidle" });
   await page.getByText("Ready", { exact: true }).waitFor({ timeout: 10_000 });
   await page.screenshot({ path: path.join(outputDir, "sms-managed-setup-desktop.png"), fullPage: true });
@@ -350,7 +409,7 @@ try {
   assert(smsUsage.rows.every((row) => row.mode === "HOSTED" && row.provider === "telnyx" && row.credits_charged === 1), "Hosted SMS usage attribution/credits are incorrect.");
 
   const balance = (await pool.query(`SELECT balance FROM credit_wallets WHERE workspace_id = $1`, [workspaceId])).rows[0].balance;
-  assert(balance === 2989, `Expected 2,011 total hosted credits consumed (2,000 number purchase + 5 AI + 3 inbound SMS + 3 outbound SMS); received balance ${balance}.`);
+  assert(balance === 2986, `Expected 2,014 hosted credits consumed (2,000 number purchase + 5 AI reply + 3 SMS policy classification + 3 inbound SMS + 3 outbound SMS); received balance ${balance}.`);
 
   await page.goto(`${baseUrl}/inbox`, { waitUntil: "networkidle" });
   await page.getByRole("heading", { name: "Inbox", level: 1 }).waitFor();

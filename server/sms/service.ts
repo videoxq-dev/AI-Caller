@@ -8,6 +8,7 @@ import { appendMessage, getOrCreateContactByIdentity, getOrCreateOpenConversatio
 import { normalizePhone } from "@/server/domain/core/schemas";
 import { getEnv } from "@/server/env";
 import { AppError } from "@/server/http/errors";
+import { logger } from "@/server/observability/logger";
 import { enqueueUniqueJob } from "@/server/jobs";
 import { SMS_INBOUND_RESPONSE, smsInboundResponseJobSchema, type SmsInboundResponseJob } from "@/server/jobs/queues";
 import { responseOrchestrator } from "@/server/orchestrator";
@@ -24,6 +25,7 @@ import {
   updateSmsDeliveryStatus,
 } from "./repository";
 import { sendSmsConversationTextWithRuntime } from "./outbound";
+import { recordSmsConsent, smsKeyword } from "./consent";
 
 const MAX_SMS_WEBHOOK_BYTES = 64 * 1024;
 
@@ -191,7 +193,7 @@ export function createSmsWebhookService(dependencies: SmsServiceDependencies) {
       let suppressed = 0;
 
       for (const event of events) {
-        if (runtime.mode === "HOSTED" && runtime.serviceStatus === "SUSPENDED" && event.type === "MESSAGE_RECEIVED") {
+        if (runtime.mode === "HOSTED" && runtime.serviceStatus === "SUSPENDED" && event.type === "MESSAGE_RECEIVED" && !["STOP", "START"].includes(smsKeyword(event.text) ?? "")) {
           suppressed += 1;
           continue;
         }
@@ -252,6 +254,16 @@ export function createSmsWebhookService(dependencies: SmsServiceDependencies) {
         queued += 1;
       }
 
+      if (deferred > 0) {
+        // A delivery webhook may beat the outbound provider-ID database commit.
+        // Telnyx retries 5xx responses; acknowledging this as 202 would lose the
+        // only delivery evidence. Duplicate inbound events are safely deduplicated.
+        throw new AppError(
+          "SMS_DELIVERY_DEFERRED",
+          "Delivery confirmation arrived before its outbound message was persisted. Retry this webhook.",
+          503,
+        );
+      }
       return { ok: true as const, queued, processed, duplicates, deferred, suppressed };
     },
 
@@ -278,8 +290,30 @@ export function createSmsWebhookService(dependencies: SmsServiceDependencies) {
           provider: job.provider,
           externalMessageId: job.externalMessageId,
           status: "RECEIVED",
-          metadata: { providerEventId: job.webhookEventId },
+          metadata: { providerEventId: job.webhookEventId, senderNumber: job.customerNumber },
         });
+        // Opt-out evidence must be recorded even when the hosted wallet cannot pay
+        // inbound usage charges. Billing failures cannot authorize further messages.
+        const keyword = smsKeyword(job.text);
+        if (keyword === "STOP" || keyword === "START") {
+          const status = keyword === "STOP" ? "OPTED_OUT" : "OPTED_IN";
+          const categories = keyword === "STOP" ? ["TRANSACTIONAL", "MARKETING"] as const : ["TRANSACTIONAL"] as const;
+          for (const category of categories) {
+            await recordSmsConsent(job.workspaceId, contact.id, job.customerNumber, {
+              category, status, source: "INBOUND_SMS", sourceReference: job.externalMessageId,
+              consentStatement: job.text,
+            });
+          }
+          try {
+            await chargeHostedInboundSms(job.workspaceId, runtime, job.externalMessageId, job.text);
+          } catch (billingError) {
+            logger.error({ err: billingError, workspaceId: job.workspaceId, webhookEventId: job.webhookEventId },
+              "Inbound SMS keyword processed but carrier usage could not be charged");
+          }
+          await completeProviderWebhookEvent(job.workspaceId, job.webhookEventId);
+          return { skipped: false as const, replied: false as const, consentUpdated: true as const };
+        }
+
         await chargeHostedInboundSms(job.workspaceId, runtime, job.externalMessageId, job.text);
 
         if (runtime.mode === "HOSTED" && !outboundSmsReady(runtime.messagingReadiness)) {
