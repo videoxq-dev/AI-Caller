@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { consentAllowsSend, smsKeyword } from "./consent";
-import { validateApprovedSmsMessage } from "./policy";
+import { validateApprovedSmsMessage, validateSmsLinks } from "./policy";
 import { parseSmsClassification } from "./classification";
 
 describe("outbound SMS compliance", () => {
@@ -24,6 +24,13 @@ describe("outbound SMS compliance", () => {
     expect(parseSmsClassification('{"purpose":"TRANSACTIONAL"}')).toBe("TRANSACTIONAL");
     expect(parseSmsClassification('{"purpose":"UNCERTAIN"}')).toBe("UNCERTAIN");
     expect(parseSmsClassification("not JSON")).toBe("UNCERTAIN");
+  });
+  it("accepts genuine booking destinations but blocks public shorteners, local and insecure links", () => {
+    expect(() => validateSmsLinks("Your appointment https://book.example.com/abc?a=1", true)).not.toThrow();
+    expect(() => validateSmsLinks("Visit https://bit.ly/abc", true)).toThrow(/trusted HTTPS link/);
+    expect(() => validateSmsLinks("Visit http://example.com", true)).toThrow();
+    expect(() => validateSmsLinks("Visit https://127.0.0.1/private", true)).toThrow();
+    expect(() => validateSmsLinks("Visit www.example.com/appointment", true)).not.toThrow();
   });
   it("honors exact opt-out instructions without guessing from normal replies", () => {
     expect(smsKeyword("stop.")).toBe("STOP");
