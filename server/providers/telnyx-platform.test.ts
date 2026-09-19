@@ -78,6 +78,32 @@ describe("managed Telnyx number search", () => {
     });
   });
 
+  it("uses Telnyx-documented area/prefix/suffix filters for an exact US number recheck", async () => {
+    const fetcher = vi.fn(async (input: RequestInfo | URL) => {
+      const params = new URL(String(input)).searchParams;
+      expect(params.get("filter[national_destination_code]")).toBe("307");
+      expect(params.get("filter[starts_with]")).toBe("555");
+      expect(params.get("filter[ends_with]")).toBe("0184");
+      expect(params.get("filter[best_effort]")).toBe("false");
+      expect(params.get("filter[exclude_held_numbers]")).toBe("true");
+      expect(params.get("filter[phone_number_type]")).toBe("local");
+      expect(params.get("filter[limit]")).toBe("30");
+      return new Response(JSON.stringify({
+        data: [{
+          phone_number: "+13075550184",
+          cost_information: { monthly_cost: "1.10", upfront_cost: "0.00", currency: "USD" },
+          features: [{ name: "voice" }, { name: "sms" }],
+        }],
+      }), { status: 200, headers: { "content-type": "application/json" } });
+    }) as typeof fetch;
+    const numbers = await searchTelnyxNumbers({
+      countryCode: "US", numberType: "local", areaCode: "307",
+      startsWith: "555", endsWith: "0184", limit: 30,
+    }, fetcher);
+    expect(numbers).toHaveLength(1);
+    expect(numbers[0].phoneNumber).toBe("+13075550184");
+  });
+
   it("requests quickship inventory for US toll-free numbers", async () => {
     const fetcher = vi.fn(async (input: RequestInfo | URL) => {
       const url = new URL(String(input));
