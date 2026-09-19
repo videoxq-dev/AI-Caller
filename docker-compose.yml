@@ -18,7 +18,7 @@ services:
   migrate:
     <<: *app
     restart: "no"
-    command: ["sh", "-ec", "npm run db:migrate && npm run verify:deployment"]
+    command: ["sh", "-ec", "npm run verify:database-connection && npm run db:migrate && npm run verify:deployment"]
 
   web:
     <<: *app
