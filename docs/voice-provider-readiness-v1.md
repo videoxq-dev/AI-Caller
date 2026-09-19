@@ -82,7 +82,7 @@ User-reported local execution on macOS (Darwin x86_64), Node v22.19.0, commit `b
 - Integrations `Our Credits` displayed **Server configured**; response reported `liveVerified: false`, correctly avoiding a misleading health claim.
 - User reported no observed errors or secret leakage. Do not confuse this with the V2 real-call acceptance evidence.
 
-CI run #853 on the exact reported commit failed because Vitest also discovered a `node:test` suite that is intended to run separately; the 275 existing Vitest tests passed, but the step failed before typecheck/build/browser checks. The test-runner discovery fix is committed after the user's local acceptance SHA. **V1 repository close requires green CI on the final branch head**, while the earlier local provider evidence remains valid for the unchanged provider probe.
+CI run #853 on the exact reported commit failed because Vitest also discovered a `node:test` suite that is intended to run separately; the 275 existing Vitest tests passed, but the step failed before typecheck/build/browser checks. The test-runner discovery fix is committed after the user's local acceptance SHA. The final PR #26 CI run #35454833538 passed on head `2b595afad3795ffb68845b6d01d5569f9d579b3b`; PR #26 was squash-merged to main as `2707d192e904f6cc5e251665ed7000382af64cf3`. V1 is now closed for **provider reachability** only; call acceptance remains V2.
 
 Note: this repository does not currently track `package-lock.json`; use `npm install` rather than `npm ci` until dependency locking is addressed independently. This is a build reproducibility improvement to track and resolve; do not represent `npm ci` as supported by this branch.
 
@@ -90,8 +90,8 @@ Note: this repository does not currently track `package-lock.json`; use `npm ins
 
 | Stage | Commit | Automated checks | Owner local feedback | Status |
 |---|---|---|---|---|
-| V1 | Local provider probe: `b7a0140`; final PR head: see PR #26 | 7/7 local probe tests passed; CI #853 failed at test discovery; final CI pending | Direct OpenAI + Telnyx authentication PASS; no Call Control app yet (managed provisioning creates it) | Live provider probe accepted; repository close pending green CI; V2 telephony provisioning pending |
-| V2 | — | — | — | Not started |
+| V1 | Live probe `b7a0140`; merged main `2707d192` | 7/7 local probe tests; final PR #26 CI #35454833538 GREEN | OpenAI Luna and Telnyx Call Control reachability PASS; no app before number purchase | Accepted and closed for provider reachability only |
+| V2 | PR #27 | Code/CI in progress | Pending real external call and accepted transcript/audio | Local live acceptance pending |
 | V3 | — | — | — | Not started |
 | V4 | — | — | — | Not started |
 | V5 | — | — | — | Not started |
