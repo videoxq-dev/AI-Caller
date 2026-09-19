@@ -25,6 +25,7 @@ export function SmsRegistrationSettings() {
   const [status, setStatus] = useState("NOT_STARTED");
   const [rejection, setRejection] = useState<string | null>(null);
   const [notice, setNotice] = useState("");
+  const [hostedOptinUrl, setHostedOptinUrl] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [loaded, setLoaded] = useState(false);
@@ -37,6 +38,7 @@ export function SmsRegistrationSettings() {
     }).then((data) => {
       if (cancelled) return;
       setNumber(data.number ?? null);
+      setHostedOptinUrl(data.hostedOptinUrl ?? null);
       setStatus(data.registration?.status ?? "NOT_STARTED");
       setRejection(data.registration?.rejectionReason ?? null);
       setDraft({
@@ -94,6 +96,7 @@ export function SmsRegistrationSettings() {
     {loaded && !number && <p>Activate a US managed phone number to prepare your optional SMS registration. Calls and other available capabilities are independent of SMS approval.</p>}
     {number && <>
       <p>Register {number.phoneNumber} for {number.numberType === "toll_free" ? "toll-free messaging verification" : "US 10DLC messaging"}. You can continue using available phone capabilities while registration is unfinished.</p>
+      {hostedOptinUrl && <p>Need a public consent form for your carrier registration? <a href={hostedOptinUrl} target="_blank" rel="noopener noreferrer">Open your hosted SMS opt-in page</a>. Customers can consent here before outbound SMS is approved.</p>}
       <p className="smsRegistrationStatus">Outbound SMS: <strong>{number.messagingReadiness.replaceAll("_", " ")}</strong> · Registration: <strong>{status.replaceAll("_", " ")}</strong></p>
       {rejection && <p role="alert">Carrier response: {rejection}</p>}
       {status === "READY" ? <p>Carrier approval is recorded. Your number's readiness status controls outbound SMS.</p> :

@@ -7,6 +7,8 @@ import { requireWorkspacePermission } from "@/server/auth/permissions";
 import { AppError, toErrorResponse } from "@/server/http/errors";
 import { parseInput } from "@/server/http/validation";
 import { submitSmsRegistration } from "@/server/sms/registration-service";
+import { ensureWebchatWidget } from "@/server/webchat/repository";
+import { getEnv } from "@/server/env";
 
 const draftSchema = z.object({
   legalName: z.string().trim().min(2).max(200),
@@ -51,7 +53,10 @@ export async function GET(request: Request) {
       eq(smsRegistrations.workspaceId, context.workspace.id),
       eq(smsRegistrations.phoneNumberId, number.id),
     )).limit(1) : [];
+    const widget = number ? await ensureWebchatWidget(context.workspace.id) : null;
+    const hostedOptinUrl = widget ? new URL("/sms/opt-in/" + widget.publicKey, getEnv().BETTER_AUTH_URL).toString() : null;
     return Response.json({
+      hostedOptinUrl,
       number: number && { id: number.id, phoneNumber: number.phoneNumber, numberType: number.numberType, messagingReadiness: number.messagingReadiness },
       business: business && { businessName: business.businessName, website: business.websiteUrl, phone: business.phone, address: business.address, city: business.city, state: business.state, postalCode: business.postalCode },
       registration: registration && {
