@@ -220,6 +220,7 @@ export function createTelnyxVoiceProvider(config: TelnyxVoiceConfig): VoiceProvi
         command_id: commandId(input.commandId),
         language: languageForTranscription(input.language),
         transcription_engine: "Telnyx",
+        transcription_tracks: "inbound",
       });
     },
 
