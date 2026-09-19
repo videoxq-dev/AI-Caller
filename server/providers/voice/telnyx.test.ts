@@ -18,6 +18,26 @@ function signedInput(body: string, privateKey: KeyObject) {
 }
 
 describe("Telnyx voice adapter", () => {
+  it("starts transcription on caller inbound audio only", async () => {
+    const { publicKey } = generateKeyPairSync("ed25519");
+    const sent = vi.fn(async () => new Response(JSON.stringify({ data: { result: "ok" } }), {
+      status: 200, headers: { "content-type": "application/json" },
+    })) as typeof fetch;
+    const provider = createTelnyxVoiceProvider({
+      apiKey: "fixture-key",
+      webhookPublicKey: publicKey.export({ type: "spki", format: "pem" }).toString(),
+      fetcher: sent,
+    });
+    await provider.startTranscription({
+      callControlId: "control-1", language: "en-US", commandId: "cmd-1",
+    });
+    const [url, request] = vi.mocked(sent).mock.calls[0] as unknown as [string, RequestInit];
+    expect(url).toContain("/actions/transcription_start");
+    expect(JSON.parse(String(request.body))).toMatchObject({
+      language: "en", transcription_engine: "Telnyx", transcription_tracks: "inbound",
+    });
+  });
+
   it("verifies and normalizes signed inbound call events", async () => {
     const { privateKey, publicKey } = generateKeyPairSync("ed25519");
     const publicKeyPem = publicKey.export({ type: "spki", format: "pem" }).toString();
