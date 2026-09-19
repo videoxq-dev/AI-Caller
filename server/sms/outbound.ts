@@ -230,7 +230,7 @@ export async function sendSmsConversationTextWithRuntime(
     provider: runtime.providerName,
     externalMessageId: null,
     status: "SENDING",
-    metadata: { mode: runtime.mode, ...(input.metadata ?? {}) },
+    metadata: { mode: runtime.mode, ...(runtime.mode === "HOSTED" ? { smsPurpose: actualPurpose } : {}), ...(input.metadata ?? {}) },
   });
 
   let hostedCharge: HostedSmsCharge | null = null;
@@ -257,7 +257,8 @@ export async function sendSmsConversationTextWithRuntime(
     if (runtime.mode === "HOSTED") {
       // Recheck just before dispatch: a contact can unsubscribe or a campaign can
       // lose approval while a queued message is waiting for credits or AI generation.
-      await managedSmsPolicy(workspaceId, runtime.senderNumber);
+      const currentPolicy = await managedSmsPolicy(workspaceId, runtime.senderNumber);
+      validateApprovedSmsMessage({ policy: currentPolicy, classifiedPurpose: actualPurpose, text });
       const consent = await getSmsConsentStatus(workspaceId, to, actualPurpose);
       const reply = await smsReplyContext(workspaceId, conversationId);
       if (!consentAllowsSend({ consent, purpose: actualPurpose, currentConversationReply: reply.currentConversationReply })) {
@@ -282,6 +283,13 @@ export async function sendSmsConversationTextWithRuntime(
     });
     return updated;
   } catch (error) {
+    if (error instanceof AppError) {
+      // A policy change or late opt-out is a local suppression, not an uncertain carrier
+      // send. Release credits and preserve an explicit, non-delivered message status.
+      await markSmsSendFailure(workspaceId, outbound.id, "SUPPRESSED", error);
+      await releaseHostedCredits(workspaceId, hostedCharge);
+      throw error;
+    }
     const uncertain = uncertainProviderFailure(error);
     await markSmsSendFailure(workspaceId, outbound.id, uncertain ? "SEND_UNKNOWN" : "FAILED", error);
     if (hostedCharge && definitiveProviderRejection(error)) {
