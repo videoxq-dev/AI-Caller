@@ -59,13 +59,20 @@ function VoiceCallCard({ message }: { message: Message }) {
   useEffect(() => {
     if (!callId) return;
     let cancelled = false;
+    let settled = false;
     let checks = 0;
     const refresh = async () => {
       try {
         const response = await fetch(`/api/voice/calls/${callId}`, { cache: "no-store" });
         if (!response.ok) return;
         const updated = await response.json() as VoiceCallDetail;
-        if (!cancelled) setDetail(updated);
+        if (!cancelled) {
+          setDetail(updated);
+          if (["AVAILABLE", "FAILED", "DECLINED"].includes(updated.call.recordingStatus)) {
+            settled = true;
+            window.clearInterval(timer);
+          }
+        }
       } catch {
         // The transcript button provides an explicit retry/error state.
       }
@@ -73,7 +80,7 @@ function VoiceCallCard({ message }: { message: Message }) {
     void refresh();
     const timer = window.setInterval(() => {
       // A recording callback can arrive after hangup. Stop polling after 1 min.
-      if (++checks > 10 || cancelled) { window.clearInterval(timer); return; }
+      if (settled || ++checks > 10 || cancelled) { window.clearInterval(timer); return; }
       void refresh();
     }, 6_000);
     return () => { cancelled = true; window.clearInterval(timer); };
