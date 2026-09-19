@@ -9,7 +9,7 @@ export default defineConfig({
   },
   test: {
     environment: "node",
-    // This suite uses node:test and runs through npm run test:voice-readiness.
-    exclude: [...configDefaults.exclude, "scripts/voice-provider-readiness.test.mjs"],
+    // These suites use node:test and runs through npm run test:voice-readiness.
+    exclude: [...configDefaults.exclude, "scripts/voice-provider-readiness.test.mjs", "scripts/verify-deployment-db.test.mjs"],
   },
 });
