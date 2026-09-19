@@ -160,20 +160,21 @@ async function findFreshQuote(phoneNumber: string) {
     throw new AppError("INVALID_PHONE_NUMBER", "Choose a valid US phone number from the current search results.", 422);
   }
   const national = phoneNumber.slice(2);
-  const localNumbers = await searchTelnyxNumbers({
-    countryCode: "US",
-    startsWith: national,
-    numberType: "local",
-    limit: 20,
-  });
+  // Telnyx documents starts_with as a number-pattern filter. Using the whole
+  // 10-digit national number can yield an empty search even for a number that
+  // just appeared in inventory. Restrict by NPA + exchange + final four, then
+  // enforce an exact E.164 match; never buy a merely similar number.
+  const exactFilters = {
+    countryCode: "US" as const,
+    areaCode: national.slice(0, 3),
+    startsWith: national.slice(3, 6),
+    endsWith: national.slice(6),
+    limit: 30,
+  };
+  const localNumbers = await searchTelnyxNumbers({ ...exactFilters, numberType: "local" });
   let match = localNumbers.find((number) => number.phoneNumber === phoneNumber);
   if (!match) {
-    const tollFreeNumbers = await searchTelnyxNumbers({
-      countryCode: "US",
-      startsWith: national,
-      numberType: "toll_free",
-      limit: 20,
-    });
+    const tollFreeNumbers = await searchTelnyxNumbers({ ...exactFilters, numberType: "toll_free" });
     match = tollFreeNumbers.find((number) => number.phoneNumber === phoneNumber);
   }
   if (!match) throw new AppError("PHONE_NUMBER_UNAVAILABLE", "That phone number is no longer available. Search again and choose another number.", 409);
