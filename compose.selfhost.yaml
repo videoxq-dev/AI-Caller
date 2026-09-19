@@ -1,7 +1,7 @@
 name: ai-caller
 
 # First-time, self-hosted deployment with a private PostgreSQL service.
-# docker compose --env-file .env.deploy up --build -d
+# docker compose --env-file .env.deploy -f compose.selfhost.yaml up --build -d
 services:
   postgres:
     image: postgres:16-alpine
