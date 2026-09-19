@@ -25,7 +25,7 @@ HOSTED_TELNYX_WEBHOOK_PUBLIC_KEY=<your-own-Telnyx-Ed25519-public-key>
 ## Run these checks
 
 ```bash
-npm ci
+npm install --no-audit --no-fund
 npm run test:voice-readiness
 npm run verify:voice-providers
 npm run verify:voice-providers:live
@@ -71,11 +71,26 @@ Record the actual commit hash and live test date in the acceptance register. A C
 - **V4 — Tools in one call:** real contact/lead updates, authoritative availability and confirmed calendar booking; retry and replay must not duplicate bookings or messages.
 - **V5 — Failure and handoff:** recording consent, provider failure fallback, duplicate/out-of-order webhooks, abandoned calls, credit exhaustion, and AI/human takeover all exercised with persisted audit data.
 
+## V1 local acceptance evidence — September 19, 2026
+
+User-reported local execution on macOS (Darwin x86_64), Node v22.19.0, commit `b7a0140cca0c9e5e21dfafa7715de89bcb272c65`:
+
+- `npm run test:voice-readiness` **PASS**: all seven standalone Node unit tests.
+- `npm run verify:voice-providers` **PASS**: direct OpenAI and Telnyx global key preflight.
+- `npm run verify:voice-providers:live` **PASS**: direct OpenAI Responses generated expected result with `gpt-5.6-luna` (3,479 ms); Telnyx Call Control listing authenticated (973 ms).
+- **V2 prerequisite outstanding:** the Telnyx account returned no Call Control applications. Authentication is verified, but there is no configured Call Control application to route a real inbound call yet.
+- Integrations `Our Credits` displayed **Server configured**; response reported `liveVerified: false`, correctly avoiding a misleading health claim.
+- User reported no observed errors or secret leakage. Do not confuse this with the V2 real-call acceptance evidence.
+
+CI run #853 on the exact reported commit failed because Vitest also discovered a `node:test` suite that is intended to run separately; the 275 existing Vitest tests passed, but the step failed before typecheck/build/browser checks. The test-runner discovery fix is committed after the user's local acceptance SHA. **V1 repository close requires green CI on the final branch head**, while the earlier local provider evidence remains valid for the unchanged provider probe.
+
+Note: this repository does not currently track `package-lock.json`; use `npm install` rather than `npm ci` until dependency locking is addressed independently. This is a build reproducibility improvement to track and resolve; do not represent `npm ci` as supported by this branch.
+
 ## Acceptance register
 
 | Stage | Commit | Automated checks | Owner local feedback | Status |
 |---|---|---|---|---|
-| V1 | PR head pending | Pending CI | Pending live local test | Acceptance pending |
+| V1 | Local provider probe: `b7a0140`; final PR head: see PR #26 | 7/7 local probe tests passed; CI #853 failed at test discovery; final CI pending | Direct OpenAI + Telnyx authentication PASS; no Call Control app exists | Live provider probe accepted; repository close pending green CI; V2 telephony provisioning pending |
 | V2 | — | — | — | Not started |
 | V3 | — | — | — | Not started |
 | V4 | — | — | — | Not started |
