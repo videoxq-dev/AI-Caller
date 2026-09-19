@@ -200,7 +200,7 @@ export function WebchatWidget({ widgetKey, config }: { widgetKey: string; config
         <strong>Stay connected</strong>
         <label>Name<input required maxLength={200} autoComplete="name" value={profile.name} onChange={(event) => setProfile((p) => ({ ...p, name: event.target.value }))} /></label>
         <label>Email<input required type="email" autoComplete="email" value={profile.email} onChange={(event) => setProfile((p) => ({ ...p, email: event.target.value }))} /></label>
-        <label>Phone<input type="tel" autoComplete="tel" value={profile.phone} onChange={(event) => setProfile((p) => ({ ...p, phone: event.target.value }))} /></label>
+        <label>Phone<input required type="tel" autoComplete="tel" value={profile.phone} onChange={(event) => setProfile((p) => ({ ...p, phone: event.target.value }))} /></label>
         {termsUrl && <><label className="webchatConsentChoice"><input type="checkbox" checked={profile.transactionalSmsConsent} onChange={(event) => setProfile((p) => ({ ...p, transactionalSmsConsent: event.target.checked }))} />
           I agree to receive appointment confirmations, reminders, and related SMS updates from {config.businessName}.
         </label>
