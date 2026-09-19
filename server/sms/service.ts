@@ -24,6 +24,7 @@ import {
   updateSmsDeliveryStatus,
 } from "./repository";
 import { sendSmsConversationTextWithRuntime } from "./outbound";
+import { recordSmsConsent, smsKeyword } from "./consent";
 
 const MAX_SMS_WEBHOOK_BYTES = 64 * 1024;
 
@@ -281,6 +282,22 @@ export function createSmsWebhookService(dependencies: SmsServiceDependencies) {
           metadata: { providerEventId: job.webhookEventId },
         });
         await chargeHostedInboundSms(job.workspaceId, runtime, job.externalMessageId, job.text);
+
+        // Process carrier keywords before the readiness gate or AI. STOP must always
+        // be honored, even while this business cannot send outbound messages.
+        const keyword = smsKeyword(job.text);
+        if (keyword === "STOP" || keyword === "START") {
+          const status = keyword === "STOP" ? "OPTED_OUT" : "OPTED_IN";
+          const categories = keyword === "STOP" ? ["TRANSACTIONAL", "MARKETING"] as const : ["TRANSACTIONAL"] as const;
+          for (const category of categories) {
+            await recordSmsConsent(job.workspaceId, contact.id, job.customerNumber, {
+              category, status, source: "INBOUND_SMS", sourceReference: job.externalMessageId,
+              consentStatement: job.text,
+            });
+          }
+          await completeProviderWebhookEvent(job.workspaceId, job.webhookEventId);
+          return { skipped: false as const, replied: false as const, consentUpdated: true as const };
+        }
 
         if (runtime.mode === "HOSTED" && !outboundSmsReady(runtime.messagingReadiness)) {
           await completeProviderWebhookEvent(job.workspaceId, job.webhookEventId);
