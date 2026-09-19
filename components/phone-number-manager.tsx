@@ -158,8 +158,15 @@ export function PhoneNumberManager({
           replaceCurrent: Boolean(current),
         }),
       });
-      const payload = await response.json().catch(() => null) as { number?: ManagedPhoneNumber; error?: { message?: string } } | null;
-      if (!response.ok || !payload?.number) throw new Error(apiError(payload, "Unable to activate that phone number."));
+      const payload = await response.json().catch(() => null) as { number?: ManagedPhoneNumber; error?: { code?: string; message?: string } } | null;
+      if (!response.ok || !payload?.number) {
+        if (payload?.error?.code === "PHONE_NUMBER_UNAVAILABLE") {
+          // A stale quote must not remain selected after the carrier recheck.
+          setResults((items) => items.filter((item) => item.phoneNumber !== selected.phoneNumber));
+          setSelected(null);
+        }
+        throw new Error(apiError(payload, "Unable to activate that phone number."));
+      }
       setCurrent(payload.number);
       onNumberChange?.(payload.number);
       setChanging(false);
