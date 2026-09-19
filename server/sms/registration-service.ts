@@ -121,6 +121,17 @@ export async function reconcileSmsRegistration(
     reason = verified.reason ?? (assigned ? null : "Carrier verification does not include this phone number.");
   } else if (number.numberType === "local") {
     if (!brandId && options.submitting) {
+      const [claimedBrand] = await db.update(smsRegistrations).set({
+        carrierStatus: "BRAND_SUBMITTING", checkedAt: now, updatedAt: now,
+      }).where(and(
+        eq(smsRegistrations.id, registration.id),
+        eq(smsRegistrations.workspaceId, workspaceId),
+        isNull(smsRegistrations.carrierBrandId),
+        registration.carrierStatus === null
+          ? isNull(smsRegistrations.carrierStatus)
+          : eq(smsRegistrations.carrierStatus, registration.carrierStatus),
+      )).returning({ id: smsRegistrations.id });
+      if (!claimedBrand) return registration.status;
       const brand = await client.createBrand(draft);
       brandId = brand.brandId ?? null;
       if (!brandId) throw new Error("Telnyx did not return a brand ID. Carrier state requires investigation.");
