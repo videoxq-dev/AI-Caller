@@ -37,6 +37,11 @@ describe("outbound SMS compliance", () => {
     expect(() => validateSmsLinks("Visit https://127.0.0.1/private", true)).toThrow();
     expect(() => validateSmsLinks("Visit www.example.com/appointment", true)).not.toThrow();
   });
+  it("overrides an AI transactional guess for explicit promotions without suppressing booking vocabulary", () => {
+    expect(classifySmsForPolicy("Get 20% discount on whitening this weekend", "TRANSACTIONAL")).toBe("MARKETING");
+    expect(classifySmsForPolicy("Your appointment discount has been applied", "TRANSACTIONAL")).toBe("TRANSACTIONAL");
+    expect(classifySmsForPolicy("Please book the replacement appointment", "TRANSACTIONAL")).toBe("TRANSACTIONAL");
+  });
   it("honors exact opt-out instructions without guessing from normal replies", () => {
     expect(smsKeyword("stop.")).toBe("STOP");
     expect(smsKeyword("UNSTOP")).toBe("START");

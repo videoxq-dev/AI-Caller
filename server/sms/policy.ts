@@ -35,7 +35,7 @@ export function classifySmsForPolicy(
   message: string,
   modelPurpose: SmsPurpose | "UNCERTAIN",
 ): SmsPurpose | "UNCERTAIN" {
-  const promotionalOffer = /\b\d{1,3}\s*%\s*off\b|\b(?:special|limited[\s-]*time|exclusive)\s+(?:offer|deal|promotion)\b|\bpromo(?:tional)?\s+code\b|\b(?:use|apply)\s+code\s+[A-Z0-9]{3,}\b/i;
+  const promotionalOffer = /\b\d{1,3}\s*%\s*off\b|\b(?:get|save|enjoy|claim|unlock|receive)\b.{0,35}\b(?:discount|offer|deal)\b|\b\d{1,3}\s*%\s*discount\b|\b(?:special|limited[\s-]*time|exclusive)\s+(?:offer|deal|promotion)\b|\bpromo(?:tional)?\s+code\b|\b(?:use|apply)\s+code\s+[A-Z0-9]{3,}\b/i;
   return promotionalOffer.test(message) ? "MARKETING" : modelPurpose;
 }
 
