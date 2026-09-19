@@ -33,6 +33,7 @@ describe("carrier HTTP error metadata", () => {
     const error = await providerJson("/fake", {}, fetcher).catch((reason: unknown) => reason);
     expect(error).toBeInstanceOf(ProviderRequestError);
     expect(error).toMatchObject({ status: 400, message: "Provider returned HTTP 400." });
+    if (!(error instanceof ProviderRequestError)) throw new Error("Expected ProviderRequestError");
     expect(error.providerCode).toBeUndefined();
     expect(error.providerField).toBeUndefined();
   });
