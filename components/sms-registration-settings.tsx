@@ -167,7 +167,7 @@ export function SmsRegistrationSettings() {
           <label>Business industry<select value={draft.vertical} onChange={(e) => field("vertical", e.target.value)}>
             {["AGRICULTURE","COMMUNICATION","CONSTRUCTION","EDUCATION","ENERGY","ENTERTAINMENT","FINANCIAL","GAMBLING","GOVERNMENT","HEALTHCARE","HOSPITALITY","INSURANCE","MANUFACTURING","NGO","REAL_ESTATE","RETAIL","TECHNOLOGY"].map((v) => <option key={v} value={v}>{v.replaceAll("_"," ")}</option>)}
           </select></label>
-          <label>Business tax ID (EIN)<input value={draft.ein} onChange={(e) => field("ein", e.target.value)} required /></label>
+          <label>Business tax ID (EIN){draft.entityType === "SOLE_PROPRIETOR" ? " (if applicable)" : ""}<input value={draft.ein} onChange={(e) => field("ein", e.target.value)} required={draft.entityType !== "SOLE_PROPRIETOR"} /></label>
           {draft.entityType === "PUBLIC_PROFIT" && <>
             <label>Stock symbol<input required maxLength={10} value={draft.stockSymbol} onChange={(e) => field("stockSymbol", e.target.value.toUpperCase())} /></label>
             <label>Stock exchange<select required value={draft.stockExchange} onChange={(e) => field("stockExchange", e.target.value)}>
