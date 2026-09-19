@@ -53,6 +53,7 @@ export const smsRegistrations = pgTable("sms_registrations", {
   approvedPolicy: jsonb("approved_policy").$type<{ categories: Array<"TRANSACTIONAL" | "MARKETING">; allowEmbeddedLinks: boolean; description: string } | null>(),
   submittedAt: timestamp("submitted_at", { withTimezone: true, mode: "date" }),
   checkedAt: timestamp("checked_at", { withTimezone: true, mode: "date" }),
+  otpRequestedAt: timestamp("otp_requested_at", { withTimezone: true, mode: "date" }),
   updatedAt: timestamp("updated_at", { withTimezone: true, mode: "date" }).defaultNow().notNull(),
 }, (table) => [
   uniqueIndex("sms_registrations_number_uq").on(table.phoneNumberId),

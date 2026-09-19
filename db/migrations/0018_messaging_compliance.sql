@@ -42,6 +42,7 @@ CREATE TABLE IF NOT EXISTS sms_registrations (
   approved_policy jsonb,
   submitted_at timestamptz,
   checked_at timestamptz,
+  otp_requested_at timestamptz,
   updated_at timestamptz NOT NULL DEFAULT now(),
   CONSTRAINT sms_registrations_number_uq UNIQUE (phone_number_id)
 );
