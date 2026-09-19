@@ -12,8 +12,8 @@ Required deployment configuration:
 
 - `HOSTED_TELNYX_API_KEY`
 - `HOSTED_TELNYX_WEBHOOK_PUBLIC_KEY`
-- a public HTTPS `BETTER_AUTH_URL`
-- the normal worker and voice gateway processes running
+- a public HTTPS `BETTER_AUTH_URL` **or** `HOSTED_WEBHOOK_BASE_URL` for local/staging tunnelling; the latter can differ from the local Better Auth sign-in URL
+- the normal application and reconciliation worker processes running; the current media gateway is optional for turn-based voice acceptance, and its `VOICE_GATEWAY_URL` must not point Telnyx at an unreachable localhost stream
 - enough AI Caller credits to purchase and exercise the number
 - any applicable US messaging registration/verification already approved before testing outbound SMS
 
