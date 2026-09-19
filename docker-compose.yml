@@ -1,0 +1,55 @@
+name: ai-caller
+
+# DeployOS / existing PostgreSQL: app + migrations + worker only.
+# DeployOS writes the application's configured variables to .env.
+# NO bundled Postgres, ${POSTGRES_*:?} substitutions, or .env.deploy dependency.
+# DATABASE_URL must point to an existing reachable PostgreSQL instance.
+x-app: &app
+  build:
+    context: .
+    dockerfile: Dockerfile
+  image: ai-caller-app:deployos
+  init: true
+  env_file:
+    - path: .env
+      required: false
+
+services:
+  migrate:
+    <<: *app
+    restart: "no"
+    command: ["sh", "-ec", "npm run db:migrate && npm run verify:deployment"]
+
+  web:
+    <<: *app
+    restart: unless-stopped
+    environment:
+      NODE_ENV: production
+      PORT: "8080"
+      HOSTNAME: 0.0.0.0
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+    expose:
+      - "8080"
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:8080/api/health', {signal:AbortSignal.timeout(5000)}).then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 30s
+      timeout: 8s
+      start_period: 30s
+      retries: 3
+    volumes:
+      - recordings:/app/.data/recordings
+
+  worker:
+    <<: *app
+    restart: unless-stopped
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+    command: ["sh", "-ec", "npm run verify:deployment && npm run worker"]
+    volumes:
+      - recordings:/app/.data/recordings
+
+volumes:
+  recordings:
