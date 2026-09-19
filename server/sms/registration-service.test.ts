@@ -23,6 +23,9 @@ function carrier(overrides: Record<string, ReturnType<typeof vi.fn>> = {}) {
   return {
     createBrand: vi.fn(async () => ({ brandId: "brand-1" })),
     getBrand: vi.fn(async () => ({ brandId: "brand-1", status: "OK", identityStatus: "VERIFIED" })),
+    requestSoleProprietorOtp: vi.fn(async () => ({ referenceId: "otp-ref-1" })),
+    verifySoleProprietorOtp: vi.fn(async () => ({})),
+    getSoleProprietorOtpStatus: vi.fn(async () => ({ deliveryStatus: "SUCCESS" })),
     updateBrand: vi.fn(async () => ({ brandId: "brand-1", status: "OK", identityStatus: "VERIFIED" })),
     createCampaign: vi.fn(async () => ({ campaignId: "campaign-1" })),
     getCampaign: vi.fn(async () => ({ campaignId: "campaign-1", submissionStatus: "CREATED", campaignStatus: "MNO_PROVISIONED", usecase: "CUSTOMER_CARE", embeddedLink: true })),

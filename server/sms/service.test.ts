@@ -255,7 +255,7 @@ describe("SMS webhook service", () => {
     await appendMessage(workspaceId, conversation.id, {
       channel: "SMS", direction: "OUTBOUND", senderType: "AI",
       contentType: "TEXT", body: "Your appointment is confirmed.",
-      provider: "twilio", externalMessageId: id, status: "SENT",
+      provider: "twilio", externalMessageId: id, status: "SENT", metadata: {},
     });
     await expect(service.ingest(request(), workspaceId, "twilio"))
       .resolves.toMatchObject({ processed: 1 });
