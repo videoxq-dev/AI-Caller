@@ -279,7 +279,7 @@ export function createSmsWebhookService(dependencies: SmsServiceDependencies) {
           provider: job.provider,
           externalMessageId: job.externalMessageId,
           status: "RECEIVED",
-          metadata: { providerEventId: job.webhookEventId },
+          metadata: { providerEventId: job.webhookEventId, senderNumber: job.customerNumber },
         });
         await chargeHostedInboundSms(job.workspaceId, runtime, job.externalMessageId, job.text);
 
