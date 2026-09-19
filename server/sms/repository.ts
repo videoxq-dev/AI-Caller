@@ -29,7 +29,7 @@ export async function attachSmsProviderMessage(
   return updated;
 }
 
-export async function markSmsSendFailure(workspaceId: string, messageId: string, status: "FAILED" | "SEND_UNKNOWN", error: unknown) {
+export async function markSmsSendFailure(workspaceId: string, messageId: string, status: "FAILED" | "SEND_UNKNOWN" | "SUPPRESSED", error: unknown) {
   const message = error instanceof Error ? error.message : "SMS provider send failed.";
   const [existing] = await db.select().from(messages).where(and(eq(messages.workspaceId, workspaceId), eq(messages.id, messageId))).limit(1);
   if (!existing) throw new AppError("MESSAGE_NOT_FOUND", "SMS message not found.", 404);
