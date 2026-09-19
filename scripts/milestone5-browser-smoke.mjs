@@ -220,6 +220,12 @@ try {
   await page.getByText("Registration required", { exact: true }).waitFor();
   await page.getByText("Activate SMS messaging", { exact: true }).waitFor();
   await assertNoHorizontalOverflow(page, "Managed phone and SMS setup desktop");
+  await page.getByRole("link", { name: /Set up SMS/ }).click();
+  await page.getByRole("heading", { name: "SMS registration" }).waitFor();
+  await page.getByText(/Register \+12025550200 for US 10DLC messaging/).waitFor();
+  await page.getByRole("button", { name: "Save registration draft" }).waitFor();
+  await assertNoHorizontalOverflow(page, "Not-started SMS registration settings");
+  await page.screenshot({ path: path.join(outputDir, "sms-registration-not-started-desktop.png"), fullPage: true });
 
   // Exercise every optional registration UI state without calling the live carrier.
   // The DB fixture represents externally observed states; it does not prove approval.
