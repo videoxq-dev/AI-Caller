@@ -162,9 +162,24 @@ export function telnyxRegistrationClient(fetcher: typeof fetch = fetch) {
     createBrand: (draft: TelnyxRegistrationDraft) =>
       request<TelnyxBrand>("/10dlc/brand", "POST", brandPayload(draft)),
     getBrand: (id: string) => request<TelnyxBrand>("/10dlc/brand/" + encodeURIComponent(id)),
+    updateBrand: (id: string, draft: TelnyxRegistrationDraft) =>
+      request<TelnyxBrand>("/10dlc/brand/" + encodeURIComponent(id), "PUT", brandPayload(draft)),
     createCampaign: (draft: TelnyxRegistrationDraft, brandId: string, referenceId: string) =>
       request<TelnyxCampaign>("/10dlc/campaignBuilder", "POST", campaignPayload(draft, brandId, referenceId)),
     getCampaign: (id: string) => request<TelnyxCampaign>("/10dlc/campaign/" + encodeURIComponent(id)),
+    updateCampaign: (id: string, draft: TelnyxRegistrationDraft) => request<TelnyxCampaign>(
+      "/10dlc/campaign/" + encodeURIComponent(id), "PUT", {
+        messageFlow: draft.optInFlow, sample1: draft.sampleMessages[0], sample2: draft.sampleMessages[1],
+        ...(draft.sampleMessages[2] ? { sample3: draft.sampleMessages[2] } : {}),
+        ...(draft.sampleMessages[3] ? { sample4: draft.sampleMessages[3] } : {}),
+        ...(draft.sampleMessages[4] ? { sample5: draft.sampleMessages[4] } : {}),
+        helpMessage: "Reply HELP for assistance or STOP to unsubscribe.",
+        autoRenewal: true,
+      },
+    ),
+    appealCampaign: (id: string, reason: string) => request<{ appealed_at?: string }>(
+      "/10dlc/campaign/" + encodeURIComponent(id) + "/appeal", "POST", { appeal_reason: reason },
+    ),
     assignNumber: (phoneNumber: string, campaignId: string) =>
       request<TelnyxAssignment>("/10dlc/phone_number_campaigns", "POST", { phoneNumber, campaignId }),
     getAssignment: (phoneNumber: string) =>
