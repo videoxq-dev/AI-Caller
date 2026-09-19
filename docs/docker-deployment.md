@@ -2,7 +2,7 @@
 
 ## DeployOS: use your EXISTING PostgreSQL database (recommended if you already configured DeployOS)
 
-The default `compose.yaml` runs **web + migration job + worker** using the repository `Dockerfile`. It does **not** provision another PostgreSQL container or require `POSTGRES_USER`, `POSTGRES_PASSWORD`, or `POSTGRES_DB` for `docker compose config`. DeployOS writes your configured environment variables into a server-side `.env` at deploy time. The Compose file reads that file optionally and passes its values to all three application services. Never put keys in Git. See DeployOS's Config → Environment Variables & Secrets.
+The default `docker-compose.yml` runs **web + migration job + worker** using the repository `Dockerfile`. It does **not** provision another PostgreSQL container or require `POSTGRES_USER`, `POSTGRES_PASSWORD`, or `POSTGRES_DB` for `docker compose config`. DeployOS writes your configured environment variables into a server-side `.env` at deploy time. The Compose file reads that file optionally and passes its values to all three application services. Never put keys in Git. See DeployOS's Config → Environment Variables & Secrets.
 
 **Fix for the original deployment error:** PR #27 previously had a bundled PostgreSQL service and required `${POSTGRES_USER:?}`, `${POSTGRES_PASSWORD:?}`, `${POSTGRES_DB:?}` during Compose interpolation. That was inappropriate for an existing DeployOS database and made Compose fail before any container started. The corrected default `compose.yaml` has no such interpolation.
 
