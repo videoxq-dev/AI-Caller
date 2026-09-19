@@ -67,7 +67,8 @@ export type TelnyxCampaign = {
   usecase?: string; referenceId?: string;
 };
 export type TelnyxAssignment = {
-  phoneNumber?: string; campaignId?: string; assignmentStatus?: string; failureReasons?: string;
+  phoneNumber?: string; campaignId?: string; telnyxCampaignId?: string; tcrCampaignId?: string;
+  assignmentStatus?: string; failureReasons?: string;
 };
 export type TelnyxTollFreeRequest = {
   id?: string; verificationStatus?: string; reason?: string;

@@ -108,6 +108,24 @@ describe("SMS registration reconciliation", () => {
     expect(client.createCampaign).toHaveBeenCalledTimes(1);
   });
 
+  it("accepts a matching Telnyx campaign ID alongside a distinct upstream TCR campaign ID", async () => {
+    await seed("local");
+    const client = carrier({ getAssignment: vi.fn(async () => ({
+      phoneNumber: "+12025550200", campaignId: "TCR-UPSTREAM-1", tcrCampaignId: "TCR-UPSTREAM-1",
+      telnyxCampaignId: "campaign-1", assignmentStatus: "ASSIGNED",
+    })) });
+    expect(await reconcileSmsRegistration(workspaceId, registrationId, { submitting: true }, client)).toBe("READY");
+  });
+
+  it("rejects a campaign assignment for a different phone number", async () => {
+    await seed("local");
+    const client = carrier({ getAssignment: vi.fn(async () => ({
+      phoneNumber: "+12025550201", campaignId: "campaign-1", assignmentStatus: "ASSIGNED",
+    })) });
+    expect(await reconcileSmsRegistration(workspaceId, registrationId, { submitting: true }, client)).toBe("REJECTED");
+    expect((await current()).number.messagingReadiness).toBe("REJECTED");
+  });
+
   it("never grants approval from a campaign without number assignment", async () => {
     await seed("local");
     const client = carrier({ getAssignment: vi.fn(async () => ({ campaignId: "campaign-1", assignmentStatus: "PENDING_ASSIGNMENT" })) });

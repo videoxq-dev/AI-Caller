@@ -202,8 +202,11 @@ export async function reconcileSmsRegistration(
           if (!assignment && options.submitting) assignment = await client.assignNumber(number.phoneNumber, campaignId);
           if (!assignment && !options.submitting) assignment = await client.assignNumber(number.phoneNumber, campaignId);
         }
-        if (assignment?.campaignId && assignment.campaignId !== campaignId) {
-          reason = "Carrier number is assigned to a different messaging campaign.";
+        // Telnyx may return both its own campaign UUID and an upstream TCR ID.
+        const assignedCampaignId = assignment?.telnyxCampaignId || assignment?.campaignId;
+        if (assignment && (assignment.phoneNumber !== number.phoneNumber ||
+            (assignedCampaignId && assignedCampaignId !== campaignId))) {
+          reason = "Carrier phone number or campaign assignment does not match this registration.";
           status = "REJECTED";
         } else {
           status = tenDlcCarrierStatus({
