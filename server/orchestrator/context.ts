@@ -1,4 +1,4 @@
-import { and, asc, desc, eq } from "drizzle-orm";
+import { and, asc, desc, eq, sql } from "drizzle-orm";
 import { db } from "@/db";
 import { aiAgents, faqs, knowledgeSources, policies, services } from "@/db/schema";
 import { getConversationTimelinePage } from "@/server/domain/core/conversation-timeline";
@@ -46,7 +46,9 @@ async function getOrchestrationAgentSetup(workspaceId: string) {
       eq(faqs.active, true),
     )).orderBy(asc(faqs.createdAt)).limit(20),
     db.select().from(policies).where(eq(policies.workspaceId, workspaceId)).orderBy(asc(policies.createdAt)).limit(12),
-    db.select().from(knowledgeSources).where(eq(knowledgeSources.workspaceId, workspaceId)).orderBy(desc(knowledgeSources.updatedAt)).limit(8),
+    db.select({ label: knowledgeSources.label, sourceUrl: knowledgeSources.sourceUrl,
+      content: sql<string>`left(${knowledgeSources.content}, 1800)`,
+    }).from(knowledgeSources).where(eq(knowledgeSources.workspaceId, workspaceId)).orderBy(desc(knowledgeSources.updatedAt)).limit(8),
   ]);
   return {
     agent: agentRows[0] ?? null,
