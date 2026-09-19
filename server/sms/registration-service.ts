@@ -142,10 +142,18 @@ export async function reconcileSmsRegistration(
         // Persist the remote-create intent before making the potentially billable POST.
         // A timeout cannot safely be retried without a campaign ID: leave it blocked
         // and surface a carrier investigation instead of submitting duplicates.
-        await db.update(smsRegistrations).set({
+        const [claimedCampaign] = await db.update(smsRegistrations).set({
           carrierStatus: "CAMPAIGN_SUBMITTING", checkedAt: now, updatedAt: now,
-        }).where(and(eq(smsRegistrations.id, registration.id), eq(smsRegistrations.workspaceId, workspaceId)));
-
+        }).where(and(
+          eq(smsRegistrations.id, registration.id),
+          eq(smsRegistrations.workspaceId, workspaceId),
+          isNull(smsRegistrations.carrierCampaignId),
+          registration.carrierStatus === null
+            ? isNull(smsRegistrations.carrierStatus)
+            : eq(smsRegistrations.carrierStatus, registration.carrierStatus),
+        )).returning({ id: smsRegistrations.id });
+        // A second web/worker instance may have claimed this potentially billable POST.
+        if (!claimedCampaign) return registration.status;
         const campaign = await client.createCampaign(draft, brandId, registration.id);
         campaignId = campaign.campaignId ?? null;
         if (!campaignId) throw new Error("Telnyx did not return a campaign ID; do not resubmit.");
