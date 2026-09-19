@@ -4,6 +4,8 @@
 
 **Gate status:** Awaiting a real local inbound call. CI's guarded Telnyx/OpenAI fixtures are useful regression checks but cannot certify voice quality or actual carrier routing. This stage does not require US 10DLC SMS registration and must not send any unapproved outbound SMS.
 
+If cloud signup returns `Unable to create account` with PostgreSQL `ECONNREFUSED`, first complete `docs/cloud-deployment-signup-database.md` and run `npm run verify:deployment` **inside the deployed web container**. Do not purchase a number before signup and database readiness work.
+
 ## Prerequisites and cost warning
 
 - V1 local provider probe accepted, including both real API credentials and the Telnyx webhook-signing public key.
