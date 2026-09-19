@@ -1,4 +1,11 @@
 import { escalateConversation } from "@/server/collaboration/service";
+import { and, desc, eq } from "drizzle-orm";
+import { db } from "@/db";
+import { messages } from "@/db/schema";
+import { AppError } from "@/server/http/errors";
+import { recordSmsConsent } from "@/server/sms/consent";
+import { resolveSmsRuntimeForWorkspace } from "@/server/providers/sms/runtime";
+import { sendSmsConversationTextWithRuntime } from "@/server/sms/outbound";
 import { z } from "zod";
 import { evaluateQualification, getQualificationConfig } from "./qualification";
 import { calendarBookingService } from "@/server/domain/core/calendar-booking";
@@ -22,6 +29,15 @@ const timezoneSchema = z.string().trim().min(1).max(100).refine((value) => {
 
 export const orchestratorActionSchema = z.discriminatedUnion("type", [
   z.object({ type: z.literal("NONE") }),
+  z.object({
+    type: z.literal("RECORD_SMS_CONSENT"),
+    category: z.enum(["TRANSACTIONAL", "MARKETING"]),
+    status: z.enum(["OPTED_IN", "OPTED_OUT"]),
+  }),
+  z.object({
+    type: z.literal("SEND_SMS"),
+    text: z.string().trim().min(1).max(1600),
+  }),
   z.object({
     type: z.literal("CHECK_AVAILABILITY"),
     startsAt: z.string().datetime({ offset: true }),
@@ -73,7 +89,7 @@ export const orchestratorEnvelopeSchema = z.object({
 
 export type OrchestratorEnvelope = z.infer<typeof orchestratorEnvelopeSchema>;
 export type OrchestratorToolResult = {
-  kind: "none" | "qualification" | "availability" | "booking" | "escalation";
+  kind: "none" | "qualification" | "availability" | "booking" | "escalation" | "consent" | "sms";
   data: Record<string, unknown>;
 };
 
@@ -138,6 +154,41 @@ async function updateLeadFromEnvelope(
   });
 }
 
+async function verifyVoiceConsent(
+  workspaceId: string,
+  conversationId: string,
+  category: "TRANSACTIONAL" | "MARKETING",
+  status: "OPTED_IN" | "OPTED_OUT",
+) {
+  const history = await db.select().from(messages).where(and(
+    eq(messages.workspaceId, workspaceId), eq(messages.conversationId, conversationId),
+    eq(messages.channel, "PHONE"), eq(messages.contentType, "CALL_TRANSCRIPT"),
+  )).orderBy(desc(messages.createdAt)).limit(8);
+  const customer = history.find((row) => row.senderType === "CUSTOMER");
+  if (!customer) throw new AppError("SMS_CONSENT_EVIDENCE_REQUIRED", "No customer consent statement was found in the call.", 409);
+  const statement = customer.body.trim().toLowerCase();
+  if (status === "OPTED_OUT") {
+    if (!/\b(stop|unsubscribe|do not|don't|no longer|opt out|remove me)\b/i.test(statement)) {
+      throw new AppError("SMS_CONSENT_EVIDENCE_REQUIRED", "An explicit customer opt-out is required.", 409);
+    }
+    return { customer, consentStatement: customer.body };
+  }
+  if (!/^(yes|yeah|yep|sure|okay|ok|i agree|i do|please|absolutely|that would be great|sounds good)\b/i.test(statement) ||
+      /\b(no|don't|do not|not|never)\b/i.test(statement)) {
+    throw new AppError("SMS_CONSENT_EVIDENCE_REQUIRED", "The customer has not explicitly agreed to SMS messages.", 409);
+  }
+  const preceding = history.filter((row) => row.senderType === "AI" && row.createdAt <= customer.createdAt);
+  const question = preceding[0]?.body ?? "";
+  const mentionsSms = /\b(text|sms|text messages?)\b/i.test(question);
+  const mentionsCategory = category === "TRANSACTIONAL"
+    ? /\b(appointment|confirmation|reminder|updates|reschedul)\w*/i.test(question)
+    : /\b(marketing|offer|promotion|discount)\w*/i.test(question);
+  if (!mentionsSms || !mentionsCategory) {
+    throw new AppError("SMS_CONSENT_EVIDENCE_REQUIRED", "Ask the customer explicitly about this SMS program before recording consent.", 409);
+  }
+  return { customer, consentStatement: question + " Customer: " + customer.body };
+}
+
 export async function executeOrchestratorTools(
   workspaceId: string,
   conversationId: string,
@@ -159,6 +210,44 @@ export async function executeOrchestratorTools(
   }
 
   if (envelope.action.type === "NONE") return { kind: "none", data: {} };
+
+  if (envelope.action.type === "RECORD_SMS_CONSENT") {
+    if (channel !== "PHONE") {
+      throw new AppError("SMS_CONSENT_CHANNEL_UNSUPPORTED", "Use the consent form or verified SMS keyword for this channel.", 409);
+    }
+    const detail = await getContactDetail(workspaceId, contactId);
+    if (!detail?.phone) throw new AppError("SMS_PHONE_REQUIRED", "Collect the customer's phone number first.", 409);
+    const evidence = await verifyVoiceConsent(
+      workspaceId, conversationId, envelope.action.category, envelope.action.status,
+    );
+    await recordSmsConsent(workspaceId, contactId, detail.phone, {
+      category: envelope.action.category, status: envelope.action.status,
+      source: "AI_CALL", sourceReference: evidence.customer.id,
+      consentStatement: evidence.consentStatement,
+    });
+    return { kind: "consent", data: { category: envelope.action.category, status: envelope.action.status } };
+  }
+
+  if (envelope.action.type === "SEND_SMS") {
+    // SMS-channel replies already travel through the webhook worker. A tool invocation
+    // there would generate a second outbound message for the same inbound event.
+    if (channel === "SMS") throw new AppError("SMS_TOOL_UNAVAILABLE_IN_SMS", "Reply normally to the inbound SMS instead.", 409);
+    const detail = await getContactDetail(workspaceId, contactId);
+    if (!detail?.phone) return { kind: "sms", data: { sent: false, reason: "Customer phone number is missing." } };
+    const runtime = await resolveSmsRuntimeForWorkspace(workspaceId);
+    try {
+      const message = await sendSmsConversationTextWithRuntime(workspaceId, conversationId, runtime, {
+        senderType: "AI", text: envelope.action.text, to: detail.phone,
+        metadata: { source: "ORCHESTRATOR" },
+      });
+      return { kind: "sms", data: { sent: true, messageId: message.id, status: message.status } };
+    } catch (error) {
+      if (error instanceof AppError && error.status < 500) {
+        return { kind: "sms", data: { sent: false, reason: error.message } };
+      }
+      throw error;
+    }
+  }
 
   if (envelope.action.type === "QUALIFY_LEAD") {
     if (!qualificationConfig?.enabled || !qualificationConfig.criteria.length) {
