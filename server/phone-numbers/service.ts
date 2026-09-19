@@ -201,6 +201,37 @@ function uncertainProviderFailure(error: unknown) {
   return !(error instanceof ProviderRequestError) || error.status >= 500;
 }
 
+type NumberProviderStage = "AVAILABILITY_RECHECK" | "VOICE_APPLICATION" | "MESSAGING_PROFILE" | "NUMBER_ORDER";
+
+// A definite carrier rejection is not an internal application exception.
+// Do not echo raw Telnyx detail/error messages to the browser or log secrets.
+function managedNumberProviderError(error: unknown, stage: NumberProviderStage): unknown {
+  if (!(error instanceof ProviderRequestError) || error.status >= 500) return error;
+  logger.warn({
+    stage,
+    providerStatus: error.status,
+    providerCode: error.providerCode,
+    providerField: error.providerField,
+  }, "Telnyx rejected a managed-number provisioning step");
+  const descriptions: Record<NumberProviderStage, string> = {
+    AVAILABILITY_RECHECK: "checking this number's availability",
+    VOICE_APPLICATION: "setting up voice routing",
+    MESSAGING_PROFILE: "setting up inbound SMS routing",
+    NUMBER_ORDER: "placing the number order",
+  };
+  return new AppError(
+    "TELNYX_NUMBER_PROVISIONING_REJECTED",
+    `Telnyx rejected the request while ${descriptions[stage]} (HTTP ${error.status}). The number is not active. Check carrier account permissions and registration requirements before trying again.`,
+    502,
+    {
+      stage,
+      providerStatus: error.status,
+      ...(error.providerCode ? { providerCode: error.providerCode } : {}),
+      ...(error.providerField ? { providerField: error.providerField } : {}),
+    },
+  );
+}
+
 async function cleanupAuxiliaryResources(input: {
   voiceConnectionId?: string | null;
   messagingProfileId?: string | null;
@@ -661,7 +692,13 @@ export async function provisionManagedPhoneNumber(workspaceId: string, input: {
     throw new AppError("PHONE_NUMBER_ALREADY_ASSIGNED", "This workspace already has a managed phone number.", 409);
   }
 
-  const { match, quote } = await findFreshQuote(input.phoneNumber);
+  let match: Awaited<ReturnType<typeof findFreshQuote>>["match"];
+  let quote: Awaited<ReturnType<typeof findFreshQuote>>["quote"];
+  try {
+    ({ match, quote } = await findFreshQuote(input.phoneNumber));
+  } catch (error) {
+    throw managedNumberProviderError(error, "AVAILABILITY_RECHECK");
+  }
   if (quote.purchaseCredits !== input.expectedPurchaseCredits || quote.monthlyCredits !== input.expectedMonthlyCredits) {
     throw new AppError(
       "PHONE_NUMBER_PRICE_CHANGED",
@@ -681,6 +718,7 @@ export async function provisionManagedPhoneNumber(workspaceId: string, input: {
   let voiceConnectionId: string | null = null;
   let messagingProfileId: string | null = null;
   let carrierOrderReturned = false;
+  let providerStage: NumberProviderStage = "VOICE_APPLICATION";
 
   try {
     row = await createProvisioningRecord(workspaceId, current?.id ?? null, {
@@ -701,6 +739,7 @@ export async function provisionManagedPhoneNumber(workspaceId: string, input: {
     });
 
     voiceConnectionId = await createTelnyxCallControlApplication(workspaceId, webhookUrls.voice);
+    providerStage = "MESSAGING_PROFILE";
     messagingProfileId = await createTelnyxMessagingProfile(workspaceId, webhookUrls.sms);
     [row] = await db.update(hostedPhoneNumbers).set({
       voiceConnectionId,
@@ -709,6 +748,7 @@ export async function provisionManagedPhoneNumber(workspaceId: string, input: {
     }).where(eq(hostedPhoneNumbers.id, row.id)).returning();
 
     let order: Awaited<ReturnType<typeof orderTelnyxNumber>>;
+    providerStage = "NUMBER_ORDER";
     try {
       order = await orderTelnyxNumber({
         workspaceId,
@@ -786,7 +826,7 @@ export async function provisionManagedPhoneNumber(workspaceId: string, input: {
       }).where(eq(hostedPhoneNumbers.id, row.id));
     }
     await releaseCreditReservation(workspaceId, reservation.id).catch(() => undefined);
-    throw error;
+    throw managedNumberProviderError(error, providerStage);
   }
 }
 
