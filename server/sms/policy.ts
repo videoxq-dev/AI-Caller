@@ -29,6 +29,16 @@ export function validateSmsLinks(text: string, linksAllowed: boolean) {
   }
 }
 
+// High-confidence promotions override a model's transactional guess. Keep this narrow:
+// appointment/booking vocabulary by itself is never a marketing signal.
+export function classifySmsForPolicy(
+  message: string,
+  modelPurpose: SmsPurpose | "UNCERTAIN",
+): SmsPurpose | "UNCERTAIN" {
+  const promotionalOffer = /\b\d{1,3}\s*%\s*off\b|\b(?:special|limited[\s-]*time|exclusive)\s+(?:offer|deal|promotion)\b|\bpromo(?:tional)?\s+code\b|\b(?:use|apply)\s+code\s+[A-Z0-9]{3,}\b/i;
+  return promotionalOffer.test(message) ? "MARKETING" : modelPurpose;
+}
+
 export function validateApprovedSmsMessage(input: {
   policy: ApprovedSmsPolicy;
   classifiedPurpose: SmsPurpose | "UNCERTAIN";
