@@ -87,6 +87,7 @@ export async function reconcileSmsRegistration(
   const { number, registration } = row;
   if (!["SUBMITTING", "PENDING", "READY"].includes(registration.status) || number.status !== "ACTIVE" || number.releasedAt) return registration.status;
   const draft = registration.draft as TelnyxRegistrationDraft;
+  const resubmission = options.submitting === true && registration.submittedAt !== null;
   let carrierStatus = "";
   let reason: string | null = null;
   let status: "PENDING" | "READY" | "REJECTED" = "PENDING";
@@ -127,7 +128,11 @@ export async function reconcileSmsRegistration(
       }).where(and(eq(smsRegistrations.id, registration.id), eq(smsRegistrations.workspaceId, workspaceId)));
     }
     if (!brandId) return "SUBMITTING";
-    const brand = await client.getBrand(brandId);
+    let brand = await client.getBrand(brandId);
+    if (brand.status === "REGISTRATION_FAILED" && resubmission) {
+      await client.updateBrand(brandId, draft);
+      brand = await client.getBrand(brandId);
+    }
     carrierStatus = brand.status ?? "UNKNOWN";
     reason = brand.failureReasons ?? null;
     if (brand.status === "REGISTRATION_FAILED") status = "REJECTED";
@@ -151,7 +156,18 @@ export async function reconcileSmsRegistration(
         reason = "The last carrier campaign submission could not be confirmed. Contact support rather than resubmitting.";
       }
       if (campaignId) {
-        const campaign = await client.getCampaign(campaignId);
+        let campaign = await client.getCampaign(campaignId);
+        if (resubmission && ["TELNYX_FAILED", "MNO_REJECTED"].includes(campaign.campaignStatus ?? "")) {
+          await client.updateCampaign(campaignId, draft);
+          await client.appealCampaign(campaignId, "Corrected campaign message flow, samples, and opt-in evidence supplied by the customer.");
+          campaign = await client.getCampaign(campaignId);
+        }
+        const expectedUsecase = draft.categories.includes("MARKETING") ? "MIXED" : "CUSTOMER_CARE";
+        if (campaign.usecase && campaign.usecase !== expectedUsecase) {
+          carrierStatus = "CAMPAIGN_PURPOSE_MISMATCH";
+          reason = "The carrier campaign use case does not match the corrected registration. Contact support to register a different messaging program.";
+          status = "REJECTED";
+        } else {
         carrierStatus = campaign.campaignStatus ?? campaign.submissionStatus ?? "UNKNOWN";
         reason = campaign.failureReasons ?? null;
         let assignment = null;
@@ -173,6 +189,7 @@ export async function reconcileSmsRegistration(
             assignmentStatus: assignment?.assignmentStatus,
           });
           reason = reason ?? assignment?.failureReasons ?? null;
+        }
         }
       }
     }
