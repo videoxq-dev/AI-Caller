@@ -3,6 +3,8 @@
 // Never print DATABASE_URL, credentials, SQL parameters, or raw provider errors.
 import { config } from "dotenv";
 import pg from "pg";
+import { resolve } from "node:path";
+import { pathToFileURL } from "node:url";
 
 config({ path: ".env.local" });
 config({ path: ".env" });
@@ -81,7 +83,7 @@ export async function verifyDeploymentDatabase({
   }
 }
 
-if (process.argv[1] && import.meta.url === new URL(`file://${process.argv[1]}`).href) {
+if (process.argv[1] && import.meta.url === pathToFileURL(resolve(process.argv[1])).href) {
   verifyDeploymentDatabase().then((ok) => {
     if (!ok) process.exitCode = 1;
   }).catch(() => {
