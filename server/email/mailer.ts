@@ -2,6 +2,7 @@ import nodemailer from "nodemailer";
 import type { Transporter } from "nodemailer";
 import { getEnv } from "@/server/env";
 import { isGuardedE2EFixtureMode } from "@/server/e2e-mode";
+import { smtpTransportConfig } from "./smtp-config";
 
 let transporter: Transporter | undefined;
 
@@ -17,8 +18,7 @@ function escapeHtml(value: string): string {
 
 function getTransporter(): Transporter {
   const env = getEnv();
-  if (!env.SMTP_URL) throw new Error("SMTP_URL is required to send email.");
-  transporter ??= nodemailer.createTransport(env.SMTP_URL);
+  transporter ??= nodemailer.createTransport(smtpTransportConfig(env));
   return transporter;
 }
 

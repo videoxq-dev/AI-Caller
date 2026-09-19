@@ -111,6 +111,22 @@ try {
     [workspaceId, integration.rows[0].id],
   );
 
+  const upload = await parseResponse(await context.request.post(`${baseUrl}/api/knowledge/files`, {
+    multipart: { file: {
+      name: "qa-services.txt", mimeType: "text/plain",
+      buffer: Buffer.from("QA Car Spa accepts weekend appointments only by advance booking."),
+    } },
+  }), "upload business knowledge");
+  assert(upload.source?.label === "qa-services.txt", "Knowledge upload did not persist.");
+  const known = await api(context, "GET", "/api/knowledge", undefined, "list business knowledge");
+  assert(known.sources?.some((item) => item.id === upload.source.id), "Knowledge is not listed.");
+  assert(!known.sources?.some((item) => Object.hasOwn(item, "content")), "Knowledge list exposed source content.");
+  const blocked = await context.request.post(`${baseUrl}/api/knowledge/website`, { data: { url: "http://127.0.0.1/internal" } });
+  assert(blocked.status() === 422, "Private-network website import was not rejected.");
+  await page.goto(`${baseUrl}/setup/ai`, { waitUntil: "networkidle" });
+  await page.getByText("qa-services.txt", { exact: true }).waitFor({ timeout: 10_000 });
+  await assertNoHorizontalOverflow(page, "Knowledge importer desktop");
+  await page.screenshot({ path: path.join(outputDir, "business-knowledge-import.png"), fullPage: true });
   await page.goto(`${baseUrl}/ai-agent`, { waitUntil: "networkidle" });
   await page.getByRole("button", { name: "Test", exact: true }).click();
   await page.getByRole("heading", { name: "Test your AI" }).waitFor();
