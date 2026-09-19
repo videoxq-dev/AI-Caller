@@ -574,7 +574,11 @@ describe("managed phone provisioning lifecycle", () => {
       requestId,
       expectedPurchaseCredits: 2000,
       expectedMonthlyCredits: 2000,
-    })).rejects.toThrow("Invalid order");
+    })).rejects.toMatchObject({
+      code: "TELNYX_NUMBER_PROVISIONING_REJECTED",
+      status: 502,
+      details: { stage: "NUMBER_ORDER", providerStatus: 422 },
+    });
 
     expect(platform.deleteTelnyxCallControlApplication).toHaveBeenCalledWith("call-control-1");
     expect(platform.deleteTelnyxMessagingProfile).toHaveBeenCalledWith("messaging-profile-1");
