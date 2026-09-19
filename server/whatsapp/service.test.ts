@@ -30,7 +30,7 @@ function inboundPayload(id = "wamid.inbound", from = "15551234567") {
         value: {
           metadata: { phone_number_id: "phone-id-1" },
           contacts: [{ profile: { name: "Ada" }, wa_id: from }],
-          messages: [{ id, from, timestamp: "1789675200", type: "text", text: { body: "I need an appointment" } }],
+          messages: [{ id, from, timestamp: String(Math.floor(Date.now() / 1000)), type: "text", text: { body: "I need an appointment" } }],
         },
       }],
     }],
@@ -46,7 +46,7 @@ function deliveryPayload(id: string, status: "sent" | "delivered" | "read" | "fa
         field: "messages",
         value: {
           metadata: { phone_number_id: "phone-id-1" },
-          statuses: [{ id, status, timestamp: "1789675260" }],
+          statuses: [{ id, status, timestamp: String(Math.floor(Date.now() / 1000) + 60) }],
         },
       }],
     }],
