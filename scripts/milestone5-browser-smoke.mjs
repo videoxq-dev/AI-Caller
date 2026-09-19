@@ -225,6 +225,16 @@ try {
       WHERE workspace_id = $1 AND provision_request_id = $2`,
     [workspaceId, provisionRequestId],
   );
+  // Guarded CI carrier fixture: both readiness and approved-policy records are required.
+  await pool.query(
+    `INSERT INTO sms_registrations
+       (workspace_id, phone_number_id, number_type, status, approved_policy, draft)
+       SELECT $1, id, 'local', 'READY',
+              '{"categories":["TRANSACTIONAL"],"allowEmbeddedLinks":true,"description":"Appointment replies"}'::jsonb,
+              '{}'::jsonb
+       FROM hosted_phone_numbers WHERE workspace_id = $1 AND provision_request_id = $2`,
+    [workspaceId, provisionRequestId],
+  );
   await page.reload({ waitUntil: "networkidle" });
   await page.getByText("Ready", { exact: true }).waitFor({ timeout: 10_000 });
   await page.screenshot({ path: path.join(outputDir, "sms-managed-setup-desktop.png"), fullPage: true });
