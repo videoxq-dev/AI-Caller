@@ -16,6 +16,22 @@ If DeployOS reports `ECONNREFUSED 127.0.0.1:5432` **after** it can read the Comp
 
 **Important:** An existing `DATABASE_URL` alone does not set `POSTGRES_USER`/`POSTGRES_PASSWORD`/`POSTGRES_DB`, and a runtime container environment is different from Compose file interpolation. This is why the previous default Compose failed even though your app variables were configured.
 
+## DeployOS reports DATABASE_URL missing or invalid after an ENOTFOUND error
+
+The migration log `FAIL: DATABASE_URL is missing or is not a valid PostgreSQL connection URL` means **there is no usable URL in that particular container**. It does not establish a database networking or password failure. A previous `ENOTFOUND ai-caller-postgres-1` error proves a URL existed in the *previous* deployment, but not that the redeployed container is receiving the same variable.
+
+In DeployOS, verify the variable **key is exactly `DATABASE_URL`** on the **AI Caller app's Config → Environment Variables** (not solely the database app). Check whether a blank per-app variable is overriding a populated global secret. Use DeployOS's actual PostgreSQL connection URL, with correct private network hostname; do not add placeholder values, whitespace or a copied `DATABASE_URL=` prefix inside the value input. Save the config and trigger a new deployment to apply it.
+
+All three services (`migrate`, `web`, and `worker`) share the optional server-side `.env` specified by `docker-compose.yml`. If DeployOS puts variables in a different location or injects them only into a selected web service, the migration job won't inherit them. Verify your DeployOS environment-file generation for this Compose deployment and ensure **each** service receives the same variable.
+
+From the app's Compose directory, validate the effective container environment **without printing secrets**:
+
+```sh
+docker compose run --rm --no-deps migrate npm run verify:database-connection
+```
+
+The revised check explicitly distinguishes `DATABASE_URL is missing or empty in this container` from `DATABASE_URL is present but not a valid PostgreSQL URL`; a syntactically valid but unresolvable URL instead reports the **hostname** plus `ENOTFOUND`. Do not publish your full database connection string or `docker compose config` output in support threads because they may contain passwords.
+
 ## DeployOS migration failed with exit 1
 
 An exit code from `migrate` is a **summary**, not the error cause. Open the DeployOS deployment's `migrate` service log (or from its app Compose directory run `docker compose logs --tail=100 migrate`) and find the FIRST `FAIL:` line or PostgreSQL error immediately before the container exits. Do not use the blank web log as evidence: the web container has not started yet.
