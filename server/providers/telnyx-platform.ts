@@ -74,6 +74,7 @@ export async function searchTelnyxNumbers(input: {
   areaCode?: string | null;
   numberType?: "local" | "toll_free";
   startsWith?: string | null;
+  endsWith?: string | null;
   limit?: number;
 }, fetcher: typeof fetch = fetch): Promise<TelnyxAvailableNumber[]> {
   if (isE2EProviderFixtureMode()) {
@@ -108,6 +109,7 @@ export async function searchTelnyxNumbers(input: {
   if (input.locality?.trim()) params.set("filter[locality]", input.locality.trim());
   if (input.areaCode?.trim()) params.set("filter[national_destination_code]", input.areaCode.replace(/\D/g, ""));
   if (input.startsWith?.trim()) params.set("filter[starts_with]", input.startsWith.replace(/\D/g, ""));
+  if (input.endsWith?.trim()) params.set("filter[ends_with]", input.endsWith.replace(/\D/g, ""));
 
   const response = await providerJson<{
     data?: Array<{
