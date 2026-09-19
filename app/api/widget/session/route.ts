@@ -21,6 +21,7 @@ export async function POST(request: Request) {
         greeting: result.widget.greeting,
         launcherLabel: result.widget.launcherLabel,
         smsTermsUrl: result.widget.smsTermsUrl,
+        marketingProgramApproved: result.widget.marketingProgramApproved,
       },
     }, {
       headers: {

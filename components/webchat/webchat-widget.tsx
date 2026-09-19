@@ -8,6 +8,7 @@ type WidgetConfig = {
   assistantName: string;
   greeting: string;
   smsTermsUrl?: string | null;
+  marketingProgramApproved?: boolean;
 };
 
 type ChatMessage = {
@@ -27,10 +28,11 @@ export function WebchatWidget({ widgetKey, config }: { widgetKey: string; config
   const [sessionToken, setSessionToken] = useState<string | null>(null);
   const [input, setInput] = useState("");
   const [captured, setCaptured] = useState(false);
-  const [profile, setProfile] = useState({ name: "", email: "", phone: "", transactionalSmsConsent: false });
+  const [profile, setProfile] = useState({ name: "", email: "", phone: "", transactionalSmsConsent: false, marketingSmsConsent: false });
   const [contactSaving, setContactSaving] = useState(false);
   const [contactError, setContactError] = useState("");
   const [termsUrl, setTermsUrl] = useState<string | null>(null);
+  const [marketingAllowed, setMarketingAllowed] = useState(false);
   const [loading, setLoading] = useState(true);
   const [sending, setSending] = useState(false);
   const [status, setStatus] = useState("AI online");
@@ -52,6 +54,7 @@ export function WebchatWidget({ widgetKey, config }: { widgetKey: string; config
       window.localStorage.setItem(sessionStorageKey, data.sessionToken);
       setSessionToken(data.sessionToken);
       setTermsUrl(data.widget.smsTermsUrl ?? null);
+      setMarketingAllowed(data.widget.marketingProgramApproved === true);
       void fetch("/api/widget/contact", { headers: { authorization: "Bearer " + data.sessionToken }, cache: "no-store" })
         .then((response) => response.ok ? response.json() : null)
         .then((details) => {
@@ -204,6 +207,9 @@ export function WebchatWidget({ widgetKey, config }: { widgetKey: string; config
         {termsUrl && <><label className="webchatConsentChoice"><input type="checkbox" checked={profile.transactionalSmsConsent} onChange={(event) => setProfile((p) => ({ ...p, transactionalSmsConsent: event.target.checked }))} />
           I agree to receive appointment confirmations, reminders, and related SMS updates from {config.businessName}.
         </label>
+        {marketingAllowed && <label className="webchatConsentChoice"><input type="checkbox" checked={profile.marketingSmsConsent} onChange={(event) => setProfile((p) => ({ ...p, marketingSmsConsent: event.target.checked }))} />
+          I separately agree to receive promotional SMS messages and offers from {config.businessName}.
+        </label>}
         <small>Message frequency varies. Msg &amp; data rates may apply. Reply STOP to opt out or HELP for help. <a href={termsUrl} target="_blank" rel="noopener noreferrer">Our SMS Terms &amp; Policy</a></small></>}
         {contactError && <p role="alert">{contactError}</p>}
         <button type="submit" disabled={contactSaving}>{contactSaving ? "Saving…" : "Save contact details"}</button>

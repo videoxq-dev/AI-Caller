@@ -184,7 +184,7 @@ export async function reconcileSmsRegistration(
     // The registration and managed number are updated atomically; never publish READY
     // without the verified status and matching number assignment from Telnyx.
     await tx.update(smsRegistrations).set({
-      status, carrierStatus, rejectionReason: status === "REJECTED" ? reason : null,
+      status, carrierStatus, rejectionReason: status === "REJECTED" || carrierStatus === "Waiting For Customer" ? reason : null,
       carrierBrandId: brandId, carrierCampaignId: campaignId, carrierVerificationId: verificationId,
       ...(status === "READY" ? { approvedPolicy: approvedPolicyFromDraft(draft) } : { approvedPolicy: null }),
       submittedAt: registration.submittedAt ?? now, checkedAt: now, updatedAt: now,

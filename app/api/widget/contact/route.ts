@@ -12,6 +12,7 @@ const inputSchema = z.object({
   email: z.string().trim().email().max(320),
   phone: z.string().trim().min(8).max(40),
   transactionalSmsConsent: z.boolean().default(false),
+  marketingSmsConsent: z.boolean().default(false),
 }).strict();
 
 async function authorized(request: Request) {
@@ -43,10 +44,12 @@ export async function POST(request: Request) {
     const resolved = await authorized(request);
     const input = parseInput(inputSchema, await request.json());
     const phoneNumber = input.phone ? normalizedSmsPhone(input.phone) : null;
-    if (input.transactionalSmsConsent && !phoneNumber) throw new AppError("SMS_PHONE_REQUIRED", "Enter a phone number to opt in.", 422);
+    if ((input.transactionalSmsConsent || input.marketingSmsConsent) && !phoneNumber) throw new AppError("SMS_PHONE_REQUIRED", "Enter a phone number to opt in.", 422);
     const widget = await getPublicWebchatWidget(resolved.widget.publicKey);
     if (!widget) throw new AppError("WIDGET_NOT_FOUND", "Web chat widget not found.", 404);
-    if (input.transactionalSmsConsent && !widget.smsTermsUrl) throw new AppError("SMS_TERMS_NOT_CONFIGURED", "SMS terms are not configured.", 409);
+    if ((input.transactionalSmsConsent || input.marketingSmsConsent) && !widget.smsTermsUrl) throw new AppError("SMS_TERMS_NOT_CONFIGURED", "SMS terms are not configured.", 409);
+    if (input.marketingSmsConsent && !widget.marketingProgramApproved)
+      throw new AppError("SMS_MARKETING_PROGRAM_NOT_APPROVED", "Marketing consent is unavailable for this messaging program.", 409);
     const [contact] = await db.update(contacts).set({
       name: input.name, email: input.email.toLowerCase(), phone: phoneNumber, updatedAt: new Date(),
     }).where(and(
@@ -59,6 +62,13 @@ export async function POST(request: Request) {
         category: "TRANSACTIONAL", status: "OPTED_IN", source: "WEB_FORM",
         sourceReference: resolved.session.id,
         consentStatement: "Appointment confirmations, reminders, and related SMS updates from " + widget.businessName + ". Terms: " + widget.smsTermsUrl,
+      });
+    }
+    if (input.marketingSmsConsent && phoneNumber) {
+      await recordSmsConsent(resolved.session.workspaceId, contact.id, phoneNumber, {
+        category: "MARKETING", status: "OPTED_IN", source: "WEB_FORM",
+        sourceReference: resolved.session.id,
+        consentStatement: "I agree to receive promotional SMS messages from " + widget.businessName + ". Terms: " + widget.smsTermsUrl,
       });
     }
     return Response.json({ captured: true });

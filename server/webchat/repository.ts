@@ -113,11 +113,15 @@ export async function getPublicWebchatWidget(widgetKey: string) {
       eq(hostedPhoneNumbers.workspaceId, smsRegistrations.workspaceId),
       eq(hostedPhoneNumbers.status, "ACTIVE"),
     )).where(eq(smsRegistrations.workspaceId, row.widget.workspaceId)).limit(1);
+  const [approved] = await db.select({ policy: smsRegistrations.approvedPolicy }).from(smsRegistrations)
+    .where(and(eq(smsRegistrations.workspaceId, row.widget.workspaceId), eq(smsRegistrations.status, "READY"))).limit(1);
+  const marketingProgramApproved = approved?.policy?.categories.includes("MARKETING") ?? false;
   const candidateTermsUrl = registration?.draft?.termsUrl;
   const smsTermsUrl = typeof candidateTermsUrl === "string" && /^https:\/\//i.test(candidateTermsUrl)
     ? candidateTermsUrl : null;
   return {
     smsTermsUrl,
+    marketingProgramApproved,
     workspaceId: row.widget.workspaceId,
     publicKey: row.widget.publicKey,
     launcherLabel: row.widget.launcherLabel,
