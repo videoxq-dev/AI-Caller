@@ -177,7 +177,7 @@ async function findFreshQuote(phoneNumber: string) {
     const tollFreeNumbers = await searchTelnyxNumbers({ ...exactFilters, numberType: "toll_free" });
     match = tollFreeNumbers.find((number) => number.phoneNumber === phoneNumber);
   }
-  if (!match) throw new AppError("PHONE_NUMBER_UNAVAILABLE", "That phone number is no longer available. Search again and choose another number.", 409);
+  if (!match) throw new AppError("PHONE_NUMBER_UNAVAILABLE", "Telnyx could not confirm that phone number is still available. Search again and choose another number.", 409);
   return { match, quote: quoteHostedPhoneNumber(match) };
 }
 
