@@ -19,6 +19,7 @@ concurrency:
 
 jobs:
   build:
+    if: github.event_name != 'push' || github.ref == 'refs/heads/main'
     name: Test, Typecheck, Build & Browser Smoke
     runs-on: ubuntu-latest
     timeout-minutes: 25
