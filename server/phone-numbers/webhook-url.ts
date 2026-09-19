@@ -23,11 +23,12 @@ export function resolveManagedWebhookBaseUrl(
     );
   }
 
-  const hostname = url.hostname.toLowerCase();
+  const hostname = url.hostname.toLowerCase().replace(/\.$/, "");
   const unbracketed = hostname.replace(/^\[|\]$/g, "");
   const nonpublic = hostname === "localhost" || hostname.endsWith(".localhost")
     || hostname.endsWith(".local") || hostname.endsWith(".internal")
     || hostname.endsWith(".test") || hostname.endsWith(".invalid")
+    || hostname.endsWith(".example") || hostname.endsWith(".localdomain") || hostname.endsWith(".lan")
     || hostname === "example.com" || hostname.endsWith(".example.com")
     || hostname === "example" || hostname === "invalid"
     || isIP(unbracketed) !== 0
