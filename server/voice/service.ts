@@ -8,7 +8,6 @@ import { loadHostedRateSnapshot, quoteHostedUsage } from "@/server/billing/prici
 import { chargeUnavoidableCredits } from "@/server/credits/service";
 import {
   appendMessage,
-  getConversationById,
   getOrCreateOpenConversation,
 } from "@/server/domain/core/repository";
 import { normalizePhone } from "@/server/domain/core/schemas";
@@ -16,7 +15,6 @@ import { getBusinessSetup } from "@/server/domain/onboarding/repository";
 import { getEnv } from "@/server/env";
 import { AppError } from "@/server/http/errors";
 import { logger } from "@/server/observability/logger";
-import { responseOrchestrator } from "@/server/orchestrator";
 import type { NormalizedVoiceEvent, VoiceWebhookInput } from "@/server/providers/contracts";
 import { isE2EProviderFixtureMode } from "@/server/providers/e2e-fixtures";
 import { resolveVoiceRuntime, type VoiceProviderName, type VoiceRuntime } from "@/server/providers/voice/runtime";
@@ -24,7 +22,6 @@ import {
   claimProviderWebhookEvent,
   claimQueuedProviderWebhookEvent,
   completeProviderWebhookEvent,
-  failProviderWebhookEvent,
   markProviderWebhookQueued,
   releaseProviderWebhookEventForRetry,
 } from "@/server/providers/webhooks/repository";
@@ -34,22 +31,23 @@ import { resolveVoiceContact } from "./identity";
 import { resolveInboundVoiceMode } from "./modes";
 import {
   appendVoiceTranscriptSegment,
+  queueVoiceTurn,
+  releaseVoiceSpeech,
   createVoiceCall,
   getVoiceCallByExternalId,
   updateVoiceCall,
 } from "./repository";
 import { putVoiceRecording } from "./storage";
 import { resolveVoiceProfile } from "./voices";
+import { estimateSpeechDurationMs } from "./turn-duration";
+import { scheduleVoiceTurn } from "./turns";
 
 const MAX_VOICE_WEBHOOK_BYTES = 64 * 1024;
 const MAX_RECORDING_BYTES = 50 * 1024 * 1024;
 const DISCLOSURE_VERSION = "voice-recording-v1";
 
-type VoiceOrchestratorResult = Awaited<ReturnType<typeof responseOrchestrator.respond>>;
-
 type VoiceServiceDependencies = {
   resolveRuntime: (workspaceId: string, provider: VoiceProviderName) => Promise<VoiceRuntime>;
-  respond: (workspaceId: string, conversationId: string) => Promise<VoiceOrchestratorResult>;
   fetchRecording: typeof fetch;
   putRecording: (key: string, bytes: Uint8Array, contentType: string) => Promise<void>;
 };
@@ -92,12 +90,6 @@ function deterministicCommandId(seed: string) {
 
 function phase(metadata: Record<string, unknown>) {
   return typeof metadata.phase === "string" ? metadata.phase : "UNKNOWN";
-}
-
-function estimateSpeechDurationMs(text: string, speakingRate = 1) {
-  const words = Math.max(1, text.trim().split(/\s+/).length);
-  const wordsPerSecond = 2.5 * Math.max(0.75, Math.min(1.25, speakingRate));
-  return Math.max(400, Math.min(20_000, Math.round((words / wordsPerSecond) * 1000)));
 }
 
 function elapsedMs(startedAt: Date, occurredAt: Date | null) {
@@ -356,6 +348,11 @@ export function createVoiceWebhookService(dependencies: VoiceServiceDependencies
         await updateVoiceCall(workspaceId, call.id, {}, { phase: "TERMINATING" });
         return;
       }
+      if (currentPhase === "AI_SPEAKING") {
+        const pending = await releaseVoiceSpeech(workspaceId, call.id);
+        if (pending) await scheduleVoiceTurn(workspaceId, call.id, pending, "after-speak");
+        return;
+      }
       if (currentPhase !== "AWAITING_DISCLOSURE_END") return;
 
       const voice = await getVoiceConfig(workspaceId);
@@ -445,11 +442,9 @@ export function createVoiceWebhookService(dependencies: VoiceServiceDependencies
     }
 
     if (event.type === "TRANSCRIPTION") {
-      if (!event.isFinal) return;
+      if (!event.isFinal || !event.transcript.trim()) return;
       const currentPhase = phase(call.metadata);
-      const voice = await getVoiceConfig(workspaceId);
-
-      if (currentPhase !== "ACTIVE") return;
+      if (!["ACTIVE", "AI_RESPONDING", "AI_SPEAKING"].includes(currentPhase)) return;
 
       const endedMs = elapsedMs(call.startedAt, event.occurredAt);
       const startedMs = Math.max(0, endedMs - estimateSpeechDurationMs(event.transcript));
@@ -473,57 +468,11 @@ export function createVoiceWebhookService(dependencies: VoiceServiceDependencies
         metadata: { voiceCallId: call.id, transcriptSegmentId: segment.id, voiceMode: call.mode, startedMs, endedMs },
       });
 
-      const responseStartedAt = Date.now();
-      const result = await dependencies.respond(workspaceId, call.conversationId);
-      const orchestrationMs = Date.now() - responseStartedAt;
-      if (!result.reply) {
-        await updateVoiceCall(workspaceId, call.id, {}, { phase: result.handlingMode === "HUMAN" ? "HUMAN" : "ACTIVE" });
-        return;
-      }
-
-      const latestConversation = await getConversationById(workspaceId, call.conversationId);
-      if (!latestConversation || latestConversation.handlingMode !== "AI") {
-        await updateVoiceCall(workspaceId, call.id, {}, { phase: "HUMAN" });
-        return;
-      }
-
-      const aiStartedMs = elapsedMs(call.startedAt, new Date());
-      const aiEndedMs = aiStartedMs + estimateSpeechDurationMs(result.reply, voice.config.speakingRate);
-      const aiSegment = await appendVoiceTranscriptSegment(workspaceId, call.id, {
-        speaker: "AI",
-        text: result.reply,
-        startedMs: aiStartedMs,
-        endedMs: aiEndedMs,
-        externalEventId: `${event.externalEventId}:ai`,
-      });
-      await appendMessage(workspaceId, call.conversationId, {
-        channel: "PHONE",
-        direction: "OUTBOUND",
-        senderType: "AI",
-        contentType: "CALL_TRANSCRIPT",
-        body: result.reply,
-        provider: "telnyx-voice",
-        externalMessageId: `${event.externalEventId}:ai`,
-        status: "SENT",
-        metadata: { voiceCallId: call.id, transcriptSegmentId: aiSegment.id, voiceMode: call.mode, startedMs: aiStartedMs, endedMs: aiEndedMs },
-      });
-      await runtime.provider.speak({
-        callControlId: event.callControlId,
-        text: result.reply,
-        voice: resolveVoiceProfile(voice.config.profileKey).providerVoiceId,
-        language: voice.config.language,
-        speakingRate: voice.config.speakingRate,
-        commandId: deterministicCommandId(`${event.externalEventId}:reply`),
-      });
-      logger.info({
-        workspaceId,
-        callId: call.id,
-        transcriptionEventId: event.externalEventId,
-        orchestrationMs,
-        voiceTurnMs: Date.now() - responseStartedAt,
-      }, "Voice AI reply accepted by telephony provider");
-      if (result.handlingMode === "HUMAN") {
-        await updateVoiceCall(workspaceId, call.id, {}, { phase: "HUMAN" });
+      // The latest final segment wins after a short silence interval. The
+      // database phase prevents overlap while the assistant is responding or
+      // speaking, and the worker survives web/container restarts.
+      if (await queueVoiceTurn(workspaceId, call.id, event.externalEventId)) {
+        await scheduleVoiceTurn(workspaceId, call.id, event.externalEventId);
       }
       return;
     }
@@ -615,7 +564,7 @@ export function createVoiceWebhookService(dependencies: VoiceServiceDependencies
       const events = await runtime.provider.normalizeWebhook(input);
       let processed = 0;
       let duplicates = 0;
-      let failed = 0;
+      const failed = 0;
       let suppressed = 0;
 
       for (const event of events) {
@@ -655,21 +604,11 @@ export function createVoiceWebhookService(dependencies: VoiceServiceDependencies
           continue;
         }
 
-        let failClosed = false;
         try {
-          if (event.type === "TRANSCRIPTION" && event.isFinal) failClosed = phase(
-            (await getVoiceCallByExternalId(workspaceId, runtime.providerName, event.externalCallId))?.metadata ?? {},
-          ) === "ACTIVE";
           await processEvent(workspaceId, runtime, event);
           await completeProviderWebhookEvent(workspaceId, claim.eventId);
           processed += 1;
         } catch (error) {
-          if (failClosed) {
-            await failProviderWebhookEvent(workspaceId, claim.eventId, error);
-            logger.error({ err: error, workspaceId, eventType: event.type, eventId: event.externalEventId }, "Voice event failed closed after orchestration began");
-            failed += 1;
-            continue;
-          }
           await releaseProviderWebhookEventForRetry(workspaceId, claim.eventId, error);
           throw error;
         }
@@ -682,7 +621,6 @@ export function createVoiceWebhookService(dependencies: VoiceServiceDependencies
 
 export const voiceWebhookService = createVoiceWebhookService({
   resolveRuntime: resolveVoiceRuntime,
-  respond: (workspaceId, conversationId) => responseOrchestrator.respond(workspaceId, conversationId),
   fetchRecording: fetch,
   putRecording: putVoiceRecording,
 });
