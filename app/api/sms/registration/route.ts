@@ -80,7 +80,7 @@ export async function PUT(request: Request) {
     const input = parseInput(draftSchema, await request.json());
     const number = await managedNumber(context.workspace.id);
     if (!number) throw new AppError("NO_ACTIVE_PHONE_NUMBER", "Activate your managed number before preparing SMS registration.", 409);
-    if (!input.ein)
+    if (input.entityType !== "SOLE_PROPRIETOR" && !input.ein)
       throw new AppError("EIN_REQUIRED", "Enter your registered business tax ID for 10DLC brand registration.", 422);
     if (input.entityType === "PUBLIC_PROFIT" && (!input.stockSymbol || input.stockExchange === "NONE"))
       throw new AppError("PUBLIC_BRAND_STOCK_DETAILS_REQUIRED", "Enter the public company stock symbol and exchange.", 422);
