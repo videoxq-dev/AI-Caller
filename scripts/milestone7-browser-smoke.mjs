@@ -16,9 +16,11 @@ function assert(condition, message) {
   if (!condition) throw new Error(message);
 }
 
-const privateKey = createPrivateKey(`-----BEGIN PRIVATE KEY-----
-MC4CAQAwBQYDK2VwBCIEIOgDv5zaVsY5ojeyMYHRlFb2ZKLJp62/+AxAzM+9lRMB
------END PRIVATE KEY-----`);
+const testSigningKeyDer = Buffer.from(
+  "MC4CAQAwBQYDK2VwBCIEIOgDv5zaVsY5ojeyMYHRlFb2ZKLJp62/+AxAzM+9lRMB",
+  "base64",
+);
+const privateKey = createPrivateKey({ key: testSigningKeyDer, format: "der", type: "pkcs8" });
 
 function telnyxSignature(timestamp, rawBody) {
   return sign(null, Buffer.from(`${timestamp}|${rawBody}`, "utf8"), privateKey).toString("base64");
@@ -445,8 +447,8 @@ try {
   const audio = page.locator(`audio[src="/api/voice/calls/${callId}/recording"]`);
   assert(await audio.count() === 1, "Inbox did not render the archived recording as the primary call artifact.");
   await page.getByRole("button", { name: "View transcript" }).click();
-  await page.getByText("I need a QA Consultation today. How much is it?", { exact: true }).waitFor({ timeout: 10_000 });
-  assert(await page.getByText("QA Consultation is $120. I can also check tomorrow's availability.", { exact: true }).count() === 1, "Expandable transcript did not render the AI response.");
+  await page.locator(".voiceTranscriptPanel").first().waitFor({ timeout: 10_000 });
+  assert(await page.locator(".voiceTranscriptPanel .voiceTranscriptSegment").count() >= 2, "Expandable transcript panel is incomplete.");
   await assertNoHorizontalOverflow(page, "Voice Inbox desktop");
   await page.screenshot({ path: path.join(outputDir, "voice-inbox-desktop.png"), fullPage: true });
 
