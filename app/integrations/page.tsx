@@ -64,7 +64,7 @@ const tabs: Array<{ id: Category; label: string }> = [
   { id: "scheduling", label: "Scheduling" },
 ];
 
-const emptyConnected = () => Object.fromEntries(providers.map((provider) => [provider.id, provider.id === "credits"])) as Record<ProviderId, boolean>;
+const emptyConnected = () => Object.fromEntries(providers.map((provider) => [provider.id, false])) as Record<ProviderId, boolean>;
 
 export default function IntegrationsPage() {
   const [category, setCategory] = useState<Category>("all");
@@ -88,6 +88,8 @@ export default function IntegrationsPage() {
       .then((payload) => {
         const rows = Array.isArray(payload?.integrations) ? payload.integrations as IntegrationRecord[] : [];
         const nextConnected = emptyConnected();
+        // A selected hosted route is not proof that server credentials are configured.
+        nextConnected.credits = payload?.hostedAI?.configured === true;
         const nextRecords: Partial<Record<ProviderId, IntegrationRecord>> = {};
         for (const row of rows) {
           if (!providers.some((provider) => provider.id === row.provider)) continue;
@@ -119,7 +121,7 @@ export default function IntegrationsPage() {
   };
 
   function updateRecord(record: IntegrationRecord | null, providerId: ProviderId) {
-    setConnected((current) => ({ ...current, [providerId]: record?.status === "CONNECTED" || providerId === "credits" }));
+    setConnected((current) => ({ ...current, [providerId]: providerId === "credits" ? current.credits : record?.status === "CONNECTED" }));
     setRecords((current) => ({ ...current, [providerId]: record ?? undefined }));
   }
 
@@ -152,7 +154,7 @@ export default function IntegrationsPage() {
 }
 
 function IntegrationCard({ provider, connected, selected, onOpen }: { provider: Provider; connected: boolean; selected: boolean; onOpen: () => void }) {
-  return <article className={`integrationCard ${selected ? "selected" : ""}`}><div className="integrationCardTop"><span className={`providerMark ${provider.id}`}>{provider.brand}</span><div><strong>{provider.name}</strong><span className={`connectionBadge ${connected ? "connected" : ""}`}>{connected ? "● Connected" : "+ Not connected"}</span></div></div><p>{provider.description}</p><ul>{provider.features.map((feature) => <li key={feature}>✓ {feature}</li>)}</ul><button type="button" className={connected ? "manageIntegration" : "connectIntegration"} onClick={onOpen}>{connected ? "Manage" : "Connect"}</button></article>;
+  return <article className={`integrationCard ${selected ? "selected" : ""}`}><div className="integrationCardTop"><span className={`providerMark ${provider.id}`}>{provider.brand}</span><div><strong>{provider.name}</strong><span className={`connectionBadge ${connected ? "connected" : ""}`}>{provider.id === "credits" ? (connected ? "● Server configured" : "Not configured") : (connected ? "● Connected" : "+ Not connected")}</span></div></div><p>{provider.description}</p><ul>{provider.features.map((feature) => <li key={feature}>✓ {feature}</li>)}</ul><button type="button" className={connected ? "manageIntegration" : "connectIntegration"} onClick={onOpen}>{connected ? "Manage" : "Connect"}</button></article>;
 }
 
 function categoryFor(provider: Provider): "AI" | "COMMUNICATION" | "WHATSAPP" | "CALENDAR" {
