@@ -1,8 +1,9 @@
 import { and, asc, eq } from "drizzle-orm";
 import { db } from "@/db";
-import { aiAgents, faqs, policies, services } from "@/db/schema";
+import { aiAgents, faqs, hostedPhoneNumbers, policies, services, smsRegistrations } from "@/db/schema";
 import { getConversationTimelinePage } from "@/server/domain/core/conversation-timeline";
 import { getContactDetail } from "@/server/domain/core/repository";
+import { getSmsConsentStatus } from "@/server/sms/consent";
 import { getBusinessSetup } from "@/server/domain/onboarding/repository";
 import { qualificationConfigFromBehaviorSettings, qualificationPrompt } from "./qualification";
 
@@ -129,6 +130,34 @@ function buildSystemPrompt(
   ].filter(Boolean).join("\n");
 }
 
+async function approvedSmsPrompt(workspaceId: string, customerPhone: string | null) {
+  const [row] = await db.select({ policy: smsRegistrations.approvedPolicy }).from(smsRegistrations)
+    .innerJoin(hostedPhoneNumbers, and(
+      eq(hostedPhoneNumbers.id, smsRegistrations.phoneNumberId),
+      eq(hostedPhoneNumbers.workspaceId, smsRegistrations.workspaceId),
+      eq(hostedPhoneNumbers.status, "ACTIVE"),
+      eq(hostedPhoneNumbers.messagingReadiness, "READY"),
+    )).where(and(eq(smsRegistrations.workspaceId, workspaceId), eq(smsRegistrations.status, "READY"))).limit(1);
+  if (!row?.policy) return "\nSMS SENDING: Outbound managed SMS is not approved. Do not promise text delivery or treat voice/booking as blocked.";
+  const phone = customerPhone && /^\+1[2-9]\d{9}$/.test(customerPhone) ? customerPhone : null;
+  const [transactionalConsent, marketingConsent] = phone
+    ? await Promise.all([
+      getSmsConsentStatus(workspaceId, phone, "TRANSACTIONAL"),
+      getSmsConsentStatus(workspaceId, phone, "MARKETING"),
+    ])
+    : ["UNKNOWN", "UNKNOWN"];
+  return [
+    "\nAPPROVED SMS MESSAGING PROGRAM",
+    "This is carrier-approved context, NOT authorization to send. All SMS must go through the backend SEND_SMS service, which rechecks readiness, purpose, links, and consent.",
+    "Approved use case: " + row.policy.description.slice(0, 1000),
+    "Approved purposes: " + row.policy.categories.join(", "),
+    "Embedded links allowed: " + (row.policy.allowEmbeddedLinks ? "yes, if directly relevant to the approved message purpose" : "no"),
+    "Transactional consent: " + transactionalConsent,
+    "Marketing consent: " + marketingConsent,
+    "A booking, phone call or unrelated YES does not automatically opt anyone into continuing text messages.",
+  ].join("\n");
+}
+
 export async function buildConversationContext(workspaceId: string, conversationId: string) {
   const timeline = await getConversationTimelinePage(workspaceId, conversationId, { limit: 30, offset: 0 });
   if (!timeline) return null;
@@ -154,6 +183,7 @@ export async function buildConversationContext(workspaceId: string, conversation
     currentAppointment,
   });
 
+  systemPrompt += await approvedSmsPrompt(workspaceId, contact.phone);
   const latestPhoneMode = [...timeline.messages].reverse().find((message) =>
     message.channel === "PHONE" && typeof message.metadata?.voiceMode === "string",
   )?.metadata?.voiceMode;
