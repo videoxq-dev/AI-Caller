@@ -19,6 +19,7 @@ import { getAgentSetup, getBusinessSetup, getSetupStatus } from "@/server/domain
 import { saveAISetupAction } from "../actions";
 import { SetupProgressPanel } from "../setup-progress";
 import { KnowledgeEditor } from "./knowledge-editor";
+import { KnowledgeImportEditor } from "./knowledge-import-editor";
 import { QualificationEditor } from "./qualification-editor";
 import "./ai-assistant.css";
 
@@ -142,20 +143,7 @@ export default async function AIAssistantSetupPage() {
                 <div><h2>Import business knowledge</h2><p>Speed up setup by pulling information from your website or documents.</p></div>
               </div>
 
-              <div className="importGrid">
-                <div className="websiteImport">
-                  <label className="aiField"><span>Website URL</span><input type="url" defaultValue={business.profile?.websiteUrl ?? ""} readOnly /></label>
-                  <button type="button" className="importButton" disabled><LinkIcon size={16} /> Import from website</button>
-                </div>
-                <div className="fileUploadBlock">
-                  <strong>Upload files</strong>
-                  <label className="uploadDropzone">
-                    <FileIcon size={20} />
-                    <span>PDF, DOCX, TXT</span>
-                    <span className="chooseFiles">Available in the knowledge milestone</span>
-                  </label>
-                </div>
-              </div>
+              <KnowledgeImportEditor initialWebsite={business.profile?.websiteUrl ?? ""} />
             </section>
 
             <div className="aiFormFooter">
