@@ -314,6 +314,15 @@ try {
   );
   assert(firstSpeakEnd.data?.processed === 1, "AI reply completion event failed.");
 
+  // Two final STT fragments in quick succession should yield one AI turn.
+  const fragment = await sendWebhook(
+    workspaceId,
+    eventPayload("call.transcription", "m7-turn-2-fragment", callSessionId, callControlId, {
+      transcription_data: { transcript: "Could you check availability?", is_final: true, confidence: 0.95 },
+    }),
+  );
+  assert(fragment.data?.processed === 1, "Intermediate final segment did not persist.");
+
   const availability = await sendWebhook(
     workspaceId,
     eventPayload("call.transcription", "m7-turn-2", callSessionId, callControlId, {
@@ -328,6 +337,13 @@ try {
     (rows) => rows.rowCount === 1,
     "voice availability response",
   );
+
+  const availabilityReplies = await pool.query(
+    `SELECT count(*)::int AS count FROM messages WHERE workspace_id = $1
+      AND channel = 'PHONE' AND sender_type = 'AI' AND body = 'I have a 10:00 AM opening tomorrow.'`,
+    [workspaceId],
+  );
+  assert(availabilityReplies.rows[0].count === 1, "Two STT final fragments generated duplicate AI replies.");
 
   const secondSpeakEnd = await sendWebhook(
     workspaceId,
@@ -369,6 +385,14 @@ try {
 
   const hangup = await sendWebhook(workspaceId, eventPayload("call.hangup", "m7-hangup", callSessionId, callControlId, { hangup_cause: "normal_clearing" }, new Date(callClock)));
   assert(hangup.data?.processed === 1, "Voice hangup event failed.");
+
+  const pendingArtifact = await pool.query(
+    `SELECT count(*)::int AS count FROM messages WHERE workspace_id = $1
+      AND content_type = 'CALL_RECORDING'
+      AND metadata->>'voiceCallId' = $2`,
+    [workspaceId, callId],
+  );
+  assert(pendingArtifact.rows[0].count === 1, "A call without archived audio must still have an Inbox artifact.");
 
   const recording = await sendWebhook(
     workspaceId,
@@ -414,6 +438,10 @@ try {
   await page.getByLabel("Channel filter").selectOption("PHONE");
   await page.getByText("Voice Visitor", { exact: true }).first().click();
   await page.getByText("Incoming call", { exact: true }).waitFor({ timeout: 10_000 });
+  assert(await page.getByText("I need a QA Consultation today. How much is it?", { exact: true }).count() >= 1,
+    "Caller phone transcript was hidden from the Inbox thread.");
+  assert(await page.getByText("QA Consultation is $120. I can also check tomorrow's availability.", { exact: true }).count() >= 1,
+    "AI spoken transcript was hidden from the Inbox thread.");
   const audio = page.locator(`audio[src="/api/voice/calls/${callId}/recording"]`);
   assert(await audio.count() === 1, "Inbox did not render the archived recording as the primary call artifact.");
   await page.getByRole("button", { name: "View transcript" }).click();
