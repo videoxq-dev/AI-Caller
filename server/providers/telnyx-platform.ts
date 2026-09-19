@@ -161,6 +161,34 @@ export async function createTelnyxCallControlApplication(
   return id;
 }
 
+// A tunnel hostname can change during local acceptance. Repair only the known
+// workspace-owned Call Control application; never buy another number to fix it.
+export async function updateTelnyxCallControlApplication(
+  workspaceId: string,
+  applicationId: string,
+  webhookUrl: string,
+  fetcher: typeof fetch = fetch,
+) {
+  if (isE2EProviderFixtureMode()) return applicationId;
+  const { apiKey } = telnyxConfig();
+  const response = await providerJson<{ data?: { id?: string } }>(
+    `${BASE_URL}/call_control_applications/${encodeURIComponent(applicationId)}`,
+    {
+      method: "PATCH",
+      headers: authHeaders(apiKey),
+      body: JSON.stringify({
+        application_name: `AI Caller ${workspaceId}`,
+        webhook_event_url: webhookUrl,
+      }),
+    },
+    fetcher,
+  );
+  if (response.data?.id !== applicationId) {
+    throw new Error("Telnyx did not confirm the expected Call Control application.");
+  }
+  return applicationId;
+}
+
 export async function createTelnyxMessagingProfile(
   workspaceId: string,
   webhookUrl: string,
