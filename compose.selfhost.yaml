@@ -1,0 +1,85 @@
+name: ai-caller
+
+# First-time, self-hosted deployment with a private PostgreSQL service.
+# docker compose --env-file .env.deploy up --build -d
+services:
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:?Set POSTGRES_USER in .env.deploy}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env.deploy}
+      POSTGRES_DB: ${POSTGRES_DB:?Set POSTGRES_DB in .env.deploy}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U \"$$POSTGRES_USER\" -d \"$$POSTGRES_DB\""]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+      start_period: 10s
+    # Deliberately NO host port:5432. DB is reachable via Docker DNS "postgres".
+
+  migrate:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: ai-caller-app:local
+    env_file:
+      - .env.deploy
+    environment:
+      NODE_ENV: production
+      DATABASE_URL: ${DATABASE_URL:?Set DATABASE_URL with host postgres in .env.deploy}
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: "no"
+    command: ["sh", "-ec", "npm run db:migrate && npm run verify:deployment"]
+
+  web:
+    image: ai-caller-app:local
+    restart: unless-stopped
+    init: true
+    env_file:
+      - .env.deploy
+    environment:
+      NODE_ENV: production
+      DATABASE_URL: ${DATABASE_URL:?Set DATABASE_URL with host postgres in .env.deploy}
+      PORT: "8080"
+      HOSTNAME: 0.0.0.0
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:8080/api/health', {signal:AbortSignal.timeout(5000)}).then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 30s
+      timeout: 8s
+      start_period: 30s
+      retries: 3
+    ports:
+      # Defaults to loopback for a host-side HTTPS reverse proxy.
+      # Set AI_CALLER_BIND_ADDRESS=0.0.0.0 only when platform networking needs it;
+      # protect public deployments with HTTPS, firewall, and reverse proxy.
+      - "${AI_CALLER_BIND_ADDRESS:-127.0.0.1}:${AI_CALLER_HTTP_PORT:-8080}:8080"
+    volumes:
+      - recordings:/app/.data/recordings
+
+  worker:
+    image: ai-caller-app:local
+    restart: unless-stopped
+    init: true
+    env_file:
+      - .env.deploy
+    environment:
+      NODE_ENV: production
+      DATABASE_URL: ${DATABASE_URL:?Set DATABASE_URL with host postgres in .env.deploy}
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+    volumes:
+      - recordings:/app/.data/recordings
+    command: ["npm", "run", "worker"]
+
+volumes:
+  postgres_data:
+  recordings:
