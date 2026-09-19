@@ -66,6 +66,7 @@ export function smsKeyword(text: string): "STOP" | "START" | "HELP" | null {
   const word = text.trim().replace(/[.!]+$/, "").toUpperCase();
   if (["STOP", "STOPALL", "UNSUBSCRIBE", "CANCEL", "END", "QUIT"].includes(word)) return "STOP";
   if (["START", "UNSTOP", "JOIN"].includes(word)) return "START";
+  if (/^(?:please\s+)?(?:stop\s+(?:texting|sending)\s+me(?:\s+(?:texts?|messages?|sms))?|don'?t\s+(?:text|send)\s+me(?:\s+(?:texts?|messages?|sms))?|do\s+not\s+(?:text|send)\s+me(?:\s+(?:texts?|messages?|sms))?|no\s+more\s+(?:texts?|messages?|sms)|unsubscribe\s+me|remove\s+me\s+from\s+(?:sms|texts?|messages?|messaging))(?:\s+(?:please|anymore|again))?[.!]?$/.test(word.toLowerCase())) return "STOP";
   if (word === "HELP") return "HELP";
   return null;
 }
