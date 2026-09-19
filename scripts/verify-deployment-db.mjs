@@ -45,6 +45,7 @@ export async function verifyDeploymentDatabase({
   env = process.env,
   ClientCtor = pg.Client,
   log = console.log,
+  connectOnly = false,
 } = {}) {
   const target = connectionTarget(env.DATABASE_URL);
   if (!target.valid) {
@@ -63,6 +64,7 @@ export async function verifyDeploymentDatabase({
   try {
     await client.connect();
     log("PASS: PostgreSQL connection established.");
+    if (connectOnly) return true;
     const { rows } = await client.query(
       'SELECT to_regclass(\'public."user"\') AS user_table, to_regclass(\'public.workspaces\') AS workspaces_table, to_regclass(\'public.app_migrations\') AS migrations_table',
     );
@@ -88,7 +90,7 @@ export async function verifyDeploymentDatabase({
 }
 
 if (process.argv[1] && import.meta.url === pathToFileURL(resolve(process.argv[1])).href) {
-  verifyDeploymentDatabase().then((ok) => {
+  verifyDeploymentDatabase({ connectOnly: process.argv.includes("--connect-only") }).then((ok) => {
     if (!ok) process.exitCode = 1;
   }).catch(() => {
     console.error("FAIL: Deployment database probe could not complete.");
