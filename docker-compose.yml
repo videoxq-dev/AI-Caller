@@ -1,9 +1,7 @@
 name: ai-caller
 
-# DeployOS / existing PostgreSQL: app + migrations + worker only.
-# DeployOS writes the application's configured variables to .env.
-# NO bundled Postgres, ${POSTGRES_*:?} substitutions, or .env.deploy dependency.
-# DATABASE_URL must point to an existing reachable PostgreSQL instance.
+# Self-provisioning PostgreSQL + app migrations + Next.js web + worker.
+# Automatically creates and persists private PostgreSQL if no external DATABASE_URL is set.
 x-app: &app
   build:
     context: .
@@ -13,14 +11,32 @@ x-app: &app
   env_file:
     - path: .env
       required: false
-  networks:
-    - default
-    - edge
 
 services:
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-postgres}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-ai_caller_auto_pass}
+      POSTGRES_DB: ${POSTGRES_DB:-ai_caller}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d ai_caller"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+      start_period: 10s
+
   migrate:
     <<: *app
     restart: "no"
+    environment:
+      DATABASE_URL: ${DATABASE_URL:-postgresql://postgres:ai_caller_auto_pass@postgres:5432/ai_caller}
+    depends_on:
+      postgres:
+        condition: service_healthy
     command: ["sh", "-ec", "npm run verify:database-connection && npm run db:migrate && npm run verify:deployment"]
 
   web:
@@ -30,6 +46,7 @@ services:
       NODE_ENV: production
       PORT: "8080"
       HOSTNAME: 0.0.0.0
+      DATABASE_URL: ${DATABASE_URL:-postgresql://postgres:ai_caller_auto_pass@postgres:5432/ai_caller}
     depends_on:
       migrate:
         condition: service_completed_successfully
@@ -47,6 +64,8 @@ services:
   worker:
     <<: *app
     restart: unless-stopped
+    environment:
+      DATABASE_URL: ${DATABASE_URL:-postgresql://postgres:ai_caller_auto_pass@postgres:5432/ai_caller}
     depends_on:
       migrate:
         condition: service_completed_successfully
@@ -55,10 +74,5 @@ services:
       - recordings:/app/.data/recordings
 
 volumes:
+  postgres_data:
   recordings:
-
-networks:
-  default:
-  edge:
-    name: edge
-    external: true
