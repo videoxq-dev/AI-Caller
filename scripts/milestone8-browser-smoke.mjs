@@ -173,15 +173,12 @@ try {
   await pool.query(
     `INSERT INTO hosted_api_rate_cards
        (capability, provider, model, unit, cost_micros, units_per_cost, target_margin_bps, effective_from, metadata)
-     VALUES ('SMS', 'twilio', '', 'SMS_SEGMENT', 450, 1, 5500, '2026-01-01T00:00:00Z', '{"fixture":"milestone8"}'::jsonb)
-     ON CONFLICT (capability, provider, model, unit, effective_from)
-     DO UPDATE SET cost_micros = EXCLUDED.cost_micros, units_per_cost = EXCLUDED.units_per_cost,
-       target_margin_bps = EXCLUDED.target_margin_bps, enabled = true, effective_to = NULL, updated_at = now()`,
+     VALUES ('SMS', 'telnyx', '', 'SMS_SEGMENT', 450, 1, 5000, now(), '{"fixture":"milestone8"}'::jsonb)`,
   );
 
   const communicationSettings = {
     voice: { mode: "HOSTED", provider: null, numberMode: "new", number: "+12025550800" },
-    sms: { mode: "HOSTED", provider: null, numberMode: "same", number: null, displayName: "Milestone Eight Studio", replyWindow: "Always respond", afterHoursBehavior: "Auto-reply + collect details" },
+    sms: { mode: "HOSTED", provider: null, numberMode: "same", number: "+12025550800", displayName: "Milestone Eight Studio", replyWindow: "Always respond", afterHoursBehavior: "Auto-reply + collect details" },
     whatsapp: { mode: "BYOP", provider: "whatsapp", accountMode: "existing" },
     webchat: { enabled: true },
   };
@@ -195,6 +192,15 @@ try {
     `INSERT INTO capability_bindings (workspace_id, capability, integration_id, mode)
      VALUES ($1, 'SMS', NULL, 'HOSTED')
      ON CONFLICT (workspace_id, capability) DO UPDATE SET integration_id = NULL, mode = 'HOSTED', updated_at = now()`,
+    [workspaceId],
+  );
+  await pool.query(
+    `INSERT INTO hosted_phone_numbers
+       (workspace_id, provider, provider_number_id, phone_number, country_code, number_type, status, messaging_readiness,
+        provider_monthly_cost_micros, provider_upfront_cost_micros, monthly_credits, purchase_credits,
+        current_period_start, current_period_end, next_billing_at)
+     VALUES ($1, 'telnyx', 'm8-managed-number', '+12025550800', 'US', 'local', 'ACTIVE', 'READY',
+       1000000, 0, 2000, 2000, now(), now() + interval '30 days', now() + interval '30 days')`,
     [workspaceId],
   );
 

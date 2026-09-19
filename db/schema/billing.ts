@@ -47,7 +47,7 @@ export const hostedApiRateCards = pgTable(
     unit: text("unit").notNull(),
     costMicros: bigint("cost_micros", { mode: "number" }).notNull(),
     unitsPerCost: integer("units_per_cost").notNull(),
-    targetMarginBps: integer("target_margin_bps").default(5500).notNull(),
+    targetMarginBps: integer("target_margin_bps").default(5000).notNull(),
     enabled: boolean("enabled").default(true).notNull(),
     effectiveFrom: timestamp("effective_from", { withTimezone: true, mode: "date" }).defaultNow().notNull(),
     effectiveTo: timestamp("effective_to", { withTimezone: true, mode: "date" }),

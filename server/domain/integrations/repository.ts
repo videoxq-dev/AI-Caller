@@ -1,9 +1,10 @@
-import { and, eq } from "drizzle-orm";
+import { and, eq, isNull } from "drizzle-orm";
 import { db } from "@/db";
 import {
   calendarSetupSettings,
   capabilityBindings,
   communicationSetupSettings,
+  hostedPhoneNumbers,
   integrations,
 } from "@/db/schema";
 import { markSetupStep } from "@/server/domain/onboarding/repository";
@@ -216,17 +217,32 @@ export async function getCommunicationSetup(workspaceId: string) {
   return row?.settings ?? null;
 }
 
+async function requireManagedPhoneReady(workspaceId: string) {
+  const [number] = await db.select({ id: hostedPhoneNumbers.id })
+    .from(hostedPhoneNumbers)
+    .where(and(
+      eq(hostedPhoneNumbers.workspaceId, workspaceId),
+      eq(hostedPhoneNumbers.status, "ACTIVE"),
+      isNull(hostedPhoneNumbers.releasedAt),
+    ))
+    .limit(1);
+  if (!number) {
+    throw new Error("Choose and activate an AI Caller phone number before completing communication setup.");
+  }
+}
+
 export async function saveCommunicationSetup(workspaceId: string, input: CommunicationSetupInput) {
+  if (input.completeStep && (input.voice.mode === "HOSTED" || input.sms.mode === "HOSTED")) {
+    await requireManagedPhoneReady(workspaceId);
+  }
   const settings = { voice: input.voice, sms: input.sms, whatsapp: input.whatsapp, webchat: input.webchat };
   const now = new Date();
   await db.insert(communicationSetupSettings).values({ workspaceId, settings, updatedAt: now }).onConflictDoUpdate({ target: communicationSetupSettings.workspaceId, set: { settings, updatedAt: now } });
   const capabilityWrites = [
+    bindCapability(workspaceId, "VOICE", input.voice.mode, input.voice.provider),
     bindCapability(workspaceId, "SMS", input.sms.mode, input.sms.provider),
     bindCapability(workspaceId, "WHATSAPP", input.whatsapp.mode, input.whatsapp.provider ?? "whatsapp"),
   ];
-  if (input.voice.mode === "BYOP" && input.voice.provider === "telnyx") {
-    capabilityWrites.push(bindCapability(workspaceId, "VOICE", "BYOP", "telnyx"));
-  }
   await Promise.all(capabilityWrites);
   if (input.completeStep) await markSetupStep(workspaceId, "communication", now);
   return settings;

@@ -548,10 +548,10 @@ export async function listAdminRateCards() {
 
 export async function createAdminRateVersion(input: {
   actorUserId: string;
-  capability: "AI_TEXT" | "SMS";
+  capability: "AI_TEXT" | "SMS" | "VOICE";
   provider: string;
   model?: string;
-  unit: "AI_INPUT_TOKEN" | "AI_CACHED_INPUT_TOKEN" | "AI_OUTPUT_TOKEN" | "SMS_SEGMENT";
+  unit: "AI_INPUT_TOKEN" | "AI_CACHED_INPUT_TOKEN" | "AI_OUTPUT_TOKEN" | "SMS_SEGMENT" | "VOICE_MINUTE";
   costMicros: number;
   unitsPerCost: number;
   targetMarginBps: number;
@@ -561,7 +561,8 @@ export async function createAdminRateVersion(input: {
   if (!Number.isInteger(input.unitsPerCost) || input.unitsPerCost <= 0) throw new AppError("INVALID_RATE_UNITS", "Units per cost must be a positive integer.", 400);
   if (!Number.isInteger(input.targetMarginBps) || input.targetMarginBps < 0 || input.targetMarginBps > 9500) throw new AppError("INVALID_RATE_MARGIN", "Target margin must be between 0 and 9500 basis points.", 400);
   if (input.capability === "SMS" && input.unit !== "SMS_SEGMENT") throw new AppError("INVALID_RATE_UNIT", "SMS rates must use SMS_SEGMENT.", 400);
-  if (input.capability === "AI_TEXT" && input.unit === "SMS_SEGMENT") throw new AppError("INVALID_RATE_UNIT", "AI rates must use an AI token unit.", 400);
+  if (input.capability === "VOICE" && input.unit !== "VOICE_MINUTE") throw new AppError("INVALID_RATE_UNIT", "Voice rates must use VOICE_MINUTE.", 400);
+  if (input.capability === "AI_TEXT" && (input.unit === "SMS_SEGMENT" || input.unit === "VOICE_MINUTE")) throw new AppError("INVALID_RATE_UNIT", "AI rates must use an AI token unit.", 400);
   if (Number.isNaN(input.effectiveFrom.getTime())) throw new AppError("INVALID_RATE_DATE", "Rate effective date is invalid.", 400);
 
   const provider = input.provider.trim().toLowerCase();

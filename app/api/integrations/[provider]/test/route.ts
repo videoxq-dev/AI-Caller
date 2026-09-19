@@ -1,4 +1,5 @@
 import { resolveWorkspaceContext } from "@/server/auth/workspace-context";
+import { requireWorkspacePermission } from "@/server/auth/permissions";
 import { bindCapability, getPrivateIntegration, testSavedIntegration } from "@/server/domain/integrations/repository";
 import { providerIdSchema } from "@/server/domain/integrations/schemas";
 import { AppError, toErrorResponse } from "@/server/http/errors";
@@ -6,6 +7,7 @@ import { AppError, toErrorResponse } from "@/server/http/errors";
 export async function POST(request: Request, { params }: { params: Promise<{ provider: string }> }) {
   try {
     const context = await resolveWorkspaceContext(request.headers);
+    requireWorkspacePermission(context.membership.role, "integration.manage");
     const { provider: rawProvider } = await params;
     const parsed = providerIdSchema.safeParse(rawProvider);
     if (!parsed.success) throw new AppError("BAD_REQUEST", "Unsupported integration provider.", 400);

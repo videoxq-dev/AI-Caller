@@ -4,16 +4,19 @@ import { decryptIntegrationCredentials, type EncryptedSecretEnvelope } from "@/s
 import { resolveProviderRoute } from "@/server/providers/resolver";
 import type { VoiceProvider } from "@/server/providers/contracts";
 import { createTelnyxVoiceProvider } from "./telnyx";
+import { getHostedPhoneWebhookRecord } from "@/server/phone-numbers/service";
+import { getHostedTelnyxCredentials } from "@/server/providers/telnyx-platform";
 import { createE2EVoiceProvider, isE2EProviderFixtureMode } from "@/server/providers/e2e-fixtures";
 
 export type VoiceProviderName = "telnyx";
 
 export type VoiceRuntime = {
   workspaceId: string;
-  mode: "BYOP";
+  mode: "HOSTED" | "BYOP";
   providerName: VoiceProviderName;
-  integrationId: string;
+  integrationId: string | null;
   receiverNumber: string;
+  serviceStatus: "ACTIVE" | "PAST_DUE" | "SUSPENDED" | null;
   provider: VoiceProvider;
 };
 
@@ -36,14 +39,30 @@ export async function resolveVoiceRuntime(
   fetcher: typeof fetch = fetch,
 ): Promise<VoiceRuntime> {
   const route = await resolveProviderRoute(workspaceId, "VOICE");
-  if (!route || route.mode !== "BYOP") {
-    throw new Error("No BYOP voice provider route is configured for this workspace.");
+  if (!route) throw new Error("No voice provider route is configured for this workspace.");
+  if (requestedProvider !== "telnyx") throw new Error("Inbound voice currently uses the managed Telnyx adapter.");
+
+  if (route.mode === "HOSTED") {
+    const number = await getHostedPhoneWebhookRecord(workspaceId);
+    const hosted = getHostedTelnyxCredentials();
+    const base = createTelnyxVoiceProvider({
+      apiKey: hosted.apiKey,
+      webhookPublicKey: hosted.webhookPublicKey,
+      fetcher,
+    });
+    return {
+      workspaceId,
+      mode: "HOSTED",
+      providerName: "telnyx",
+      integrationId: null,
+      receiverNumber: normalizePhone(number.phoneNumber),
+      serviceStatus: number.status as "ACTIVE" | "PAST_DUE" | "SUSPENDED",
+      provider: isE2EProviderFixtureMode() ? createE2EVoiceProvider(base) : base,
+    };
   }
+
   if (route.provider !== requestedProvider) {
     throw new Error("The webhook provider is not the active voice provider for this workspace.");
-  }
-  if (requestedProvider !== "telnyx") {
-    throw new Error("Milestone 7 currently supports Telnyx for inbound voice.");
   }
   if (!route.integrationId) throw new Error("The active voice integration is missing.");
 
@@ -67,6 +86,7 @@ export async function resolveVoiceRuntime(
     providerName: "telnyx",
     integrationId: integration.id,
     receiverNumber: normalizePhone(phone),
+    serviceStatus: null,
     provider: (() => {
       const base = createTelnyxVoiceProvider({
         apiKey: required(secret, "apiKey", "Telnyx API key"),

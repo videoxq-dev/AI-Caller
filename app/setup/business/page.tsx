@@ -20,13 +20,13 @@ import { IndustryField } from "./industry-field";
 import "./business-profile.css";
 
 const defaultDays = [
-  { day: "Monday", open: "08:00", close: "18:00", enabled: true },
-  { day: "Tuesday", open: "08:00", close: "18:00", enabled: true },
-  { day: "Wednesday", open: "08:00", close: "18:00", enabled: true },
-  { day: "Thursday", open: "08:00", close: "18:00", enabled: true },
-  { day: "Friday", open: "08:00", close: "18:00", enabled: true },
-  { day: "Saturday", open: "09:00", close: "15:00", enabled: true },
-  { day: "Sunday", open: "", close: "", enabled: false },
+  { dayOfWeek: 1, day: "Monday", open: "08:00", close: "18:00", enabled: true },
+  { dayOfWeek: 2, day: "Tuesday", open: "08:00", close: "18:00", enabled: true },
+  { dayOfWeek: 3, day: "Wednesday", open: "08:00", close: "18:00", enabled: true },
+  { dayOfWeek: 4, day: "Thursday", open: "08:00", close: "18:00", enabled: true },
+  { dayOfWeek: 5, day: "Friday", open: "08:00", close: "18:00", enabled: true },
+  { dayOfWeek: 6, day: "Saturday", open: "09:00", close: "15:00", enabled: true },
+  { dayOfWeek: 0, day: "Sunday", open: "", close: "", enabled: false },
 ];
 
 const timeOptions = Array.from({ length: 24 }, (_, hour) => {
@@ -55,9 +55,11 @@ export default async function BusinessProfilePage() {
     getSetupStatus(context.workspace.id),
   ]);
   const hourMap = new Map(saved.hours.map((row) => [row.dayOfWeek, row]));
-  const days = defaultDays.map((day, index) => {
-    const stored = hourMap.get(index);
-    return stored ? { day: day.day, open: normalizeStoredTime(stored.openTime, day.open), close: normalizeStoredTime(stored.closeTime, day.close), enabled: stored.enabled } : day;
+  const days = defaultDays.map((day) => {
+    const stored = hourMap.get(day.dayOfWeek);
+    return stored
+      ? { ...day, open: normalizeStoredTime(stored.openTime, day.open), close: normalizeStoredTime(stored.closeTime, day.close), enabled: stored.enabled }
+      : day;
   });
   const profile = saved.profile;
 
@@ -105,13 +107,13 @@ export default async function BusinessProfilePage() {
                 <label className="timezoneField"><span>Timezone</span><select name="timezone" defaultValue={profile?.timezone ?? "UTC"}>{timezones.map((timezone) => <option value={timezone} key={timezone}>{timezone}</option>)}</select></label>
               </div>
               <div className="hoursTable">
-                {days.map((row, index) => (
-                  <div className={`hoursRow ${!row.enabled ? "closed" : ""}`} key={row.day}>
+                {days.map((row) => (
+                  <div className={`hoursRow ${!row.enabled ? "closed" : ""}`} key={row.dayOfWeek}>
                     <strong>{row.day}</strong>
-                    <label className="toggle" aria-label={`${row.day} open`}><input name={`hours.${index}.enabled`} type="checkbox" defaultChecked={row.enabled} /><span /></label>
-                    <select name={`hours.${index}.openTime`} aria-label={`${row.day} opening time`} defaultValue={row.open || "08:00"}>{timeOptions.map((option) => <option value={option.value} key={option.value}>{option.label}</option>)}</select>
+                    <label className="toggle" aria-label={`${row.day} open`}><input name={`hours.${row.dayOfWeek}.enabled`} type="checkbox" defaultChecked={row.enabled} /><span /></label>
+                    <select name={`hours.${row.dayOfWeek}.openTime`} aria-label={`${row.day} opening time`} defaultValue={row.open || "08:00"}>{timeOptions.map((option) => <option value={option.value} key={option.value}>{option.label}</option>)}</select>
                     <span className="toLabel">to</span>
-                    <select name={`hours.${index}.closeTime`} aria-label={`${row.day} closing time`} defaultValue={row.close || "18:00"}>{timeOptions.map((option) => <option value={option.value} key={option.value}>{option.label}</option>)}</select>
+                    <select name={`hours.${row.dayOfWeek}.closeTime`} aria-label={`${row.day} closing time`} defaultValue={row.close || "18:00"}>{timeOptions.map((option) => <option value={option.value} key={option.value}>{option.label}</option>)}</select>
                   </div>
                 ))}
               </div>

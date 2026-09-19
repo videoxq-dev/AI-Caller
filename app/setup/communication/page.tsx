@@ -13,16 +13,12 @@ import {
 } from "@/components/icons";
 import { showToast } from "@/components/toast";
 import { SetupProgressPanel } from "../setup-progress";
+import { PhoneNumberManager, type ManagedPhoneNumber } from "@/components/phone-number-manager";
 import { WebChatSetup, WebChatSidebar } from "./webchat";
 import "./communication.css";
 
-type Channel = "phone" | "sms" | "whatsapp" | "webchat";
+type Channel = "phone" | "whatsapp" | "webchat";
 type IntegrationSummary = { provider: string; status: "CONNECTED" | "ERROR" | "DISCONNECTED" };
-type VoiceConfig = {
-  configured: boolean;
-  receiverNumber: string | null;
-};
-
 function responseError(payload: unknown, fallback: string) {
   if (!payload || typeof payload !== "object") return fallback;
   const error = (payload as { error?: unknown }).error;
@@ -53,28 +49,17 @@ function responseError(payload: unknown, fallback: string) {
 export default function CommunicationSetupPage() {
   const router = useRouter();
   const [channel, setChannel] = useState<Channel>("phone");
-  const [voiceConfig, setVoiceConfig] = useState<VoiceConfig>({ configured: false, receiverNumber: null });
-  const [displayName, setDisplayName] = useState("");
+  const [managedNumber, setManagedNumber] = useState<ManagedPhoneNumber | null>(null);
   const [integrations, setIntegrations] = useState<IntegrationSummary[]>([]);
   const [saving, setSaving] = useState(false);
 
   useEffect(() => {
-    Promise.all([
-      fetch("/api/setup/communication", { cache: "no-store" }).then((response) => response.ok ? response.json() : null),
-      fetch("/api/integrations", { cache: "no-store" }).then((response) => response.ok ? response.json() : null),
-      fetch("/api/integrations/voice/config", { cache: "no-store" }).then((response) => response.ok ? response.json() : null),
-    ]).then(([setupPayload, integrationPayload, voicePayload]) => {
-      if (voicePayload) {
-        setVoiceConfig({
-          configured: voicePayload.configured === true,
-          receiverNumber: typeof voicePayload.receiverNumber === "string" ? voicePayload.receiverNumber : null,
-        });
-      }
-      if (typeof setupPayload?.settings?.sms?.displayName === "string") {
-        setDisplayName(setupPayload.settings.sms.displayName);
-      }
-      if (Array.isArray(integrationPayload?.integrations)) setIntegrations(integrationPayload.integrations);
-    }).catch(() => showToast("Some communication settings could not be loaded. You can still continue setup.", "error"));
+    fetch("/api/integrations", { cache: "no-store" })
+      .then((response) => response.ok ? response.json() : null)
+      .then((payload) => {
+        if (Array.isArray(payload?.integrations)) setIntegrations(payload.integrations);
+      })
+      .catch(() => showToast("Some communication settings could not be loaded. You can still continue setup.", "error"));
   }, []);
 
   const connected = useMemo(
@@ -84,20 +69,24 @@ export default function CommunicationSetupPage() {
   const whatsappConnected = connected.has("whatsapp");
 
   async function save(completeStep: boolean) {
+    if (completeStep && managedNumber?.status !== "ACTIVE") {
+      setChannel("phone");
+      showToast("Choose and activate your AI Caller phone number before continuing.", "error");
+      return;
+    }
     setSaving(true);
     try {
       const response = await fetch("/api/setup/communication", {
         method: "PUT",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({
-          // Voice still uses the existing inbound adapter internally. Provider details stay out of onboarding.
-          voice: { mode: "BYOP", provider: "telnyx", numberMode: "existing", number: voiceConfig.receiverNumber },
+          voice: { mode: "HOSTED", provider: null, numberMode: "new", number: managedNumber?.phoneNumber ?? null },
           sms: {
             mode: "HOSTED",
             provider: null,
             numberMode: "same",
-            number: null,
-            displayName,
+            number: managedNumber?.phoneNumber ?? null,
+            displayName: "",
             replyWindow: "Always respond",
             afterHoursBehavior: "Auto-reply + collect details",
           },
@@ -136,47 +125,19 @@ export default function CommunicationSetupPage() {
           <div className="communicationIntro">
             <span className="stepBadge">STEP 3 OF 6</span>
             <h1>Connect your communication channels</h1>
-            <p>Choose how customers can reach your AI assistant. Phone and messaging connections can be finished later.</p>
+            <p>Choose a voice + SMS-capable business number, connect WhatsApp, and add web chat to your website. Outbound US business SMS unlocks after the required carrier registration is approved.</p>
           </div>
 
-          <div className="channelTabs" role="tablist" aria-label="Communication channels">
-            <button className={channel === "phone" ? "active" : ""} onClick={() => setChannel("phone")} type="button"><span className="channelTabIcon blue"><PhoneIcon size={21} /></span><span><strong>Phone &amp; Voice</strong><small>Receive inbound calls</small></span></button>
-            <button className={channel === "sms" ? "active" : ""} onClick={() => setChannel("sms")} type="button"><span className="channelTabIcon purple"><MessageIcon size={20} /></span><span><strong>SMS</strong><small>Send text messages</small></span></button>
+          <div className="channelTabs channelTabsThree" role="tablist" aria-label="Communication channels">
+            <button className={channel === "phone" ? "active" : ""} onClick={() => setChannel("phone")} type="button"><span className="channelTabIcon blue"><PhoneIcon size={21} /></span><span><strong>Phone &amp; SMS</strong><small>One managed business number</small></span></button>
             <button className={channel === "whatsapp" ? "active" : ""} onClick={() => setChannel("whatsapp")} type="button"><span className="channelTabIcon green"><MessageIcon size={20} /></span><span><strong>WhatsApp</strong><small>Connect your account</small></span></button>
             <button className={channel === "webchat" ? "active" : ""} onClick={() => setChannel("webchat")} type="button"><span className="channelTabIcon orange"><MessageIcon size={20} /></span><span><strong>Web Chat</strong><small>Add to your website</small></span></button>
           </div>
 
           {channel === "phone" && (
             <section className="channelSetupCard">
-              <div className="communicationSectionHeading"><span className="sectionCircle blue"><PhoneIcon size={23} /></span><div><h2>Phone &amp; Voice Setup</h2><p>Configure the number customers call to reach your AI assistant. Outbound AI calling is not enabled.</p></div></div>
-              <div className="existingNumberEmpty voiceConnectionSummary">
-                <PhoneIcon size={24} />
-                <div>
-                  <strong>{voiceConfig.receiverNumber ?? "Configure your phone number"}</strong>
-                  <span>{voiceConfig.configured ? "Your inbound phone connection is ready." : "Phone activation is optional during onboarding. You can finish it before going live."}</span>
-                </div>
-                <Link className="outlineAction noWrapAction" href="/integrations?provider=telnyx&return=%2Fsetup%2Fcommunication">{voiceConfig.configured ? "Manage number" : "Connect Phone number"}</Link>
-              </div>
-            </section>
-          )}
-
-          {channel === "sms" && (
-            <section className="channelSetupCard smsSetupCard">
-              <div className="communicationSectionHeading"><span className="sectionCircle purple"><MessageIcon size={23} /></span><div><h2>SMS Setup</h2><p>SMS is hosted by AI Caller and billed from your hosted credits. There is no provider setup during onboarding.</p></div></div>
-              <div className="smsBlock">
-                <h3>SMS number</h3>
-                <div className="existingNumberEmpty">
-                  <PhoneIcon size={24} />
-                  <div><strong>{voiceConfig.receiverNumber ?? "Phone number not configured yet"}</strong><span>{voiceConfig.receiverNumber ? "SMS will use your configured business number." : "You can continue now and assign the hosted messaging number before going live."}</span></div>
-                </div>
-              </div>
-              <div className="smsBlock messagingSettingsBlock">
-                <h3>Messaging identity</h3>
-                <div className="smsSettingsGrid">
-                  <label className="communicationField"><span>Display business name</span><input value={displayName} onChange={(event) => setDisplayName(event.target.value)} maxLength={100} placeholder="Your business name" /></label>
-                  <div className="complianceField"><span className="complianceLabel">Messaging safeguards</span><div className="compliancePills"><span><CheckIcon size={13} /> STOP / HELP handling enabled</span><span><CheckIcon size={13} /> Hosted routing managed by AI Caller</span></div></div>
-                </div>
-              </div>
+              <div className="communicationSectionHeading"><span className="sectionCircle blue"><PhoneIcon size={23} /></span><div><h2>Phone &amp; SMS</h2><p>Use one AI Caller-managed voice + SMS-capable number. Search by state, city or area code; outbound SMS remains gated until carrier registration is approved.</p></div></div>
+              <PhoneNumberManager onNumberChange={setManagedNumber} />
             </section>
           )}
 
@@ -197,7 +158,7 @@ export default function CommunicationSetupPage() {
 
         <aside className="communicationSidebar">
           <SetupProgressPanel currentStep={3} estimated="7 minutes" className="sidebarCard communicationProgressCard" progressClassName="sidebarProgressBar communicationProgressBar" />
-          {channel === "webchat" ? <WebChatSidebar /> : <section className="sidebarCard communicationWhyCard"><h2>Connect what you need</h2><p>Web chat is available immediately. Phone, SMS and WhatsApp can be completed before go-live without blocking the rest of onboarding.</p><div className="communicationBenefits"><div className="communicationBenefit"><span className="benefitIcon green"><CheckIcon size={16} /></span><div><strong>Simple onboarding</strong><small>No provider credentials or callback URLs are required here.</small></div></div><div className="communicationBenefit"><span className="benefitIcon blue"><PhoneIcon size={16} /></span><div><strong>Finish later</strong><small>Save progress now and activate optional channels when you are ready.</small></div></div></div></section>}
+          {channel === "webchat" ? <WebChatSidebar /> : <section className="sidebarCard communicationWhyCard"><h2>Connect what you need</h2><p>Your AI Caller number is provisioned for voice and SMS routing. Outbound US business SMS is enabled only after the required carrier registration is approved. Number setup and renewals are billed from your credit balance.</p><div className="communicationBenefits"><div className="communicationBenefit"><span className="benefitIcon green"><CheckIcon size={16} /></span><div><strong>One managed voice + SMS number</strong><small>No carrier account, provider credentials or callback URLs are required.</small></div></div><div className="communicationBenefit"><span className="benefitIcon blue"><PhoneIcon size={16} /></span><div><strong>Local number search</strong><small>Filter by state, city or area code and AI Caller configures the number automatically.</small></div></div></div></section>}
         </aside>
       </div>
     </main>

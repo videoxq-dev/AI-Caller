@@ -20,9 +20,10 @@ export function ToastHost() {
     function onToast(event: Event) {
       const detail = (event as CustomEvent<{ message?: unknown; tone?: unknown }>).detail;
       if (!detail || typeof detail.message !== "string" || !detail.message.trim()) return;
+      const message = detail.message.trim();
       const tone: ToastTone = detail.tone === "success" || detail.tone === "error" ? detail.tone : "info";
       const id = nextId.current++;
-      setItems((current) => [...current.slice(-2), { id, message: detail.message.trim(), tone }]);
+      setItems((current) => [...current.slice(-2), { id, message, tone }]);
       window.setTimeout(() => {
         setItems((current) => current.filter((item) => item.id !== id));
       }, 5000);

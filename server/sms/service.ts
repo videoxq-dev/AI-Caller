@@ -12,7 +12,8 @@ import { enqueueUniqueJob } from "@/server/jobs";
 import { SMS_INBOUND_RESPONSE, smsInboundResponseJobSchema, type SmsInboundResponseJob } from "@/server/jobs/queues";
 import { responseOrchestrator } from "@/server/orchestrator";
 import type { NormalizedSmsEvent, SmsWebhookInput } from "@/server/providers/contracts";
-import { resolveSmsRuntime, type SmsProviderName, type SmsRuntime } from "@/server/providers/sms/runtime";
+import { outboundSmsReady } from "@/server/phone-numbers/lifecycle";
+import { resolveSmsWebhookRuntime, type SmsProviderName, type SmsRuntime } from "@/server/providers/sms/runtime";
 import {
   claimProviderWebhookEvent,
   claimQueuedProviderWebhookEvent,
@@ -187,8 +188,13 @@ export function createSmsWebhookService(dependencies: SmsServiceDependencies) {
       let processed = 0;
       let duplicates = 0;
       let deferred = 0;
+      let suppressed = 0;
 
       for (const event of events) {
+        if (runtime.mode === "HOSTED" && runtime.serviceStatus === "SUSPENDED" && event.type === "MESSAGE_RECEIVED") {
+          suppressed += 1;
+          continue;
+        }
         if (event.type === "MESSAGE_RECEIVED" && normalizePhone(event.to) !== runtime.senderNumber) {
           throw new AppError("SMS_DESTINATION_MISMATCH", "The inbound SMS destination does not match this workspace's configured SMS number.", 409);
         }
@@ -246,7 +252,7 @@ export function createSmsWebhookService(dependencies: SmsServiceDependencies) {
         queued += 1;
       }
 
-      return { ok: true as const, queued, processed, duplicates, deferred };
+      return { ok: true as const, queued, processed, duplicates, deferred, suppressed };
     },
 
     async processInboundJob(input: SmsInboundResponseJob) {
@@ -275,6 +281,16 @@ export function createSmsWebhookService(dependencies: SmsServiceDependencies) {
           metadata: { providerEventId: job.webhookEventId },
         });
         await chargeHostedInboundSms(job.workspaceId, runtime, job.externalMessageId, job.text);
+
+        if (runtime.mode === "HOSTED" && !outboundSmsReady(runtime.messagingReadiness)) {
+          await completeProviderWebhookEvent(job.workspaceId, job.webhookEventId);
+          return {
+            skipped: false as const,
+            replied: false as const,
+            outboundBlocked: true as const,
+            messagingReadiness: runtime.messagingReadiness,
+          };
+        }
 
         const orchestrated = await dependencies.respond(job.workspaceId, conversation.id);
         if (!orchestrated.reply) {
@@ -313,7 +329,7 @@ export function createSmsWebhookService(dependencies: SmsServiceDependencies) {
 }
 
 export const smsWebhookService = createSmsWebhookService({
-  resolveRuntime: resolveSmsRuntime,
+  resolveRuntime: resolveSmsWebhookRuntime,
   respond: (workspaceId, conversationId) => responseOrchestrator.respond(workspaceId, conversationId),
   enqueueResponseJob: (job) => enqueueUniqueJob(SMS_INBOUND_RESPONSE, job.webhookEventId, job),
 });

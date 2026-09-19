@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { resolveWorkspaceContext } from "@/server/auth/workspace-context";
+import { requireWorkspacePermission } from "@/server/auth/permissions";
 import { bindCapability, saveVerifiedIntegration } from "@/server/domain/integrations/repository";
 import { completeMetaEmbeddedSignup } from "@/server/providers/meta";
 import { toErrorResponse } from "@/server/http/errors";
@@ -15,6 +16,7 @@ const inputSchema = z.object({
 export async function POST(request: Request) {
   try {
     const context = await resolveWorkspaceContext(request.headers);
+    requireWorkspacePermission(context.membership.role, "integration.manage");
     const input = parseInput(inputSchema, await request.json());
     const result = await completeMetaEmbeddedSignup(input);
     const integration = await saveVerifiedIntegration(context.workspace.id, {

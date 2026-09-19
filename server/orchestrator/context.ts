@@ -92,6 +92,7 @@ function buildSystemPrompt(
     qualificationConfigFromBehaviorSettings(agent?.behaviorSettings),
     customer.qualificationData,
   );
+
   const knowledgeText = agentSetup.knowledge.length
     ? agentSetup.knowledge.map((source) => `SOURCE: ${clip(source.label, 200)}${source.sourceUrl ? ` (${clip(source.sourceUrl, 500)})` : ""}\n${clip(source.content, 1800)}`).join("\n\n")
     : "No imported knowledge sources configured.";
