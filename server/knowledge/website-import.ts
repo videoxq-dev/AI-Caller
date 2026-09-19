@@ -34,7 +34,7 @@ export function isPublicAddress(address: string) {
   if (normalized.startsWith("::ffff:")) return false;
   if (normalized.startsWith("fc") || normalized.startsWith("fd") || normalized.startsWith("ff")) return false;
   if (/^fe[89ab]/.test(normalized)) return false;
-  if (normalized.startsWith("2001:db8") || normalized === "2001::" || normalized.startsWith("2001:0:") || normalized.startsWith("2002:")) return false;
+  if (normalized.startsWith("2001:db8") || normalized.startsWith("2001::") || normalized.startsWith("2001:0:") || normalized.startsWith("2002:")) return false;
   return true;
 }
 
