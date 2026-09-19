@@ -86,7 +86,8 @@ describe("approved managed number outbound SMS", () => {
   it("allows a reply to the current SMS conversation without inventing recurring consent", async () => {
     await appendMessage(workspaceId, conversationId, {
       channel: "SMS", direction: "INBOUND", senderType: "CUSTOMER", contentType: "TEXT",
-      body: "Where is my appointment?", provider: "telnyx", externalMessageId: "in-1", metadata: {},
+      body: "Where is my appointment?", provider: "telnyx", externalMessageId: "in-1",
+      metadata: {}, metadata: {},
     });
     await expect(sendSmsConversationTextWithRuntime(workspaceId, conversationId, runtime(), {
       senderType: "AI", text: "Your appointment is at the downtown office.",
@@ -130,7 +131,8 @@ describe("approved managed number outbound SMS", () => {
   it("stops both SMS categories after explicit opt-out, even for a current customer reply", async () => {
     await appendMessage(workspaceId, conversationId, {
       channel: "SMS", direction: "INBOUND", senderType: "CUSTOMER", contentType: "TEXT",
-      body: "Stop texting me", provider: "telnyx", externalMessageId: "in-stop", metadata: {},
+      body: "Stop texting me", provider: "telnyx", externalMessageId: "in-stop",
+      metadata: {}, metadata: {},
     });
     await recordSmsConsent(workspaceId, contactId, phone, {
       category: "TRANSACTIONAL", status: "OPTED_OUT", source: "INBOUND_SMS",
