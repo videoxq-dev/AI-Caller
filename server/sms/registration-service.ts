@@ -163,7 +163,8 @@ export async function reconcileSmsRegistration(
           await client.appealCampaign(campaignId, "Corrected campaign message flow, samples, and opt-in evidence supplied by the customer.");
           campaign = await client.getCampaign(campaignId);
         }
-        const expectedUsecase = draft.categories.includes("MARKETING") ? "MIXED" : "CUSTOMER_CARE";
+        const expectedUsecase = draft.categories.includes("MARKETING")
+          ? draft.categories.includes("TRANSACTIONAL") ? "MIXED" : "MARKETING" : "CUSTOMER_CARE";
         if (campaign.usecase !== expectedUsecase) {
           carrierStatus = "CAMPAIGN_PURPOSE_MISMATCH";
           reason = "The carrier campaign use case does not match the corrected registration. Contact support to register a different messaging program.";
