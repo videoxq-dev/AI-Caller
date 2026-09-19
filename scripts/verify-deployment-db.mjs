@@ -6,8 +6,12 @@ import pg from "pg";
 import { resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 
-config({ path: ".env.local" });
-config({ path: ".env" });
+// Mirror Next.js runtime precedence when a hosting platform uses env files instead
+// of injected container variables; dotenv never overrides existing shell variables.
+const mode = process.env.NODE_ENV === "production" ? "production" : "development";
+for (const file of [`.env.${mode}.local`, ".env.local", `.env.${mode}`, ".env"]) {
+  config({ path: file });
+}
 
 export function connectionTarget(value) {
   if (!value?.trim()) return { valid: false, loopback: false, host: "unknown", port: "5432" };
