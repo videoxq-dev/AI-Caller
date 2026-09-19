@@ -19,6 +19,7 @@ test("preflight rejects missing keys, non-OpenAI provider and CI fixtures", () =
   const result = preflight({ ...env, HOSTED_AI_PROVIDER: "openrouter", AI_CALLER_E2E_FIXTURES: "1" });
   assert.equal(result.failures.length, 2);
   assert.equal(preflight(env).model, "gpt-5.6-luna");
+  assert.match(preflight({ ...env, HOSTED_AI_MODEL: "gpt-5.6-sol" }).failures.join(" "), /HOSTED_AI_MODEL/);
 });
 
 test("configuration check never invokes provider APIs", async () => {
@@ -39,6 +40,7 @@ test("OpenAI probe requests an actual non-stored model response", async () => {
       const input = JSON.parse(init.body);
       assert.equal(input.model, "gpt-5.6-luna");
       assert.equal(input.store, false);
+      assert.equal(input.reasoning.effort, "none");
       assert.ok(init.signal);
       assert.equal(init.redirect, "error");
       return json({ output: [{ type: "message", content: [{ type: "output_text", text: "READY" }] }] });
