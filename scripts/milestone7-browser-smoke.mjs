@@ -308,6 +308,12 @@ try {
   );
   assert(groundedReply.rows[0].body.includes("$120"), "Voice knowledge response was not grounded in configured pricing.");
 
+  const firstSpeakEnd = await sendWebhook(
+    workspaceId,
+    eventPayload("call.speak.ended", "m7-reply-1-ended", callSessionId, callControlId),
+  );
+  assert(firstSpeakEnd.data?.processed === 1, "AI reply completion event failed.");
+
   const availability = await sendWebhook(
     workspaceId,
     eventPayload("call.transcription", "m7-turn-2", callSessionId, callControlId, {
@@ -322,6 +328,12 @@ try {
     (rows) => rows.rowCount === 1,
     "voice availability response",
   );
+
+  const secondSpeakEnd = await sendWebhook(
+    workspaceId,
+    eventPayload("call.speak.ended", "m7-reply-2-ended", callSessionId, callControlId),
+  );
+  assert(secondSpeakEnd.data?.processed === 1, "AI reply completion event failed.");
 
   const booking = await sendWebhook(
     workspaceId,
