@@ -23,8 +23,11 @@ function carrier(overrides: Record<string, ReturnType<typeof vi.fn>> = {}) {
   return {
     createBrand: vi.fn(async () => ({ brandId: "brand-1" })),
     getBrand: vi.fn(async () => ({ brandId: "brand-1", status: "OK", identityStatus: "VERIFIED" })),
+    updateBrand: vi.fn(async () => ({ brandId: "brand-1", status: "OK", identityStatus: "VERIFIED" })),
     createCampaign: vi.fn(async () => ({ campaignId: "campaign-1" })),
     getCampaign: vi.fn(async () => ({ campaignId: "campaign-1", submissionStatus: "CREATED", campaignStatus: "MNO_PROVISIONED" })),
+    updateCampaign: vi.fn(async () => ({ campaignId: "campaign-1" })),
+    appealCampaign: vi.fn(async () => ({ appealed_at: "2026-09-19T00:00:00Z" })),
     getAssignment: vi.fn(async () => ({ phoneNumber: "+12025550200", campaignId: "campaign-1", assignmentStatus: "ASSIGNED" })),
     assignNumber: vi.fn(async () => ({ phoneNumber: "+12025550200", campaignId: "campaign-1", assignmentStatus: "ASSIGNED" })),
     findTollFreeByNumber: vi.fn(async () => null),
