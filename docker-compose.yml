@@ -61,6 +61,8 @@ services:
       NODE_ENV: production
       PORT: "8080"
       HOSTNAME: 0.0.0.0
+      VOICE_RECORDING_ALLOW_PERSISTENT_FILESYSTEM: "true"
+      VOICE_RECORDING_DIR: /app/.data/recordings
       DATABASE_URL: ${DATABASE_URL:-postgresql://postgres:ai_caller_auto_pass@postgres:5432/ai_caller}
     depends_on:
       migrate:
