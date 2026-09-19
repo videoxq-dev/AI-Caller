@@ -155,6 +155,45 @@ describe("managed phone provisioning lifecycle", () => {
     expect(platform.updateTelnyxCallControlApplication).not.toHaveBeenCalled();
   });
 
+  it("rechecks selected number by area, exchange and final four before any charge or order", async () => {
+    await provisionManagedPhoneNumber(workspaceId, {
+      phoneNumber: "+12025550200",
+      requestId,
+      expectedPurchaseCredits: 2000,
+      expectedMonthlyCredits: 2000,
+    });
+    expect(platform.searchTelnyxNumbers).toHaveBeenCalledWith({
+      countryCode: "US",
+      areaCode: "202",
+      startsWith: "555",
+      endsWith: "0200",
+      numberType: "local",
+      limit: 30,
+    });
+    expect(platform.orderTelnyxNumber).toHaveBeenCalledTimes(1);
+  });
+
+  it("does not order a similar number or reserve credits if the exact number vanishes", async () => {
+    platform.searchTelnyxNumbers.mockResolvedValue([{
+      phoneNumber: "+12025550201",
+      countryCode: "US", administrativeArea: "DC", locality: "Washington",
+      numberType: "local", monthlyCost: "1.00", upfrontCost: "0.00",
+      currency: "USD", bestEffort: false,
+    }]);
+    await expect(provisionManagedPhoneNumber(workspaceId, {
+      phoneNumber: "+12025550200",
+      requestId,
+      expectedPurchaseCredits: 2000,
+      expectedMonthlyCredits: 2000,
+    })).rejects.toMatchObject({ code: "PHONE_NUMBER_UNAVAILABLE", status: 409 });
+    expect(platform.searchTelnyxNumbers).toHaveBeenCalledTimes(2);
+    expect(platform.orderTelnyxNumber).not.toHaveBeenCalled();
+    expect(platform.createTelnyxCallControlApplication).not.toHaveBeenCalled();
+    expect(platform.createTelnyxMessagingProfile).not.toHaveBeenCalled();
+    expect(await db.select().from(hostedPhoneNumbers)).toHaveLength(0);
+    expect((await db.select().from(creditWallets))[0].balance).toBe(10_000);
+  });
+
   it("rejects a changed carrier quote before reserving credits or ordering the number", async () => {
     await expect(provisionManagedPhoneNumber(workspaceId, {
       phoneNumber: "+12025550200",
