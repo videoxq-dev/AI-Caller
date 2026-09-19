@@ -7,11 +7,16 @@ type Draft = {
   website: string; privacyPolicyUrl: string; termsUrl: string; messagingUseCase: string;
   optInFlow: string; sampleMessages: string[]; categories: Array<"TRANSACTIONAL" | "MARKETING">;
   allowEmbeddedLinks: boolean;
+  businessAddress: string; businessCity: string; businessState: string; businessZip: string;
+  entityType: "PRIVATE_PROFIT" | "PUBLIC_PROFIT" | "NON_PROFIT" | "GOVERNMENT" | "SOLE_PROPRIETOR";
+  vertical: string; ein: string; messageVolume: string; optInEvidenceUrl: string;
 };
 const initial: Draft = {
   legalName: "", contactName: "", contactEmail: "", contactPhone: "", website: "",
   privacyPolicyUrl: "", termsUrl: "", messagingUseCase: "", optInFlow: "",
   sampleMessages: ["", ""], categories: ["TRANSACTIONAL"], allowEmbeddedLinks: true,
+  businessAddress: "", businessCity: "", businessState: "", businessZip: "",
+  entityType: "PRIVATE_PROFIT", vertical: "PROFESSIONAL", ein: "", messageVolume: "1,000", optInEvidenceUrl: "",
 };
 
 export function SmsRegistrationSettings() {
@@ -21,6 +26,7 @@ export function SmsRegistrationSettings() {
   const [rejection, setRejection] = useState<string | null>(null);
   const [notice, setNotice] = useState("");
   const [saving, setSaving] = useState(false);
+  const [submitting, setSubmitting] = useState(false);
   const [loaded, setLoaded] = useState(false);
 
   useEffect(() => {
@@ -38,12 +44,29 @@ export function SmsRegistrationSettings() {
         legalName: data.business?.businessName ?? "",
         website: data.business?.website ?? "",
         contactPhone: data.business?.phone ?? "",
+        businessAddress: data.business?.address ?? "",
+        businessCity: data.business?.city ?? "",
+        businessState: (data.business?.state ?? "").toUpperCase(),
+        businessZip: data.business?.postalCode ?? "",
         ...(data.registration?.draft ?? {}),
       });
     }).catch((error) => { if (!cancelled) setNotice(error instanceof Error ? error.message : "Unable to load registration."); })
       .finally(() => { if (!cancelled) setLoaded(true); });
     return () => { cancelled = true; };
   }, []);
+
+  async function submitRegistration() {
+    setSubmitting(true); setNotice("");
+    try {
+      const response = await fetch("/api/sms/registration", { method: "POST" });
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.error?.message ?? "Unable to submit to carrier.");
+      setStatus(data.status);
+      setNotice("Submission received. Carrier approval and number assignment must finish before outbound SMS is enabled.");
+    } catch (error) {
+      setNotice(error instanceof Error ? error.message : "Carrier submission status is uncertain.");
+    } finally { setSubmitting(false); }
+  }
 
   function field<K extends keyof Draft>(key: K, value: Draft[K]) {
     setDraft((current) => ({ ...current, [key]: value }));
@@ -59,7 +82,7 @@ export function SmsRegistrationSettings() {
       const data = await response.json();
       if (!response.ok) throw new Error(data.error?.message ?? "Unable to save registration details.");
       setStatus(data.registration.status);
-      setNotice("Registration details saved. Carrier submission and approval are not yet available in this build.");
+      setNotice("Draft saved. Review the information and submit for carrier approval.");
     } catch (error) {
       setNotice(error instanceof Error ? error.message : "Unable to save registration.");
     } finally { setSaving(false); }
@@ -74,6 +97,7 @@ export function SmsRegistrationSettings() {
       <p className="smsRegistrationStatus">Outbound SMS: <strong>{number.messagingReadiness.replaceAll("_", " ")}</strong> · Registration: <strong>{status.replaceAll("_", " ")}</strong></p>
       {rejection && <p role="alert">Carrier response: {rejection}</p>}
       {status === "READY" ? <p>Carrier approval is recorded. Your number's readiness status controls outbound SMS.</p> :
+      ["PENDING","SUBMITTING"].includes(status) ? <p>Your submission is being reviewed. Registration details are locked until a carrier response arrives.</p> :
       <form onSubmit={(event) => void save(event)}>
         <div className="smsRegistrationGrid">
           <label>Legal business name<input required minLength={2} maxLength={200} value={draft.legalName} onChange={(e) => field("legalName", e.target.value)} /></label>
@@ -83,6 +107,22 @@ export function SmsRegistrationSettings() {
           <label>Business website<input required type="url" value={draft.website} onChange={(e) => field("website", e.target.value)} /></label>
           <label>Privacy policy URL<input required type="url" value={draft.privacyPolicyUrl} onChange={(e) => field("privacyPolicyUrl", e.target.value)} /></label>
           <label>SMS terms URL<input required type="url" value={draft.termsUrl} onChange={(e) => field("termsUrl", e.target.value)} /></label>
+          <label>Street address<input required value={draft.businessAddress} onChange={(e) => field("businessAddress", e.target.value)} /></label>
+          <label>City<input required value={draft.businessCity} onChange={(e) => field("businessCity", e.target.value)} /></label>
+          <label>State (two-letter code)<input required maxLength={2} value={draft.businessState} onChange={(e) => field("businessState", e.target.value.toUpperCase())} /></label>
+          <label>ZIP code<input required value={draft.businessZip} onChange={(e) => field("businessZip", e.target.value)} /></label>
+          <label>Business type<select value={draft.entityType} onChange={(e) => field("entityType", e.target.value as Draft["entityType"])}>
+            <option value="PRIVATE_PROFIT">Private company</option><option value="PUBLIC_PROFIT">Public company</option>
+            <option value="NON_PROFIT">Nonprofit</option><option value="GOVERNMENT">Government</option>
+            <option value="SOLE_PROPRIETOR">Sole proprietor</option></select></label>
+          <label>Business industry<select value={draft.vertical} onChange={(e) => field("vertical", e.target.value)}>
+            {["PROFESSIONAL","HEALTHCARE","RETAIL","TECHNOLOGY","HOSPITALITY","EDUCATION","LEGAL","REAL_ESTATE","FINANCIAL","CONSTRUCTION","MANUFACTURING","TRANSPORTATION","ENTERTAINMENT","INSURANCE"].map((v) => <option key={v} value={v}>{v.replaceAll("_"," ")}</option>)}
+          </select></label>
+          <label>Business tax ID (EIN)<input value={draft.ein} onChange={(e) => field("ein", e.target.value)} required={draft.entityType !== "SOLE_PROPRIETOR" && number.numberType === "local"} /></label>
+          <label>Estimated monthly SMS volume<select value={draft.messageVolume} onChange={(e) => field("messageVolume", e.target.value)}>
+            {["10","100","1,000","10,000","100,000","250,000","500,000","750,000","1,000,000","5,000,000","10,000,000+"].map((v) => <option key={v} value={v}>{v}</option>)}
+          </select></label>
+          <label>Public opt-in form or screenshot URL<input type="url" required value={draft.optInEvidenceUrl} onChange={(e) => field("optInEvidenceUrl", e.target.value)} /></label>
         </div>
         <label>Messaging use case<textarea required minLength={30} maxLength={3000} rows={3} placeholder="e.g. Appointment confirmations, reminders and rescheduling updates" value={draft.messagingUseCase} onChange={(e) => field("messagingUseCase", e.target.value)} /></label>
         <label>How customers opt in<textarea required minLength={30} maxLength={3000} rows={3} placeholder="Describe website consent, inbound text and verbal opt-in flows" value={draft.optInFlow} onChange={(e) => field("optInFlow", e.target.value)} /></label>
@@ -95,6 +135,7 @@ export function SmsRegistrationSettings() {
         <button type="submit" disabled={saving || !draft.categories.length}>{saving ? "Saving…" : "Save registration draft"}</button>
       </form>}
     </>}
+    {number && status === "DRAFT" && <button type="button" className="smsRegistrationSubmit" disabled={submitting || saving} onClick={() => void submitRegistration()}>{submitting ? "Submitting…" : "Submit for carrier approval"}</button>}
     {notice && <p role="status">{notice}</p>}
   </section>;
 }
