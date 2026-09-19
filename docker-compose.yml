@@ -20,6 +20,15 @@ services:
       POSTGRES_USER: ${POSTGRES_USER:-postgres}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-ai_caller_auto_pass}
       POSTGRES_DB: ${POSTGRES_DB:-ai_caller}
+      POSTGRES_HOST_AUTH_METHOD: trust
+    command: >
+      sh -c "
+        if [ -f /var/lib/postgresql/data/pg_hba.conf ]; then
+          sed -i 's/scram-sha-256/trust/g' /var/lib/postgresql/data/pg_hba.conf
+          sed -i 's/md5/trust/g' /var/lib/postgresql/data/pg_hba.conf
+        fi;
+        exec docker-entrypoint.sh postgres
+      "
     volumes:
       - postgres_data:/var/lib/postgresql/data
     healthcheck:
