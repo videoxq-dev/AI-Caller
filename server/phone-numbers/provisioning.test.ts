@@ -486,6 +486,60 @@ describe("managed phone provisioning lifecycle", () => {
     expect(platform.orderTelnyxNumber).toHaveBeenCalledTimes(1);
   });
 
+  it("reports a carrier 400 in exact recheck without reserving credits or creating resources", async () => {
+    platform.searchTelnyxNumbers.mockRejectedValueOnce(
+      new ProviderRequestError("Bearer secret shouldn't reach browser", 400, "10002", "/phone_number"),
+    );
+    await expect(provisionManagedPhoneNumber(workspaceId, {
+      phoneNumber: "+12025550200",
+      requestId,
+      expectedPurchaseCredits: 2000,
+      expectedMonthlyCredits: 2000,
+    })).rejects.toMatchObject({
+      code: "TELNYX_NUMBER_PROVISIONING_REJECTED",
+      status: 502,
+      details: {
+        stage: "AVAILABILITY_RECHECK",
+        providerStatus: 400,
+        providerCode: "10002",
+        providerField: "/phone_number",
+      },
+    });
+    expect(platform.createTelnyxCallControlApplication).not.toHaveBeenCalled();
+    expect(platform.createTelnyxMessagingProfile).not.toHaveBeenCalled();
+    expect(platform.orderTelnyxNumber).not.toHaveBeenCalled();
+    expect((await db.select().from(creditWallets))[0].balance).toBe(10_000);
+    expect(await db.select().from(hostedPhoneNumbers)).toHaveLength(0);
+  });
+
+  it.each([
+    ["VOICE_APPLICATION", "createTelnyxCallControlApplication", false],
+    ["MESSAGING_PROFILE", "createTelnyxMessagingProfile", true],
+    ["NUMBER_ORDER", "orderTelnyxNumber", true],
+  ] as const)("reports %s carrier rejection, releases credits, and avoids false activation", async (
+    stage, rejectedMethod, expectVoiceCleanup,
+  ) => {
+    platform[rejectedMethod].mockRejectedValueOnce(
+      new ProviderRequestError("Bearer secret shouldn't reach browser", 400, "10002", "/messaging_profile_id"),
+    );
+    await expect(provisionManagedPhoneNumber(workspaceId, {
+      phoneNumber: "+12025550200",
+      requestId,
+      expectedPurchaseCredits: 2000,
+      expectedMonthlyCredits: 2000,
+    })).rejects.toMatchObject({
+      code: "TELNYX_NUMBER_PROVISIONING_REJECTED",
+      status: 502,
+      details: { stage, providerStatus: 400, providerCode: "10002" },
+    });
+    expect(platform.orderTelnyxNumber).toHaveBeenCalledTimes(stage === "NUMBER_ORDER" ? 1 : 0);
+    expect(platform.deleteTelnyxCallControlApplication).toHaveBeenCalledTimes(expectVoiceCleanup ? 1 : 0);
+    expect(platform.deleteTelnyxMessagingProfile).toHaveBeenCalledTimes(stage === "NUMBER_ORDER" ? 1 : 0);
+    expect(platform.releaseTelnyxNumber).not.toHaveBeenCalled();
+    expect((await db.select().from(creditWallets))[0].balance).toBe(10_000);
+    expect((await db.select().from(hostedPhoneNumbers))[0].status).toBe("FAILED");
+  });
+
   it("preserves a failed outcome on an idempotent retry instead of reporting accepted provisioning", async () => {
     platform.orderTelnyxNumber.mockRejectedValueOnce(new ProviderRequestError("Invalid order", 422));
 
@@ -494,7 +548,11 @@ describe("managed phone provisioning lifecycle", () => {
       requestId,
       expectedPurchaseCredits: 2000,
       expectedMonthlyCredits: 2000,
-    })).rejects.toThrow("Invalid order");
+    })).rejects.toMatchObject({
+      code: "TELNYX_NUMBER_PROVISIONING_REJECTED",
+      status: 502,
+      details: { stage: "NUMBER_ORDER", providerStatus: 422 },
+    });
 
     await expect(provisionManagedPhoneNumber(workspaceId, {
       phoneNumber: "+12025550200",
