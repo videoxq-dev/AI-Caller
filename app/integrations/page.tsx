@@ -132,7 +132,7 @@ export default function IntegrationsPage() {
       <section className="appWorkspace integrationsWorkspace">
         <header className="integrationsTopbar">
           <label className="integrationsGlobalSearch"><SearchIcon /><input name="global-integrations-search" autoComplete="off" data-lpignore="true" data-1p-ignore="true" placeholder="Search contacts, appointments, integrations..." /><kbd>⌘ K</kbd></label>
-          <div className="integrationsTopActions"><button className="integrationsAgentStatus" type="button"><i />AI Agent Online <ChevronDown /></button><button className="integrationsCredit" type="button"><MessageIcon size={15} />2,480 credits</button><button className="integrationsBell" type="button" aria-label="Notifications">♧<i /></button><div className="profileBlock integrationsProfile"><span className="avatar">B</span><span className="profileCopy"><strong>Bella</strong><small>Wellness Juvi</small></span><ChevronDown /></div></div>
+          <div className="integrationsTopActions"><button className="integrationsAgentStatus" type="button">AI Agent <ChevronDown /></button><button className="integrationsCredit" type="button"><MessageIcon size={15} />2,480 credits</button><button className="integrationsBell" type="button" aria-label="Notifications">♧<i /></button><div className="profileBlock integrationsProfile"><span className="avatar">B</span><span className="profileCopy"><strong>Bella</strong><small>Wellness Juvi</small></span><ChevronDown /></div></div>
         </header>
 
         <div className={`integrationsBody ${selected ? "drawerOpen" : ""}`}>
@@ -233,7 +233,7 @@ function IntegrationDrawer({ provider, connected, record, onClose, onRecordChang
 
   async function useHostedAI() {
     setSaving(true); setNotice(null);
-    try { await bindAI("HOSTED"); setNotice({ tone: "success", text: "Hosted AI is now the active AI capability." }); }
+    try { if (!connected) throw new Error("Hosted AI is not configured on the server. Ask the administrator to set HOSTED_AI_API_KEY."); await bindAI("HOSTED"); setNotice({ tone: "success", text: "Hosted AI route selected. Run the V1 live provider probe before enabling real calls." }); }
     catch (error) { setNotice({ tone: "error", text: error instanceof Error ? error.message : "Unable to update AI routing." }); }
     finally { setSaving(false); }
   }
@@ -241,7 +241,7 @@ function IntegrationDrawer({ provider, connected, record, onClose, onRecordChang
   return (
     <aside className="integrationDrawer" aria-label={`${provider.name} integration settings`}>
       <button type="button" className="drawerClose" onClick={onClose} aria-label="Close integration panel">×</button>
-      <div className="drawerProviderHeader"><span className={`providerMark large ${provider.id}`}>{provider.brand}</span><div><h2>{provider.name}</h2><span className={`connectionBadge ${connected ? "connected" : ""}`}>{connected ? "● Connected" : record?.status === "ERROR" ? "Connection error" : "Not connected"}</span><p>{provider.description}</p></div></div>
+      <div className="drawerProviderHeader"><span className={`providerMark large ${provider.id}`}>{provider.brand}</span><div><h2>{provider.name}</h2><span className={`connectionBadge ${connected ? "connected" : ""}`}>{provider.id === "credits" ? (connected ? "● Server configured" : "Not configured") : connected ? "● Connected" : record?.status === "ERROR" ? "Connection error" : "Not connected"}</span><p>{provider.description}</p></div></div>
       {provider.id === "credits" ? <CreditsPanel onUseHosted={useHostedAI} busy={saving} /> : provider.id === "whatsapp" ? <MetaEmbeddedSignupPanel record={record} onRecordChange={onRecordChange} setNotice={setNotice} /> : oauthCalendar ? <OAuthCalendarPanel provider={provider.id as "google" | "outlook"} record={record} /> : provider.category === "communication" ? <CommunicationPanel provider={provider.id} values={values} update={update} showSecret={showSecret} setShowSecret={setShowSecret} hasSavedSecret={hasSavedSecret} /> : provider.category === "ai" ? <AiPanel provider={provider.id} values={values} update={update} showSecret={showSecret} setShowSecret={setShowSecret} hasSavedSecret={hasSavedSecret} /> : <SchedulingPanel provider={provider.id} values={values} update={update} showSecret={showSecret} setShowSecret={setShowSecret} hasSavedSecret={hasSavedSecret} />}
       {record?.lastTestedAt && <div className="providerLastTest">Last tested {new Date(record.lastTestedAt).toLocaleString()}</div>}
       {record?.lastError && <div className="providerErrorText">{record.lastError}</div>}
