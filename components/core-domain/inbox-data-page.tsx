@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { MessageIcon, PhoneIcon, UsersIcon } from "@/components/icons";
 import { AppNav } from "./app-nav";
 
@@ -310,6 +310,24 @@ export function InboxDataPage() {
     }
   }
 
+  // Older live calls may have transcript messages but no recording artifact:
+  // still show their call card and allow opening the persisted transcript.
+  const fallbackCallCards = new Set<string>();
+  if (timeline) {
+    const callsWithCards = new Set(timeline.messages
+      .filter((message) => message.contentType === "CALL_RECORDING")
+      .map((message) => message.metadata.voiceCallId)
+      .filter((id): id is string => typeof id === "string"));
+    const seen = new Set<string>();
+    for (const message of timeline.messages) {
+      const callId = message.metadata.voiceCallId;
+      if (message.contentType !== "CALL_TRANSCRIPT" || typeof callId !== "string"
+        || callsWithCards.has(callId) || seen.has(callId)) continue;
+      seen.add(callId);
+      fallbackCallCards.add(message.id);
+    }
+  }
+
   return (
     <main className="inboxShell">
       <AppNav active="Inbox" className="appSidebar inboxSidebarNav" />
@@ -341,7 +359,7 @@ export function InboxDataPage() {
                 {timeline.messages.map((message) => {
                   if (message.contentType === "CALL_RECORDING") return <VoiceCallCard key={message.id} message={message} />;
                   const customer = message.senderType === "CUSTOMER";
-                  return <div key={message.id} className={`messageRow ${customer ? "customer" : "agent"}`}>{customer && <span className="miniAvatar">{initials(timeline.contact.name)}</span>}<div className={`messageBubble ${customer ? "incoming" : "outgoing"}`}><div className="messageMeta"><span className={`channelBadge ${channelLabels[message.channel].toLowerCase().replace(" ", "-")}`}>{message.channel === "PHONE" ? <PhoneIcon size={13} /> : <MessageIcon size={13} />}{channelLabels[message.channel]}</span><time>{displayTime(message.createdAt)}</time></div><p>{message.body}</p></div>{!customer && <span className="botAvatar">{message.senderType === "USER" ? <UsersIcon size={16} /> : "✦"}</span>}</div>;
+                  return <Fragment key={message.id}>{fallbackCallCards.has(message.id) && <VoiceCallCard message={message} />}<div className={`messageRow ${customer ? "customer" : "agent"}`}>{customer && <span className="miniAvatar">{initials(timeline.contact.name)}</span>}<div className={`messageBubble ${customer ? "incoming" : "outgoing"}`}><div className="messageMeta"><span className={`channelBadge ${channelLabels[message.channel].toLowerCase().replace(" ", "-")}`}>{message.channel === "PHONE" ? <PhoneIcon size={13} /> : <MessageIcon size={13} />}{channelLabels[message.channel]}</span><time>{displayTime(message.createdAt)}</time></div><p>{message.body}</p></div>{!customer && <span className="botAvatar">{message.senderType === "USER" ? <UsersIcon size={16} /> : "✦"}</span>}</div></Fragment>;
                 })}
               </div>
               <div className="composerWrap"><div className="composerTabs"><button className="active" type="button">Message</button></div><textarea aria-label="Conversation reply" value={draft} onChange={(event) => setDraft(event.target.value)} disabled={!canReplyOnStaffChannel || sendingReply} placeholder={canReplyOnStaffChannel ? `Reply by ${channelLabels[latestChannel]}…` : latestChannel === "WHATSAPP" || latestChannel === "SMS" || latestChannel === "WEBCHAT" ? `Take over this conversation to reply by ${channelLabels[latestChannel]}.` : `Staff outbound ${channelLabels[latestChannel]} replies are not enabled yet.`} /><div className="composerFooter"><span>{canReplyOnStaffChannel ? latestChannel === "WHATSAPP" ? "Free-form WhatsApp replies require an active 24-hour customer window." : latestChannel === "SMS" ? "Staff SMS replies use the workspace's active SMS provider." : "Web Chat replies appear in the customer's active widget session." : "Take over a supported messaging conversation to reply as staff."}</span>{canReplyOnStaffChannel && <button className="sendButton" type="button" disabled={sendingReply || !draft.trim()} onClick={() => void sendStaffReply()}>{sendingReply ? "Sending…" : "Send"}</button>}</div></div>
