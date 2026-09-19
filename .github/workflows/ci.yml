@@ -78,6 +78,12 @@ jobs:
       - name: Voice provider readiness unit tests (no network or secrets)
         run: npm run test:voice-readiness
 
+      - name: Cloud deployment database probe unit tests
+        run: npm run test:deployment
+
+      - name: Database deployment readiness after migrations
+        run: npm run verify:deployment
+
       - name: Typecheck
         run: npm run typecheck
 
