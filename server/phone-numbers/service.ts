@@ -27,6 +27,8 @@ import { ProviderRequestError } from "@/server/providers/http";
 import { quoteHostedPhoneNumber } from "./pricing";
 import { addBillingMonth } from "./billing-period";
 import { carrierProvisioningOutcome } from "./lifecycle";
+import { managedNumberWebhookUrls } from "./webhook-url";
+import { isE2EProviderFixtureMode } from "@/server/providers/e2e-fixtures";
 
 export type ManagedNumberSearch = {
   phoneNumber: string;
@@ -650,6 +652,9 @@ export async function provisionManagedPhoneNumber(workspaceId: string, input: {
       409,
     );
   }
+  // Fail before reserving credits or creating carrier resources if Telnyx cannot
+  // reach the configured callback address (common in local deployments).
+  const webhookUrls = managedNumberWebhookUrls(workspaceId, getEnv(), isE2EProviderFixtureMode());
   const reservation = await reserveCredits(workspaceId, quote.purchaseCredits, {
     referenceType: "PHONE_NUMBER_PURCHASE",
     referenceId: input.requestId,
@@ -678,15 +683,8 @@ export async function provisionManagedPhoneNumber(workspaceId: string, input: {
       reconcileAfter: new Date(),
     });
 
-    const baseUrl = getEnv().BETTER_AUTH_URL.replace(/\/$/, "");
-    voiceConnectionId = await createTelnyxCallControlApplication(
-      workspaceId,
-      `${baseUrl}/api/webhooks/voice/telnyx/${workspaceId}`,
-    );
-    messagingProfileId = await createTelnyxMessagingProfile(
-      workspaceId,
-      `${baseUrl}/api/webhooks/sms/telnyx/${workspaceId}`,
-    );
+    voiceConnectionId = await createTelnyxCallControlApplication(workspaceId, webhookUrls.voice);
+    messagingProfileId = await createTelnyxMessagingProfile(workspaceId, webhookUrls.sms);
     [row] = await db.update(hostedPhoneNumbers).set({
       voiceConnectionId,
       messagingProfileId,
