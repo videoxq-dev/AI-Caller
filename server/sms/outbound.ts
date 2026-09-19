@@ -167,8 +167,8 @@ async function managedSmsPolicy(workspaceId: string, senderNumber: string) {
   return row.policy as ApprovedSmsPolicy;
 }
 
-async function smsReplyContext(workspaceId: string, conversationId: string) {
-  const [last] = await db.select({ body: messages.body, createdAt: messages.createdAt })
+async function smsReplyContext(workspaceId: string, conversationId: string, recipient: string) {
+  const [last] = await db.select({ body: messages.body, createdAt: messages.createdAt, metadata: messages.metadata })
     .from(messages).where(and(
       eq(messages.workspaceId, workspaceId),
       eq(messages.conversationId, conversationId),
@@ -177,7 +177,7 @@ async function smsReplyContext(workspaceId: string, conversationId: string) {
     )).orderBy(desc(messages.createdAt)).limit(1);
   return {
     lastCustomerMessage: last?.body ?? null,
-    currentConversationReply: Boolean(last && Date.now() - last.createdAt.getTime() <= 24 * 60 * 60 * 1000),
+    currentConversationReply: Boolean(last && last.metadata?.senderNumber === recipient && Date.now() - last.createdAt.getTime() <= 24 * 60 * 60 * 1000),
   };
 }
 
@@ -213,7 +213,7 @@ export async function sendSmsConversationTextWithRuntime(
   let actualPurpose: SmsPurpose = "TRANSACTIONAL";
   if (runtime.mode === "HOSTED") {
     const policy = await managedSmsPolicy(workspaceId, runtime.senderNumber);
-    const reply = await smsReplyContext(workspaceId, conversationId);
+    const reply = await smsReplyContext(workspaceId, conversationId, to);
     actualPurpose = validateApprovedSmsMessage({
       policy,
       classifiedPurpose: await classifySmsPurpose({
@@ -268,7 +268,7 @@ export async function sendSmsConversationTextWithRuntime(
       const currentPolicy = await managedSmsPolicy(workspaceId, runtime.senderNumber);
       validateApprovedSmsMessage({ policy: currentPolicy, classifiedPurpose: actualPurpose, text });
       const consent = await getSmsConsentStatus(workspaceId, to, actualPurpose);
-      const reply = await smsReplyContext(workspaceId, conversationId);
+      const reply = await smsReplyContext(workspaceId, conversationId, to);
       if (!consentAllowsSend({ consent, purpose: actualPurpose, currentConversationReply: reply.currentConversationReply })) {
         throw new AppError("SMS_CONSENT_REQUIRED", "This contact has opted out or lacks consent for this message.", 409);
       }
