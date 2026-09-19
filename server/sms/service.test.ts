@@ -123,6 +123,23 @@ describe("SMS webhook service", () => {
     expect(jobs).toHaveLength(0);
   });
 
+  it("persists a STOP opt-out even if hosted inbound billing cannot charge credits", async () => {
+    const provider: SMSProvider = {
+      send: vi.fn(async () => ({ externalId: "unused", status: "QUEUED" as const })),
+      verifyWebhook: vi.fn(async () => true),
+      normalizeWebhook: vi.fn(async () => [{ ...inboundEvent("optout-without-wallet"), text: "Stop texting me" }]),
+    };
+    const { service, jobs } = serviceHarness(runtimeFor(workspaceId, provider, "HOSTED"), async () =>
+      orchestratorReply("Should not respond"));
+    await service.ingest(request(), workspaceId, "twilio");
+    await expect(service.processInboundJob(jobs[0])).resolves.toMatchObject({ consentUpdated: true });
+    const { getSmsConsentStatus } = await import("./consent");
+    expect(await getSmsConsentStatus(workspaceId, "+12025550100", "TRANSACTIONAL")).toBe("OPTED_OUT");
+    expect(await getSmsConsentStatus(workspaceId, "+12025550100", "MARKETING")).toBe("OPTED_OUT");
+    expect(provider.send).not.toHaveBeenCalled();
+    expect((await db.select().from(providerWebhookEvents))[0].status).toBe("PROCESSED");
+  });
+
   it("queues once, persists one inbound/outbound pair, and does not replay duplicate inbound events", async () => {
     const inbound = inboundEvent("in-1");
     const send = vi.fn(async () => ({ externalId: "msg-out-1", status: "QUEUED" as const }));
