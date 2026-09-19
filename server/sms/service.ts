@@ -254,6 +254,16 @@ export function createSmsWebhookService(dependencies: SmsServiceDependencies) {
         queued += 1;
       }
 
+      if (deferred > 0) {
+        // A delivery webhook may beat the outbound provider-ID database commit.
+        // Telnyx retries 5xx responses; acknowledging this as 202 would lose the
+        // only delivery evidence. Duplicate inbound events are safely deduplicated.
+        throw new AppError(
+          "SMS_DELIVERY_DEFERRED",
+          "Delivery confirmation arrived before its outbound message was persisted. Retry this webhook.",
+          503,
+        );
+      }
       return { ok: true as const, queued, processed, duplicates, deferred, suppressed };
     },
 
