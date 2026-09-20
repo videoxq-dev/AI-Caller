@@ -186,6 +186,47 @@ describe("orchestrator response protocol", () => {
     expect(generate).not.toHaveBeenCalled();
   });
 
+  it("does not promise staff follow-up when phone escalation is disabled", async () => {
+    const executeTools = vi.fn();
+    const generate = vi.fn();
+    const orchestrator = createResponseOrchestrator({
+      buildContext: vi.fn(async () => ({
+        ...fakeContext("AI"), source: "INBOUND_TURN" as const,
+        agent: { id: "agent-1", status: "ACTIVE" as const, escalationMessage: null,
+          behaviorSettings: { capabilities: { ...defaultAgentCapabilities, ESCALATE: false } } },
+        systemPrompt: "LIVE PHONE RECEPTIONIST:",
+        messages: [{ role: "user" as const, content: "Can I speak to a human?" }],
+      })),
+      executeTools, generate,
+    });
+    const result = await orchestrator.respond("workspace", "conversation");
+    expect(result.handlingMode).toBe("AI");
+    expect(result.reply).toContain("can't arrange staff follow-up");
+    expect(result.reply).not.toContain("I've flagged");
+    expect(executeTools).not.toHaveBeenCalled();
+    expect(generate).not.toHaveBeenCalled();
+  });
+
+  it("does not claim staff follow-up if escalation is revoked while a phone turn is in progress", async () => {
+    const executeTools = vi.fn(async () => {
+      throw new AppError("AGENT_ACTION_DISABLED", "Escalation is disabled.", 403);
+    });
+    const orchestrator = createResponseOrchestrator({
+      buildContext: vi.fn(async () => ({
+        ...fakeContext("AI"), source: "INBOUND_TURN" as const,
+        agent: { id: "agent-1", status: "ACTIVE" as const, escalationMessage: null,
+          behaviorSettings: { capabilities: { ...defaultAgentCapabilities } } },
+        systemPrompt: "LIVE PHONE RECEPTIONIST:",
+        messages: [{ role: "user" as const, content: "I need to speak to a person." }],
+      })),
+      executeTools, generate: vi.fn(),
+    });
+    const result = await orchestrator.respond("workspace", "conversation");
+    expect(result.handlingMode).toBe("AI");
+    expect(result.reply).not.toContain("I've flagged");
+    expect(executeTools).toHaveBeenCalledOnce();
+  });
+
   it("suppresses a model-only live transfer promise when no transfer or escalation occurred", async () => {
     const context = {
       ...fakeContext("AI"),
