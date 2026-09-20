@@ -172,10 +172,10 @@ try {
   const widgetFrame = page.frameLocator(`iframe[src*="/widget/${widget.publicKey}"]`);
   const composer = widgetFrame.getByPlaceholder("Type your message…");
   await composer.fill("How much is the QA Consultation?");
-  await composer.press("Enter");
+  await widgetFrame.getByRole("button", { name: "Send message" }).click();
   await widgetFrame.getByText(/QA Consultation is \$120/).last().waitFor({ timeout: 15_000 });
   await composer.fill("Book the QA Consultation. My name is QA Visitor, qa.visitor@example.com");
-  await composer.press("Enter");
+  await widgetFrame.getByRole("button", { name: "Send message" }).click();
   await widgetFrame.getByText(/can't perform that action/).last().waitFor({ timeout: 15_000 });
   const forbiddenBookings = await pool.query(`SELECT count(*)::int AS count FROM appointments
     WHERE workspace_id = $1`, [workspaceId]);
@@ -198,7 +198,7 @@ try {
   const pausedFrame = page.frameLocator(`iframe[src*="/widget/${widget.publicKey}"]`);
   const pausedComposer = pausedFrame.getByPlaceholder("Type your message…");
   await pausedComposer.fill("Hello, Mia, are you there?");
-  await pausedComposer.press("Enter");
+  await pausedFrame.getByRole("button", { name: "Send message" }).click();
   await pausedFrame.getByText(/AI assistant is currently unavailable/).waitFor({ timeout: 15_000 });
   assert(await pausedFrame.getByText("A team member is handling this conversation.").count() === 0,
     "Paused agent falsely claimed an actual staff handoff.");
