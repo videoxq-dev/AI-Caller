@@ -54,10 +54,10 @@ describe("live voice response gating", () => {
 
   beforeEach(() => {
     vi.clearAllMocks();
-    vi.mocked(claimVoiceTurn).mockResolvedValue(call as Awaited<ReturnType<typeof claimVoiceTurn>>);
+    vi.mocked(claimVoiceTurn).mockResolvedValue(call as unknown as Awaited<ReturnType<typeof claimVoiceTurn>>);
     vi.mocked(yieldSupersededVoiceTurn).mockResolvedValue(null);
     vi.mocked(isVoiceTurnCurrent).mockResolvedValue(true);
-    vi.mocked(finishVoiceTurn).mockResolvedValue(call as Awaited<ReturnType<typeof finishVoiceTurn>>);
+    vi.mocked(finishVoiceTurn).mockResolvedValue(call as unknown as Awaited<ReturnType<typeof finishVoiceTurn>>);
     vi.mocked(getConversationById).mockResolvedValue({ handlingMode: "AI" } as Awaited<ReturnType<typeof getConversationById>>);
     vi.mocked(resolveVoiceRuntime).mockResolvedValue({ provider: { speak } } as unknown as Awaited<ReturnType<typeof resolveVoiceRuntime>>);
     vi.mocked(appendVoiceTranscriptSegment).mockResolvedValue({ id: "segment-id" } as Awaited<ReturnType<typeof appendVoiceTranscriptSegment>>);
