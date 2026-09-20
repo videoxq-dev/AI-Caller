@@ -25,6 +25,9 @@ services:
       # Fresh volumes use SCRAM. An existing volume retains its own pg_hba.conf
       # until the operator completes a verified, backup-gated auth migration.
       POSTGRES_HOST_AUTH_METHOD: scram-sha-256
+      # Official initdb defaults may create earlier loopback trust rules. Force
+      # SCRAM for ALL TCP host records on NEW volumes; existing HBA stays intact.
+      POSTGRES_INITDB_ARGS: --auth-host=scram-sha-256
     command:
       - sh
       - -ec
