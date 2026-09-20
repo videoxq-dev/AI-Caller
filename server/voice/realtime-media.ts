@@ -314,7 +314,10 @@ export function attachRealtimeMedia({ telnyx, identity, streamId }: BridgeOption
       return;
     }
     if (event.type === "response.output_audio_transcript.done") {
-      track(saveAssistantTranscript(event).catch(() => { error = true; }));
+      track(saveAssistantTranscript(event).catch(err => {
+        logger.error({ err, workspaceId, callId },
+          "Unable to archive Realtime assistant transcript; call billing remains independent");
+      }));
       return;
     }
     if (event.type === "response.output_item.done") {
@@ -360,14 +363,14 @@ export function attachRealtimeMedia({ telnyx, identity, streamId }: BridgeOption
           })
           .catch(err => {
             logger.error({ err, workspaceId, callId }, "Unable to store or budget Realtime usage");
-            error = true;
+            fail("realtime-usage-write-failure");
           }));
       } else {
         // Cancelled generation can still have billable tokens. Without a
         // provider usage object the final invoice cannot be reconstructed.
-        error = true;
         logger.warn({ workspaceId, callId, responseId, status },
           "Realtime response completed without authoritative token usage");
+        fail("realtime-usage-missing");
       }
       pendingResponses.delete(responseId);
       responseStatuses.set(responseId, status);
