@@ -1,4 +1,4 @@
-import { and, eq } from "drizzle-orm";
+import { and, eq, sql } from "drizzle-orm";
 import { z } from "zod";
 import { db } from "@/db";
 import { voiceRealtimeBookingState } from "@/db/schema";
@@ -22,12 +22,7 @@ export async function captureRealtimeBookingDetails(
   workspaceId: string, callId: string, input: unknown) {
   const detail = realtimeBookingDetailsSchema.parse(input);
   return db.transaction(async tx => {
-    await tx.execute(
-      // Lock is scoped to workspace+call; never let another workspace overwrite.
-      // IDs are bound via signed Telnyx stream and never from a caller field.
-      // eslint-disable-next-line drizzle/enforce-delete-with-where
-      (await import("drizzle-orm")).sql`select pg_advisory_xact_lock(hashtext(${callId}))`,
-    );
+    await tx.execute(sql`select pg_advisory_xact_lock(hashtext(${callId}))`);
     const [existing] = await tx.select().from(voiceRealtimeBookingState).where(and(
       eq(voiceRealtimeBookingState.workspaceId, workspaceId),
       eq(voiceRealtimeBookingState.voiceCallId, callId),
@@ -49,15 +44,18 @@ export async function captureRealtimeBookingDetails(
 
 export async function saveRealtimeAvailability(workspaceId: string, callId: string,
   startsAt: string, available: boolean) {
-  const [existing] = await db.select().from(voiceRealtimeBookingState).where(and(
-    eq(voiceRealtimeBookingState.workspaceId, workspaceId),
-    eq(voiceRealtimeBookingState.voiceCallId, callId),
-  )).limit(1);
-  if (!existing) return;
-  await db.update(voiceRealtimeBookingState).set({
-    availableStart: available ? startsAt : null, updatedAt: new Date(),
-  }).where(and(eq(voiceRealtimeBookingState.workspaceId, workspaceId),
-    eq(voiceRealtimeBookingState.voiceCallId, callId)));
+  await db.transaction(async tx => {
+    await tx.execute(sql`select pg_advisory_xact_lock(hashtext(${callId}))`);
+    const [existing] = await tx.select().from(voiceRealtimeBookingState).where(and(
+      eq(voiceRealtimeBookingState.workspaceId, workspaceId),
+      eq(voiceRealtimeBookingState.voiceCallId, callId),
+    )).limit(1);
+    if (!existing) return;
+    await tx.update(voiceRealtimeBookingState).set({
+      availableStart: available ? startsAt : null, updatedAt: new Date(),
+    }).where(and(eq(voiceRealtimeBookingState.workspaceId, workspaceId),
+      eq(voiceRealtimeBookingState.voiceCallId, callId)));
+  });
 }
 
 function dateTimeParts(startsAt: string, tz: string) {
