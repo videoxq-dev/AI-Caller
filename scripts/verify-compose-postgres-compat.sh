@@ -175,7 +175,9 @@ if ! docker exec "$db_container" psql -X -q -U postgres -d ai_caller -Atc \
   echo "Migrated HBA contains invalid or non-SCRAM network authentication." >&2
   exit 1
 fi
-docker exec -u postgres "$db_container" rm -f \
-  /tmp/ai-caller-new-db-password /tmp/upgrade-postgres-auth.sh
+docker exec -u postgres "$db_container" rm -f /tmp/ai-caller-new-db-password
+# docker cp creates the migration script as root-owned, so only root may
+# remove this *fixture* script; the production operator's script is separate.
+docker exec "$db_container" rm -f /tmp/upgrade-postgres-auth.sh
 echo "PASS: backup-gated migration secures the same volume and rejects missing/wrong TCP passwords."
 
