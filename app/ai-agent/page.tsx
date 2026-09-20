@@ -44,21 +44,6 @@ type TestResult = {
   simulated: boolean;
 };
 
-const recentConversations = [
-  { name: "Chioma Okafor", initials: "CO", channel: "WhatsApp" as Channel, message: "Hi, do you have ginger shots in stock?", outcome: "Appointment booked", time: "10 min ago" },
-  { name: "Tunde Adebayo", initials: "TA", channel: "Phone" as Channel, message: "I'd like to know your pricing", outcome: "Information provided", time: "32 min ago" },
-  { name: "Sarah Johnson", initials: "SJ", channel: "Web Chat" as Channel, message: "Can I book a consultation?", outcome: "Appointment booked", time: "1 hour ago" },
-  { name: "Emeka Onuoha", initials: "EO", channel: "SMS" as Channel, message: "What are the ingredients?", outcome: "Information provided", time: "2 hours ago" },
-];
-
-const knowledgeItems = [
-  { title: "Business profile", subtitle: "Business details, hours and service area", state: "Connected", icon: <BuildingIcon /> },
-  { title: "Website", subtitle: "www.brightsideautospa.com", state: "Imported", icon: <LinkIcon /> },
-  { title: "Services", subtitle: "3 services available to the AI", state: "3 items", icon: <ListIcon /> },
-  { title: "FAQs", subtitle: "Common questions and approved answers", state: "12 items", icon: <QuestionIcon /> },
-  { title: "Documents", subtitle: "PDF, DOCX and TXT reference files", state: "4 files", icon: <DocumentIcon /> },
-];
-
 export default function AIAgentPage() {
   const [tab, setTab] = useState<AgentTab>("overview");
   const [agentStatus, setAgentStatus] = useState<AgentStatus>("DRAFT");
@@ -230,7 +215,7 @@ export default function AIAgentPage() {
 
       <section className="appWorkspace agentWorkspace">
         <header className="agentTopbar">
-          <label className="agentGlobalSearch"><SearchIcon /><input placeholder="Search contacts, appointments, or anything..." /><kbd>⌘ K</kbd></label>
+          <Link className="agentGlobalSearch" href="/inbox">Open Inbox</Link>
           <div className="agentTopActions">
             <Link className="agentOnlinePill" href="/settings">Phone &amp; Messaging settings</Link>
           </div>
@@ -443,7 +428,6 @@ function BehaviorTab({
       </section>
 
       <aside className="behaviorSide">
-        <article className="agentCard livePreview"><h3>Preview</h3><div className="previewChat"><span className="previewCustomer">How much is a full detailing?</span><span className="previewAgent">Full detailing starts at $120. The final price depends on vehicle size and condition. Would you like me to check availability?</span></div></article>
         <article className="agentCard behaviorSummary"><h3>Current behavior</h3><span><small>Tone</small><strong>{tone}</strong></span><span><small>Goal</small><strong>{goal}</strong></span><span><small>Phone voice</small><strong>{voiceProfile.split("-")[0]}</strong></span><span><small>Lead qualification</small><strong>{qualificationEnabled ? `${qualificationCriteria.filter((item) => item.required).length} required fields` : "Off"}</strong></span><span><small>When unsure</small><strong>{whenUnsure}</strong></span></article>
       </aside>
     </div>
@@ -540,7 +524,7 @@ function TestTab() {
       </section>
 
       <aside className="testSideColumn">
-        <article className="agentCard testChecklist"><h3>Test checklist</h3><ChecklistItem label="Business questions" status={messages.length > 1 ? "Tested" : "Ready"} /><ChecklistItem label="Lead qualification" status={lastResult ? "Observed" : "Ready"} /><ChecklistItem label="Calendar availability" status={lastResult?.toolResult.kind === "availability" ? "Tested" : "Ready"} /><ChecklistItem label="Appointment booking" status="Safe simulation" /><ChecklistItem label="Human escalation" status="Safe simulation" /></article>
+        <article className="agentCard testChecklist"><h3>Test checklist</h3><ChecklistItem label="Business questions" status={messages.length > 1 ? "Tested" : "Not tested"} /><ChecklistItem label="Lead qualification" status={lastResult?.toolResult.kind === "qualification" ? "Observed" : "Not tested"} /><ChecklistItem label="Calendar availability" status={lastResult?.toolResult.kind === "availability" ? "Tested" : "Not tested"} /><ChecklistItem label="Appointment booking" status={lastResult?.toolResult.kind === "booking" ? "Simulated" : "Not tested"} /><ChecklistItem label="Human escalation" status={lastResult?.toolResult.kind === "escalation" ? "Simulated" : "Not tested"} /></article>
         <article className="agentCard testInsight"><h3>AI response details</h3><span><small>Channel</small><strong>{channel}</strong></span><span><small>Action</small><strong>{actionLabel}</strong></span><span><small>Server tool</small><strong>{toolLabel}</strong></span><span><small>Side effects</small><strong>{lastResult?.simulated ? "Simulated in Test" : "Normal test behavior"}</strong></span></article>
         <article className="agentCard readinessCard" style={{ display: "block" }}><div style={{ width: "100%" }}><strong>Web Chat embed code</strong><p>Paste this script before the closing &lt;/body&gt; tag on your website.</p><code style={{ display: "block", marginTop: 10, padding: 10, borderRadius: 8, background: "#f5f7fb", color: "#26344d", fontSize: 11, lineHeight: 1.45, overflowWrap: "anywhere" }}>{embedCode || "Loading embed code…"}</code><button type="button" onClick={() => void copyEmbed()} disabled={!embedCode} style={{ marginTop: 10 }}>{copied ? "Copied" : "Copy embed code"}</button></div></article>
       </aside>
@@ -551,19 +535,11 @@ function TestTab() {
 function Metric({ icon, label, value }: { icon: React.ReactNode; label: string; value?: number }) { return <article className="agentCard agentMetric"><span className="metricArt blue">{icon}</span><div><small>{label}</small><strong>{value === undefined ? "—" : value.toLocaleString()}</strong><p>{value === undefined ? "Loading actual data…" : "Recorded activity"}</p></div></article>; }
 function GuardrailRow({ label, checked, onChange }: { label: string; checked: boolean; onChange: (value: boolean) => void }) { return <div className="guardrailRow"><span>{label}</span><button type="button" className={`switch ${checked ? "on" : ""}`} onClick={() => onChange(!checked)}><i /></button></div>; }
 function ChecklistItem({ label, status }: { label: string; status: string }) { return <div className="checklistItem"><span>✓</span><strong>{label}</strong><em>{status}</em></div>; }
-function channelClass(channel: Channel) { return channel.toLowerCase().replace(/\s+/g, "-"); }
 function channelIcon(channel: Channel) { if (channel === "Phone") return <PhoneIcon size={15} />; if (channel === "WhatsApp") return <WhatsAppIcon />; return <MessageIcon size={15} />; }
 
-function SearchIcon() { return <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg>; }
-function ChevronDown() { return <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="m6 9 6 6 6-6"/></svg>; }
 function WhatsAppIcon() { return <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M20 11.5a8 8 0 0 1-11.8 7L4 20l1.5-4.1A8 8 0 1 1 20 11.5Z"/><path d="M8.5 8.5c.8 2.4 2.4 4 4.8 4.8"/></svg>; }
-function BuildingIcon() { return <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8"><path d="M4 21V4h11v17M15 9h5v12M8 8h3M8 12h3M8 16h3M18 13h.01M18 17h.01"/></svg>; }
-function LinkIcon() { return <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round"><path d="M10 13a5 5 0 0 0 7.5.5l2-2a5 5 0 0 0-7-7l-1.2 1.2"/><path d="M14 11a5 5 0 0 0-7.5-.5l-2 2a5 5 0 0 0 7 7l1.2-1.2"/></svg>; }
-function ListIcon() { return <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round"><path d="M8 6h12M8 12h12M8 18h12M4 6h.01M4 12h.01M4 18h.01"/></svg>; }
-function QuestionIcon() { return <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8"><circle cx="12" cy="12" r="9"/><path d="M9.8 9a2.4 2.4 0 1 1 3.4 2.2c-.8.4-1.2.9-1.2 1.8M12 17h.01"/></svg>; }
 function DocumentIcon() { return <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinejoin="round"><path d="M6 3h8l4 4v14H6Z"/><path d="M14 3v5h5M9 13h6M9 17h5"/></svg>; }
 function PauseIcon() { return <svg width="15" height="15" viewBox="0 0 24 24" fill="currentColor"><path d="M7 5h4v14H7zM13 5h4v14h-4z"/></svg>; }
 function PlayIcon() { return <svg width="15" height="15" viewBox="0 0 24 24" fill="currentColor"><path d="m8 5 11 7-11 7Z"/></svg>; }
-function StarIcon() { return <svg width="21" height="21" viewBox="0 0 24 24" fill="currentColor"><path d="m12 2.5 2.9 5.9 6.5.9-4.7 4.6 1.1 6.5-5.8-3-5.8 3 1.1-6.5-4.7-4.6 6.5-.9Z"/></svg>; }
 function BotFaceIcon() { return <svg width="52" height="52" viewBox="0 0 64 64" fill="none"><rect x="10" y="18" width="44" height="34" rx="12" fill="#173c86"/><rect x="16" y="24" width="32" height="22" rx="8" fill="#f4f8ff"/><circle cx="26" cy="34" r="3" fill="#173c86"/><circle cx="38" cy="34" r="3" fill="#173c86"/><path d="M25 41h14" stroke="#173c86" strokeWidth="3" strokeLinecap="round"/><path d="M32 18v-7" stroke="#173c86" strokeWidth="4" strokeLinecap="round"/><circle cx="32" cy="8" r="4" fill="#173c86"/></svg>; }
 function SendIcon() { return <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="m22 2-7 20-4-9-9-4Z"/><path d="M22 2 11 13"/></svg>; }
