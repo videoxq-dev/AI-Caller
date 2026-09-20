@@ -15,6 +15,8 @@ import { normalizePhone } from "@/server/domain/core/schemas";
 import { getBusinessSetup } from "@/server/domain/onboarding/repository";
 import { getEnv } from "@/server/env";
 import { AppError } from "@/server/http/errors";
+import { getWorkspaceAgent } from "@/server/agent/service";
+import { capabilitiesFromBehaviorSettings } from "@/server/agent/capabilities";
 import { logger } from "@/server/observability/logger";
 import type { NormalizedVoiceEvent, VoiceWebhookInput } from "@/server/providers/contracts";
 import { isE2EProviderFixtureMode } from "@/server/providers/e2e-fixtures";
@@ -265,8 +267,13 @@ export function createVoiceWebhookService(dependencies: VoiceServiceDependencies
         throw new AppError("VOICE_DESTINATION_MISMATCH", "The inbound call destination does not match this workspace.", 409);
       }
 
-      const preference = await getVoiceTechnology(workspaceId);
-      const realtimeRates = preference.technology === "REALTIME"
+      const assignedAgent = await getWorkspaceAgent(workspaceId);
+      const answeringEnabled = assignedAgent?.status === "ACTIVE"
+        && capabilitiesFromBehaviorSettings(assignedAgent.behaviorSettings).ANSWER_INQUIRY;
+      // An inactive agent still has an auditable inbound call, but never starts
+      // a billable Realtime stream or pretends to handle the customer.
+      const preference = answeringEnabled ? await getVoiceTechnology(workspaceId) : null;
+      const realtimeRates = preference?.technology === "REALTIME"
         ? runtime.mode === "HOSTED"
           ? await requireRealtimeReady(workspaceId, preference.realtimeModel)
           : (() => { throw new AppError("REALTIME_HOSTED_ONLY",
@@ -290,9 +297,9 @@ export function createVoiceWebhookService(dependencies: VoiceServiceDependencies
         mode,
         recordingDisclosureVersion: DISCLOSURE_VERSION,
         metadata: {
-          phase: "AWAITING_ANSWER",
-          voiceTechnology: preference.technology,
-          realtimeModel: preference.technology === "REALTIME" ? preference.realtimeModel : null,
+          phase: answeringEnabled ? "AWAITING_ANSWER" : "AWAITING_UNAVAILABLE_ANSWER",
+          voiceTechnology: preference?.technology ?? "STANDARD",
+          realtimeModel: preference?.technology === "REALTIME" ? preference.realtimeModel : null,
           realtimeRates,
           realtimeUsageComplete: null,
           voiceProfile: voice.config.profileKey,
@@ -302,7 +309,7 @@ export function createVoiceWebhookService(dependencies: VoiceServiceDependencies
         },
       });
 
-      if (phase(call.metadata) === "AWAITING_ANSWER" && call.status === "RINGING") {
+      if ((phase(call.metadata) === "AWAITING_ANSWER" || phase(call.metadata) === "AWAITING_UNAVAILABLE_ANSWER") && call.status === "RINGING") {
         let reservationId: string | null = null;
         if (call.metadata.voiceTechnology === "REALTIME") {
           const availableCredits = await getCreditBalance(workspaceId);
@@ -323,7 +330,7 @@ export function createVoiceWebhookService(dependencies: VoiceServiceDependencies
         try {
         await runtime.provider.answer({
           callControlId: event.callControlId,
-          streamUrl: buildVoiceGatewayStreamUrl(workspaceId, call.id, event.externalCallId),
+          streamUrl: answeringEnabled ? buildVoiceGatewayStreamUrl(workspaceId, call.id, event.externalCallId) : null,
           bidirectional: call.metadata.voiceTechnology === "REALTIME",
           commandId: deterministicCommandId(`${event.externalEventId}:answer`),
         });
@@ -339,6 +346,21 @@ export function createVoiceWebhookService(dependencies: VoiceServiceDependencies
     if (!call) throw new AppError("VOICE_CALL_NOT_FOUND", "Voice call has not been initialized yet.", 409);
 
     if (event.type === "CALL_ANSWERED") {
+      if (phase(call.metadata) === "AWAITING_UNAVAILABLE_ANSWER") {
+        const voice = await getVoiceConfig(workspaceId);
+        await runtime.provider.speak({
+          callControlId: event.callControlId,
+          text: "Our AI assistant is currently unavailable. Please try again later.",
+          voice: resolveVoiceProfile(voice.config.profileKey).providerVoiceId,
+          language: voice.config.language,
+          speakingRate: voice.config.speakingRate,
+          commandId: deterministicCommandId(`${event.externalEventId}:unavailable-notice`),
+        });
+        await updateVoiceCall(workspaceId, call.id, {
+          status: "ACTIVE", answeredAt: event.occurredAt ?? new Date(),
+        }, { phase: "UNAVAILABLE_NOTICE" });
+        return;
+      }
       const voice = await getVoiceConfig(workspaceId);
       const business = await getBusinessSetup(workspaceId);
       const businessName = business.profile?.businessName?.trim() || "this business";
@@ -386,6 +408,14 @@ export function createVoiceWebhookService(dependencies: VoiceServiceDependencies
 
     if (event.type === "SPEAK_ENDED") {
       const currentPhase = phase(call.metadata);
+      if (currentPhase === "UNAVAILABLE_NOTICE") {
+        await runtime.provider.hangup({
+          callControlId: event.callControlId,
+          commandId: deterministicCommandId(`${event.externalEventId}:unavailable-hangup`),
+        });
+        await updateVoiceCall(workspaceId, call.id, {}, { phase: "TERMINATING" });
+        return;
+      }
       if (currentPhase === "DECLINED_NOTICE") {
         await runtime.provider.hangup({
           callControlId: event.callControlId,
