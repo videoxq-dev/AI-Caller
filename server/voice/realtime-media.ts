@@ -400,6 +400,10 @@ export function attachRealtimeMedia({ telnyx, identity, streamId }: BridgeOption
     try {
       const call = await waitUntilGreetingEnds();
       if (!open) return;
+      // Drop all frames captured before the recording/transcription disclosure
+      // and opening message completed. Those frames are not consented AI input.
+      initialAudio.length = 0;
+      initialBytes = 0;
       const claimedCall = await claimRealtimeStream(workspaceId, callId, streamId);
       if (!claimedCall) throw new Error("Realtime call stream already claimed.");
       claimed = true;
