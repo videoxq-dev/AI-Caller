@@ -80,6 +80,8 @@ export function attachRealtimeMedia({ telnyx, identity, streamId }: BridgeOption
   let escalationResponseComplete = false;
   let toolSerial = Promise.resolve();
   const handledToolCalls = new Set<string>();
+  const responseEpochs = new Map<string, number>();
+  let callerSpeechEpoch = 0;
   const startedAt = Date.now();
 
   function track(promise: Promise<unknown>) {
@@ -208,16 +210,18 @@ export function attachRealtimeMedia({ telnyx, identity, streamId }: BridgeOption
     });
   }
 
-  async function runTool(raw: RealtimeEvent) {
+  async function runTool(raw: RealtimeEvent, epoch: number) {
     const item = object(raw.item);
     if (item.type !== "function_call" || typeof item.call_id !== "string"
       || typeof item.name !== "string" || typeof item.arguments !== "string") return;
-    if (handledToolCalls.has(item.call_id)) return;
+    if (handledToolCalls.has(item.call_id) || epoch !== callerSpeechEpoch) return;
     handledToolCalls.add(item.call_id);
     const call = await getVoiceCall(workspaceId, callId);
-    if (!call || !open || !ready || call.metadata.voiceTechnology !== "REALTIME") return;
+    if (!call || !open || !ready || epoch !== callerSpeechEpoch
+      || call.status !== "ACTIVE" || call.metadata.realtimeStreamId !== streamId
+      || call.metadata.voiceTechnology !== "REALTIME") return;
     const result = await runRealtimeBusinessTool({
-      workspaceId, callId, conversationId: call.conversationId, contactId: call.contactId,
+      workspaceId, callId, streamId, conversationId: call.conversationId, contactId: call.contactId,
       name: item.name, arguments: item.arguments,
     });
     if (!open) return;
@@ -246,6 +250,7 @@ export function attachRealtimeMedia({ telnyx, identity, streamId }: BridgeOption
       return;
     }
     if (event.type === "input_audio_buffer.speech_started") {
+      callerSpeechEpoch += 1;
       interruptedResponseId = activeResponseId;
       clearAudio();
       return;
@@ -254,6 +259,7 @@ export function attachRealtimeMedia({ telnyx, identity, streamId }: BridgeOption
       const response = object(event.response);
       if (typeof response.id === "string") {
         activeResponseId = response.id;
+        responseEpochs.set(response.id, callerSpeechEpoch);
         pendingResponses.add(response.id);
       }
       return;
@@ -281,7 +287,10 @@ export function attachRealtimeMedia({ telnyx, identity, streamId }: BridgeOption
       return;
     }
     if (event.type === "response.output_item.done") {
-      toolSerial = toolSerial.then(() => runTool(event)).catch(err => {
+      const epoch = typeof event.response_id === "string"
+        ? responseEpochs.get(event.response_id) : undefined;
+      if (epoch === undefined || epoch !== callerSpeechEpoch) return;
+      toolSerial = toolSerial.then(() => runTool(event, epoch)).catch(err => {
         logger.error({ err, workspaceId, callId }, "Realtime business tool failed");
         error = true;
         fail("realtime-tool-failure");
@@ -315,6 +324,7 @@ export function attachRealtimeMedia({ telnyx, identity, streamId }: BridgeOption
           "Realtime response completed without authoritative token usage");
       }
       pendingResponses.delete(responseId);
+      responseEpochs.delete(responseId);
       if (activeResponseId === responseId) activeResponseId = null;
       if (toolEscalated && !pendingResponses.size) {
         escalationResponseComplete = true;
