@@ -21,7 +21,8 @@ export async function getVoiceTechnology(workspaceId: string) {
 
 export function hasRealtimeGatewayConfiguration() {
   const env = getEnv();
-  if (!env.HOSTED_AI_API_KEY || !env.VOICE_GATEWAY_URL || !env.VOICE_REALTIME_ENABLED) return false;
+  if (env.HOSTED_AI_PROVIDER !== "openai" || !env.HOSTED_AI_API_KEY
+    || !env.VOICE_GATEWAY_URL || !env.VOICE_REALTIME_ENABLED) return false;
   const url = new URL(env.VOICE_GATEWAY_URL);
   return url.protocol === "wss:" || (env.NODE_ENV !== "production" && url.protocol === "ws:");
 }
