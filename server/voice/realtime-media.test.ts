@@ -125,6 +125,16 @@ describe("Realtime Telnyx/OpenAI media contract", () => {
     })));
     await new Promise(resolve => setTimeout(resolve, 70));
     expect(telnyx.sent.filter(v => v.event === "media")).toHaveLength(prior);
+    // Another VAD event must not re-enable media from the older response.
+    openai.emit("message", Buffer.from(JSON.stringify({
+      type: "input_audio_buffer.speech_started",
+    })));
+    openai.emit("message", Buffer.from(JSON.stringify({
+      type: "response.output_audio.delta", response_id: "r1",
+      delta: Buffer.alloc(160, 0x4f).toString("base64"),
+    })));
+    await new Promise(resolve => setTimeout(resolve, 70));
+    expect(telnyx.sent.filter(v => v.event === "media")).toHaveLength(prior);
     openai.emit("message", Buffer.from(JSON.stringify({
       type: "response.done", response: { id: "r1", status: "cancelled",
         usage: { input_tokens: 0, output_tokens: 0,
