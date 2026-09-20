@@ -172,7 +172,9 @@ describe("Realtime Telnyx/OpenAI media contract", () => {
       workspaceId: "ws", callId: "call-id", streamId: "stream",
       name: "capture_booking_details",
     });
-    await vi.waitFor(() => expect(openai.sent.filter(v => v.type === "response.create")).toHaveLength(1));
+    // Never create the next response while the tool-only provider response is
+    // still active; wait for response.done and the completed tool output.
+    expect(openai.sent.filter(v => v.type === "response.create")).toHaveLength(0);
     const usage = { input_tokens: 1, output_tokens: 1,
       input_token_details: { text_tokens: 1 }, output_token_details: { audio_tokens: 1 } };
     openai.emit("message", Buffer.from(JSON.stringify({
@@ -182,6 +184,7 @@ describe("Realtime Telnyx/OpenAI media contract", () => {
       type: "response.done", response: { id: "new", status: "completed", usage },
     })));
     await vi.waitFor(() => expect(recordRealtimeResponse).toHaveBeenCalledTimes(2));
+    await vi.waitFor(() => expect(openai.sent.filter(v => v.type === "response.create")).toHaveLength(1));
     await bridge.stop();
     expect(telnyx.readyState).toBe(3);
   });
