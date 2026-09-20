@@ -114,6 +114,8 @@ export async function settleRealtimeCall(workspaceId: string, callId: string) {
     numberType: "local",
     callSeconds: Math.max(0, call.durationSeconds ?? 0),
     recorded: call.recordingConsentStatus === "ANNOUNCED" || call.recordingConsentStatus === "GRANTED",
+    ttsCharacters: typeof call.metadata.voiceTelnyxTtsCharacters === "number"
+      ? call.metadata.voiceTelnyxTtsCharacters : 0,
     usage: sumUsage(rows),
   }, aiRates, telnyxRates);
   // Idempotent wallet ledger and unique VOICE_CALL usage reference make retries safe.
