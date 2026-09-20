@@ -34,7 +34,7 @@ vi.mock("@/server/domain/core/repository", () => ({
   appendMessage: vi.fn(async () => ({})),
 }));
 vi.mock("@/server/voice/realtime-tools", () => ({
-  realtimeSystemInstructions: vi.fn(async () => "Answer the caller."),
+  realtimeSessionContext: vi.fn(async () => ({ instructions: "Answer the caller.", history: "" })),
   realtimeTools: [],
   runRealtimeBusinessTool: vi.fn(),
 }));
