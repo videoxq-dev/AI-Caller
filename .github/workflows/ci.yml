@@ -90,16 +90,23 @@ jobs:
       - name: Build
         run: npm run build
 
-      - name: Validate secure default DeployOS Compose
-        env:
-          POSTGRES_USER: postgres
-          POSTGRES_PASSWORD: ci-only-strong-scram-placeholder-123456
-          POSTGRES_DB: ai_caller_test
+      - name: Validate DeployOS Compose with existing DB and no PostgreSQL credentials
         run: |
-          docker compose -f docker-compose.yml config --quiet
-          docker compose -f docker-compose.yml config | grep -q 'POSTGRES_HOST_AUTH_METHOD: scram-sha-256'
-          if grep -q 'ai_caller_auto_pass\|POSTGRES_HOST_AUTH_METHOD: trust' docker-compose.yml; then
-            echo "Unsafe DeployOS Compose auth fallback detected."
+          # Regression for DeployOS: its application has DATABASE_URL but
+          # does NOT provide POSTGRES_USER/PASSWORD/DB for a separate database.
+          env -u POSTGRES_USER -u POSTGRES_PASSWORD -u POSTGRES_DB \
+            docker compose -f docker-compose.yml config --quiet
+          services=$(env -u POSTGRES_USER -u POSTGRES_PASSWORD -u POSTGRES_DB \
+            docker compose -f docker-compose.yml config --services)
+          for expected in migrate web worker gateway; do
+            printf '%s\n' "$services" | grep -qx "$expected"
+          done
+          if printf '%s\n' "$services" | grep -qx postgres; then
+            echo "Default DeployOS Compose must not provision a new PostgreSQL instance."
+            exit 1
+          fi
+          if grep -Eq 'ai_caller_auto_pass|POSTGRES_HOST_AUTH_METHOD:[[:space:]]*trust' docker-compose.yml; then
+            echo "Unsafe Compose authentication fallback detected."
             exit 1
           fi
 
