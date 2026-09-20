@@ -6,6 +6,7 @@ import { buildConversationContext } from "@/server/orchestrator/context";
 import { executeOrchestratorTools, orchestratorActionSchema } from "@/server/orchestrator/tools";
 import { getConversationById } from "@/server/domain/core/repository";
 import { assertRealtimeBookingReady, captureRealtimeBookingDetails, saveRealtimeAvailability } from "./realtime-booking";
+import { getVoiceCall } from "./repository";
 
 export const realtimeTools = [
   {
@@ -59,12 +60,20 @@ function record(v: unknown): Record<string, unknown> {
 }
 
 export async function runRealtimeBusinessTool(input: {
-  workspaceId: string; conversationId: string; contactId: string; callId: string;
+  workspaceId: string; conversationId: string; contactId: string;
+  callId: string; streamId: string;
   name: string; arguments: string;
 }) {
-  const convo = await getConversationById(input.workspaceId, input.conversationId);
-  if (!convo || convo.handlingMode !== "AI") {
-    return { ok: false, reason: "Conversation is being handled by staff; AI actions are paused." };
+  const [convo, call] = await Promise.all([
+    getConversationById(input.workspaceId, input.conversationId),
+    getVoiceCall(input.workspaceId, input.callId),
+  ]);
+  if (!convo || convo.handlingMode !== "AI"
+    || !call || call.conversationId !== input.conversationId
+    || call.contactId !== input.contactId || call.status !== "ACTIVE"
+    || call.metadata.voiceTechnology !== "REALTIME"
+    || call.metadata.realtimeStreamId !== input.streamId) {
+    return { ok: false, reason: "The call is no longer authorized for AI actions." };
   }
   let args: Record<string, unknown>;
   try { args = record(JSON.parse(input.arguments)); }
