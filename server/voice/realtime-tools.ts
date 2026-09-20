@@ -5,7 +5,7 @@ import { AppError } from "@/server/http/errors";
 import { buildConversationContext } from "@/server/orchestrator/context";
 import { executeOrchestratorTools, orchestratorActionSchema } from "@/server/orchestrator/tools";
 import { getConversationById } from "@/server/domain/core/repository";
-import { assertRealtimeBookingReady, captureRealtimeBookingDetails, saveRealtimeAvailability, sameBookingInstant } from "./realtime-booking";
+import { assertRealtimeBookingReady, captureRealtimeBookingDetails, getRealtimeBookingDetails, saveRealtimeAvailability, sameBookingInstant } from "./realtime-booking";
 import { getVoiceCall } from "./repository";
 
 export const realtimeTools = [
@@ -132,6 +132,11 @@ export async function runRealtimeBusinessTool(input: {
     if (!input.isCurrentTurn()) {
       return { ok: false, reason: "The caller corrected the request; please check the latest details." };
     }
+    const bookingSnapshot = parsed.data.type === "CHECK_AVAILABILITY"
+      ? await getRealtimeBookingDetails(input.workspaceId, input.callId) : null;
+    if (parsed.data.type === "CHECK_AVAILABILITY" && !bookingSnapshot) {
+      return { ok: false, reason: "Record the caller's service, location, date and time before checking availability." };
+    }
     const result = await executeOrchestratorTools(input.workspaceId,
       input.conversationId, input.contactId, { action: parsed.data });
     if (parsed.data.type === "CHECK_AVAILABILITY") {
@@ -139,7 +144,11 @@ export async function runRealtimeBusinessTool(input: {
       const slots = Array.isArray(result.data.slots) ? result.data.slots : [];
       const available = slots.some(slot =>
         sameBookingInstant(String(record(slot).startsAt), start));
-      await saveRealtimeAvailability(input.workspaceId, input.callId, start, available);
+      const applied = await saveRealtimeAvailability(input.workspaceId, input.callId, start,
+        available, bookingSnapshot!);
+      if (!applied || !input.isCurrentTurn()) {
+        return { ok: false, reason: "The booking request changed during the calendar check. Recheck the latest requested appointment." };
+      }
     }
     return { ok: true as const, ...result, ...(result.kind === "escalation"
       ? { spokenInstruction: "Tell the caller staff will follow up. Never promise a live phone transfer." } : {}) };
