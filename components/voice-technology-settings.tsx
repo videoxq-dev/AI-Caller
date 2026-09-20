@@ -69,7 +69,7 @@ export function VoiceTechnologySettings() {
         <label className={technology === "STANDARD" ? "voiceTechOption selected" : "voiceTechOption"}>
           <input type="radio" name="voiceTechnology" checked={technology === "STANDARD"}
             disabled={!settings.canManage || busy} onChange={() => setTechnology("STANDARD")} />
-          <span><strong>Standard · Cost-controlled</strong>
+          <span><strong>Standard · Predictable per-minute voice rate</strong>
             <small>Current Telnyx transcription, text AI and speech synthesis. Turn-based conversations.</small>
             <small>Current managed voice rate: 80 credits per started minute; AI text usage billed separately.</small>
           </span>
@@ -81,6 +81,7 @@ export function VoiceTechnologySettings() {
           <span><strong>Realtime · Natural conversations</strong>
             <small>Streaming speech-to-speech with interruption handling and live business tools.</small>
             <small>Actual OpenAI audio/text tokens plus Telnyx call costs, with a 50% cost markup.</small>
+            <small>Calls use up to a 1,500-credit prefunded budget and a ten-minute session limit. Actual usage is reconciled after the call.</small>
             {!settings.realtimeConfigured && <small>Not configured on this deployment.</small>}
           </span>
         </label>
