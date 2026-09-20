@@ -22,7 +22,7 @@ export type OrchestratorResponseOptions = {
 function isExplicitHumanRequest(message: string) {
   const text = message.trim().toLowerCase().replace(/[?!.,]+$/g, "");
   return /^(?:a|an|the)?\s*(?:human|operator|representative|real person|live person)(?: please)?$/.test(text)
-    || /\b(?:speak|talk|connect|transfer|reach|want|need|like|get)\b[^.!?]{0,100}\b(?:human|operator|representative|real person|live person|staff member|team member)\b/.test(text);
+    || /\b(?:speak|talk|connect|transfer|reach|want|need|like|get)\b[^.!?]{0,100}\b(?:human|operator|representative|real person|live person|staff member|team member|person)\b/.test(text);
 }
 
 const LIVE_PHONE_ESCALATION_REPLY = "I've flagged your request for our team to follow up. I can't transfer this call live.";
