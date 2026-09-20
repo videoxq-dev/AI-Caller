@@ -1,14 +1,23 @@
 # Existing DeployOS PostgreSQL volume: preserve data and replace network trust authentication
 
-**Production release gate — Issue #28.** Do not mark this item complete or merge a deployment
+**Legacy bundled-database release gate — Issue #28.** Do not mark this item complete or merge a bundled-DB deployment
 until the operator verifies a recoverable backup and an authenticated connection
 against the ACTUAL existing database volume. The code must not delete/reinitialize
 PostgreSQL data to solve an authentication problem.
 
-The old `docker-compose.yml` set `POSTGRES_HOST_AUTH_METHOD: trust`, modified
+The old bundled-PostgreSQL `docker-compose.yml` set `POSTGRES_HOST_AUTH_METHOD: trust`, modified
 existing `pg_hba.conf` entries to `trust`, and advertised a fixed fallback
 password. Merely replacing the environment variable does not fix an existing
 volume: its `pg_hba.conf` and role password are persisted.
+
+The DeployOS default `docker-compose.yml` now connects to the existing
+separately managed database via `DATABASE_URL` and has no postgres service
+or `POSTGRES_USER`/`POSTGRES_DB`/`POSTGRES_PASSWORD` interpolation.
+If the installed application actually uses the old bundled PostgreSQL volume,
+keep its existing database container available and perform this migration
+before changing topology. Do not point the app at a new empty DB.
+An independently managed database must be assessed for its own authentication
+and TLS; do not run this script against an unrelated managed database.
 
 ## Production migration (one coordinated maintenance window)
 
@@ -42,8 +51,9 @@ volume: its `pg_hba.conf` and role password are persisted.
    characters in the password inside the database URL; use Docker DNS hostname
    `postgres`. The URL password MUST match the rotated database role password.
    Do not put the secrets in source control, Docker build arguments, or CI logs.
-6. Deploy the hardened `docker-compose.yml` retaining the **same Compose
-   project name and existing named volumes**. Confirm the postgres service
+6. Deploy the intended authenticated DB topology retaining the **same actual
+   database volume and records**. If the original DB was bundled, migrate it
+   deliberately before pointing the default external-DB app at it. Confirm the postgres service
    healthcheck, migration job, web, worker, gateway, existing user data and
    fresh application DB connections. Confirm a valid password authenticates
    from web/worker and a missing or wrong password is rejected on the Docker
@@ -56,14 +66,14 @@ volume: its `pg_hba.conf` and role password are persisted.
 
 ## Fail-safe / rollback
 
-The new Compose postgres service deliberately **refuses startup** if it detects
-a legacy network trust entry in an existing data volume. This is a safe failure,
-not a reason to wipe the database. If the upgrade fails, keep the write freeze;
+The previous draft hardened bundled Postgres service refused startup on legacy
+network trust; the current DeployOS default has **no** postgres service at all.
+Neither situation authorizes removing or wiping the old volume. If the upgrade fails, keep the write freeze;
 restore the saved pg_hba.conf file and reload PostgreSQL while investigating.
 If needed, restore the verified backup into a separate, authenticated container
 with the same data and inspect it before repointing app services. Never silently
 revert production to passwordless network authentication.
 
-Fresh installations must supply credentials and create SCRAM access. External
-managed databases should instead use the database provider's TLS/authenticated
-connection and should not use this default local Postgres container.
+Fresh manual bundled installations via `compose.selfhost.yaml` must supply
+credentials and create SCRAM access. Separately managed DeployOS databases
+should use their provider's TLS/authenticated connection in `DATABASE_URL`.
