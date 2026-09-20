@@ -41,6 +41,8 @@ import { putVoiceRecording } from "./storage";
 import { resolveVoiceProfile } from "./voices";
 import { estimateSpeechDurationMs } from "./turn-duration";
 import { scheduleVoiceTurn } from "./turns";
+import { getVoiceTechnology, requireRealtimeReady } from "./technology";
+import { settleRealtimeCall } from "./realtime-usage";
 
 const MAX_VOICE_WEBHOOK_BYTES = 64 * 1024;
 const MAX_RECORDING_BYTES = 50 * 1024 * 1024;
@@ -197,6 +199,10 @@ async function recordVoiceUsage(
   call: NonNullable<Awaited<ReturnType<typeof getVoiceCallByExternalId>>>,
 ) {
   try {
+    if (call.metadata.voiceTechnology === "REALTIME") {
+      await settleRealtimeCall(workspaceId, call.id);
+      return;
+    }
     const durationSeconds = Math.max(0, call.durationSeconds ?? 0);
     let creditsCharged = 0;
     let providerCostMicros = 0;
@@ -258,6 +264,13 @@ export function createVoiceWebhookService(dependencies: VoiceServiceDependencies
         throw new AppError("VOICE_DESTINATION_MISMATCH", "The inbound call destination does not match this workspace.", 409);
       }
 
+      const preference = await getVoiceTechnology(workspaceId);
+      const realtimeRates = preference.technology === "REALTIME"
+        ? runtime.mode === "HOSTED"
+          ? await requireRealtimeReady(workspaceId, preference.realtimeModel)
+          : (() => { throw new AppError("REALTIME_HOSTED_ONLY",
+              "Realtime voice is currently supported only for managed Telnyx numbers.", 409); })()
+        : null;
       const contact = await resolveVoiceContact(workspaceId, event.from);
       const conversation = await getOrCreateOpenConversation(workspaceId, contact.id);
       const [mode, voice] = await Promise.all([
@@ -277,6 +290,10 @@ export function createVoiceWebhookService(dependencies: VoiceServiceDependencies
         recordingDisclosureVersion: DISCLOSURE_VERSION,
         metadata: {
           phase: "AWAITING_ANSWER",
+          voiceTechnology: preference.technology,
+          realtimeModel: preference.technology === "REALTIME" ? preference.realtimeModel : null,
+          realtimeRates,
+          realtimeUsageComplete: null,
           voiceProfile: voice.config.profileKey,
           language: voice.config.language,
           speakingRate: voice.config.speakingRate,
@@ -288,6 +305,7 @@ export function createVoiceWebhookService(dependencies: VoiceServiceDependencies
         await runtime.provider.answer({
           callControlId: event.callControlId,
           streamUrl: buildVoiceGatewayStreamUrl(workspaceId, call.id, event.externalCallId),
+          bidirectional: call.metadata.voiceTechnology === "REALTIME",
           commandId: deterministicCommandId(`${event.externalEventId}:answer`),
         });
       }
@@ -375,11 +393,13 @@ export function createVoiceWebhookService(dependencies: VoiceServiceDependencies
         callControlId: event.callControlId,
         commandId: deterministicCommandId(`${event.externalEventId}:record`),
       });
+      if (call.metadata.voiceTechnology !== "REALTIME") {
       await runtime.provider.startTranscription({
         callControlId: event.callControlId,
         language: voice.config.language,
         commandId: deterministicCommandId(`${event.externalEventId}:transcription`),
       });
+      }
       await runtime.provider.speak({
         callControlId: event.callControlId,
         text: openingText(voice.openingMessage),
@@ -408,11 +428,13 @@ export function createVoiceWebhookService(dependencies: VoiceServiceDependencies
           callControlId: event.callControlId,
           commandId: deterministicCommandId(`${event.externalEventId}:record-after-consent`),
         });
+        if (call.metadata.voiceTechnology !== "REALTIME") {
         await runtime.provider.startTranscription({
           callControlId: event.callControlId,
           language: voice.config.language,
           commandId: deterministicCommandId(`${event.externalEventId}:transcription-after-consent`),
         });
+        }
         await runtime.provider.speak({
           callControlId: event.callControlId,
           text: openingText(voice.openingMessage),
@@ -457,6 +479,7 @@ export function createVoiceWebhookService(dependencies: VoiceServiceDependencies
     }
 
     if (event.type === "TRANSCRIPTION") {
+      if (call.metadata.voiceTechnology === "REALTIME") return;
       if (!event.isFinal || !event.transcript.trim()) return;
       const currentPhase = phase(call.metadata);
       if (!["ACTIVE", "OPENING_SPEAKING", "AI_RESPONDING", "AI_SPEAKING"].includes(currentPhase)) return;
