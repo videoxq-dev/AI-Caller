@@ -1,4 +1,4 @@
-import { and, desc, eq } from "drizzle-orm";
+import { and, desc, eq, sql } from "drizzle-orm";
 import { db } from "@/db";
 import { messages } from "@/db/schema";
 import { AppError } from "@/server/http/errors";
@@ -105,6 +105,7 @@ export async function runRealtimeBusinessTool(input: {
     }).from(messages).where(and(
       eq(messages.workspaceId, input.workspaceId), eq(messages.conversationId, input.conversationId),
       eq(messages.channel, "PHONE"), eq(messages.contentType, "CALL_TRANSCRIPT"),
+      sql`${messages.metadata}->>'voiceCallId' = ${input.callId}`,
     )).orderBy(desc(messages.createdAt)).limit(10);
     const customerIndex = history.findIndex(row => row.sender === "CUSTOMER");
     const customer = customerIndex < 0 ? "" : history[customerIndex].body.trim();
