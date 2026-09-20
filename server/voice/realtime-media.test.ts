@@ -55,6 +55,7 @@ vi.mock("@/server/observability/logger", () => ({
 import { attachRealtimeMedia } from "./realtime-media";
 import { runRealtimeBusinessTool, realtimeSessionContext } from "./realtime-tools";
 import { recordRealtimeResponse } from "./realtime-usage";
+import { finishRealtimeStream } from "./repository";
 
 type Socket = EventEmitter & {
   readyState: number;
@@ -143,6 +144,31 @@ describe("Realtime Telnyx/OpenAI media contract", () => {
     await bridge.stop();
     expect(telnyx.readyState).toBe(3);
   });
+  it("does not certify usage when token persistence fails during a carrier close", async () => {
+    vi.mocked(recordRealtimeResponse).mockRejectedValueOnce(new Error("database unavailable"));
+    const telnyx = telnyxSocket();
+    const bridge = attachRealtimeMedia({
+      telnyx: telnyx as unknown as WebSocket,
+      identity: { workspaceId: "ws", callId: "call-id", externalCallId: "telnyx-call" },
+      streamId: "stream",
+    });
+    await vi.waitFor(() => expect(shared.client).not.toBeNull());
+    const openai = currentOpenai();
+    openai.emit("open");
+    openai.emit("message", Buffer.from(JSON.stringify({ type: "session.updated" })));
+    openai.emit("message", Buffer.from(JSON.stringify({
+      type: "response.created", response: { id: "unmetered" },
+    })));
+    openai.emit("message", Buffer.from(JSON.stringify({
+      type: "response.done", response: { id: "unmetered", status: "completed",
+        usage: { input_tokens: 1, output_tokens: 1,
+          input_token_details: { text_tokens: 1 }, output_token_details: { audio_tokens: 1 } } },
+    })));
+    await vi.waitFor(() => expect(finishRealtimeStream).toHaveBeenCalled());
+    expect(vi.mocked(finishRealtimeStream).mock.calls.at(-1)?.[3]).toBe(false);
+    await bridge.stop();
+  });
+
   it("loads previous cross-channel context without turning it into an immediate AI answer", async () => {
     vi.mocked(realtimeSessionContext).mockResolvedValueOnce({
       instructions: "Continue with the caller and do not invent bookings.",
