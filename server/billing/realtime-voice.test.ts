@@ -34,7 +34,7 @@ function rate(model: string, unit: HostedPricingUnit, micros: number, unitsPerCo
 function rates(model: RealtimeVoiceModel) {
   return {
     ai: aiUnits.map((unit, i) => rate(model, unit, openai[model][i], 1_000_000)),
-    telnyx: telnyxUnits.map((unit, i) => rate("realtime-us-local", unit, [5200, 3500, 2000, 15000][i], 1)),
+    telnyx: telnyxUnits.map((unit, i) => rate("realtime-us-local", unit, [5200, 3500, 2000, 15000, 48][i], 1)),
   };
 }
 const usage: RealtimeVoiceBill["usage"] = {
