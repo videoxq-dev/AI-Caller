@@ -299,6 +299,15 @@ export function attachRealtimeMedia({ telnyx, identity, streamId }: BridgeOption
       return;
     }
     if (event.type === "input_audio_buffer.speech_started") {
+      // Semantic VAD can be triggered by line/background noise. Keep barge-in
+      // responsive but make this specific source of cut-off observable.
+      if (pendingResponses.size > 0 || outboundPackets.length > 0 || outputTail.length > 0) {
+        logger.warn({ workspaceId, callId,
+          interruptedActiveResponses: pendingResponses.size,
+          queuedAudioMs: Math.round(
+            (outboundPackets.length * AUDIO_PACKET_BYTES + outputTail.length) / 8,
+          ) }, "Realtime caller activity interrupted assistant playback");
+      }
       callerSpeechEpoch += 1;
       for (const id of pendingResponses) interruptedResponseIds.add(id);
       clearAudio();
@@ -369,6 +378,13 @@ export function attachRealtimeMedia({ telnyx, identity, streamId }: BridgeOption
       const responseId = typeof response.id === "string" ? response.id : null;
       if (!responseId) return fail("missing-response-id");
       const status = typeof response.status === "string" ? response.status : "";
+      if (status !== "completed") {
+        const reason = object(response.incomplete_details).reason;
+        logger.warn({ workspaceId, callId, responseId, status,
+          incompleteReason: typeof reason === "string" && /^[a-z_]{1,50}$/.test(reason)
+            ? reason : "unknown" },
+        "Realtime provider ended assistant response before completion");
+      }
       // Cancelled responses may contain chargeable tokens; persist if present.
       if (response.usage) {
         track(recordRealtimeResponse(workspaceId, callId, responseId, response.usage)
@@ -461,9 +477,14 @@ export function attachRealtimeMedia({ telnyx, identity, streamId }: BridgeOption
         type: "realtime",
         instructions,
         output_modalities: ["audio"],
-        max_output_tokens: 512,
+        // 512 audio/text tokens can cut a spoken answer mid-sentence; retain
+        // a bounded per-turn limit, with existing call-level credit controls.
+        max_output_tokens: 2048,
         audio: {
           input: { format: { type: "audio/pcmu" },
+            // Near-field telephone microphone input needs filtering BEFORE
+            // VAD to avoid background-noise barge-ins mid-assistant reply.
+            noise_reduction: { type: "near_field" },
             turn_detection: { type: "semantic_vad", eagerness: "medium",
               create_response: true, interrupt_response: true } },
           output: { format: { type: "audio/pcmu" }, voice: "marin" },
