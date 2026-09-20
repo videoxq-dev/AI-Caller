@@ -13,10 +13,15 @@ import {
 import "../dashboard/dashboard.css";
 import "./ai-agent.css";
 
-type AgentTab = "overview" | "knowledge" | "behavior" | "test";
+type AgentTab = "overview" | "knowledge" | "behavior" | "capabilities" | "test";
+type AgentStatus = "DRAFT" | "ACTIVE" | "PAUSED";
+type Capability = { key: string; label: string; description: string };
+type DashboardData = { metrics: Record<"inquiries" | "aiConversations" | "qualifiedLeads" | "appointments", { value: number }>; credit: { balance: number }; activity: Array<{ id: string; label: string; detail: string; occurredAt: string; href: string }> };
 type Channel = "WhatsApp" | "Phone" | "SMS" | "Web Chat";
 type QualificationCriterion = { id: string; label: string; question: string; required: boolean };
 type AgentApiRecord = {
+  id: string;
+  status: AgentStatus;
   name: string;
   tone: string;
   primaryGoal: string;
@@ -56,29 +61,29 @@ const knowledgeItems = [
 
 export default function AIAgentPage() {
   const [tab, setTab] = useState<AgentTab>("overview");
-  const [agentOnline, setAgentOnline] = useState(true);
+  const [agentStatus, setAgentStatus] = useState<AgentStatus>("DRAFT");
+  const [loadingSettings, setLoadingSettings] = useState(true);
+  const [canManage, setCanManage] = useState(false);
+  const [capabilityCatalog, setCapabilityCatalog] = useState<Capability[]>([]);
+  const [capabilities, setCapabilities] = useState<Record<string, boolean>>({});
+  const [knowledgeCounts, setKnowledgeCounts] = useState({ services: 0, faqs: 0, policies: 0 });
   const [saved, setSaved] = useState(false);
-  const [channels, setChannels] = useState<Record<Channel, boolean>>({ WhatsApp: true, Phone: true, SMS: true, "Web Chat": true });
   const [tone, setTone] = useState("Friendly & professional");
   const [goal, setGoal] = useState("Book appointments");
   const [whenUnsure, setWhenUnsure] = useState("Escalate to a human");
   const [verbosity, setVerbosity] = useState("Concise");
   const [guardrails, setGuardrails] = useState({ pricing: true, availability: true, approvedInfo: true, collectContact: true });
-  const [assistantName, setAssistantName] = useState("Juvi AI");
-  const [openingMessage, setOpeningMessage] = useState("Hi! I'm Juvi AI. How can I help you today?");
-  const [escalationMessage, setEscalationMessage] = useState("I want to make sure you get the right answer. Let me connect you with a member of the team.");
+  const [assistantName, setAssistantName] = useState("AI Assistant");
+  const [openingMessage, setOpeningMessage] = useState("");
+  const [escalationMessage, setEscalationMessage] = useState("");
   const [advancedInstructions, setAdvancedInstructions] = useState<string | null>(null);
   const [voiceProfile, setVoiceProfile] = useState("ava-us-1");
   const [voiceLanguage, setVoiceLanguage] = useState("en-US");
   const [voiceSpeed, setVoiceSpeed] = useState(1);
   const [recordingPolicy, setRecordingPolicy] = useState<"ANNOUNCE" | "EXPLICIT_CONSENT">("ANNOUNCE");
   const [afterHoursEnabled, setAfterHoursEnabled] = useState(true);
-  const [qualificationEnabled, setQualificationEnabled] = useState(true);
-  const [qualificationCriteria, setQualificationCriteria] = useState<QualificationCriterion[]>([
-    { id: "service_needed", label: "Service needed", question: "What service are you looking for?", required: true },
-    { id: "location", label: "Location", question: "What city or ZIP code is the service for?", required: true },
-    { id: "urgency", label: "Urgency", question: "How soon do you need help?", required: true },
-  ]);
+  const [qualificationEnabled, setQualificationEnabled] = useState(false);
+  const [qualificationCriteria, setQualificationCriteria] = useState<QualificationCriterion[]>([]);
   const [savingSettings, setSavingSettings] = useState(false);
   const [settingsError, setSettingsError] = useState<string | null>(null);
 
@@ -87,10 +92,16 @@ export default function AIAgentPage() {
     fetch("/api/agent", { cache: "no-store" })
       .then(async (response) => {
         if (!response.ok) throw new Error("Unable to load AI agent settings.");
-        return response.json() as Promise<{ agent: AgentApiRecord | null }>;
+        return response.json() as Promise<{ agent: AgentApiRecord | null; capabilities: Record<string, boolean> | null; capabilityCatalog: Capability[]; canManage: boolean; services: unknown[]; faqs: unknown[]; policies: unknown[] }>;
       })
-      .then(({ agent }) => {
-        if (cancelled || !agent) return;
+      .then(({ agent, capabilities: stored, capabilityCatalog: catalog, canManage: manage, services, faqs, policies }) => {
+        if (cancelled) return;
+        setCapabilityCatalog(catalog);
+        setCanManage(manage);
+        setKnowledgeCounts({ services: services.length, faqs: faqs.length, policies: policies.length });
+        setCapabilities(stored ?? {});
+        if (!agent) return;
+        setAgentStatus(agent.status);
         setAssistantName(agent.name);
         setTone(agent.tone);
         setGoal(agent.primaryGoal);
@@ -123,9 +134,48 @@ export default function AIAgentPage() {
           if (parsed.length) setQualificationCriteria(parsed);
         }
       })
-      .catch((err) => { if (!cancelled) setSettingsError(err instanceof Error ? err.message : "Unable to load AI agent settings."); });
+      .catch((err) => { if (!cancelled) setSettingsError(err instanceof Error ? err.message : "Unable to load AI agent settings."); })
+      .finally(() => { if (!cancelled) setLoadingSettings(false); });
     return () => { cancelled = true; };
   }, [setGoal, setTone, setWhenUnsure]);
+
+  const updateStatus = async () => {
+    const next: AgentStatus = agentStatus === "ACTIVE" ? "PAUSED" : "ACTIVE";
+    setSavingSettings(true);
+    setSettingsError(null);
+    try {
+      const response = await fetch("/api/agent/status", {
+        method: "PATCH", headers: { "content-type": "application/json" },
+        body: JSON.stringify({ status: next }),
+      });
+      const payload = await response.json() as { agent?: AgentApiRecord; error?: { message?: string } };
+      if (!response.ok || !payload.agent) throw new Error(payload.error?.message ?? "Unable to change agent status.");
+      setAgentStatus(payload.agent.status);
+    } catch (error) {
+      setSettingsError(error instanceof Error ? error.message : "Unable to change agent status.");
+    } finally {
+      setSavingSettings(false);
+    }
+  };
+
+  const saveCapabilities = async () => {
+    setSavingSettings(true);
+    setSettingsError(null);
+    try {
+      const response = await fetch("/api/agent/capabilities", {
+        method: "PATCH", headers: { "content-type": "application/json" },
+        body: JSON.stringify(capabilities),
+      });
+      const payload = await response.json() as { agent?: AgentApiRecord; error?: { message?: string } };
+      if (!response.ok || !payload.agent) throw new Error(payload.error?.message ?? "Unable to save capabilities.");
+      setCapabilities(payload.agent.behaviorSettings.capabilities as Record<string, boolean>);
+      setSaved(true);
+    } catch (error) {
+      setSettingsError(error instanceof Error ? error.message : "Unable to save capabilities.");
+    } finally {
+      setSavingSettings(false);
+    }
+  };
 
   const saveChanges = async () => {
     setSavingSettings(true);
