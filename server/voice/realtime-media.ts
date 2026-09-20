@@ -116,8 +116,10 @@ export function attachRealtimeMedia({ telnyx, identity, streamId }: BridgeOption
   }
 
   function fail(reason: string) {
-    if (!open) return;
+    // Persist failure state even if the carrier already initiated stop():
+    // a usage write can reject while stop() drains pending work.
     error = true;
+    if (!open) return;
     logger.warn({ workspaceId, callId, reason }, "Realtime media bridge ended early");
     // Closing the media WebSocket alone would strand a live telephone call in
     // silence. End the provider call as well, even on OpenAI session failure.
