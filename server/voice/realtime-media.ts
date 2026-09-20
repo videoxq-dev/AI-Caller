@@ -8,7 +8,6 @@ import { recordRealtimeResponse, settleRealtimeCall } from "./realtime-usage";
 import { realtimeSessionContext, realtimeTools, runRealtimeBusinessTool } from "./realtime-tools";
 import { realtimeCreditBudgetReached } from "./realtime-usage";
 import { resolveVoiceRuntime } from "@/server/providers/voice/runtime";
-import { TelnyxPcmuRtpPacketizer } from "./telnyx-rtp";
 
 const MAX_BUFFERED_BYTES = 2 * 1024 * 1024;
 const MAX_OPENING_AUDIO_BYTES = 256 * 1024;
@@ -71,7 +70,6 @@ export function attachRealtimeMedia({ telnyx, identity, streamId }: BridgeOption
   const outboundPackets: Buffer[] = [];
   let initialBytes = 0;
   let outputTail = Buffer.alloc(0);
-  const rtp = new TelnyxPcmuRtpPacketizer();
   let toolEscalated = false;
   let speechAllowed = false;
   let providerCloseRequested = false;
@@ -166,7 +164,10 @@ export function attachRealtimeMedia({ telnyx, identity, streamId }: BridgeOption
     if (!speechAllowed || !outboundPackets.length) return;
     const packet = outboundPackets.shift();
     if (packet) sendTelnyx({
-      event: "media", stream_id: streamId, media: { payload: rtp.packet(packet).toString("base64") },
+      // Telnyx WebSocket `rtp` mode expects the RTP *payload*, not a full
+      // 12-byte RTP header plus payload. Sending the header as PCMU creates
+      // periodic audible interference every 172 decoded bytes (46.5 Hz).
+      event: "media", stream_id: streamId, media: { payload: packet.toString("base64") },
     });
   }, 20);
   ticker.unref();
