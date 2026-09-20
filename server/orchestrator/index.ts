@@ -90,8 +90,12 @@ function actionProtocolFor(context: OrchestratorContext) {
   if (!context.agent) return ACTION_PROTOCOL;
   const policy = capabilitiesFromBehaviorSettings(context.agent.behaviorSettings);
   return ACTION_PROTOCOL.split("\n").filter((line) => {
+    if (line.trimStart().startsWith('"contact":') && !policy.UPDATE_CONTACT) return false;
+    if (line.trimStart().startsWith('"lead":') && !policy.UPDATE_LEAD) return false;
     const action = /^- \{ "type": "([A-Z_]+)"/.exec(line)?.[1];
-    return !action || action === "NONE" || policy[action as keyof typeof policy] === true;
+    if (!action || action === "NONE") return true;
+    // STOP/opt-out is a customer right, including when recording new consent is disabled.
+    return action === "RECORD_SMS_CONSENT" || policy[action as keyof typeof policy] === true;
   }).join("\n");
 }
 
@@ -179,7 +183,21 @@ export function createResponseOrchestrator(dependencies: OrchestratorDependencie
       }
 
       const firstResponse = await dependencies.generate(workspaceId, conversationId, plannerMessages(context));
-      const first = parseOrchestratorEnvelope(firstResponse.text);
+      const planned = parseOrchestratorEnvelope(firstResponse.text);
+      const allowed = context.agent
+        ? capabilitiesFromBehaviorSettings(context.agent.behaviorSettings)
+        : null;
+      // Treat the model's metadata as optional hints. A disabled metadata
+      // capability cannot fail an otherwise valid answer or cause side effects.
+      // The executor still rechecks permissions on current DB state, including
+      // after a capability was revoked while the AI was generating.
+      const first: OrchestratorEnvelope = {
+        ...planned,
+        contact: allowed && !allowed.UPDATE_CONTACT ? undefined : planned.contact,
+        lead: allowed && !allowed.UPDATE_LEAD ? undefined
+          : allowed && !allowed.QUALIFY_LEAD && planned.lead?.status === "QUALIFIED"
+            ? { ...planned.lead, status: undefined } : planned.lead,
+      };
       if (options.beforeTools && !(await options.beforeTools())) {
         return { reply: null, handlingMode: "AI" as const, action: { type: "NONE" as const },
           toolResult: { kind: "none" as const, data: {} } };
