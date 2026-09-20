@@ -353,6 +353,13 @@ export function createVoiceWebhookService(dependencies: VoiceServiceDependencies
         if (pending) await scheduleVoiceTurn(workspaceId, call.id, pending, "after-speak");
         return;
       }
+      if (currentPhase === "OPENING_SPEAKING") {
+        const latest = await updateVoiceCall(workspaceId, call.id, {}, { phase: "ACTIVE" });
+        const pending = typeof latest.metadata.pendingVoiceTurnEventId === "string"
+          ? latest.metadata.pendingVoiceTurnEventId : null;
+        if (pending) await scheduleVoiceTurn(workspaceId, call.id, pending, "after-greeting");
+        return;
+      }
       if (currentPhase !== "AWAITING_DISCLOSURE_END") return;
 
       const voice = await getVoiceConfig(workspaceId);
@@ -378,7 +385,7 @@ export function createVoiceWebhookService(dependencies: VoiceServiceDependencies
         recordingConsentStatus: "ANNOUNCED",
         recordingDisclosedAt: event.occurredAt ?? new Date(),
         transcriptStatus: "ACTIVE",
-      }, { phase: "ACTIVE" });
+      }, { phase: "OPENING_SPEAKING" });
       return;
     }
 
@@ -411,7 +418,7 @@ export function createVoiceWebhookService(dependencies: VoiceServiceDependencies
           recordingConsentStatus: "GRANTED",
           transcriptStatus: "ACTIVE",
         }, {
-          phase: "ACTIVE",
+          phase: "OPENING_SPEAKING",
           consentEvidence: "DTMF_1",
           consentEventId: event.externalEventId,
         });
@@ -444,7 +451,7 @@ export function createVoiceWebhookService(dependencies: VoiceServiceDependencies
     if (event.type === "TRANSCRIPTION") {
       if (!event.isFinal || !event.transcript.trim()) return;
       const currentPhase = phase(call.metadata);
-      if (!["ACTIVE", "AI_RESPONDING", "AI_SPEAKING"].includes(currentPhase)) return;
+      if (!["ACTIVE", "OPENING_SPEAKING", "AI_RESPONDING", "AI_SPEAKING"].includes(currentPhase)) return;
 
       const endedMs = elapsedMs(call.startedAt, event.occurredAt);
       const startedMs = Math.max(0, endedMs - estimateSpeechDurationMs(event.transcript));
@@ -471,7 +478,8 @@ export function createVoiceWebhookService(dependencies: VoiceServiceDependencies
       // The latest final segment wins after a short silence interval. The
       // database phase prevents overlap while the assistant is responding or
       // speaking, and the worker survives web/container restarts.
-      if (await queueVoiceTurn(workspaceId, call.id, event.externalEventId)) {
+      if (await queueVoiceTurn(workspaceId, call.id, event.externalEventId)
+        && currentPhase === "ACTIVE") {
         await scheduleVoiceTurn(workspaceId, call.id, event.externalEventId);
       }
       return;
