@@ -6,6 +6,8 @@ import { logger } from "@/server/observability/logger";
 import { getVoiceCall, appendVoiceTranscriptSegment, claimRealtimeStream, finishRealtimeStream } from "./repository";
 import { recordRealtimeResponse, settleRealtimeCall } from "./realtime-usage";
 import { realtimeSystemInstructions, realtimeTools, runRealtimeBusinessTool } from "./realtime-tools";
+import { realtimeCreditBudgetReached } from "./realtime-usage";
+import { resolveVoiceRuntime } from "@/server/providers/voice/runtime";
 import { TelnyxPcmuRtpPacketizer } from "./telnyx-rtp";
 
 const MAX_BUFFERED_BYTES = 2 * 1024 * 1024;
@@ -74,6 +76,8 @@ export function attachRealtimeMedia({ telnyx, identity, streamId }: BridgeOption
   let toolEscalated = false;
   let speechAllowed = false;
   let providerCloseRequested = false;
+  let budgetHangupRequested = false;
+  let escalationResponseComplete = false;
   let toolSerial = Promise.resolve();
   const handledToolCalls = new Set<string>();
   const startedAt = Date.now();
@@ -108,6 +112,26 @@ export function attachRealtimeMedia({ telnyx, identity, streamId }: BridgeOption
     void stop(false);
   }
 
+  async function hangupForBudget(reason: "budget" | "max-duration" | "escalation") {
+    if (!open || budgetHangupRequested) return;
+    budgetHangupRequested = true;
+    const call = await getVoiceCall(workspaceId, callId);
+    if (!call || !call.callControlId || call.status !== "ACTIVE") return;
+    try {
+      const runtime = await resolveVoiceRuntime(workspaceId);
+      if (runtime.mode !== "HOSTED") throw new Error("Realtime requires hosted Telnyx.");
+      await runtime.provider.hangup({
+        callControlId: call.callControlId,
+        commandId: `realtime-${reason}-${call.id}`,
+      });
+      logger.info({ workspaceId, callId, reason }, "Realtime call hangup requested");
+    } catch (cause) {
+      logger.error({ err: cause, workspaceId, callId, reason },
+        "Unable to hang up Realtime call after budget or escalation; operator follow-up required");
+      fail("realtime-hangup-failure");
+    }
+  }
+
   function feedAudio(bytes: Buffer) {
     if (!open || !ready || !speechAllowed) return;
     sendOpenAI({ type: "input_audio_buffer.append", audio: bytes.toString("base64") });
@@ -115,7 +139,15 @@ export function attachRealtimeMedia({ telnyx, identity, streamId }: BridgeOption
 
   const ticker = setInterval(() => {
     if (!open) return;
-    if (Date.now() - startedAt > MAX_CALL_MS) return fail("max-call-duration");
+    if (Date.now() - startedAt > MAX_CALL_MS) {
+      void hangupForBudget("max-duration");
+      return;
+    }
+    if (escalationResponseComplete && outboundPackets.length === 0 && outputTail.length === 0) {
+      escalationResponseComplete = false;
+      setTimeout(() => void hangupForBudget("escalation"), 500).unref();
+      return;
+    }
     if (!speechAllowed || !outboundPackets.length) return;
     const packet = outboundPackets.shift();
     if (packet) sendTelnyx({
@@ -265,8 +297,14 @@ export function attachRealtimeMedia({ telnyx, identity, streamId }: BridgeOption
       // Cancelled responses may contain chargeable tokens; persist if present.
       if (response.usage) {
         track(recordRealtimeResponse(workspaceId, callId, responseId, response.usage)
+          .then(async () => {
+            if (open && await realtimeCreditBudgetReached(workspaceId, callId)) {
+              logger.warn({ workspaceId, callId }, "Realtime voice credit hold budget reached");
+              await hangupForBudget("budget");
+            }
+          })
           .catch(err => {
-            logger.error({ err, workspaceId, callId }, "Unable to store Realtime usage");
+            logger.error({ err, workspaceId, callId }, "Unable to store or budget Realtime usage");
             error = true;
           }));
       } else {
@@ -279,6 +317,7 @@ export function attachRealtimeMedia({ telnyx, identity, streamId }: BridgeOption
       pendingResponses.delete(responseId);
       if (activeResponseId === responseId) activeResponseId = null;
       if (toolEscalated && !pendingResponses.size) {
+        escalationResponseComplete = true;
         sendOpenAI({ type: "session.update", session: { type: "realtime",
           audio: { input: { turn_detection: { type: "semantic_vad",
             create_response: false, interrupt_response: true } } } } });
@@ -332,6 +371,7 @@ export function attachRealtimeMedia({ telnyx, identity, streamId }: BridgeOption
         type: "realtime",
         instructions,
         output_modalities: ["audio"],
+        max_output_tokens: 512,
         audio: {
           input: { format: { type: "audio/pcmu" },
             turn_detection: { type: "semantic_vad", eagerness: "medium",
