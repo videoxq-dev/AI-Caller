@@ -89,7 +89,7 @@ export async function assertRealtimeBookingReady(
   if (start.date !== details.date || start.time !== details.time
     || proposed.timezone !== details.timezone
     || !proposed.title.toLowerCase().includes(details.serviceName.toLowerCase())
-    || row.availableStart !== proposed.startsAt) {
+    || new Date(row.availableStart).getTime() !== new Date(proposed.startsAt).getTime()) {
     throw new AppError("BOOKING_DETAILS_CHANGED",
       "The appointment differs from the caller's latest request; collect and recheck the requested slot.", 409);
   }
