@@ -52,6 +52,7 @@ export default function AIAgentPage() {
   const [canManage, setCanManage] = useState(false);
   const [capabilityCatalog, setCapabilityCatalog] = useState<Capability[]>([]);
   const [capabilities, setCapabilities] = useState<Record<string, boolean>>({});
+  const [capabilitiesSaved, setCapabilitiesSaved] = useState(false);
   const [knowledgeCounts, setKnowledgeCounts] = useState({ services: 0, faqs: 0, policies: 0 });
   const [saved, setSaved] = useState(false);
   const [tone, setTone] = useState("Friendly & professional");
@@ -156,7 +157,7 @@ export default function AIAgentPage() {
       const payload = await response.json() as { agent?: AgentApiRecord; error?: { message?: string } };
       if (!response.ok || !payload.agent) throw new Error(payload.error?.message ?? "Unable to save capabilities.");
       setCapabilities(payload.agent.behaviorSettings.capabilities as Record<string, boolean>);
-      setSaved(true);
+      setCapabilitiesSaved(true);
     } catch (error) {
       setSettingsError(error instanceof Error ? error.message : "Unable to save capabilities.");
     } finally {
@@ -239,7 +240,7 @@ export default function AIAgentPage() {
           {tab === "overview" && <OverviewTab agentName={assistantName} status={agentStatus} configured={hasAgent} onStatusChange={updateStatus} canManage={canManage} loading={loadingSettings || savingSettings} setTab={setTab} />}
           {tab === "knowledge" && <KnowledgeTab counts={knowledgeCounts} />}
           {tab === "behavior" && <BehaviorTab tone={tone} setTone={setTone} goal={goal} setGoal={setGoal} whenUnsure={whenUnsure} setWhenUnsure={setWhenUnsure} verbosity={verbosity} setVerbosity={setVerbosity} guardrails={guardrails} setGuardrails={setGuardrails} assistantName={assistantName} setAssistantName={setAssistantName} openingMessage={openingMessage} setOpeningMessage={setOpeningMessage} escalationMessage={escalationMessage} setEscalationMessage={setEscalationMessage} voiceProfile={voiceProfile} setVoiceProfile={setVoiceProfile} voiceLanguage={voiceLanguage} setVoiceLanguage={setVoiceLanguage} voiceSpeed={voiceSpeed} setVoiceSpeed={setVoiceSpeed} recordingPolicy={recordingPolicy} setRecordingPolicy={setRecordingPolicy} afterHoursEnabled={afterHoursEnabled} setAfterHoursEnabled={setAfterHoursEnabled} qualificationEnabled={qualificationEnabled} setQualificationEnabled={setQualificationEnabled} qualificationCriteria={qualificationCriteria} setQualificationCriteria={setQualificationCriteria} />}
-          {tab === "capabilities" && <CapabilitiesTab catalog={capabilityCatalog} capabilities={capabilities} setCapabilities={setCapabilities} onSave={saveCapabilities} loading={loadingSettings || savingSettings} canManage={canManage} />}
+          {tab === "capabilities" && <CapabilitiesTab catalog={capabilityCatalog} capabilities={capabilities} setCapabilities={(value) => { setCapabilitiesSaved(false); setCapabilities(value); }} saved={capabilitiesSaved} onSave={saveCapabilities} loading={loadingSettings || savingSettings} canManage={canManage} />}
           {tab === "test" && <TestTab />}
         </div>
       </section>
@@ -348,9 +349,9 @@ function KnowledgeTab({ counts }: { counts: { services: number; faqs: number; po
   </div>;
 }
 
-function CapabilitiesTab({ catalog, capabilities, setCapabilities, onSave, loading, canManage }: {
+function CapabilitiesTab({ catalog, capabilities, setCapabilities, saved, onSave, loading, canManage }: {
   catalog: Capability[]; capabilities: Record<string, boolean>;
-  setCapabilities: (value: Record<string, boolean>) => void; onSave: () => void;
+  setCapabilities: (value: Record<string, boolean>) => void; saved: boolean; onSave: () => void;
   loading: boolean; canManage: boolean;
 }) {
   return <div className="agentTabContent"><section className="agentCard behaviorCard">
@@ -364,7 +365,7 @@ function CapabilitiesTab({ catalog, capabilities, setCapabilities, onSave, loadi
         onClick={() => setCapabilities({ ...capabilities, [item.key]: !capabilities[item.key] })}><i /></button>
     </div>)}
     {!catalog.length && <p>{loading ? "Loading capabilities…" : "No capabilities available."}</p>}
-    <button type="button" disabled={loading || !canManage || !catalog.length} onClick={onSave}>Save capabilities</button>
+    <button type="button" disabled={loading || !canManage || !catalog.length} onClick={onSave}>{loading ? "Saving…" : saved ? "Capabilities saved" : "Save capabilities"}</button>
   </section></div>;
 }
 
