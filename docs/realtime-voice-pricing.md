@@ -1,9 +1,10 @@
 # Voice technology and billing: implementation contract
 
-Status: **pricing foundation only**. Realtime media bridge, user-selectable voice mode, durable
-OpenAI response usage aggregation, debit settlement and live carrier acceptance are NOT yet
-implemented by this pricing change. Do not show Realtime as active or charge customers before
-those components are verified. Existing legacy voice is unchanged.
+Status: **implementation in PR #30, live carrier acceptance pending**. The selectable mode,
+PCMU media bridge, business tools, structured booking state, response-usage storage,
+credit holds and call settlement are coded; these are not a certification of actual
+carrier routing, audio quality or invoice reconciliation. Keep VOICE_REALTIME_ENABLED=false
+until deployment, security review and live acceptance. Standard voice remains available.
 
 ## Planned user choice
 
@@ -44,7 +45,8 @@ Telnyx US **local inbound** public starting/list rates per minute:
 | Media streaming WebSocket | $0.0035 |
 | Recording, if enabled | $0.0020 |
 | Telnyx STT (caller transcript) | $0.0150 |
-| Total, recorded example | **from $0.0257** |
+| Total excluding TTS greeting/disclosure | **from $0.0257** |
+| One-time Telnyx greeting/disclosure TTS | **Conservative rate-card proxy: $0.000048 per character** |
 
 - https://telnyx.com/pricing/voice-api
 - https://telnyx.com/pricing/elastic-sip
@@ -80,16 +82,19 @@ credits slightly higher than exactly 1.5x; disclose rounding and total charges.
 
 Hypothetical single one-minute **recorded** US-local call with 300 noncached
 audio input, 600 audio output, 2,000 noncached text input and 200 text output
-tokens (example token counts, NOT a per-minute OpenAI consumption guarantee):
+tokens and **250 Telnyx-rendered greeting/disclosure characters** (example token/character counts, NOT a per-minute OpenAI consumption guarantee):
 
 | Model | OpenAI COGS | Telnyx COGS | Total COGS | Retail 50% markup | Credits |
 | --- | ---: | ---: | ---: | ---: | ---: |
-| gpt-realtime-2.1 | $0.06080 | $0.02570 | $0.08650 | $0.12975 | 130 |
-| gpt-realtime-2.1-mini | $0.01668 | $0.02570 | $0.04238 | $0.06357 | 64 |
+| gpt-realtime-2.1 | $0.06080 | $0.03770 | $0.09850 | $0.14775 | 148 |
+| gpt-realtime-2.1-mini | $0.01668 | $0.03770 | $0.05438 | $0.08157 | 82 |
 
 Monthly at exactly 1,000 calls with that same usage and 1-minute rounding:
-full model provider $86.50 / retail $130.00; mini provider $42.38 /
-retail $64.00. Actual costs will vary with tokenized conversation history,
+full model provider $98.50 / retail $148.00; mini provider $54.38 /
+retail $82.00. The selected Azure voice may have a different account-specific rate: $0.000048/character
+is a conservative Telnyx HD TTS proxy, not an assertion that Azure always costs this amount.
+Source: https://telnyx.com/pricing/text-to-speech . Confirm the actual provider bill.
+Actual costs will vary with tokenized conversation history,
 turn count, silence, caching, speaking time and customer behavior.
 
 ## Required work before Realtime may be enabled
@@ -111,3 +116,22 @@ turn count, silence, caching, speaking time and customer behavior.
   breakdown before declaring paid Realtime generally available.
 
 The transcription line was added when connecting the live gateway to the existing caller transcript store; the earlier price example omitted this additional Telnyx STT cost. Source: https://telnyx.com/pricing/speech-to-text . Transcription runs asynchronously and does not gate Realtime responses. Actual Telnyx invoice rates must be reconciled before general availability.
+
+
+## Deployment and live gate
+
+Set HOSTED_AI_API_KEY, HOSTED_TELNYX_API_KEY, Telnyx webhook public key,
+BETTER_AUTH_SECRET, DATABASE_URL and the HTTPS webhook URL. Deploy the separate
+gateway Compose service with a trusted TLS terminating reverse proxy mapping
+a dedicated public WSS hostname to internal port 3002. Set VOICE_GATEWAY_URL
+to the WSS endpoint, and enable VOICE_REALTIME_ENABLED=true on all relevant
+web/gateway runtime services only after confirming the gateway is reachable.
+The independent gateway is not a substitute for the web webhook receiver.
+
+To activate, complete local and carrier testing: service question, multi-clause
+booking with changing date/time, interruption, human follow-up (never live
+transfer), transcript/recording, workspace isolation and billing reconciled to
+OpenAI response.done.usage and Telnyx account invoice. The user must perform a
+real inbound call with an authorized managed Telnyx number. No production call
+has been placed in automated CI. Issue #28 PostgreSQL trust authentication is
+a separate production security release blocker.
