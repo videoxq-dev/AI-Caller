@@ -16,6 +16,8 @@ function safeCount(value: unknown): number {
   if (typeof value !== "number" || !Number.isSafeInteger(value) || value < 0) throw new Error("Invalid Realtime provider usage counter.");
   return value;
 }
+function optionalCount(value: unknown): number { return value == null ? 0 : safeCount(value); }
+
 function object(value: unknown): Record<string, unknown> {
   return value && typeof value === "object" && !Array.isArray(value)
     ? value as Record<string, unknown> : {};
@@ -28,18 +30,21 @@ export function normalizeRealtimeResponseUsage(value: unknown): RealtimeVoiceUsa
   const input = object(usage.input_token_details);
   const cached = object(input.cached_tokens_details);
   const output = object(usage.output_token_details);
-  const audioInputTokens = safeCount(input.audio_tokens);
-  const textInputTokens = safeCount(input.text_tokens);
-  const audioCachedInputTokens = safeCount(cached.audio_tokens);
-  const textCachedInputTokens = safeCount(cached.text_tokens);
-  const audioOutputTokens = safeCount(output.audio_tokens);
-  const textOutputTokens = safeCount(output.text_tokens);
+  const audioInputTokens = optionalCount(input.audio_tokens);
+  const textInputTokens = optionalCount(input.text_tokens);
+  const audioCachedInputTokens = optionalCount(cached.audio_tokens);
+  const textCachedInputTokens = optionalCount(cached.text_tokens);
+  const audioOutputTokens = optionalCount(output.audio_tokens);
+  const textOutputTokens = optionalCount(output.text_tokens);
+  if (safeCount(usage.input_tokens) !== audioInputTokens + textInputTokens
+    || safeCount(usage.output_tokens) !== audioOutputTokens + textOutputTokens
+    || optionalCount(input.image_tokens) > 0
+    || optionalCount(cached.image_tokens) > 0
+    || optionalCount(input.cached_tokens) !== audioCachedInputTokens + textCachedInputTokens) {
+    throw new Error("Realtime provider usage contains unpriced or inconsistent token totals.");
+  }
   if (audioCachedInputTokens > audioInputTokens || textCachedInputTokens > textInputTokens) {
     throw new Error("Realtime provider usage has impossible cached token counts.");
-  }
-  if (safeCount(usage.input_tokens) !== audioInputTokens + textInputTokens
-    || safeCount(usage.output_tokens) !== audioOutputTokens + textOutputTokens) {
-    throw new Error("Realtime response has unallocated input/output tokens; billing requires authoritative details.");
   }
   return { audioInputTokens, audioCachedInputTokens, audioOutputTokens,
     textInputTokens, textCachedInputTokens, textOutputTokens };
