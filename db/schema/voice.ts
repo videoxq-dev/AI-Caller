@@ -102,3 +102,13 @@ export const voiceRealtimeResponseUsage = pgTable("voice_realtime_response_usage
   uniqueIndex("voice_realtime_response_usage_voice_call_id_response_id_key").on(table.voiceCallId, table.responseId),
   index("voice_realtime_response_usage_workspace_call_idx").on(table.workspaceId, table.voiceCallId),
 ]);
+
+export const voiceRealtimeBookingState = pgTable("voice_realtime_booking_state", {
+  voiceCallId: uuid("voice_call_id").primaryKey().references(() => voiceCalls.id, { onDelete: "cascade" }),
+  workspaceId: uuid("workspace_id").notNull().references(() => workspaces.id, { onDelete: "cascade" }),
+  details: jsonb("details").$type<Record<string, string>>().default({}).notNull(),
+  availableStart: text("available_start"),
+  updatedAt: timestamp("updated_at", { withTimezone: true, mode: "date" }).defaultNow().notNull(),
+}, (table) => [
+  index("voice_realtime_booking_state_workspace_idx").on(table.workspaceId),
+]);
