@@ -131,7 +131,9 @@ export async function runRealtimeBusinessTool(input: {
     if (parsed.data.type === "CHECK_AVAILABILITY") {
       const start = parsed.data.startsAt;
       const slots = Array.isArray(result.data.slots) ? result.data.slots : [];
-      const available = slots.some(slot => record(slot).startsAt === start);
+      const requested = new Date(start).getTime();
+      const available = Number.isFinite(requested) && slots.some(slot =>
+        new Date(String(record(slot).startsAt)).getTime() === requested);
       await saveRealtimeAvailability(input.workspaceId, input.callId, start, available);
     }
     return { ok: true as const, ...result, ...(result.kind === "escalation"
