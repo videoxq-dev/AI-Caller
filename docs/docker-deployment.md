@@ -1,52 +1,60 @@
 # Deploy AI Caller using Docker — DeployOS or self-hosted Compose
 
-## DeployOS: use your EXISTING PostgreSQL database (recommended if you already configured DeployOS)
+## DeployOS: preserve the EXISTING bundled PostgreSQL service and data
 
-The default `docker-compose.yml` runs **web + migration job + worker + Realtime gateway** using the repository `Dockerfile`. It does **not** provision another PostgreSQL container or require `POSTGRES_USER`, `POSTGRES_PASSWORD`, or `POSTGRES_DB` for `docker compose config`. DeployOS writes your configured environment variables into a server-side `.env` at deploy time. The Compose file reads that file optionally and passes its values to all three application services. Never put keys in Git. See DeployOS's Config → Environment Variables & Secrets.
+The default `docker-compose.yml` is the original working DeployOS **bundled**
+PostgreSQL topology plus `migrate`, `web`, `worker`, and the Realtime `gateway`.
+It retains the Compose project name `ai-caller`, PostgreSQL service hostname
+`postgres`, and persistent `postgres_data` volume. Docker automatically
+initializes PostgreSQL **only when that same volume is empty**. An existing
+volume is NOT recreated, replaced, or wiped by the application deploy.
 
-**Fix for the original deployment error:** PR #27 previously had a bundled PostgreSQL service and required `${POSTGRES_USER:?}`, `${POSTGRES_PASSWORD:?}`, `${POSTGRES_DB:?}` during Compose interpolation. That was inappropriate for an existing DeployOS database and made Compose fail before any container started. The current default `docker-compose.yml` has no such interpolation.
+**Existing AI Caller deployments:** keep your currently working `DATABASE_URL`
+with hostname `postgres`, and keep all existing account, encryption, Telnyx,
+Stripe and recording settings. You do NOT need to add `POSTGRES_USER`,
+`POSTGRES_DB` or `POSTGRES_PASSWORD` just to pass `docker compose config`
+if the original database already exists and uses the historical defaults.
+The legacy role/database defaults remain `postgres`/`ai_caller`.
 
-1. In DeployOS, select repository `videoxq-dev/AI-Caller`, branch `feat/dual-voice-realtime`, build method **Dockerfile (repo compose)**. Use **web** as app service, internal port **8080**, and health path `/api/health`. DeployOS terminates HTTPS and connects the app to its edge proxy. Do not select the `migrate` or `worker` service as the public app.
-2. Confirm your existing PostgreSQL database is actually running. If DeployOS manages it, open **Databases**, find your PostgreSQL instance, and use its actual connection string (do not paste it into a GitHub issue or chat). `DATABASE_URL` needs a hostname resolvable and reachable **inside the web, worker, and migration containers**. `127.0.0.1`/`localhost` in this URL is almost certainly wrong for a separately deployed Docker database.
-3. In DeployOS app **Config → Environment Variables**, set `DATABASE_URL`, `BETTER_AUTH_URL`, `BETTER_AUTH_SECRET`, `INTEGRATION_ENCRYPTION_KEY`, `HOSTED_AI_PROVIDER=openai`, `HOSTED_AI_MODEL=gpt-5.6-luna`, your direct `HOSTED_AI_API_KEY`, your Telnyx global key and webhook public key. `BETTER_AUTH_URL` is the **public HTTPS origin** people visit, not `web:8080`. For V2 use `HOSTED_WEBHOOK_BASE_URL` only if it differs from that public HTTPS origin; leave `VOICE_GATEWAY_URL` blank for the turn-based call acceptance. Retain your other configured plan, payment and SMTP variables as needed.
-4. Deploy the updated branch. The `migrate` job applies SQL migrations and checks database readiness; `web` and `worker` start only after it succeeds. If the DB is missing, unreachable, misconfigured or has migration errors, expect a **clear deployment error** rather than a signup form with broken persistence.
-5. Visit your public `https://YOUR-APP-DOMAIN/api/health`: it must return HTTP 200 with `{"status":"ok","database":"ok"}`. Then sign up, open your workspace onboarding, sign out and sign back in. These are the live acceptance criteria for the cloud signup fix.
+**New empty database volumes:** the default does not silently initialize
+PostgreSQL with the previous known fallback password or network `trust`.
+Before provisioning a new installation, set `POSTGRES_PASSWORD` to a strong
+random secret, and a matching URL-safe password in `DATABASE_URL` (with
+hostname `postgres`); optionally set `POSTGRES_USER` and `POSTGRES_DB`.
+New volumes use SCRAM authentication. This still auto-creates the database
+from an empty volume, but only after secure credentials are configured.
 
-If DeployOS reports `ECONNREFUSED 127.0.0.1:5432` **after** it can read the Compose file, that is a **different, runtime error**: the actual `DATABASE_URL` still targets container loopback. Correct it to the reachable DeployOS-managed or external PostgreSQL hostname. Check whether the DB and app are attached to compatible Docker networks; there is no universal service hostname.
+**Existing legacy `trust` authentication is not automatically migrated:**
+the service warns when the current volume has old permissive host rules
+and continues serving the existing data. Never change or reset a live
+PostgreSQL password or HBA file without a recoverable backup and the
+controlled migration in `docs/postgres-auth-migration.md` (Issue #28).
+This compatibility fix is NOT security signoff for an old trust-auth volume.
 
-**Important:** An existing `DATABASE_URL` alone does not set `POSTGRES_USER`/`POSTGRES_PASSWORD`/`POSTGRES_DB`, and a runtime container environment is different from Compose file interpolation. This is why the previous default Compose failed even though your app variables were configured.
+Select branch `feat/dual-voice-realtime`, use Compose service **web** as
+DeployOS's public app on internal port 8080 (`/api/health`), and retain
+the existing `.env`/DeployOS secret values. The `gateway` is a private
+service on port 3002; route a separate TLS-terminated `wss://` endpoint
+to it only when testing Realtime. Leave `VOICE_REALTIME_ENABLED=false`
+until live acceptance (Issue #31).
 
-## DeployOS deployment on `feat/dual-voice-realtime`
+Before deploying, verify the app's actual Compose project and volume names.
+If a previous DeployOS installation used a different project name, stop:
+restore the same project name or use an explicit, verified external volume
+name. Do not allow Docker to create a fresh `postgres_data` volume for an
+already-used database. Do not run `docker compose down -v`, `docker volume rm`,
+or `initdb` to troubleshoot an existing installation.
 
-The default `docker-compose.yml` now **only** runs `migrate`, `web`,
-`worker`, and the separate `gateway` against the app's **existing
-authenticated `DATABASE_URL`**. It must not demand `POSTGRES_USER`,
-`POSTGRES_DB` or `POSTGRES_PASSWORD` from an app that has its own
-DeployOS-managed database. The bundled database remains **opt-in** via
-`compose.selfhost.yaml`, and that file is for a new manual all-in-one
-installation, not an automatic replacement for an existing database.
+See the `migrate` service log for database connectivity or migration errors.
+The migration job runs before web, worker and gateway. A Compose-config
+parsing error occurs before any of these services start.
 
-If DeployOS says `POSTGRES_DB` or `POSTGRES_PASSWORD` is required before
-it starts containers, inspect the selected branch/Compose path: it is the
-superseded default (prior to the external-DB fix). Set the existing app's
-`DATABASE_URL` in DeployOS Config and redeploy the corrected branch. **Do
-not** make up PostgreSQL credentials, reinitialize the database, switch
-`DATABASE_URL` to localhost or delete a volume to satisfy interpolation.
+### If DATABASE_URL references an independently managed database
 
-**Existing bundled-Postgres caveat:** earlier `docker-compose.yml` revisions
-*did* start a `postgres` service. Before changing the service graph on such
-a deployment, privately inspect the DATABASE_URL host and Docker volume/
-container names. If it points to the old Compose service `postgres`, do not
-switch that deployment to the external-DB default until a recoverable backup
-and authenticated migration are verified under
-`docs/postgres-auth-migration.md`; keep the old database available.
-Switching Compose files must never silently replace the original
-`ai-caller_postgres_data` volume with a new empty database.
-
-For Realtime, separately route a TLS-terminated public `wss://` endpoint to
-the `gateway` internal port 3002 and set `VOICE_GATEWAY_URL` in the
-application's DeployOS secrets. Leave `VOICE_REALTIME_ENABLED=false`
-until live carrier/model acceptance and credit reconciliation (Issue #31).
+The default DeployOS Compose is not external-DB-only. It will still start
+its bundled PostgreSQL service. An independently managed database requires
+a separate explicitly chosen deployment topology. Do not silently switch
+an existing bundled install to an unrelated database or vice versa.
 
 ## DeployOS reports DATABASE_URL missing or invalid after an ENOTFOUND error
 
