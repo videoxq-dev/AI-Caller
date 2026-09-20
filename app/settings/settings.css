@@ -20,3 +20,19 @@
 .settingsPhoneManager{margin-top:14px}
 .phoneBillingHelp{position:sticky;top:84px}
 @media(max-width:980px){.settingsPhoneSection{grid-template-columns:1fr}.phoneBillingHelp{position:static}}
+
+.voiceTechSettings{padding:18px 0;border-top:1px solid #e0e7f0;margin-top:20px}
+.voiceTechCards{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px;margin-top:14px}
+.voiceTechOption{display:flex;gap:12px;padding:14px;border:1px solid #dce5ef;border-radius:10px;cursor:pointer;background:#fff}
+.voiceTechOption.selected{border-color:#357cef;background:#f3f8ff}
+.voiceTechOption input{margin-top:3px;flex-shrink:0}
+.voiceTechOption span{display:flex;flex-direction:column;gap:7px;min-width:0}
+.voiceTechOption strong{font-size:13px;color:#19304e}
+.voiceTechOption small,.voiceTechModel small,.voiceTechFoot small{font-size:11px;color:#526580;line-height:1.45}
+.voiceTechModel{display:flex;flex-direction:column;gap:7px;margin-top:14px;font-size:12px;color:#1b3556}
+.voiceTechModel select{width:100%;max-width:380px;border:1px solid #dce5ef;border-radius:8px;padding:10px;color:#213651;background:#fff}
+.voiceTechFoot{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-top:14px}
+.voiceTechFoot button{border:0;border-radius:8px;padding:10px 14px;background:#1769ee;color:#fff;cursor:pointer}
+.voiceTechFoot button:disabled{opacity:.5;cursor:default}
+.voiceTechError{color:#b42318;font-size:12px}
+@media(max-width:720px){.voiceTechCards{grid-template-columns:1fr}}
