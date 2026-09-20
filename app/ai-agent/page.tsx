@@ -47,6 +47,7 @@ type TestResult = {
 export default function AIAgentPage() {
   const [tab, setTab] = useState<AgentTab>("overview");
   const [agentStatus, setAgentStatus] = useState<AgentStatus>("DRAFT");
+  const [hasAgent, setHasAgent] = useState(false);
   const [loadingSettings, setLoadingSettings] = useState(true);
   const [canManage, setCanManage] = useState(false);
   const [capabilityCatalog, setCapabilityCatalog] = useState<Capability[]>([]);
@@ -87,6 +88,7 @@ export default function AIAgentPage() {
         setCapabilities(stored ?? {});
         if (!agent) return;
         setAgentStatus(agent.status);
+        setHasAgent(true);
         setAssistantName(agent.name);
         setTone(agent.tone);
         setGoal(agent.primaryGoal);
@@ -124,8 +126,8 @@ export default function AIAgentPage() {
     return () => { cancelled = true; };
   }, [setGoal, setTone, setWhenUnsure]);
 
-  const updateStatus = async () => {
-    const next: AgentStatus = agentStatus === "ACTIVE" ? "PAUSED" : "ACTIVE";
+  const updateStatus = async (selected?: AgentStatus) => {
+    const next: AgentStatus = selected ?? (agentStatus === "ACTIVE" ? "PAUSED" : "ACTIVE");
     setSavingSettings(true);
     setSettingsError(null);
     try {
@@ -198,8 +200,10 @@ export default function AIAgentPage() {
           completeStep: false,
         }),
       });
-      const payload = await response.json().catch(() => ({})) as { error?: { message?: string } };
-      if (!response.ok) throw new Error(payload.error?.message ?? "Unable to save AI agent settings.");
+      const payload = await response.json().catch(() => ({})) as { agent?: AgentApiRecord; error?: { message?: string } };
+      if (!response.ok || !payload.agent) throw new Error(payload.error?.message ?? "Unable to save AI agent settings.");
+      setHasAgent(true);
+      setAgentStatus(payload.agent.status);
       setSaved(true);
       window.setTimeout(() => setSaved(false), 1800);
     } catch (err) {
@@ -232,7 +236,7 @@ export default function AIAgentPage() {
             {(["overview", "knowledge", "behavior", "capabilities", "test"] as AgentTab[]).map((item) => <button key={item} type="button" className={tab === item ? "active" : ""} onClick={() => setTab(item)}>{item[0].toUpperCase() + item.slice(1)}</button>)}
           </div>
 
-          {tab === "overview" && <OverviewTab agentName={assistantName} status={agentStatus} onStatusChange={updateStatus} canManage={canManage} loading={loadingSettings || savingSettings} setTab={setTab} />}
+          {tab === "overview" && <OverviewTab agentName={assistantName} status={agentStatus} configured={hasAgent} onStatusChange={updateStatus} canManage={canManage} loading={loadingSettings || savingSettings} setTab={setTab} />}
           {tab === "knowledge" && <KnowledgeTab counts={knowledgeCounts} />}
           {tab === "behavior" && <BehaviorTab tone={tone} setTone={setTone} goal={goal} setGoal={setGoal} whenUnsure={whenUnsure} setWhenUnsure={setWhenUnsure} verbosity={verbosity} setVerbosity={setVerbosity} guardrails={guardrails} setGuardrails={setGuardrails} assistantName={assistantName} setAssistantName={setAssistantName} openingMessage={openingMessage} setOpeningMessage={setOpeningMessage} escalationMessage={escalationMessage} setEscalationMessage={setEscalationMessage} voiceProfile={voiceProfile} setVoiceProfile={setVoiceProfile} voiceLanguage={voiceLanguage} setVoiceLanguage={setVoiceLanguage} voiceSpeed={voiceSpeed} setVoiceSpeed={setVoiceSpeed} recordingPolicy={recordingPolicy} setRecordingPolicy={setRecordingPolicy} afterHoursEnabled={afterHoursEnabled} setAfterHoursEnabled={setAfterHoursEnabled} qualificationEnabled={qualificationEnabled} setQualificationEnabled={setQualificationEnabled} qualificationCriteria={qualificationCriteria} setQualificationCriteria={setQualificationCriteria} />}
           {tab === "capabilities" && <CapabilitiesTab catalog={capabilityCatalog} capabilities={capabilities} setCapabilities={setCapabilities} onSave={saveCapabilities} loading={loadingSettings || savingSettings} canManage={canManage} />}
@@ -243,8 +247,8 @@ export default function AIAgentPage() {
   );
 }
 
-function OverviewTab({ agentName, status, onStatusChange, canManage, loading, setTab }: {
-  agentName: string; status: AgentStatus; onStatusChange: () => void;
+function OverviewTab({ agentName, status, configured, onStatusChange, canManage, loading, setTab }: {
+  agentName: string; status: AgentStatus; configured: boolean; onStatusChange: (next?: AgentStatus) => void;
   canManage: boolean; loading: boolean; setTab: (tab: AgentTab) => void;
 }) {
   const [dashboard, setDashboard] = useState<DashboardData | null>(null);
@@ -273,13 +277,16 @@ function OverviewTab({ agentName, status, onStatusChange, canManage, loading, se
         <div className="agentBotAvatar"><BotFaceIcon /></div>
         <div className="agentHeroCopy">
           <div className="agentHeroName"><h2>{agentName}</h2><span>{status}</span></div>
-          <p>{status === "ACTIVE" ? "Your configured agent is active for eligible inbound conversations." :
+          <p>{!configured ? "Configure your AI Agent from Behavior before activating it." :
+            status === "ACTIVE" ? "Your configured agent is active for eligible inbound conversations." :
             status === "PAUSED" ? "New AI replies are paused. Incoming messages remain in your Inbox." :
             "Activate your agent after checking its knowledge, capabilities and communication setup."}</p>
           <div className="agentHeroButtons">
-            <button type="button" disabled={loading || !canManage} onClick={onStatusChange}>
+            <button type="button" disabled={loading || !canManage || !configured} onClick={() => onStatusChange()}>
               {status === "ACTIVE" ? <PauseIcon /> : <PlayIcon />}{status === "ACTIVE" ? "Pause agent" : "Activate agent"}
             </button>
+            {configured && status !== "DRAFT" && <button type="button" disabled={loading || !canManage}
+              onClick={() => onStatusChange("DRAFT")}>Return to draft</button>}
             <button type="button" onClick={() => setTab("behavior")}><GearIcon size={16} />Edit settings</button>
           </div>
         </div>
