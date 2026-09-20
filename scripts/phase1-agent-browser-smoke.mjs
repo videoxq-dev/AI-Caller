@@ -107,10 +107,12 @@ try {
     "Booking capability toggle did not reflect its saved state.");
   await booking.click();
   await page.getByRole("button", { name: "Save capabilities" }).click();
-  await page.waitForFunction(() => {
-    const control = document.querySelector('button[aria-label="Book appointments"]');
-    return control?.getAttribute("aria-pressed") === "false";
-  });
+  await page.waitForFunction(async () => {
+    const response = await fetch("/api/agent", { cache: "no-store" });
+    if (!response.ok) return false;
+    const stored = await response.json();
+    return stored.capabilities?.BOOK_APPOINTMENT === false;
+  }, null, { timeout: 10_000 });
   agent = await api(context, "GET", "/api/agent", undefined, "read revoked booking");
   assert(agent.capabilities.BOOK_APPOINTMENT === false,
     "Booking toggle was cosmetic rather than persisted.");
