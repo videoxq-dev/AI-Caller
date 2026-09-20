@@ -355,10 +355,19 @@ export function attachRealtimeMedia({ telnyx, identity, streamId }: BridgeOption
     open = false;
     clearInterval(ticker);
     providerCloseRequested = true;
+    // Ask OpenAI to finish/cancel and return response.done.usage before the
+    // telephony socket disappears. A cancelled response can still cost tokens.
+    if (upstream && upstream.readyState === WebSocket.OPEN && pendingResponses.size > 0) {
+      upstream.send(JSON.stringify({ type: "response.cancel" }));
+      const until = Date.now() + 3000;
+      while (pendingResponses.size > 0 && Date.now() < until
+        && upstream.readyState === WebSocket.OPEN) {
+        await new Promise(resolve => setTimeout(resolve, 50));
+      }
+    }
     if (upstream && upstream.readyState === WebSocket.OPEN) upstream.close(1000);
     if (upstream && upstream.readyState === WebSocket.CONNECTING) upstream.terminate();
-    // Do not mark provider usage complete when the stream ended during active
-    // generation: the last response may have chargeable tokens not yet received.
+    // Do not claim authoritative billing if any chargeable response was lost.
     await Promise.allSettled([...pendingWork]);
     const verified = providerConfirmed && !error && ready && pendingResponses.size === 0;
     if (claimed) {
