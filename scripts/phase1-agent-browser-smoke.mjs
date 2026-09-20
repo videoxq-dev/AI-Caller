@@ -207,6 +207,13 @@ try {
   await page.goto(`${baseUrl}/ai-agent`, { waitUntil: "networkidle" });
   await page.getByText("Agent paused", { exact: true }).waitFor();
   await page.getByRole("button", { name: "Activate agent" }).click();
+  await page.getByText("Agent active", { exact: true }).waitFor();
+  await page.getByRole("button", { name: "Return to draft" }).click();
+  await page.getByText("Agent draft", { exact: true }).waitFor();
+  assert((await api(context, "GET", "/api/agent", undefined, "read returned draft")).agent.status === "DRAFT",
+    "Return to draft did not persist.");
+  await page.getByRole("button", { name: "Activate agent" }).click();
+  await page.getByText("Agent active", { exact: true }).waitFor();
 
   await page.getByRole("button", { name: "Capabilities", exact: true }).click();
   assert(await page.getByRole("button", { name: "Book appointments", exact: true })
