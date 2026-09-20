@@ -351,6 +351,8 @@ export function createVoiceWebhookService(dependencies: VoiceServiceDependencies
           recordingDisclosedAt: event.occurredAt ?? new Date(),
         }, {
           phase: "AWAITING_RECORDING_CONSENT",
+          ...(call.metadata.voiceTechnology === "REALTIME"
+            ? { voiceTelnyxTtsCharacters: text.length } : {}),
         });
         return;
       }
@@ -366,7 +368,10 @@ export function createVoiceWebhookService(dependencies: VoiceServiceDependencies
       await updateVoiceCall(workspaceId, call.id, {
         status: "ACTIVE",
         answeredAt: event.occurredAt ?? new Date(),
-      }, { phase: "AWAITING_DISCLOSURE_END" });
+      }, { phase: "AWAITING_DISCLOSURE_END",
+        ...(call.metadata.voiceTechnology === "REALTIME"
+          ? { voiceTelnyxTtsCharacters: text.length } : {}),
+      });
       return;
     }
 
@@ -425,7 +430,12 @@ export function createVoiceWebhookService(dependencies: VoiceServiceDependencies
         recordingConsentStatus: "ANNOUNCED",
         recordingDisclosedAt: event.occurredAt ?? new Date(),
         transcriptStatus: "ACTIVE",
-      }, { phase: "OPENING_SPEAKING" });
+      }, { phase: "OPENING_SPEAKING",
+        ...(call.metadata.voiceTechnology === "REALTIME"
+          ? { voiceTelnyxTtsCharacters:
+            Number(call.metadata.voiceTelnyxTtsCharacters ?? 0) + openingText(voice.openingMessage).length }
+          : {}),
+      });
       return;
     }
 
@@ -461,6 +471,10 @@ export function createVoiceWebhookService(dependencies: VoiceServiceDependencies
           phase: "OPENING_SPEAKING",
           consentEvidence: "DTMF_1",
           consentEventId: event.externalEventId,
+          ...(call.metadata.voiceTechnology === "REALTIME"
+            ? { voiceTelnyxTtsCharacters:
+              Number(call.metadata.voiceTelnyxTtsCharacters ?? 0) + openingText(voice.openingMessage).length }
+            : {}),
         });
         return;
       }
