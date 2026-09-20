@@ -1,7 +1,7 @@
 import { and, eq } from "drizzle-orm";
 import { db } from "@/db";
 import { usageEvents, voiceRealtimeResponseUsage } from "@/db/schema";
-import { chargeUnavoidableCredits, settleCreditReservation } from "@/server/credits/service";
+import { settleCreditReservation } from "@/server/credits/service";
 import { logger } from "@/server/observability/logger";
 import { getVoiceCall } from "./repository";
 import { quoteRealtimeVoiceFromRates, type RealtimeVoiceModel, type RealtimeVoiceUsage } from "@/server/billing/realtime-voice";
@@ -136,6 +136,11 @@ export async function settleRealtimeCall(workspaceId: string, callId: string) {
   if (prior) return { settled: true };
   const model = call.metadata.realtimeModel as RealtimeVoiceModel;
   if (!["gpt-realtime-2.1", "gpt-realtime-2.1-mini"].includes(model)) throw new Error("Invalid per-call Realtime model.");
+  // The reservation is written before issuing the Telnyx answer. Fail closed
+  // if a newer call somehow reached settlement without its funded hold.
+  if (typeof call.metadata.realtimeReservationId !== "string") {
+    throw new Error("Realtime call cannot settle without the original credit reservation.");
+  }
   const snapshots = object(call.metadata.realtimeRates);
   const aiRates = readSnapshot(snapshots.openaiRates);
   const telnyxRates = readSnapshot(snapshots.telnyxRates);
@@ -160,12 +165,7 @@ export async function settleRealtimeCall(workspaceId: string, callId: string) {
     referenceType: "VOICE_CALL", referenceId: call.id,
   };
   const reservationId = call.metadata.realtimeReservationId;
-  if (typeof reservationId === "string") {
-    await settleCreditReservation(workspaceId, reservationId, quote.credits, charge);
-  } else if (quote.credits > 0) {
-    // Recover older calls without a hold rather than silently dropping COGS.
-    await chargeUnavoidableCredits(workspaceId, quote.credits, charge);
-  }
+  await settleCreditReservation(workspaceId, reservationId as string, quote.credits, charge);
   await db.insert(usageEvents).values({
     workspaceId, capability: "VOICE", provider: call.provider, mode: "HOSTED",
     providerUsage: { ...quote.billedUnits, model, technology: "REALTIME",
