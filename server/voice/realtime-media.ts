@@ -87,6 +87,7 @@ export function attachRealtimeMedia({ telnyx, identity, streamId }: BridgeOption
   const responseEpochs = new Map<string, number>();
   let callerSpeechEpoch = 0;
   let priorConversation = "";
+  let historyInjected = false;
   const startedAt = Date.now();
 
   function track(promise: Promise<unknown>) {
@@ -262,12 +263,15 @@ export function attachRealtimeMedia({ telnyx, identity, streamId }: BridgeOption
 
     if (event.type === "session.updated") {
       sessionConfigured = true;
-      if (priorConversation) sendOpenAI({
-        type: "conversation.item.create",
-        item: { type: "message", role: "user", status: "completed",
-          content: [{ type: "input_text",
-            text: "Prior workspace conversation excerpts for reference only; the current caller request arrives via live audio:\\n" + priorConversation }] },
-      });
+      if (!historyInjected) {
+        historyInjected = true;
+        if (priorConversation) sendOpenAI({
+          type: "conversation.item.create",
+          item: { type: "message", role: "user", status: "completed",
+            content: [{ type: "input_text",
+              text: "Prior workspace conversation excerpts for reference only; the current caller request arrives via live audio:\\n" + priorConversation }] },
+        });
+      }
       ready = true;
       if (speechAllowed) {
         for (const bytes of initialAudio) feedAudio(bytes);
