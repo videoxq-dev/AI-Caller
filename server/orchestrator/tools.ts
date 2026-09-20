@@ -142,7 +142,6 @@ async function updateLeadFromEnvelope(
   contactId: string,
   lead: NonNullable<OrchestratorEnvelope["lead"]>,
   channel: ConversationChannel,
-  qualificationEnabled = false,
 ) {
   const detail = await getContactDetail(workspaceId, contactId);
   if (!detail) throw new Error("The conversation contact no longer exists.");
@@ -209,9 +208,9 @@ export async function executeOrchestratorTools(
       assertAgentActionAllowed(agent.capabilities, envelope.action.type);
     }
   }
-  const conversation = await getConversationById(workspaceId, conversationId);
-  if (!conversation) throw new AppError("CONVERSATION_NOT_FOUND", "Conversation not found.", 404);
-  if (conversation.handlingMode === "HUMAN") {
+  const currentConversation = await getConversationById(workspaceId, conversationId);
+  if (!currentConversation) throw new AppError("CONVERSATION_NOT_FOUND", "Conversation not found.", 404);
+  if (currentConversation.handlingMode === "HUMAN") {
     throw new AppError("CONVERSATION_HUMAN_HANDLING", "Staff now controls this conversation.", 409);
   }
   const channel = await getActiveConversationChannel(workspaceId, conversationId) ?? "WEBCHAT";
@@ -224,7 +223,6 @@ export async function executeOrchestratorTools(
       contactId,
       envelope.lead,
       channel,
-      Boolean(qualificationConfig?.enabled && qualificationConfig.criteria.length),
     );
   }
 
