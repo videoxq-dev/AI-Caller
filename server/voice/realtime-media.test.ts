@@ -136,7 +136,7 @@ describe("Realtime Telnyx/OpenAI media contract", () => {
   it("suppresses interrupted stale tools but forwards the newest tool and deduplicates usage", async () => {
     vi.mocked(runRealtimeBusinessTool).mockResolvedValue({
       ok: true, kind: "booking_state",
-      data: { details: { date: "2026-09-26" } },
+      data: { details: { date: "2026-09-26" }, availabilityMustBeRechecked: true },
     } as Awaited<ReturnType<typeof runRealtimeBusinessTool>>);
     const telnyx = telnyxSocket();
     const bridge = attachRealtimeMedia({
