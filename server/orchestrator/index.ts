@@ -184,12 +184,30 @@ export function createResponseOrchestrator(dependencies: OrchestratorDependencie
         return { reply: null, handlingMode: "AI" as const, action: { type: "NONE" as const },
           toolResult: { kind: "none" as const, data: {} } };
       }
-      const toolResult = await dependencies.executeTools(
-        workspaceId,
-        conversationId,
-        context.contact.id,
-        first,
-      );
+      let toolResult: OrchestratorToolResult;
+      try {
+        toolResult = await dependencies.executeTools(
+          workspaceId,
+          conversationId,
+          context.contact.id,
+          first,
+        );
+      } catch (error) {
+        if (error instanceof AppError && (
+          error.code === "AGENT_NOT_ACTIVE" || error.code === "AGENT_NOT_CONFIGURED"
+          || error.code === "CONVERSATION_HUMAN_HANDLING"
+        )) {
+          return { reply: null, handlingMode: "AI" as const,
+            action: { type: "NONE" as const },
+            toolResult: { kind: "none" as const, data: {} } };
+        }
+        if (error instanceof AppError && error.code === "AGENT_ACTION_DISABLED") {
+          return { reply: "I can't perform that action. I can answer other questions or you can ask for staff follow-up.",
+            handlingMode: "AI" as const, action: { type: "NONE" as const },
+            toolResult: { kind: "none" as const, data: {} } };
+        }
+        throw error;
+      }
 
       if (toolResult.kind === "availability" || toolResult.kind === "booking" || toolResult.kind === "qualification" || toolResult.kind === "sms") {
         try {
