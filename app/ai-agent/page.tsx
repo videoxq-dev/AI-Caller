@@ -535,6 +535,7 @@ function TestTab() {
 function Metric({ icon, label, value }: { icon: React.ReactNode; label: string; value?: number }) { return <article className="agentCard agentMetric"><span className="metricArt blue">{icon}</span><div><small>{label}</small><strong>{value === undefined ? "—" : value.toLocaleString()}</strong><p>{value === undefined ? "Loading actual data…" : "Recorded activity"}</p></div></article>; }
 function GuardrailRow({ label, checked, onChange }: { label: string; checked: boolean; onChange: (value: boolean) => void }) { return <div className="guardrailRow"><span>{label}</span><button type="button" className={`switch ${checked ? "on" : ""}`} onClick={() => onChange(!checked)}><i /></button></div>; }
 function ChecklistItem({ label, status }: { label: string; status: string }) { return <div className="checklistItem"><span>✓</span><strong>{label}</strong><em>{status}</em></div>; }
+function channelClass(channel: Channel) { return channel.toLowerCase().replace(/\s+/g, "-"); }
 function channelIcon(channel: Channel) { if (channel === "Phone") return <PhoneIcon size={15} />; if (channel === "WhatsApp") return <WhatsAppIcon />; return <MessageIcon size={15} />; }
 
 function WhatsAppIcon() { return <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M20 11.5a8 8 0 0 1-11.8 7L4 20l1.5-4.1A8 8 0 1 1 20 11.5Z"/><path d="M8.5 8.5c.8 2.4 2.4 4 4.8 4.8"/></svg>; }
