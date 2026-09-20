@@ -8,6 +8,7 @@ import { VOICE_RESPOND_TURN } from "@/server/jobs/queues";
 import { getVoiceConfig } from "./config";
 import {
   appendVoiceTranscriptSegment, claimVoiceTurn, finishVoiceTurn, restoreVoiceTurn,
+  isVoiceTurnCurrent, yieldSupersededVoiceTurn,
 } from "./repository";
 import { estimateSpeechDurationMs, VOICE_TURN_SILENCE_MS } from "./turn-duration";
 import { resolveVoiceProfile } from "./voices";
@@ -46,22 +47,37 @@ export async function processVoiceTurn(input: { workspaceId: string; callId: str
       return { status: "SUPPRESSED" as const };
     }
 
-    const result = await responseOrchestrator.respond(workspaceId, call.conversationId);
+    const result = await responseOrchestrator.respond(workspaceId, call.conversationId, {
+      beforeTools: () => isVoiceTurnCurrent(workspaceId, callId, eventId),
+    });
     const orchestrationMs = Date.now() - startedAt;
+
+    // A later final chunk may arrive during the LLM or a tool finalizer.
+    // Never queue an answer to the older partial request.
+    const superseded = await yieldSupersededVoiceTurn(workspaceId, callId, eventId);
+    if (superseded) {
+      await scheduleVoiceTurn(workspaceId, callId, superseded, "superseded");
+      return { status: "SUPERSEDED" as const };
+    }
+
     if (!result.reply) {
       await finishVoiceTurn(workspaceId, callId, eventId, result.handlingMode === "HUMAN" ? "HUMAN" : "ACTIVE");
       return { status: "NO_REPLY" as const };
     }
 
     const conversation = await getConversationById(workspaceId, call.conversationId);
-    if (!conversation || conversation.handlingMode !== "AI") {
+    const escalatedByThisTurn = result.toolResult.kind === "escalation"
+      && result.handlingMode === "HUMAN";
+    if (!conversation || (conversation.handlingMode !== "AI" && !escalatedByThisTurn)) {
       await finishVoiceTurn(workspaceId, callId, eventId, "HUMAN");
       return { status: "HANDOFF" as const };
     }
 
     const voice = await getVoiceConfig(workspaceId);
     const runtime = await resolveVoiceRuntime(workspaceId, call.provider as "telnyx");
-    const ready = await finishVoiceTurn(workspaceId, callId, eventId, "AI_SPEAKING");
+    const ready = await finishVoiceTurn(
+      workspaceId, callId, eventId, "AI_SPEAKING", escalatedByThisTurn ? "HUMAN" : "ACTIVE",
+    );
     if (!ready) return { status: "CALL_ENDED" as const };
 
     await runtime.provider.speak({
@@ -96,6 +112,8 @@ export async function processVoiceTurn(input: { workspaceId: string; callId: str
     logger.info({
       workspaceId, callId: call.id, transcriptionEventId: eventId,
       orchestrationMs, voiceTurnMs: Date.now() - startedAt,
+      queueLagMs: call.metadata.pendingVoiceTurnAt
+        ? Math.max(0, startedAt - new Date(String(call.metadata.pendingVoiceTurnAt)).getTime()) : null,
     }, "Voice AI reply accepted by telephony provider");
     return { status: "SPOKEN" as const };
   } catch (error) {
