@@ -22,6 +22,7 @@ const telnyxUnits: HostedPricingUnit[] = [
   "VOICE_REALTIME_STREAM_MINUTE",
   "VOICE_REALTIME_RECORDING_MINUTE",
   "VOICE_REALTIME_TRANSCRIPTION_MINUTE",
+  "VOICE_REALTIME_GREETING_TTS_CHAR",
 ];
 function rate(model: string, unit: HostedPricingUnit, micros: number, unitsPerCost: number): HostedRate {
   return {
