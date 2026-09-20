@@ -30,7 +30,7 @@ services:
       - -ec
       - |
         if [ ! -s /var/lib/postgresql/data/PG_VERSION ]; then
-          if [ "$POSTGRES_PASSWORD" = "ai_caller_auto_pass" ]; then
+          if [ "$$POSTGRES_PASSWORD" = "ai_caller_auto_pass" ]; then
             echo "Refusing to create an insecure new database: set POSTGRES_PASSWORD and a matching DATABASE_URL in DeployOS. Existing database volumes will not be modified." >&2
             exit 1
           fi
