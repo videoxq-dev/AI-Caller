@@ -393,13 +393,11 @@ export function createVoiceWebhookService(dependencies: VoiceServiceDependencies
         callControlId: event.callControlId,
         commandId: deterministicCommandId(`${event.externalEventId}:record`),
       });
-      if (call.metadata.voiceTechnology !== "REALTIME") {
-      await runtime.provider.startTranscription({
+            await runtime.provider.startTranscription({
         callControlId: event.callControlId,
         language: voice.config.language,
         commandId: deterministicCommandId(`${event.externalEventId}:transcription`),
       });
-      }
       await runtime.provider.speak({
         callControlId: event.callControlId,
         text: openingText(voice.openingMessage),
@@ -428,13 +426,11 @@ export function createVoiceWebhookService(dependencies: VoiceServiceDependencies
           callControlId: event.callControlId,
           commandId: deterministicCommandId(`${event.externalEventId}:record-after-consent`),
         });
-        if (call.metadata.voiceTechnology !== "REALTIME") {
-        await runtime.provider.startTranscription({
+                await runtime.provider.startTranscription({
           callControlId: event.callControlId,
           language: voice.config.language,
           commandId: deterministicCommandId(`${event.externalEventId}:transcription-after-consent`),
         });
-        }
         await runtime.provider.speak({
           callControlId: event.callControlId,
           text: openingText(voice.openingMessage),
@@ -479,7 +475,7 @@ export function createVoiceWebhookService(dependencies: VoiceServiceDependencies
     }
 
     if (event.type === "TRANSCRIPTION") {
-      if (call.metadata.voiceTechnology === "REALTIME") return;
+      if (call.metadata.voiceTechnology === "REALTIME" && phase(call.metadata) === "ENDED") return;
       if (!event.isFinal || !event.transcript.trim()) return;
       const currentPhase = phase(call.metadata);
       if (!["ACTIVE", "OPENING_SPEAKING", "AI_RESPONDING", "AI_SPEAKING"].includes(currentPhase)) return;
@@ -509,6 +505,7 @@ export function createVoiceWebhookService(dependencies: VoiceServiceDependencies
       // The latest final segment wins after a short silence interval. The
       // database phase prevents overlap while the assistant is responding or
       // speaking, and the worker survives web/container restarts.
+      if (call.metadata.voiceTechnology === "REALTIME") return;
       if (await queueVoiceTurn(workspaceId, call.id, event.externalEventId)
         && currentPhase === "ACTIVE") {
         await scheduleVoiceTurn(workspaceId, call.id, event.externalEventId);
