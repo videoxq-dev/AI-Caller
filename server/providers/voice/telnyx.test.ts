@@ -38,6 +38,32 @@ describe("Telnyx voice adapter", () => {
     });
   });
 
+  it("enables RTP/PCMU streaming only on selected Realtime answers", async () => {
+    const { publicKey } = generateKeyPairSync("ed25519");
+    const fetcher = vi.fn(async () => new Response(JSON.stringify({ data: {} }), {
+      status: 200, headers: { "content-type": "application/json" },
+    }));
+    const provider = createTelnyxVoiceProvider({
+      apiKey: "fixture-key",
+      webhookPublicKey: publicKey.export({ type: "spki", format: "pem" }).toString(),
+      fetcher: fetcher as unknown as typeof fetch,
+    });
+    const streamUrl = "wss://voice.example.com/?token=fixture";
+    await provider.answer({ callControlId: "cc", streamUrl, commandId: "std" });
+    await provider.answer({ callControlId: "cc", streamUrl,
+      bidirectional: true, commandId: "realtime" });
+    const standard = JSON.parse(String((fetcher.mock.calls[0] as unknown as [string, RequestInit])[1].body));
+    const realtime = JSON.parse(String((fetcher.mock.calls[1] as unknown as [string, RequestInit])[1].body));
+    expect(standard.stream_url).toBe(streamUrl);
+    expect(standard).not.toHaveProperty("stream_bidirectional_mode");
+    expect(standard).not.toHaveProperty("stream_bidirectional_codec");
+    expect(realtime).toMatchObject({
+      stream_url: streamUrl, stream_track: "inbound_track",
+      stream_bidirectional_mode: "rtp", stream_bidirectional_codec: "PCMU",
+      stream_codec: "PCMU",
+    });
+  });
+
   it("verifies and normalizes signed inbound call events", async () => {
     const { privateKey, publicKey } = generateKeyPairSync("ed25519");
     const publicKeyPem = publicKey.export({ type: "spki", format: "pem" }).toString();
