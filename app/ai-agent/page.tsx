@@ -224,7 +224,7 @@ export default function AIAgentPage() {
         <div className="agentBody">
           <div className="agentTitleRow">
             <div><h1>AI Agent</h1><p>Configure, train and test your AI agent.</p></div>
-            <div className="agentTitleActions"><span className={`agentState ${agentStatus === "ACTIVE" ? "online" : "paused"}`}><i />{loadingSettings ? "Loading status…" : `Agent ${agentStatus.toLowerCase()}`}</span><button type="button" disabled={savingSettings || loadingSettings || !canManage} onClick={() => void saveChanges()}>{savingSettings ? "Saving…" : saved ? "Saved" : "Save changes"}</button></div>
+            <div className="agentTitleActions"><span className={`agentState ${agentStatus === "ACTIVE" ? "online" : "paused"}`}><i />{loadingSettings ? "Loading status…" : `Agent ${agentStatus.toLowerCase()}`}</span>{tab === "behavior" && <button type="button" disabled={savingSettings || loadingSettings || !canManage} onClick={() => void saveChanges()}>{savingSettings ? "Saving…" : saved ? "Saved" : "Save changes"}</button>}</div>
           </div>
 
           {settingsError && <div className="agentSettingsError">{settingsError}</div>}
