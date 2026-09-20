@@ -156,6 +156,9 @@ describe("Realtime Telnyx/OpenAI media contract", () => {
     openai.emit("open");
     openai.emit("message", Buffer.from(JSON.stringify({ type: "session.updated" })));
     await vi.waitFor(() => expect(openai.sent.some(v => v.type === "session.update")).toBe(true));
+    bridge.onMedia(Buffer.alloc(160, 0xff).toString("base64"));
+    await vi.waitFor(() =>
+      expect(openai.sent.some(v => v.type === "input_audio_buffer.append")).toBe(true));
 
     // Distinct sample values reveal headers, lost/duplicated frames or reordering.
     const raw = Buffer.concat([
