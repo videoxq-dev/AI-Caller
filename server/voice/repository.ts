@@ -228,12 +228,18 @@ export async function finishVoiceTurn(
   callId: string,
   eventId: string,
   nextPhase: "ACTIVE" | "AI_SPEAKING" | "HUMAN",
+  afterSpeakPhase: "ACTIVE" | "HUMAN" = "ACTIVE",
 ) {
   return lockedVoiceCall(workspaceId, callId, async (tx, call) => {
     if (call.status !== "ACTIVE" || call.metadata.phase !== "AI_RESPONDING"
       || call.metadata.respondingVoiceTurnEventId !== eventId) return null;
     const [updated] = await tx.update(voiceCalls).set({
-      metadata: { ...call.metadata, phase: nextPhase, respondingVoiceTurnEventId: nextPhase === "AI_SPEAKING" ? eventId : null },
+      metadata: {
+        ...call.metadata,
+        phase: nextPhase,
+        respondingVoiceTurnEventId: nextPhase === "AI_SPEAKING" ? eventId : null,
+        voiceAfterSpeakPhase: nextPhase === "AI_SPEAKING" ? afterSpeakPhase : null,
+      },
       updatedAt: new Date(),
     }).where(and(eq(voiceCalls.workspaceId, workspaceId), eq(voiceCalls.id, callId))).returning();
     return updated;
@@ -262,10 +268,45 @@ export async function restoreVoiceTurn(workspaceId: string, callId: string, even
 export async function releaseVoiceSpeech(workspaceId: string, callId: string) {
   return lockedVoiceCall(workspaceId, callId, async (tx, call) => {
     if (call.status !== "ACTIVE" || call.metadata.phase !== "AI_SPEAKING") return null;
-    const pending = typeof call.metadata.pendingVoiceTurnEventId === "string"
+    const handingOff = call.metadata.voiceAfterSpeakPhase === "HUMAN";
+    const pending = !handingOff && typeof call.metadata.pendingVoiceTurnEventId === "string"
       ? call.metadata.pendingVoiceTurnEventId : null;
     await tx.update(voiceCalls).set({
-      metadata: { ...call.metadata, phase: "ACTIVE", respondingVoiceTurnEventId: null },
+      metadata: {
+        ...call.metadata,
+        phase: handingOff ? "HUMAN" : "ACTIVE",
+        pendingVoiceTurnEventId: handingOff ? null : call.metadata.pendingVoiceTurnEventId,
+        respondingVoiceTurnEventId: null,
+        voiceAfterSpeakPhase: null,
+      },
+      updatedAt: new Date(),
+    }).where(and(eq(voiceCalls.workspaceId, workspaceId), eq(voiceCalls.id, callId)));
+    return pending;
+  });
+}
+
+/** Check immediately before committing AI tool effects or speech. */
+export async function isVoiceTurnCurrent(workspaceId: string, callId: string, eventId: string) {
+  const call = await getVoiceCall(workspaceId, callId);
+  return call?.status === "ACTIVE"
+    && call.metadata.phase === "AI_RESPONDING"
+    && call.metadata.respondingVoiceTurnEventId === eventId
+    && !call.metadata.pendingVoiceTurnEventId;
+}
+
+/** The caller spoke while AI was generating: drop stale speech and requeue new input. */
+export async function yieldSupersededVoiceTurn(workspaceId: string, callId: string, eventId: string) {
+  return lockedVoiceCall(workspaceId, callId, async (tx, call) => {
+    if (call.status !== "ACTIVE" || call.metadata.phase !== "AI_RESPONDING"
+      || call.metadata.respondingVoiceTurnEventId !== eventId
+      || typeof call.metadata.pendingVoiceTurnEventId !== "string") return null;
+    const pending = call.metadata.pendingVoiceTurnEventId;
+    await tx.update(voiceCalls).set({
+      metadata: {
+        ...call.metadata,
+        phase: "ACTIVE",
+        respondingVoiceTurnEventId: null,
+      },
       updatedAt: new Date(),
     }).where(and(eq(voiceCalls.workspaceId, workspaceId), eq(voiceCalls.id, callId)));
     return pending;
