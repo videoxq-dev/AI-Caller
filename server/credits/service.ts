@@ -247,15 +247,24 @@ export async function settleCreditReservation(
         .returning({ balance: creditWallets.balance });
     } else {
       const extra = -difference;
+      // The carrier and OpenAI have already performed this call. Actual
+      // authoritative usage can exceed a prefunded hold. Never discard that
+      // debt or release the hold just because the workspace used its balance
+      // elsewhere. This exception is strictly limited to a matching voice
+      // hold; every other reservation still requires available funds.
+      const unavoidableVoiceOverage =
+        reservation.referenceType === "VOICE_REALTIME_HOLD"
+        && input.referenceType === "VOICE_CALL"
+        && reservation.referenceId === input.referenceId;
       [wallet] = await tx.update(creditWallets)
         .set({
           balance: sql`${creditWallets.balance} - ${extra}`,
           updatedAt: new Date(),
         })
-        .where(and(
-          eq(creditWallets.workspaceId, workspaceId),
-          gte(creditWallets.balance, extra),
-        ))
+        .where(unavoidableVoiceOverage
+          ? eq(creditWallets.workspaceId, workspaceId)
+          : and(eq(creditWallets.workspaceId, workspaceId),
+            gte(creditWallets.balance, extra)))
         .returning({ balance: creditWallets.balance });
     }
     if (!wallet) {
