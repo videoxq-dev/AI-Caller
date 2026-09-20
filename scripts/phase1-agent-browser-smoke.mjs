@@ -69,6 +69,17 @@ try {
   assert(agent.capabilities.BOOK_APPOINTMENT === true,
     "Legacy-default booking permission changed unexpectedly.");
 
+  await pool.query(`INSERT INTO business_profiles
+    (workspace_id, business_name, industry, timezone, summary)
+    VALUES ($1, 'Phase One Auto Spa', 'Auto detailing', 'UTC', 'Bookings are available by appointment.')
+    ON CONFLICT (workspace_id) DO UPDATE SET business_name = EXCLUDED.business_name`, [workspaceId]);
+  await pool.query(`INSERT INTO services
+    (workspace_id, name, description, price_text, duration_minutes, active)
+    VALUES ($1, 'QA Consultation', 'Thirty-minute appointment.', '$120', 30, true)`, [workspaceId]);
+  const automations = await pool.query(`SELECT count(*)::int AS count FROM automation_settings
+    WHERE workspace_id = $1`, [workspaceId]);
+  assert(automations.rows[0].count === 0, "Acceptance workspace unexpectedly has automations.");
+
   await pool.query(`INSERT INTO credit_wallets (workspace_id, balance) VALUES ($1, 85)
     ON CONFLICT (workspace_id) DO UPDATE SET balance=85`, [workspaceId]);
   const contact = await pool.query(`INSERT INTO contacts (workspace_id, name)
@@ -126,6 +137,24 @@ try {
     "Activation did not persist.");
   assert((await api(context, "GET", "/api/setup/status", undefined, "go-live progress")).setup.steps.live,
     "Agent activation did not mark the onboarding go-live step.");
+
+  const ordinary = await api(context, "POST", "/api/agent/test", {
+    message: "How much is the QA Consultation?", reset: true,
+  }, "ordinary conversation with no automations");
+  assert(ordinary.reply.includes("QA Consultation is $120"),
+    "Enabled Mia could not answer business knowledge without automations.");
+
+  const forged = await api(context, "POST", "/api/agent/test", {
+    message: "Book the QA Consultation, my name is QA Visitor, qa.visitor@example.com.",
+    reset: true,
+  }, "forged model booking when disabled");
+  assert(forged.reply?.includes("can't perform that action")
+    && !forged.reply?.includes("booked for"),
+    "Mia claimed success when the model attempted a disabled booking.");
+  const appointments = await pool.query(`SELECT count(*)::int AS count FROM appointments
+    WHERE workspace_id = $1`, [workspaceId]);
+  assert(appointments.rows[0].count === 0,
+    "A disabled agent booking created an actual appointment.");
 
   await page.reload({ waitUntil: "networkidle" });
   await page.getByText("Agent active", { exact: true }).waitFor();
