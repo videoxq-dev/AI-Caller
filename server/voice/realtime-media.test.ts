@@ -24,7 +24,7 @@ vi.mock("@/server/voice/repository", () => ({
     conversationId: "conversation", contactId: "contact",
     recordingConsentStatus: "ANNOUNCED",
     metadata: { phase: "ACTIVE", voiceTechnology: "REALTIME",
-      realtimeModel: "gpt-realtime-2.1-mini" },
+      realtimeModel: "gpt-realtime-2.1-mini", realtimeStreamId: "stream" },
   })),
   claimRealtimeStream: vi.fn(async () => ({ id: "call-id" })),
   finishRealtimeStream: vi.fn(async () => true),
@@ -53,6 +53,8 @@ vi.mock("@/server/observability/logger", () => ({
 }));
 
 import { attachRealtimeMedia } from "./realtime-media";
+import { runRealtimeBusinessTool } from "./realtime-tools";
+import { recordRealtimeResponse } from "./realtime-usage";
 
 type Socket = EventEmitter & {
   readyState: number;
@@ -131,4 +133,57 @@ describe("Realtime Telnyx/OpenAI media contract", () => {
     await bridge.stop();
     expect(telnyx.readyState).toBe(3);
   });
+  it("suppresses interrupted stale tools but forwards the newest tool and deduplicates usage", async () => {
+    vi.mocked(runRealtimeBusinessTool).mockResolvedValue({
+      ok: true, kind: "booking_state",
+      data: { details: { date: "2026-09-26" } },
+    } as Awaited<ReturnType<typeof runRealtimeBusinessTool>>);
+    const telnyx = telnyxSocket();
+    const bridge = attachRealtimeMedia({
+      telnyx: telnyx as unknown as WebSocket,
+      identity: { workspaceId: "ws", callId: "call-id", externalCallId: "telnyx-call" },
+      streamId: "stream",
+    });
+    await vi.waitFor(() => expect(shared.client).not.toBeNull());
+    const openai = currentOpenai();
+    openai.emit("open");
+    openai.emit("message", Buffer.from(JSON.stringify({ type: "session.updated" })));
+    openai.emit("message", Buffer.from(JSON.stringify({
+      type: "response.created", response: { id: "stale" },
+    })));
+    openai.emit("message", Buffer.from(JSON.stringify({
+      type: "input_audio_buffer.speech_started",
+    })));
+    const toolItem = { type: "function_call",
+      call_id: "tool-1", name: "capture_booking_details",
+      arguments: JSON.stringify({ date: "2026-09-26" }) };
+    openai.emit("message", Buffer.from(JSON.stringify({
+      type: "response.output_item.done", response_id: "stale", item: toolItem,
+    })));
+    expect(runRealtimeBusinessTool).not.toHaveBeenCalled();
+    openai.emit("message", Buffer.from(JSON.stringify({
+      type: "response.created", response: { id: "new" },
+    })));
+    openai.emit("message", Buffer.from(JSON.stringify({
+      type: "response.output_item.done", response_id: "new", item: toolItem,
+    })));
+    await vi.waitFor(() => expect(runRealtimeBusinessTool).toHaveBeenCalledTimes(1));
+    expect(vi.mocked(runRealtimeBusinessTool).mock.calls[0]?.[0]).toMatchObject({
+      workspaceId: "ws", callId: "call-id", streamId: "stream",
+      name: "capture_booking_details",
+    });
+    await vi.waitFor(() => expect(openai.sent.filter(v => v.type === "response.create")).toHaveLength(1));
+    const usage = { input_tokens: 1, output_tokens: 1,
+      input_token_details: { text_tokens: 1 }, output_token_details: { audio_tokens: 1 } };
+    openai.emit("message", Buffer.from(JSON.stringify({
+      type: "response.done", response: { id: "stale", status: "cancelled", usage },
+    })));
+    openai.emit("message", Buffer.from(JSON.stringify({
+      type: "response.done", response: { id: "new", status: "completed", usage },
+    })));
+    await vi.waitFor(() => expect(recordRealtimeResponse).toHaveBeenCalledTimes(2));
+    await bridge.stop();
+    expect(telnyx.readyState).toBe(3);
+  });
+
 });
