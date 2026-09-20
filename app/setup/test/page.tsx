@@ -34,17 +34,45 @@ export default function TestSetupPage() {
   const [copied, setCopied] = useState(false);
   const [copiedEmbed, setCopiedEmbed] = useState(false);
   const [isLive, setIsLive] = useState(false);
+  const [activating, setActivating] = useState(false);
+  const [activationError, setActivationError] = useState<string | null>(null);
 
   useEffect(() => {
+    fetch("/api/agent", { cache: "no-store" })
+      .then((response) => response.ok ? response.json() : null)
+      .then((payload) => { if (payload?.agent?.status === "ACTIVE") setIsLive(true); })
+      .catch(() => undefined);
     fetch("/api/setup/status", { cache: "no-store" })
       .then((response) => response.ok ? response.json() : null)
       .then((payload) => { if (payload?.setup) setSetup(payload.setup as SetupStatus); })
       .catch(() => undefined);
   }, []);
 
+  const activate = async () => {
+    if (activating || isLive) return;
+    setActivating(true);
+    setActivationError(null);
+    try {
+      const response = await fetch("/api/agent/status", {
+        method: "PATCH", headers: { "content-type": "application/json" },
+        body: JSON.stringify({ status: "ACTIVE" }),
+      });
+      const result = await response.json() as { agent?: { status: string }; error?: { message?: string } };
+      if (!response.ok || result.agent?.status !== "ACTIVE") {
+        throw new Error(result.error?.message ?? "Unable to activate your AI Agent.");
+      }
+      setIsLive(true);
+    } catch (error) {
+      setActivationError(error instanceof Error ? error.message : "Unable to activate your AI Agent.");
+    } finally {
+      setActivating(false);
+    }
+  };
+
   const runTest = (key: TestKey) => {
-    setStatus((current) => ({ ...current, [key]: "running" }));
-    window.setTimeout(() => setStatus((current) => ({ ...current, [key]: "done" })), 700);
+    // This page does not yet have a channel-specific provider test runner.
+    // Never claim a call, SMS or WhatsApp delivery passed based on a timer.
+    setActivationError(`${key.toUpperCase()} live testing is not available from this page; use the connected channel directly or the AI Agent private Web Chat test.`);
   };
 
   const copyNumber = async () => {
@@ -55,7 +83,7 @@ export default function TestSetupPage() {
     try { await navigator.clipboard.writeText(webChatEmbedCode); setCopiedEmbed(true); window.setTimeout(() => setCopiedEmbed(false), 1400); } catch { setCopiedEmbed(false); }
   };
 
-  const readyLabel = (key: TestKey) => status[key] === "running" ? "Testing..." : status[key] === "done" ? "Test passed" : "Ready to test";
+  const readyLabel = (_key: TestKey) => "Manual verification required";
 
   return (
     <main className="testSetupPage">
@@ -94,9 +122,10 @@ export default function TestSetupPage() {
             <div className="webChatActions"><button type="button" className="primaryTestButton" onClick={() => runTest("webchat")}>Open chat widget ↗</button><button type="button" className="secondaryTestButton" onClick={() => runTest("webchat")}>Preview on your website ↗</button></div><TipRow>Try asking a few questions and book an appointment.</TipRow>
           </TestCard>
 
+          {activationError && <div role="alert" className="readyBanner"><p>{activationError}</p></div>}
           <div className={`readyBanner ${isLive ? "live" : ""}`}><span className="readyCheck"><CheckIcon size={22} /></span><div><strong>{isLive ? "You’re live!" : "Everything looks good!"}</strong><p>{isLive ? "Your AI assistant is active and ready to start handling customer inquiries." : "Your AI assistant is ready to go live. When you’re ready, click the button below to activate it."}</p></div></div>
 
-          <div className="testFooter"><Link className="backLink" href="/setup/calendar">←&nbsp;&nbsp;Back to Calendar</Link><div className="testActions"><button type="button" className="outlineAction">Save for later</button><button type="button" className="goLiveButton" onClick={() => setIsLive(true)}>{isLive ? "Live" : "Go Live"} <ChevronRightIcon size={18} /></button></div></div>
+          <div className="testFooter"><Link className="backLink" href="/setup/calendar">←&nbsp;&nbsp;Back to Calendar</Link><div className="testActions"><button type="button" className="outlineAction">Save for later</button><button type="button" className="goLiveButton" disabled={activating || isLive} onClick={() => void activate()}>{activating ? "Activating…" : isLive ? "Live" : "Go Live"} <ChevronRightIcon size={18} /></button></div></div>
         </section>
 
         <aside className="testSidebar">
