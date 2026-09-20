@@ -4,6 +4,7 @@ import { aiAgents, setupProgress, workspaces } from "@/db/schema";
 import { eq } from "drizzle-orm";
 import { AppError } from "@/server/http/errors";
 import { defaultAgentCapabilities } from "./capabilities";
+import { buildAgentTestContext } from "@/server/orchestrator/context";
 import {
   getWorkspaceAgent, getAgentPolicySnapshot, requireActiveWorkspaceAgent,
   setWorkspaceAgentStatus, setWorkspaceAgentCapabilities,
@@ -48,6 +49,18 @@ describe("one workspace agent service", () => {
     await setWorkspaceAgentStatus(workspaceId, "PAUSED");
     await expect(requireActiveWorkspaceAgent(workspaceId))
       .rejects.toMatchObject({ code: "AGENT_NOT_ACTIVE" });
+  });
+
+  it("makes configured business guardrails available in the actual agent conversation", async () => {
+    await db.insert(aiAgents).values({
+      workspaceId, name: "Mia", status: "ACTIVE",
+      behaviorSettings: { guardrails: ["Do not mention a service that is not in the catalog."] },
+    });
+    const context = await buildAgentTestContext(workspaceId,
+      [{ role: "user", content: "What services do you offer?" }]);
+    expect(context.agent?.id).toBeTruthy();
+    expect(context.systemPrompt).toContain("Do not mention a service that is not in the catalog.");
+    expect(context.messages).toEqual([{ role: "user", content: "What services do you offer?" }]);
   });
 
   it("isolates one workspace policy from another workspace", async () => {
