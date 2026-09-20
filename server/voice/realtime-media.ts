@@ -79,6 +79,11 @@ export function attachRealtimeMedia({ telnyx, identity, streamId }: BridgeOption
   let budgetHangupRequested = false;
   let escalationResponseComplete = false;
   let toolSerial = Promise.resolve();
+  const responseToolCounts = new Map<string, number>();
+  const completedToolResponses = new Set<string>();
+  const resumedToolResponses = new Set<string>();
+  const responseStatuses = new Map<string, string>();
+  const responseWithTools = new Set<string>();
   const handledToolCalls = new Set<string>();
   const responseEpochs = new Map<string, number>();
   let callerSpeechEpoch = 0;
@@ -210,6 +215,20 @@ export function attachRealtimeMedia({ telnyx, identity, streamId }: BridgeOption
     });
   }
 
+  function resumeAfterTools(responseId: string, epoch: number) {
+    if (!open || epoch !== callerSpeechEpoch || resumedToolResponses.has(responseId)
+      || !completedToolResponses.has(responseId)
+      || responseStatuses.get(responseId) !== "completed"
+      || (responseToolCounts.get(responseId) ?? 0) !== 0) return;
+    resumedToolResponses.add(responseId);
+
+    if (toolEscalated) {
+      sendOpenAI({ type: "session.update", session: { type: "realtime",
+        audio: { input: { turn_detection: { type: "semantic_vad",
+          create_response: false, interrupt_response: true } } } } });
+    }
+  }
+
   async function runTool(raw: RealtimeEvent, epoch: number) {
     const item = object(raw.item);
     if (item.type !== "function_call" || typeof item.call_id !== "string"
@@ -287,10 +306,24 @@ export function attachRealtimeMedia({ telnyx, identity, streamId }: BridgeOption
       return;
     }
     if (event.type === "response.output_item.done") {
-      const epoch = typeof event.response_id === "string"
-        ? responseEpochs.get(event.response_id) : undefined;
-      if (epoch === undefined || epoch !== callerSpeechEpoch) return;
-      toolSerial = toolSerial.then(() => runTool(event, epoch)).catch(err => {
+      const responseId = typeof event.response_id === "string" ? event.response_id : "";
+      const epoch = responseEpochs.get(responseId);
+      const item = object(event.item);
+      const callKey = typeof item.call_id === "string" ? item.call_id : "";
+      if (epoch === undefined || epoch !== callerSpeechEpoch
+        || item.type !== "function_call" || !callKey
+        || handledToolCalls.has(callKey)) return;
+      responseWithTools.add(responseId);
+      responseToolCounts.set(responseId, (responseToolCounts.get(responseId) ?? 0) + 1);
+      toolSerial = toolSerial.then(async () => {
+        try {
+          await runTool(event, epoch);
+        } finally {
+          responseToolCounts.set(responseId,
+            Math.max(0, (responseToolCounts.get(responseId) ?? 1) - 1));
+          resumeAfterTools(responseId, epoch);
+        }
+      }).catch(err => {
         logger.error({ err, workspaceId, callId }, "Realtime business tool failed");
         error = true;
         fail("realtime-tool-failure");
@@ -324,13 +357,17 @@ export function attachRealtimeMedia({ telnyx, identity, streamId }: BridgeOption
           "Realtime response completed without authoritative token usage");
       }
       pendingResponses.delete(responseId);
+      responseStatuses.set(responseId, status);
+      const epoch = responseEpochs.get(responseId);
       responseEpochs.delete(responseId);
       if (activeResponseId === responseId) activeResponseId = null;
-      if (toolEscalated && !pendingResponses.size) {
+      if (responseWithTools.has(responseId)) {
+        completedToolResponses.add(responseId);
+        if (epoch !== undefined) resumeAfterTools(responseId, epoch);
+      } else if (toolEscalated && !pendingResponses.size
+        && status === "completed") {
+        // Wait for the *spoken follow-up* response, not the tool-only turn.
         escalationResponseComplete = true;
-        sendOpenAI({ type: "session.update", session: { type: "realtime",
-          audio: { input: { turn_detection: { type: "semantic_vad",
-            create_response: false, interrupt_response: true } } } } });
       }
       return;
     }
