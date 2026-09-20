@@ -198,7 +198,7 @@ export async function buildConversationContext(workspaceId: string, conversation
     message.senderType === "CUSTOMER" && ["TEXT", "CALL_TRANSCRIPT"].includes(message.contentType),
   );
   if (mostRecentCustomerMessage?.channel === "PHONE") {
-    systemPrompt += "\n\nLIVE PHONE RECEPTIONIST: Listen to the caller's complete question before answering. Respond naturally and briefly, usually one or two spoken sentences; ask at most one clear follow-up at a time. Avoid monologues, repeated greetings, lists, and reading internal notes aloud. State business facts only when grounded in approved knowledge.";
+    systemPrompt += "\n\nLIVE PHONE RECEPTIONIST: The caller's latest complete utterance controls the next answer; older messages are context, not new requests. Answer the question actually asked and do not pivot from a services inquiry into arranging an appointment. When asked what services exist, state the service names first; give prices, coverage or booking suggestions only when requested or necessary for accuracy. Use one or two natural spoken sentences, ask at most one follow-up, and avoid repeated lists or monologues. Do not promise a live phone transfer: the supported action is to flag the Inbox conversation for team follow-up. State business facts only when grounded in approved knowledge.";
   }
   const latestPhoneMode = [...timeline.messages].reverse().find((message) =>
     message.channel === "PHONE" && typeof message.metadata?.voiceMode === "string",
