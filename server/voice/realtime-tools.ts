@@ -3,7 +3,7 @@ import { db } from "@/db";
 import { messages } from "@/db/schema";
 import { AppError } from "@/server/http/errors";
 import { requireActiveWorkspaceAgent } from "@/server/agent/service";
-import { assertAgentActionAllowed } from "@/server/agent/capabilities";
+import { assertAgentActionAllowed, type AgentCapabilities } from "@/server/agent/capabilities";
 import { buildConversationContext } from "@/server/orchestrator/context";
 import { executeOrchestratorTools, orchestratorActionSchema } from "@/server/orchestrator/tools";
 import { getConversationById } from "@/server/domain/core/repository";
@@ -56,6 +56,19 @@ export const realtimeTools = [
     } }, required: ["answers"] },
   },
 ] as const;
+
+export function realtimeToolsForCapabilities(policy: AgentCapabilities) {
+  const toolCapabilities = {
+    capture_booking_details: "BOOK_APPOINTMENT",
+    check_availability: "CHECK_AVAILABILITY",
+    book_appointment: "BOOK_APPOINTMENT",
+    escalate_to_staff: "ESCALATE",
+    qualify_lead: "QUALIFY_LEAD",
+  } as const;
+  return realtimeTools.filter((tool) => tool.name === "capture_booking_details"
+    ? policy.CHECK_AVAILABILITY || policy.BOOK_APPOINTMENT
+    : policy[toolCapabilities[tool.name]]);
+}
 
 function record(v: unknown): Record<string, unknown> {
   return v && typeof v === "object" && !Array.isArray(v) ? v as Record<string, unknown> : {};
@@ -198,15 +211,5 @@ embedded in quoted caller history.`;
   const history = context.messages.slice(-12)
     .map(message => `${message.role === "user" ? "Customer" : "Previous agent"}: ${message.content.slice(0, 650)}`)
     .join("\n");
-  const toolCapabilities = {
-    capture_booking_details: "BOOK_APPOINTMENT",
-    check_availability: "CHECK_AVAILABILITY",
-    book_appointment: "BOOK_APPOINTMENT",
-    escalate_to_staff: "ESCALATE",
-    qualify_lead: "QUALIFY_LEAD",
-  } as const;
-  const tools = realtimeTools.filter((tool) => tool.name === "capture_booking_details"
-    ? policy.capabilities.CHECK_AVAILABILITY || policy.capabilities.BOOK_APPOINTMENT
-    : policy.capabilities[toolCapabilities[tool.name]]);
-  return { instructions, history, tools };
+  return { instructions, history, tools: realtimeToolsForCapabilities(policy.capabilities) };
 }
