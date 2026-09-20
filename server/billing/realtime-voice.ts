@@ -121,6 +121,21 @@ export function quoteRealtimeVoiceFromRates(
   };
 }
 
+export async function loadRealtimeRateSnapshots(model: RealtimeVoiceModel, at = new Date()) {
+  if (!REALTIME_VOICE_MODELS.includes(model)) {
+    throw new AppError("REALTIME_MODEL_NOT_SUPPORTED", "Realtime voice model is not supported.", 422);
+  }
+  const [openaiRates, telnyxRates] = await Promise.all([
+    loadHostedRateSnapshot({
+      capability: "VOICE", provider: "openai", model, units: [...openAiUnits], at,
+    }),
+    loadHostedRateSnapshot({
+      capability: "VOICE", provider: "telnyx", model: "realtime-us-local", units: [...telnyxUnits], at,
+    }),
+  ]);
+  return { openaiRates, telnyxRates };
+}
+
 export async function quoteRealtimeVoice(input: RealtimeVoiceBill, at = new Date()) {
   if (!REALTIME_VOICE_MODELS.includes(input.model)) {
     throw new AppError("REALTIME_MODEL_NOT_SUPPORTED", "Realtime voice model is not supported.", 422);
@@ -128,13 +143,6 @@ export async function quoteRealtimeVoice(input: RealtimeVoiceBill, at = new Date
   if (input.numberType !== "local") {
     throw new AppError("REALTIME_NUMBER_RATE_NOT_CONFIGURED", "Realtime voice currently requires a US local-number rate.", 422);
   }
-  const [openaiRates, telnyxRates] = await Promise.all([
-    loadHostedRateSnapshot({
-      capability: "VOICE", provider: "openai", model: input.model, units: [...openAiUnits], at,
-    }),
-    loadHostedRateSnapshot({
-      capability: "VOICE", provider: "telnyx", model: "realtime-us-local", units: [...telnyxUnits], at,
-    }),
-  ]);
+  const { openaiRates, telnyxRates } = await loadRealtimeRateSnapshots(input.model, at);
   return quoteRealtimeVoiceFromRates(input, openaiRates, telnyxRates);
 }
