@@ -78,7 +78,7 @@ function currentOpenai() { return shared.client as Socket; }
 describe("Realtime Telnyx/OpenAI media contract", () => {
   afterEach(() => { shared.client = null; shared.phase = "ACTIVE"; vi.clearAllMocks(); });
 
-  it("bridges caller PCMU and sends correct RTP packets; clears buffered speech on interruption", async () => {
+  it("bridges PCMU as headerless Telnyx RTP payloads; clears speech on interruption", async () => {
     const telnyx = telnyxSocket();
     const bridge = attachRealtimeMedia({
       telnyx: telnyx as unknown as WebSocket, identity: { workspaceId: "ws", callId: "call-id", externalCallId: "telnyx-call" },
@@ -107,10 +107,10 @@ describe("Realtime Telnyx/OpenAI media contract", () => {
     })));
     await vi.waitFor(() => expect(telnyx.sent.some(v => v.event === "media")).toBe(true));
     const packet = Buffer.from(String((telnyx.sent.find(v => v.event === "media")?.media as Record<string, unknown>).payload), "base64");
-    expect(packet.length).toBe(172);
-    expect(packet[0]).toBe(0x80);
-    expect(packet[1]).toBe(0);
-    expect(packet.subarray(12)).toEqual(Buffer.alloc(160, 0x6f));
+    // The 12-byte RTP header previously inserted here was decoded as audio
+    // by Telnyx, generating 46.5 Hz-spaced interference over the AI's voice.
+    expect(packet.length).toBe(160);
+    expect(packet).toEqual(Buffer.alloc(160, 0x6f));
 
     openai.emit("message", Buffer.from(JSON.stringify({
       type: "input_audio_buffer.speech_started",
@@ -144,6 +144,46 @@ describe("Realtime Telnyx/OpenAI media contract", () => {
     await bridge.stop();
     expect(telnyx.readyState).toBe(3);
   });
+  it("preserves ordered 20ms headerless PCMU frames and pads the final frame with silence", async () => {
+    const telnyx = telnyxSocket();
+    const bridge = attachRealtimeMedia({
+      telnyx: telnyx as unknown as WebSocket,
+      identity: { workspaceId: "ws", callId: "call-id", externalCallId: "telnyx-call" },
+      streamId: "stream",
+    });
+    await vi.waitFor(() => expect(shared.client).not.toBeNull());
+    const openai = currentOpenai();
+    openai.emit("open");
+    openai.emit("message", Buffer.from(JSON.stringify({ type: "session.updated" })));
+    await vi.waitFor(() => expect(openai.sent.some(v => v.type === "session.update")).toBe(true));
+
+    // Distinct sample values reveal headers, lost/duplicated frames or reordering.
+    const raw = Buffer.concat([
+      Buffer.alloc(160, 0x23),
+      Buffer.alloc(160, 0x67),
+      Buffer.alloc(10, 0xa9),
+    ]);
+    openai.emit("message", Buffer.from(JSON.stringify({
+      type: "response.output_audio.delta",
+      response_id: "three-frame-response",
+      delta: raw.toString("base64"),
+    })));
+    openai.emit("message", Buffer.from(JSON.stringify({
+      type: "response.output_audio.done", response_id: "three-frame-response",
+    })));
+    await vi.waitFor(() => {
+      expect(telnyx.sent.filter(v => v.event === "media")).toHaveLength(3);
+    }, { timeout: 1000 });
+    const frames = telnyx.sent
+      .filter(v => v.event === "media")
+      .map(v => Buffer.from(String((v.media as Record<string, unknown>).payload), "base64"));
+    expect(frames.every(frame => frame.length === 160)).toBe(true);
+    expect(frames[0]).toEqual(raw.subarray(0, 160));
+    expect(frames[1]).toEqual(raw.subarray(160, 320));
+    expect(frames[2]).toEqual(Buffer.concat([raw.subarray(320), Buffer.alloc(150, 0xff)]));
+    await bridge.stop();
+  });
+
   it("preconnects OpenAI during the Telnyx greeting but holds input audio until the greeting ends", async () => {
     shared.phase = "OPENING_SPEAKING";
     const telnyx = telnyxSocket();
