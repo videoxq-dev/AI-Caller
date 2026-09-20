@@ -53,7 +53,7 @@ vi.mock("@/server/observability/logger", () => ({
 }));
 
 import { attachRealtimeMedia } from "./realtime-media";
-import { runRealtimeBusinessTool } from "./realtime-tools";
+import { runRealtimeBusinessTool, realtimeSessionContext } from "./realtime-tools";
 import { recordRealtimeResponse } from "./realtime-usage";
 
 type Socket = EventEmitter & {
@@ -142,6 +142,28 @@ describe("Realtime Telnyx/OpenAI media contract", () => {
     })));
     await bridge.stop();
     expect(telnyx.readyState).toBe(3);
+  });
+  it("loads previous cross-channel context without turning it into an immediate AI answer", async () => {
+    vi.mocked(realtimeSessionContext).mockResolvedValueOnce({
+      instructions: "Continue with the caller and do not invent bookings.",
+      history: "Customer: The office is in Sheridan.\\nPrevious agent: What day would you like?",
+    });
+    const telnyx = telnyxSocket();
+    const bridge = attachRealtimeMedia({
+      telnyx: telnyx as unknown as WebSocket,
+      identity: { workspaceId: "ws", callId: "call-id", externalCallId: "telnyx-call" },
+      streamId: "stream",
+    });
+    await vi.waitFor(() => expect(shared.client).not.toBeNull());
+    const openai = currentOpenai();
+    openai.emit("open");
+    await vi.waitFor(() => expect(openai.sent.some(e => e.type === "session.update")).toBe(true));
+    openai.emit("message", Buffer.from(JSON.stringify({ type: "session.updated" })));
+    const history = openai.sent.find(e => e.type === "conversation.item.create");
+    expect(history?.item).toMatchObject({ type: "message", role: "user",
+      content: [{ type: "input_text", text: expect.stringContaining("Sheridan") }] });
+    expect(openai.sent.filter(e => e.type === "response.create")).toHaveLength(0);
+    await bridge.stop();
   });
   it("suppresses interrupted stale tools but forwards the newest tool and deduplicates usage", async () => {
     vi.mocked(runRealtimeBusinessTool).mockResolvedValue({
