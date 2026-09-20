@@ -281,6 +281,11 @@ try {
   assert(consentState.rows[0].recording_consent_status === "GRANTED", "Affirmative keypad recording consent was not persisted.");
   assert(consentState.rows[0].recording_disclosed_at, "Recording consent evidence timestamp was not persisted.");
 
+  const openingSpeakEnd = await sendWebhook(
+    workspaceId, eventPayload("call.speak.ended", "m7-opening-ended", callSessionId, callControlId),
+  );
+  assert(openingSpeakEnd.data?.processed === 1, "Greeting must finish before first caller AI turn.");
+
   const qualificationTurn = await sendWebhook(
     workspaceId,
     eventPayload("call.transcription", "m7-turn-1", callSessionId, callControlId, {
