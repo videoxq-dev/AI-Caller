@@ -315,3 +315,31 @@ export async function yieldSupersededVoiceTurn(workspaceId: string, callId: stri
     return pending;
   });
 }
+
+/** One authenticated Telnyx stream may own a Realtime call at a time. */
+export async function claimRealtimeStream(workspaceId: string, callId: string, streamId: string) {
+  return lockedVoiceCall(workspaceId, callId, async (tx, call) => {
+    if (call.status !== "ACTIVE" || call.metadata.voiceTechnology !== "REALTIME"
+      || call.metadata.phase !== "ACTIVE" || call.metadata.realtimeUsageComplete !== null
+      || call.metadata.realtimeStreamId) return null;
+    const [updated] = await tx.update(voiceCalls).set({
+      metadata: { ...call.metadata, realtimeStreamId: streamId },
+      updatedAt: new Date(),
+    }).where(and(eq(voiceCalls.workspaceId, workspaceId), eq(voiceCalls.id, callId))).returning();
+    return updated ?? null;
+  });
+}
+
+export async function finishRealtimeStream(workspaceId: string, callId: string, streamId: string,
+  confirmed: boolean) {
+  return lockedVoiceCall(workspaceId, callId, async (tx, call) => {
+    if (call.metadata.voiceTechnology !== "REALTIME"
+      || call.metadata.realtimeStreamId !== streamId) return false;
+    await tx.update(voiceCalls).set({
+      metadata: { ...call.metadata, realtimeStreamId: null,
+        realtimeUsageComplete: confirmed, realtimeClosedAt: new Date().toISOString() },
+      updatedAt: new Date(),
+    }).where(and(eq(voiceCalls.workspaceId, workspaceId), eq(voiceCalls.id, callId)));
+    return true;
+  });
+}
