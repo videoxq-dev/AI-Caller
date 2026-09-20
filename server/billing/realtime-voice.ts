@@ -23,6 +23,7 @@ const telnyxUnits = [
   "VOICE_REALTIME_STREAM_MINUTE",
   "VOICE_REALTIME_RECORDING_MINUTE",
   "VOICE_REALTIME_TRANSCRIPTION_MINUTE",
+  "VOICE_REALTIME_GREETING_TTS_CHAR",
 ] as const satisfies readonly HostedPricingUnit[];
 
 export type RealtimeVoiceUsage = {
