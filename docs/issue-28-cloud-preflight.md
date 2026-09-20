@@ -27,11 +27,13 @@ The result contains only:
 - PostgreSQL version, whether the login role stores a SCRAM password,
   parsed HBA errors and non-SCRAM **host** rule count.
 - Aggregate counts for workspaces, contacts, conversations, messages,
-  appointments, wallets and ledger entries.
+  appointments, wallets and ledger entries, plus aggregated wallet balances
+  and ledger amounts (in existing AI Caller credits).
 
 It does **not** print the DB password, hash, HBA CIDRs, `DATABASE_URL`,
 customer records or provider credentials. It uses PostgreSQL read-only
-transactions and never invokes a migration, backup or restart. If the
+transactions and a 15-second SQL statement timeout so large-table scans fail
+rather than run without a time bound. It never invokes a migration, backup or restart. If the
 PostgreSQL local Unix-socket login or any expected table is unavailable,
 the script fails: investigate rather than interpreting missing output as zero.
 
