@@ -193,7 +193,7 @@ export async function queueVoiceTurn(workspaceId: string, callId: string, eventI
   return lockedVoiceCall(workspaceId, callId, async (tx, call) => {
     const phase = call.metadata.phase;
     if (call.status !== "ACTIVE"
-      || !["ACTIVE", "AI_RESPONDING", "AI_SPEAKING"].includes(String(phase))) return false;
+      || !["ACTIVE", "OPENING_SPEAKING", "AI_RESPONDING", "AI_SPEAKING"].includes(String(phase))) return false;
     await tx.update(voiceCalls).set({
       metadata: {
         ...call.metadata,
