@@ -1,4 +1,5 @@
 import { AppError } from "@/server/http/errors";
+import { capabilitiesFromBehaviorSettings } from "@/server/agent/capabilities";
 import { logger } from "@/server/observability/logger";
 import { buildConversationContext, type OrchestratorContext } from "./context";
 import {
@@ -85,11 +86,20 @@ Rules:
 - Keep customer-facing replies concise and do not expose this JSON protocol.
 `;
 
+function actionProtocolFor(context: OrchestratorContext) {
+  if (!context.agent) return ACTION_PROTOCOL;
+  const policy = capabilitiesFromBehaviorSettings(context.agent.behaviorSettings);
+  return ACTION_PROTOCOL.split("\\n").filter((line) => {
+    const action = /^- \\{ "type": "([A-Z_]+)"/.exec(line)?.[1];
+    return !action || action === "NONE" || policy[action as keyof typeof policy] === true;
+  }).join("\\n");
+}
+
 function plannerMessages(context: OrchestratorContext): AIMessage[] {
   return [
     {
       role: "system",
-      content: `${context.systemPrompt}\n\nCurrent server time: ${new Date().toISOString()}\n${ACTION_PROTOCOL}`,
+      content: `${context.systemPrompt}\n\nCurrent server time: ${new Date().toISOString()}\n${actionProtocolFor(context)}`,
     },
     ...context.messages,
   ];
@@ -103,7 +113,7 @@ function finalizerMessages(
   return [
     {
       role: "system",
-      content: `${context.systemPrompt}\n\nCurrent server time: ${new Date().toISOString()}\n${ACTION_PROTOCOL}`,
+      content: `${context.systemPrompt}\n\nCurrent server time: ${new Date().toISOString()}\n${actionProtocolFor(context)}`,
     },
     ...context.messages,
     {
@@ -147,6 +157,15 @@ export function createResponseOrchestrator(dependencies: OrchestratorDependencie
         };
       }
 
+      // Only private test mode may use a DRAFT or PAUSED agent. Live inbound turns
+      // are suppressed before invoking or charging an AI provider.
+      if (context.source !== "AGENT_TEST" && context.agent) {
+        const capabilities = capabilitiesFromBehaviorSettings(context.agent.behaviorSettings);
+        if (context.agent.status !== "ACTIVE" || !capabilities.ANSWER_INQUIRY) {
+          return { reply: null, handlingMode: "AI" as const, action: { type: "NONE" as const },
+            toolResult: { kind: "none" as const, data: {} } };
+        }
+      }
       const isLivePhone = context.systemPrompt.includes("LIVE PHONE RECEPTIONIST:");
       const lastUserMessage = [...context.messages].reverse().find((message) => message.role === "user")?.content ?? "";
       if (isLivePhone && isExplicitHumanRequest(lastUserMessage)) {
