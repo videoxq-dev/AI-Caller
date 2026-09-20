@@ -78,7 +78,14 @@ export async function processVoiceTurn(input: { workspaceId: string; callId: str
     const ready = await finishVoiceTurn(
       workspaceId, callId, eventId, "AI_SPEAKING", escalatedByThisTurn ? "HUMAN" : "ACTIVE",
     );
-    if (!ready) return { status: "CALL_ENDED" as const };
+    if (!ready) {
+      const newer = await yieldSupersededVoiceTurn(workspaceId, callId, eventId);
+      if (newer) {
+        await scheduleVoiceTurn(workspaceId, callId, newer, "pre-speak-superseded");
+        return { status: "SUPERSEDED" as const };
+      }
+      return { status: "CALL_ENDED" as const };
+    }
 
     await runtime.provider.speak({
       callControlId: call.callControlId,
