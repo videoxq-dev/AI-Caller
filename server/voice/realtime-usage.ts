@@ -1,6 +1,6 @@
 import { and, eq } from "drizzle-orm";
 import { db } from "@/db";
-import { usageEvents, voiceCalls, voiceRealtimeResponseUsage } from "@/db/schema";
+import { usageEvents, voiceRealtimeResponseUsage } from "@/db/schema";
 import { chargeUnavoidableCredits } from "@/server/credits/service";
 import { logger } from "@/server/observability/logger";
 import { getVoiceCall, updateVoiceCall } from "./repository";
