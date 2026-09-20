@@ -199,7 +199,19 @@ try {
   const pausedComposer = pausedFrame.getByPlaceholder("Type your message…");
   await pausedComposer.fill("Hello, Mia, are you there?");
   await pausedFrame.getByRole("button", { name: "Send message" }).click();
-  await pausedFrame.getByText(/AI assistant is currently unavailable/).waitFor({ timeout: 15_000 });
+  try {
+    await pausedFrame.getByText(/AI assistant is currently unavailable/).waitFor({ timeout: 15_000 });
+  } catch (error) {
+    const visible = await pausedFrame.locator("body").innerText().catch(() => "Widget inaccessible");
+    console.error("Paused Web Chat UI after send:", visible.slice(-1400));
+    await page.screenshot({ path: path.join(dir, "paused-agent-debug.png"), fullPage: true });
+    throw error;
+  }
+  // The widget polls authoritative history every four seconds; an unavailable
+  // notice is not a persisted AI reply and must survive that refresh.
+  await page.waitForTimeout(4_600);
+  assert(await pausedFrame.getByText(/AI assistant is currently unavailable/).isVisible(),
+    "Paused-agent notice disappeared after Web Chat history refresh.");
   assert(await pausedFrame.getByText("A team member is handling this conversation.").count() === 0,
     "Paused agent falsely claimed an actual staff handoff.");
   await page.screenshot({ path: path.join(dir, "paused-agent-webchat.png"), fullPage: true });
