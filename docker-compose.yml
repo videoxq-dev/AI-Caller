@@ -90,6 +90,27 @@ services:
     volumes:
       - recordings:/app/.data/recordings
 
+
+  gateway:
+    <<: *app
+    restart: unless-stopped
+    environment:
+      NODE_ENV: production
+      VOICE_GATEWAY_PORT: "3002"
+      DATABASE_URL: ${DATABASE_URL:-postgresql://postgres:ai_caller_auto_pass@postgres:5432/ai_caller}
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+    command: ["npm", "run", "voice-gateway"]
+    expose:
+      - "3002"
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:3002/health', {signal:AbortSignal.timeout(5000)}).then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 30s
+      timeout: 8s
+      start_period: 30s
+      retries: 3
+
 volumes:
   postgres_data:
   recordings:
