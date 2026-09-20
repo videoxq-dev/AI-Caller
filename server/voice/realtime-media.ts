@@ -64,7 +64,6 @@ export function attachRealtimeMedia({ telnyx, identity, streamId }: BridgeOption
   let error = false;
   let sessionConfigured = false;
   let claimed = false;
-  let activeResponseId: string | null = null;
   const interruptedResponseIds = new Set<string>();
   let pendingResponses = new Set<string>();
   const pendingWork = new Set<Promise<unknown>>();
@@ -286,7 +285,6 @@ export function attachRealtimeMedia({ telnyx, identity, streamId }: BridgeOption
     if (event.type === "response.created") {
       const response = object(event.response);
       if (typeof response.id === "string") {
-        activeResponseId = response.id;
         responseEpochs.set(response.id, callerSpeechEpoch);
         pendingResponses.add(response.id);
       }
@@ -370,7 +368,6 @@ export function attachRealtimeMedia({ telnyx, identity, streamId }: BridgeOption
       responseStatuses.set(responseId, status);
       const epoch = responseEpochs.get(responseId);
       responseEpochs.delete(responseId);
-      if (activeResponseId === responseId) activeResponseId = null;
       if (responseWithTools.has(responseId)) {
         completedToolResponses.add(responseId);
         if (epoch !== undefined) resumeAfterTools(responseId, epoch);
