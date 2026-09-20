@@ -203,6 +203,16 @@ export default function AIAgentPage() {
       });
       const payload = await response.json().catch(() => ({})) as { agent?: AgentApiRecord; error?: { message?: string } };
       if (!response.ok || !payload.agent) throw new Error(payload.error?.message ?? "Unable to save AI agent settings.");
+      // A newly created agent did not exist on the first GET, so the
+      // capabilities editor must load its persisted legacy-default policy now.
+      const refreshed = await fetch("/api/agent", { cache: "no-store" });
+      const current = await refreshed.json() as {
+        capabilities?: Record<string, boolean>; error?: { message?: string };
+      };
+      if (!refreshed.ok || !current.capabilities) {
+        throw new Error(current.error?.message ?? "Agent saved, but the capability policy could not be loaded.");
+      }
+      setCapabilities(current.capabilities);
       setHasAgent(true);
       setAgentStatus(payload.agent.status);
       setSaved(true);
