@@ -1,6 +1,5 @@
-import { randomUUID } from "node:crypto";
 import WebSocket from "ws";
-import { appendMessage, getConversationById } from "@/server/domain/core/repository";
+import { appendMessage } from "@/server/domain/core/repository";
 import { getEnv } from "@/server/env";
 import { logger } from "@/server/observability/logger";
 import { getVoiceCall, appendVoiceTranscriptSegment, claimRealtimeStream, finishRealtimeStream } from "./repository";
@@ -32,6 +31,7 @@ type RealtimeEvent = {
   type?: unknown;
   delta?: unknown;
   response_id?: unknown;
+  item_id?: unknown;
   transcript?: unknown;
   response?: unknown;
   item?: unknown;
@@ -70,7 +70,6 @@ export function attachRealtimeMedia({ telnyx, identity, streamId }: BridgeOption
   let outputTail = Buffer.alloc(0);
   let toolEscalated = false;
   let speechAllowed = false;
-  let lastSpeechAt = Date.now();
   let providerCloseRequested = false;
   let toolSerial = Promise.resolve();
   const startedAt = Date.now();
@@ -209,7 +208,6 @@ export function attachRealtimeMedia({ telnyx, identity, streamId }: BridgeOption
       return;
     }
     if (event.type === "input_audio_buffer.speech_started") {
-      lastSpeechAt = Date.now();
       interruptedResponseId = activeResponseId;
       clearAudio();
       return;
