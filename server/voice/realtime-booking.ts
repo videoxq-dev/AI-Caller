@@ -48,19 +48,37 @@ export async function captureRealtimeBookingDetails(
   });
 }
 
+export function sameRealtimeBookingDetails(
+  current: Record<string, string>, expected: Record<string, string>,
+) {
+  const keys = new Set([...Object.keys(current), ...Object.keys(expected)]);
+  return [...keys].every(key => current[key] === expected[key]);
+}
+
+export async function getRealtimeBookingDetails(workspaceId: string, callId: string) {
+  const [row] = await db.select({ details: voiceRealtimeBookingState.details })
+    .from(voiceRealtimeBookingState).where(and(
+      eq(voiceRealtimeBookingState.workspaceId, workspaceId),
+      eq(voiceRealtimeBookingState.voiceCallId, callId),
+    )).limit(1);
+  return row?.details ?? null;
+}
+
+/** Never confirm a calendar result from a superseded caller service/date/time. */
 export async function saveRealtimeAvailability(workspaceId: string, callId: string,
-  startsAt: string, available: boolean) {
+  startsAt: string, available: boolean, expectedDetails: Record<string, string>): Promise<boolean> {
   await db.transaction(async tx => {
     await tx.execute(sql`select pg_advisory_xact_lock(hashtext(${callId}))`);
     const [existing] = await tx.select().from(voiceRealtimeBookingState).where(and(
       eq(voiceRealtimeBookingState.workspaceId, workspaceId),
       eq(voiceRealtimeBookingState.voiceCallId, callId),
     )).limit(1);
-    if (!existing) return;
+    if (!existing || !sameRealtimeBookingDetails(existing.details, expectedDetails)) return false;
     await tx.update(voiceRealtimeBookingState).set({
       availableStart: available ? startsAt : null, updatedAt: new Date(),
     }).where(and(eq(voiceRealtimeBookingState.workspaceId, workspaceId),
       eq(voiceRealtimeBookingState.voiceCallId, callId)));
+    return true;
   });
 }
 
