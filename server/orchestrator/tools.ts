@@ -198,7 +198,7 @@ export async function executeOrchestratorTools(
   envelope: OrchestratorEnvelope,
 ): Promise<OrchestratorToolResult> {
   // Re-read the current policy at the execution boundary; the model and its prompt are untrusted.
-  const agent = await requireActiveWorkspaceAgent(workspaceId);
+  const agent = await requireActiveWorkspaceAgent(workspaceId, "ANSWER_INQUIRY");
   if (envelope.contact) assertAgentActionAllowed(agent.capabilities, "UPDATE_CONTACT");
   if (envelope.lead) assertAgentActionAllowed(agent.capabilities, "UPDATE_LEAD");
   if (envelope.lead?.status === "QUALIFIED") assertAgentActionAllowed(agent.capabilities, "QUALIFY_LEAD");
