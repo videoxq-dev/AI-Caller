@@ -483,10 +483,18 @@ export function attachRealtimeMedia({ telnyx, identity, streamId }: BridgeOption
       timeout.unref();
       track(waitUntilGreetingEnds().then(() => {
         if (!open) return;
-        // Discard audio captured during recording disclosure/opening playback.
-        initialAudio.length = 0;
-        initialBytes = 0;
+        // The webhook can lag the audio playback completion by one polling
+        // interval. Keep only ~200ms of the newest buffered audio so the first
+        // syllable after the greeting is not clipped, never the full greeting.
+        while (initialAudio.length && initialBytes > 1600) {
+          initialBytes -= initialAudio.shift()!.length;
+        }
         speechAllowed = true;
+        if (ready) {
+          for (const frame of initialAudio) feedAudio(frame);
+          initialAudio.length = 0;
+          initialBytes = 0;
+        }
       }).catch(err => {
         logger.warn({ err, workspaceId, callId }, "Realtime greeting authorization failed");
         fail("realtime-greeting-ended-abnormally");
