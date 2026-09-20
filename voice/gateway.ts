@@ -4,12 +4,16 @@ import { WebSocketServer } from "ws";
 import { getEnv } from "@/server/env";
 import { logger } from "@/server/observability/logger";
 import { verifyVoiceGatewayRequest } from "@/server/voice/gateway-auth";
+import { attachRealtimeMedia } from "@/server/voice/realtime-media";
+import { getVoiceCall } from "@/server/voice/repository";
 
 type TelnyxStreamFrame = {
   event?: unknown;
   start?: {
     call_session_id?: unknown;
     call_control_id?: unknown;
+    stream_id?: unknown;
+    media_format?: { encoding?: unknown; sample_rate?: unknown };
   };
   media?: {
     payload?: unknown;
@@ -60,6 +64,8 @@ wss.on("connection", (ws, request) => {
   let verifiedStart = false;
   let mediaBytes = 0;
   let mediaFrames = 0;
+  let realtime: ReturnType<typeof attachRealtimeMedia> | null = null;
+  let mediaStarting = false;
 
   ws.on("message", (data, isBinary) => {
     if (isBinary) {
@@ -85,8 +91,36 @@ wss.on("connection", (ws, request) => {
         ws.close(1008, "Call identity mismatch");
         return;
       }
-      verifiedStart = true;
-      logger.info({ workspaceId: auth.workspaceId, callId: auth.callId }, "Inbound voice media stream started");
+      if (verifiedStart || mediaStarting) {
+        ws.close(1008, "Duplicate stream start");
+        return;
+      }
+      mediaStarting = true;
+      const streamId = typeof frame.start?.stream_id === "string" ? frame.start.stream_id : "";
+      void getVoiceCall(auth.workspaceId, auth.callId).then((call) => {
+        if (!call || call.externalCallId !== auth.externalCallId || call.status !== "ACTIVE") {
+          ws.close(1008, "Voice call is not active");
+          return;
+        }
+        if (call.metadata.voiceTechnology === "REALTIME") {
+          if (!streamId || frame.start?.media_format?.encoding !== "PCMU"
+            || frame.start.media_format.sample_rate !== 8000) {
+            ws.close(1003, "Realtime PCMU 8000 Hz required");
+            return;
+          }
+          realtime = attachRealtimeMedia({
+            telnyx: ws, identity: auth, streamId,
+          });
+        }
+        verifiedStart = true;
+        logger.info({ workspaceId: auth.workspaceId, callId: auth.callId,
+          technology: call.metadata.voiceTechnology ?? "STANDARD" },
+          "Inbound voice media stream started");
+      }).catch((err) => {
+        logger.error({ err, workspaceId: auth.workspaceId, callId: auth.callId },
+          "Voice gateway could not authorize the call");
+        ws.close(1011, "Voice session unavailable");
+      });
       return;
     }
 
@@ -99,13 +133,18 @@ wss.on("connection", (ws, request) => {
       if (!payload) return;
       mediaFrames += 1;
       mediaBytes += Buffer.byteLength(payload, "base64");
+      realtime?.onMedia(payload);
       return;
     }
 
-    if (frame.event === "stop") ws.close(1000, "Stream ended");
+    if (frame.event === "stop") {
+      if (realtime) void realtime.stop();
+      else ws.close(1000, "Stream ended");
+    }
   });
 
   ws.on("close", () => {
+    if (realtime) void realtime.stop();
     logger.info(
       { workspaceId: auth.workspaceId, callId: auth.callId, mediaFrames, mediaBytes },
       "Inbound voice media stream closed",
