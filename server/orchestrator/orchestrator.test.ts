@@ -56,6 +56,67 @@ describe("orchestrator response protocol", () => {
     expect(generate).not.toHaveBeenCalled();
   });
 
+  it.each([
+    "an operator",
+    "How can I speak to a human?",
+    "I need to talk to a team member",
+  ])("escalates explicit live caller request %s without promising a live transfer", async (utterance) => {
+    const context = {
+      ...fakeContext("AI"),
+      systemPrompt: "LIVE PHONE RECEPTIONIST: answer caller.",
+      messages: [{ role: "user" as const, content: utterance }],
+    };
+    const executeTools = vi.fn().mockResolvedValue({
+      kind: "escalation", data: { handlingMode: "HUMAN" },
+    });
+    const generate = vi.fn();
+    const orchestrator = createResponseOrchestrator({
+      buildContext: vi.fn(async () => context), executeTools, generate,
+    });
+    const result = await orchestrator.respond("workspace", "conversation");
+    expect(result.handlingMode).toBe("HUMAN");
+    expect(result.reply).toContain("I can't transfer this call live.");
+    expect(executeTools).toHaveBeenCalledWith("workspace", "conversation",
+      context.contact.id, { action: {
+        type: "ESCALATE", reason: "Caller requested a human during a phone call.",
+      } });
+    expect(generate).not.toHaveBeenCalled();
+  });
+
+  it("does not perform irreversible tools for an utterance superseded during AI generation", async () => {
+    const executeTools = vi.fn();
+    const generate = vi.fn().mockResolvedValue({
+      text: JSON.stringify({ reply: "I will book your appointment now.", action: { type: "NONE" } }),
+    });
+    const orchestrator = createResponseOrchestrator({
+      buildContext: vi.fn(async () => fakeContext("AI")),
+      executeTools, generate,
+    });
+    const beforeTools = vi.fn(async () => false);
+    const result = await orchestrator.respond("workspace", "conversation", { beforeTools });
+    expect(result.reply).toBeNull();
+    expect(executeTools).not.toHaveBeenCalled();
+    expect(beforeTools).toHaveBeenCalledTimes(1);
+  });
+
+  it("does not escalate after the caller supersedes a human-request fragment", async () => {
+    const context = {
+      ...fakeContext("AI"),
+      systemPrompt: "LIVE PHONE RECEPTIONIST:",
+      messages: [{ role: "user" as const, content: "an operator" }],
+    };
+    const executeTools = vi.fn();
+    const orchestrator = createResponseOrchestrator({
+      buildContext: vi.fn(async () => context),
+      executeTools, generate: vi.fn(),
+    });
+    const result = await orchestrator.respond("workspace", "conversation", {
+      beforeTools: async () => false,
+    });
+    expect(result.reply).toBeNull();
+    expect(executeTools).not.toHaveBeenCalled();
+  });
+
   it("uses an authoritative availability result before answering the customer", async () => {
     const generate = vi.fn()
       .mockResolvedValueOnce({
