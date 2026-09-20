@@ -240,6 +240,7 @@ export async function finishVoiceTurn(
         phase: nextPhase,
         respondingVoiceTurnEventId: nextPhase === "AI_SPEAKING" ? eventId : null,
         voiceAfterSpeakPhase: nextPhase === "AI_SPEAKING" ? afterSpeakPhase : null,
+        voiceSpeechRequestedAt: nextPhase === "AI_SPEAKING" ? new Date().toISOString() : null,
       },
       updatedAt: new Date(),
     }).where(and(eq(voiceCalls.workspaceId, workspaceId), eq(voiceCalls.id, callId))).returning();
@@ -279,6 +280,7 @@ export async function releaseVoiceSpeech(workspaceId: string, callId: string) {
         pendingVoiceTurnEventId: handingOff ? null : call.metadata.pendingVoiceTurnEventId,
         respondingVoiceTurnEventId: null,
         voiceAfterSpeakPhase: null,
+        voiceSpeechRequestedAt: null,
       },
       updatedAt: new Date(),
     }).where(and(eq(voiceCalls.workspaceId, workspaceId), eq(voiceCalls.id, callId)));
