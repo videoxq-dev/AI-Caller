@@ -89,6 +89,41 @@ function readSnapshot(value: unknown): HostedRate[] {
   });
 }
 
+/**
+ * Check a live call's accumulated provider usage against its prefunded hold.
+ * This is a soft cutoff: an individual in-flight response can exceed the hold;
+ * the final ledger still charges the authoritative invoice-sized usage.
+ */
+export async function realtimeCreditBudgetReached(workspaceId: string, callId: string,
+  now = new Date(), maxCreditFraction = 0.9) {
+  const call = await getVoiceCall(workspaceId, callId);
+  if (!call || call.metadata.voiceTechnology !== "REALTIME" || call.status !== "ACTIVE")
+    return true;
+  const model = call.metadata.realtimeModel as RealtimeVoiceModel;
+  if (model !== "gpt-realtime-2.1" && model !== "gpt-realtime-2.1-mini")
+    throw new Error("Invalid Realtime budget model.");
+  const snapshot = object(call.metadata.realtimeRates);
+  const rows = await db.select({ usage: voiceRealtimeResponseUsage.usage })
+    .from(voiceRealtimeResponseUsage).where(and(
+      eq(voiceRealtimeResponseUsage.workspaceId, workspaceId),
+      eq(voiceRealtimeResponseUsage.voiceCallId, callId),
+    ));
+  const seconds = Math.max(0, Math.ceil((now.getTime()
+    - (call.answeredAt ?? call.startedAt).getTime()) / 1000));
+  const quote = quoteRealtimeVoiceFromRates({
+    model, callSeconds: seconds, numberType: "local",
+    recorded: call.recordingConsentStatus === "ANNOUNCED"
+      || call.recordingConsentStatus === "GRANTED",
+    ttsCharacters: typeof call.metadata.voiceTelnyxTtsCharacters === "number"
+      ? call.metadata.voiceTelnyxTtsCharacters : 0,
+    usage: sumUsage(rows),
+  }, readSnapshot(snapshot.openaiRates), readSnapshot(snapshot.telnyxRates));
+  const hold = call.metadata.realtimeReservationAmount;
+  const creditLimit = typeof hold === "number" && Number.isSafeInteger(hold) && hold > 0
+    ? Math.floor(hold * maxCreditFraction) : 450;
+  return quote.credits >= creditLimit;
+}
+
 /** Called after BOTH Telnyx hangup and a clean OpenAI usage stream close, in either order. */
 export async function settleRealtimeCall(workspaceId: string, callId: string) {
   const call = await getVoiceCall(workspaceId, callId);
