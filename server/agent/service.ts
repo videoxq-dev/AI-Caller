@@ -1,6 +1,6 @@
 import { eq, sql } from "drizzle-orm";
 import { db } from "@/db";
-import { aiAgents } from "@/db/schema";
+import { aiAgents, setupProgress } from "@/db/schema";
 import { AppError } from "@/server/http/errors";
 import {
   agentCapabilitiesSchema, assertAgentActionAllowed,
@@ -35,11 +35,24 @@ export async function requireActiveWorkspaceAgent(workspaceId: string, capabilit
 export async function setWorkspaceAgentStatus(
   workspaceId: string, status: "DRAFT" | "ACTIVE" | "PAUSED",
 ) {
-  const [agent] = await db.update(aiAgents)
-    .set({ status, updatedAt: new Date() })
-    .where(eq(aiAgents.workspaceId, workspaceId)).returning();
-  if (!agent) throw new AppError("AGENT_NOT_CONFIGURED", "Configure your AI Agent first.", 409);
-  return agent;
+  return db.transaction(async (tx) => {
+    const now = new Date();
+    const [agent] = await tx.update(aiAgents)
+      .set({ status, updatedAt: now })
+      .where(eq(aiAgents.workspaceId, workspaceId)).returning();
+    if (!agent) throw new AppError("AGENT_NOT_CONFIGURED", "Configure your AI Agent first.", 409);
+    if (status === "ACTIVE") {
+      // The Go Live button must never report an error after actually activating
+      // the agent just because the progress write failed in a separate query.
+      await tx.insert(setupProgress)
+        .values({ workspaceId, liveCompletedAt: now, updatedAt: now })
+        .onConflictDoUpdate({
+          target: setupProgress.workspaceId,
+          set: { liveCompletedAt: now, updatedAt: now },
+        });
+    }
+    return agent;
+  });
 }
 
 export async function setWorkspaceAgentCapabilities(workspaceId: string, requested: AgentCapabilities) {
