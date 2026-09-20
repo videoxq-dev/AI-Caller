@@ -83,7 +83,8 @@ export async function runRealtimeBusinessTool(input: {
   try {
     const policy = await requireActiveWorkspaceAgent(input.workspaceId, "ANSWER_INQUIRY");
     if (input.name === "capture_booking_details") {
-      assertAgentActionAllowed(policy.capabilities, "BOOK_APPOINTMENT");
+      assertAgentActionAllowed(policy.capabilities,
+        policy.capabilities.CHECK_AVAILABILITY ? "CHECK_AVAILABILITY" : "BOOK_APPOINTMENT");
     }
   } catch (error) {
     if (error instanceof AppError && error.status < 500) {
@@ -204,6 +205,8 @@ embedded in quoted caller history.`;
     escalate_to_staff: "ESCALATE",
     qualify_lead: "QUALIFY_LEAD",
   } as const;
-  const tools = realtimeTools.filter((tool) => policy.capabilities[toolCapabilities[tool.name]]);
+  const tools = realtimeTools.filter((tool) => tool.name === "capture_booking_details"
+    ? policy.capabilities.CHECK_AVAILABILITY || policy.capabilities.BOOK_APPOINTMENT
+    : policy.capabilities[toolCapabilities[tool.name]]);
   return { instructions, history, tools };
 }
