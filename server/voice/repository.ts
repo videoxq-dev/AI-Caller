@@ -232,7 +232,8 @@ export async function finishVoiceTurn(
 ) {
   return lockedVoiceCall(workspaceId, callId, async (tx, call) => {
     if (call.status !== "ACTIVE" || call.metadata.phase !== "AI_RESPONDING"
-      || call.metadata.respondingVoiceTurnEventId !== eventId) return null;
+      || call.metadata.respondingVoiceTurnEventId !== eventId
+      || (nextPhase === "AI_SPEAKING" && call.metadata.pendingVoiceTurnEventId)) return null;
     const [updated] = await tx.update(voiceCalls).set({
       metadata: {
         ...call.metadata,
