@@ -27,6 +27,16 @@ function isExplicitHumanRequest(message: string) {
 const LIVE_PHONE_ESCALATION_REPLY = "I've flagged your request for our team to follow up. I can't transfer this call live.";
 
 
+function safeLivePhoneReply(reply: string) {
+  // Without a completed escalation, a model cannot promise an actual live
+  // Call Control transfer: this version supports staff Inbox follow-up only.
+  if (/\b(?:i(?:['’]ll| will| can)|we(?:['’]ll| will| can)|let me)\s+[^.!?]{0,55}\b(?:connect|transfer|put you through|patch you through)\b[^.!?]{0,75}\b(?:team|staff|human|operator|person|representative|someone|you)\b/i.test(reply)) {
+    return "I can answer questions about the business here. If you need a person, I can flag your request for staff follow-up, but I can't transfer this call live.";
+  }
+  return reply;
+}
+
+
 type OrchestratorDependencies = {
   buildContext: (workspaceId: string, conversationId: string) => Promise<OrchestratorContext | null>;
   executeTools: (
@@ -221,7 +231,7 @@ export function createResponseOrchestrator(dependencies: OrchestratorDependencie
 
       if (!first.reply) throw new Error("AI provider did not return a customer-facing response.");
       return {
-        reply: first.reply,
+        reply: isLivePhone ? safeLivePhoneReply(first.reply) : first.reply,
         handlingMode: "AI" as const,
         action: first.action,
         toolResult,
