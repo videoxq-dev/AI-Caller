@@ -98,6 +98,17 @@ describe("realtime voice pricing / 50% cost markup", () => {
     expect(q.credits).toBe(97);
   });
 
+  it("accounts for the Telnyx-rendered disclosure and opening message", () => {
+    const r = rates("gpt-realtime-2.1-mini");
+    const q = quoteRealtimeVoiceFromRates(sample("gpt-realtime-2.1-mini", {
+      ttsCharacters: 250,
+    }), r.ai, r.telnyx);
+    expect(q.billedUnits.VOICE_REALTIME_GREETING_TTS_CHAR).toBe(250);
+    expect(q.providerCostMicros).toBe(54380);
+    expect(q.retailMicros).toBe(81570);
+    expect(q.credits).toBe(82);
+  });
+
   it("rejects impossible cached usage and unsupported number types", () => {
     const r = rates("gpt-realtime-2.1");
     expect(() => quoteRealtimeVoiceFromRates(sample("gpt-realtime-2.1", {
