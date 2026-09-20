@@ -119,6 +119,11 @@ jobs:
             echo 'Never initialize or silently rewrite PostgreSQL auth to trust.'
             exit 1
           fi
+      - name: Validate read-only DeployOS database inventory preflight
+        run: |
+          sh -n scripts/inspect-deployos-postgres.sh
+          node --test scripts/inspect-deployos-postgres.test.mjs
+
       - name: Verify existing PostgreSQL data survives a Compose upgrade
         run: sh scripts/verify-compose-postgres-compat.sh
 
