@@ -56,6 +56,7 @@ import { attachRealtimeMedia } from "./realtime-media";
 import { runRealtimeBusinessTool, realtimeSessionContext } from "./realtime-tools";
 import { recordRealtimeResponse } from "./realtime-usage";
 import { finishRealtimeStream } from "./repository";
+import { logger } from "@/server/observability/logger";
 
 type Socket = EventEmitter & {
   readyState: number;
@@ -90,6 +91,9 @@ describe("Realtime Telnyx/OpenAI media contract", () => {
     await vi.waitFor(() => expect(openai.sent.some(v => v.type === "session.update")).toBe(true));
     const update = openai.sent.find(v => v.type === "session.update");
     expect((update?.session as Record<string, unknown>).output_modalities).toEqual(["audio"]);
+    expect((update?.session as Record<string, unknown>).max_output_tokens).toBe(2048);
+    const audio = (update?.session as Record<string, unknown>).audio as Record<string, unknown>;
+    expect((audio.input as Record<string, unknown>).noise_reduction).toEqual({ type: "near_field" });
     openai.emit("message", Buffer.from(JSON.stringify({ type: "session.updated" })));
 
     const callerAudio = Buffer.alloc(160, 0x55);
@@ -116,6 +120,11 @@ describe("Realtime Telnyx/OpenAI media contract", () => {
       type: "input_audio_buffer.speech_started",
     })));
     expect(telnyx.sent.some(v => v.event === "clear")).toBe(true);
+    expect(logger.warn).toHaveBeenCalledWith(
+      expect.objectContaining({ workspaceId: "ws", callId: "call-id",
+        interruptedActiveResponses: 1 }),
+      "Realtime caller activity interrupted assistant playback",
+    );
     const prior = telnyx.sent.filter(v => v.event === "media").length;
     openai.emit("message", Buffer.from(JSON.stringify({
       type: "response.output_audio.delta", response_id: "r1",
@@ -184,6 +193,37 @@ describe("Realtime Telnyx/OpenAI media contract", () => {
     expect(frames[0]).toEqual(raw.subarray(0, 160));
     expect(frames[1]).toEqual(raw.subarray(160, 320));
     expect(frames[2]).toEqual(Buffer.concat([raw.subarray(320), Buffer.alloc(150, 0xff)]));
+    await bridge.stop();
+  });
+
+  it("logs provider token-limit stops without treating usage as missing", async () => {
+    const telnyx = telnyxSocket();
+    const bridge = attachRealtimeMedia({
+      telnyx: telnyx as unknown as WebSocket,
+      identity: { workspaceId: "ws", callId: "call-id", externalCallId: "telnyx-call" },
+      streamId: "stream",
+    });
+    await vi.waitFor(() => expect(shared.client).not.toBeNull());
+    const openai = currentOpenai();
+    openai.emit("open");
+    openai.emit("message", Buffer.from(JSON.stringify({ type: "session.updated" })));
+    openai.emit("message", Buffer.from(JSON.stringify({
+      type: "response.created", response: { id: "cut-off" },
+    })));
+    openai.emit("message", Buffer.from(JSON.stringify({
+      type: "response.done",
+      response: {
+        id: "cut-off", status: "incomplete",
+        incomplete_details: { reason: "max_output_tokens" },
+        usage: { input_tokens: 2, output_tokens: 2048,
+          input_token_details: {}, output_token_details: { audio_tokens: 2048 } },
+      },
+    })));
+    expect(logger.warn).toHaveBeenCalledWith(
+      expect.objectContaining({ workspaceId: "ws", callId: "call-id",
+        status: "incomplete", incompleteReason: "max_output_tokens" }),
+      "Realtime provider ended assistant response before completion",
+    );
     await bridge.stop();
   });
 
