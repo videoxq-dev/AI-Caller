@@ -4,6 +4,12 @@ import { db } from "@/db";
 import { voiceRealtimeBookingState } from "@/db/schema";
 import { AppError } from "@/server/http/errors";
 
+export function sameBookingInstant(left: string, right: string) {
+  const a = new Date(left).getTime();
+  const b = new Date(right).getTime();
+  return Number.isFinite(a) && Number.isFinite(b) && a === b;
+}
+
 const localDate = z.string().regex(/^\d{4}-\d{2}-\d{2}$/);
 const localTime = z.string().regex(/^(?:[01]\d|2[0-3]):[0-5]\d$/);
 const timezone = z.string().min(1).max(100).refine(tz => {
@@ -89,7 +95,7 @@ export async function assertRealtimeBookingReady(
   if (start.date !== details.date || start.time !== details.time
     || proposed.timezone !== details.timezone
     || !proposed.title.toLowerCase().includes(details.serviceName.toLowerCase())
-    || new Date(row.availableStart).getTime() !== new Date(proposed.startsAt).getTime()) {
+    || !sameBookingInstant(row.availableStart, proposed.startsAt)) {
     throw new AppError("BOOKING_DETAILS_CHANGED",
       "The appointment differs from the caller's latest request; collect and recheck the requested slot.", 409);
   }
