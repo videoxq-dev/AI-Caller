@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import "./admin.css";
+import type { HostedPricingUnit } from "@/server/billing/pricing";
 
 type AdminTab = "overview" | "users" | "workspaces" | "plans" | "rates" | "audit";
 
@@ -52,7 +53,7 @@ type AdminRate = {
   capability: "AI_TEXT" | "SMS" | "VOICE";
   provider: string;
   model: string;
-  unit: "AI_INPUT_TOKEN" | "AI_CACHED_INPUT_TOKEN" | "AI_OUTPUT_TOKEN" | "SMS_SEGMENT" | "VOICE_MINUTE";
+  unit: HostedPricingUnit;
   costMicros: number;
   unitsPerCost: number;
   targetMarginBps: number;
@@ -432,11 +433,37 @@ export default function AdminPage() {
                     }));
                   }}><option value="AI_TEXT">AI text</option><option value="SMS">SMS</option><option value="VOICE">Voice</option></select></label>
                   <label><span>Provider</span><input value={newRate.provider} onChange={(event) => setNewRate((value) => ({ ...value, provider: event.target.value }))} /></label>
-                  <label><span>Model</span><input value={newRate.model} disabled={newRate.capability !== "AI_TEXT"} onChange={(event) => setNewRate((value) => ({ ...value, model: event.target.value }))} /></label>
-                  <label><span>Unit</span><select value={newRate.unit} onChange={(event) => setNewRate((value) => ({ ...value, unit: event.target.value as AdminRate["unit"] }))}>{newRate.capability === "SMS" ? <option value="SMS_SEGMENT">SMS segment</option> : newRate.capability === "VOICE" ? <option value="VOICE_MINUTE">Voice minute</option> : <><option value="AI_INPUT_TOKEN">AI input token</option><option value="AI_CACHED_INPUT_TOKEN">AI cached input token</option><option value="AI_OUTPUT_TOKEN">AI output token</option></>}</select></label>
+                  <label><span>Model / market</span><input value={newRate.model} disabled={newRate.capability !== "AI_TEXT" && !newRate.unit.startsWith("VOICE_REALTIME_")} onChange={(event) => setNewRate((value) => ({ ...value, model: event.target.value }))} /></label>
+                  <label><span>Unit</span><select value={newRate.unit} onChange={(event) => setNewRate((value) => {
+                    const unit = event.target.value as AdminRate["unit"];
+                    const realtime = unit.startsWith("VOICE_REALTIME_");
+                    const token = unit.endsWith("_TOKEN");
+                    return {
+                      ...value, unit,
+                      ...(realtime ? {
+                        provider: token ? "openai" : "telnyx",
+                        model: token ? "gpt-realtime-2.1" : "realtime-us-local",
+                        unitsPerCost: token ? "1000000" : "1",
+                        targetMarginBps: "0",
+                      } : unit === "VOICE_MINUTE" ? {
+                        provider: "telnyx", model: "", unitsPerCost: "1", targetMarginBps: "5000",
+                      } : {}),
+                    };
+                  })}>{newRate.capability === "SMS" ? <option value="SMS_SEGMENT">SMS segment</option> : newRate.capability === "VOICE" ? <>
+                    <option value="VOICE_MINUTE">Legacy voice minute</option>
+                    <option value="VOICE_REALTIME_AUDIO_INPUT_TOKEN">Realtime audio input token</option>
+                    <option value="VOICE_REALTIME_AUDIO_CACHED_INPUT_TOKEN">Realtime audio cached input token</option>
+                    <option value="VOICE_REALTIME_AUDIO_OUTPUT_TOKEN">Realtime audio output token</option>
+                    <option value="VOICE_REALTIME_TEXT_INPUT_TOKEN">Realtime text input token</option>
+                    <option value="VOICE_REALTIME_TEXT_CACHED_INPUT_TOKEN">Realtime text cached input token</option>
+                    <option value="VOICE_REALTIME_TEXT_OUTPUT_TOKEN">Realtime text output token</option>
+                    <option value="VOICE_REALTIME_CARRIER_MINUTE">Realtime US local carrier minute</option>
+                    <option value="VOICE_REALTIME_STREAM_MINUTE">Realtime media-streaming minute</option>
+                    <option value="VOICE_REALTIME_RECORDING_MINUTE">Realtime recording minute</option>
+                  </> : <><option value="AI_INPUT_TOKEN">AI input token</option><option value="AI_CACHED_INPUT_TOKEN">AI cached input token</option><option value="AI_OUTPUT_TOKEN">AI output token</option></>}</select></label>
                   <label><span>Provider cost (micro-USD)</span><input type="number" value={newRate.costMicros} onChange={(event) => setNewRate((value) => ({ ...value, costMicros: event.target.value }))} /></label>
                   <label><span>Units per cost</span><input type="number" value={newRate.unitsPerCost} onChange={(event) => setNewRate((value) => ({ ...value, unitsPerCost: event.target.value }))} /></label>
-                  <label><span>Margin (bps)</span><input type="number" value={newRate.targetMarginBps} onChange={(event) => setNewRate((value) => ({ ...value, targetMarginBps: event.target.value }))} /></label>
+                  <label><span>Margin (bps; Realtime provider rates: 0)</span><input type="number" value={newRate.targetMarginBps} disabled={newRate.unit.startsWith("VOICE_REALTIME_")} onChange={(event) => setNewRate((value) => ({ ...value, targetMarginBps: event.target.value }))} /></label>
                   <label><span>Effective from</span><input type="datetime-local" value={newRate.effectiveFrom} onChange={(event) => setNewRate((value) => ({ ...value, effectiveFrom: event.target.value }))} /></label>
                 </div>
                 <button type="button" className="adminPrimary" disabled={actionPending} onClick={() => void createRate()}>Create rate version</button>
@@ -454,7 +481,7 @@ export default function AdminPage() {
                           <td><strong>{rate.provider}</strong><small>{rate.model || "default"}</small></td>
                           <td>{rate.unit}</td>
                           <td>{n(rate.costMicros)} μUSD / {n(rate.unitsPerCost)}</td>
-                          <td>{(rate.targetMarginBps / 100).toFixed(2)}%</td>
+                          <td>{rate.unit.startsWith("VOICE_REALTIME_") ? "50% markup on total cost" : `${(rate.targetMarginBps / 100).toFixed(2)}% margin`}</td>
                           <td>{date(rate.effectiveFrom)}<small>{rate.effectiveTo ? `to ${date(rate.effectiveTo)}` : "current interval"}</small></td>
                           <td><button type="button" className={`miniToggle ${rate.enabled ? "on" : ""}`} disabled={actionPending} onClick={() => void setRateEnabled(rate, !rate.enabled)}>{rate.enabled ? "Enabled" : "Disabled"}</button></td>
                         </tr>
