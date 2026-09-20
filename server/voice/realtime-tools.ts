@@ -63,7 +63,9 @@ export async function runRealtimeBusinessTool(input: {
   workspaceId: string; conversationId: string; contactId: string;
   callId: string; streamId: string;
   name: string; arguments: string;
+  isCurrentTurn: () => boolean;
 }) {
+  if (!input.isCurrentTurn()) return { ok: false, reason: "The caller corrected the request." };
   const [convo, call] = await Promise.all([
     getConversationById(input.workspaceId, input.conversationId),
     getVoiceCall(input.workspaceId, input.callId),
@@ -80,6 +82,7 @@ export async function runRealtimeBusinessTool(input: {
   catch { return { ok: false, reason: "The tool arguments were invalid." }; }
   if (input.name === "capture_booking_details") {
     try {
+      if (!input.isCurrentTurn()) return { ok: false, reason: "The caller corrected the request." };
       const saved = await captureRealtimeBookingDetails(input.workspaceId, input.callId, args);
       return { ok: true as const, kind: "booking_state" as const, data: saved };
     } catch (error) {
@@ -126,6 +129,9 @@ export async function runRealtimeBusinessTool(input: {
   }
 
   try {
+    if (!input.isCurrentTurn()) {
+      return { ok: false, reason: "The caller corrected the request; please check the latest details." };
+    }
     const result = await executeOrchestratorTools(input.workspaceId,
       input.conversationId, input.contactId, { action: parsed.data });
     if (parsed.data.type === "CHECK_AVAILABILITY") {
