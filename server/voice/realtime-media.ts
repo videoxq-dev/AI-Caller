@@ -72,6 +72,7 @@ export function attachRealtimeMedia({ telnyx, identity, streamId }: BridgeOption
   let speechAllowed = false;
   let providerCloseRequested = false;
   let toolSerial = Promise.resolve();
+  const handledToolCalls = new Set<string>();
   const startedAt = Date.now();
 
   function track(promise: Promise<unknown>) {
@@ -176,10 +177,12 @@ export function attachRealtimeMedia({ telnyx, identity, streamId }: BridgeOption
     const item = object(raw.item);
     if (item.type !== "function_call" || typeof item.call_id !== "string"
       || typeof item.name !== "string" || typeof item.arguments !== "string") return;
+    if (handledToolCalls.has(item.call_id)) return;
+    handledToolCalls.add(item.call_id);
     const call = await getVoiceCall(workspaceId, callId);
     if (!call || !open || !ready || call.metadata.voiceTechnology !== "REALTIME") return;
     const result = await runRealtimeBusinessTool({
-      workspaceId, conversationId: call.conversationId, contactId: call.contactId,
+      workspaceId, callId, conversationId: call.conversationId, contactId: call.contactId,
       name: item.name, arguments: item.arguments,
     });
     if (!open) return;
