@@ -163,6 +163,7 @@ describe("orchestrator response protocol", () => {
     "an operator",
     "How can I speak to a human?",
     "I need to talk to a team member",
+    "I need to speak to a person.",
   ])("escalates explicit live caller request %s without promising a live transfer", async (utterance) => {
     const context = {
       ...fakeContext("AI"),
