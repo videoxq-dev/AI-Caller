@@ -28,8 +28,8 @@ services:
       - -ec
       - |
         if [ -f /var/lib/postgresql/data/pg_hba.conf ] &&
-           grep -Eq '^[[:space:]]*host[^[:space:]]*[[:space:]].*[[:space:]]trust([[:space:]]|$)' /var/lib/postgresql/data/pg_hba.conf; then
-          echo 'Legacy PostgreSQL host trust authentication detected. Back up the volume and follow docs/postgres-auth-migration.md.' >&2
+           grep -Eq '^[[:space:]]*host[^[:space:]]*[[:space:]].*[[:space:]](trust|md5|password)([[:space:]]|$)' /var/lib/postgresql/data/pg_hba.conf; then
+          echo 'Legacy PostgreSQL host trust/md5/password authentication detected. Back up the volume and follow docs/postgres-auth-migration.md.' >&2
           exit 1
         fi
         exec docker-entrypoint.sh postgres
