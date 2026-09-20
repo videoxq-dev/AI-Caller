@@ -163,6 +163,8 @@ describe("Realtime Telnyx/OpenAI media contract", () => {
     expect(history?.item).toMatchObject({ type: "message", role: "user",
       content: [{ type: "input_text", text: expect.stringContaining("Sheridan") }] });
     expect(openai.sent.filter(e => e.type === "response.create")).toHaveLength(0);
+    openai.emit("message", Buffer.from(JSON.stringify({ type: "session.updated" })));
+    expect(openai.sent.filter(e => e.type === "conversation.item.create")).toHaveLength(1);
     await bridge.stop();
   });
   it("suppresses interrupted stale tools but forwards the newest tool and deduplicates usage", async () => {
