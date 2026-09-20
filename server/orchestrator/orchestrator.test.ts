@@ -83,6 +83,25 @@ describe("orchestrator response protocol", () => {
     expect(generate).not.toHaveBeenCalled();
   });
 
+  it("suppresses a model-only live transfer promise when no transfer or escalation occurred", async () => {
+    const context = {
+      ...fakeContext("AI"),
+      systemPrompt: "LIVE PHONE RECEPTIONIST:",
+      messages: [{ role: "user" as const, content: "What services do you offer?" }],
+    };
+    const orchestrator = createResponseOrchestrator({
+      buildContext: vi.fn(async () => context),
+      executeTools: vi.fn(async () => ({ kind: "none" as const, data: {} })),
+      generate: vi.fn(async () => ({
+        text: JSON.stringify({ reply: "I'll connect you with our team to book office cleaning.", action: { type: "NONE" } }),
+      })),
+    });
+    const result = await orchestrator.respond("workspace", "conversation");
+    expect(result.reply).toContain("I can't transfer this call live.");
+    expect(result.reply).not.toContain("I'll connect");
+    expect(result.handlingMode).toBe("AI");
+  });
+
   it("does not perform irreversible tools for an utterance superseded during AI generation", async () => {
     const executeTools = vi.fn();
     const generate = vi.fn().mockResolvedValue({
