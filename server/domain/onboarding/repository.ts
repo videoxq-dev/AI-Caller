@@ -1,5 +1,6 @@
 import { and, asc, eq } from "drizzle-orm";
 import { db } from "@/db";
+import { getWorkspaceAgent } from "@/server/agent/service";
 import {
   aiAgents,
   businessHours,
@@ -100,11 +101,11 @@ export async function saveBusinessSetup(workspaceId: string, input: BusinessProf
 }
 
 export async function getAgentSetup(workspaceId: string) {
-  const [agent] = await db.select().from(aiAgents).where(eq(aiAgents.workspaceId, workspaceId)).limit(1);
+  const agent = await getWorkspaceAgent(workspaceId);
   const serviceRows = await db.select().from(services).where(eq(services.workspaceId, workspaceId)).orderBy(asc(services.createdAt));
   const faqRows = await db.select().from(faqs).where(eq(faqs.workspaceId, workspaceId)).orderBy(asc(faqs.createdAt));
   const policyRows = await db.select().from(policies).where(eq(policies.workspaceId, workspaceId)).orderBy(asc(policies.createdAt));
-  return { agent: agent ?? null, services: serviceRows, faqs: faqRows, policies: policyRows };
+  return { agent, services: serviceRows, faqs: faqRows, policies: policyRows };
 }
 
 export async function saveAgentSetup(workspaceId: string, input: AIAgentInput) {
