@@ -35,6 +35,7 @@ import { isGuardedE2EFixtureMode } from "@/server/e2e-mode";
 import { AppError } from "@/server/http/errors";
 import { enqueueJob } from "@/server/jobs";
 import { ADMIN_USER_WELCOME_EMAIL } from "@/server/jobs/queues";
+import type { HostedPricingUnit } from "@/server/billing/pricing";
 
 type Tx = Parameters<Parameters<typeof db.transaction>[0]>[0];
 
@@ -551,7 +552,7 @@ export async function createAdminRateVersion(input: {
   capability: "AI_TEXT" | "SMS" | "VOICE";
   provider: string;
   model?: string;
-  unit: "AI_INPUT_TOKEN" | "AI_CACHED_INPUT_TOKEN" | "AI_OUTPUT_TOKEN" | "SMS_SEGMENT" | "VOICE_MINUTE";
+  unit: HostedPricingUnit;
   costMicros: number;
   unitsPerCost: number;
   targetMarginBps: number;
@@ -561,8 +562,26 @@ export async function createAdminRateVersion(input: {
   if (!Number.isInteger(input.unitsPerCost) || input.unitsPerCost <= 0) throw new AppError("INVALID_RATE_UNITS", "Units per cost must be a positive integer.", 400);
   if (!Number.isInteger(input.targetMarginBps) || input.targetMarginBps < 0 || input.targetMarginBps > 9500) throw new AppError("INVALID_RATE_MARGIN", "Target margin must be between 0 and 9500 basis points.", 400);
   if (input.capability === "SMS" && input.unit !== "SMS_SEGMENT") throw new AppError("INVALID_RATE_UNIT", "SMS rates must use SMS_SEGMENT.", 400);
-  if (input.capability === "VOICE" && input.unit !== "VOICE_MINUTE") throw new AppError("INVALID_RATE_UNIT", "Voice rates must use VOICE_MINUTE.", 400);
-  if (input.capability === "AI_TEXT" && (input.unit === "SMS_SEGMENT" || input.unit === "VOICE_MINUTE")) throw new AppError("INVALID_RATE_UNIT", "AI rates must use an AI token unit.", 400);
+  const realtime = input.unit.startsWith("VOICE_REALTIME_");
+  if (input.capability === "VOICE" && input.unit !== "VOICE_MINUTE" && !realtime) {
+    throw new AppError("INVALID_RATE_UNIT", "Voice rates require a voice billing unit.", 400);
+  }
+  if (input.capability === "AI_TEXT" && !["AI_INPUT_TOKEN", "AI_CACHED_INPUT_TOKEN", "AI_OUTPUT_TOKEN"].includes(input.unit)) {
+    throw new AppError("INVALID_RATE_UNIT", "AI rates must use an AI text token unit.", 400);
+  }
+  if (realtime) {
+    const tokenUnit = input.unit.endsWith("_TOKEN");
+    const provider = input.provider.trim().toLowerCase();
+    const model = input.model?.trim() ?? "";
+    if (input.capability !== "VOICE"
+      || (tokenUnit && (provider !== "openai" || !["gpt-realtime-2.1", "gpt-realtime-2.1-mini"].includes(model)))
+      || (!tokenUnit && (provider !== "telnyx" || model !== "realtime-us-local"))) {
+      throw new AppError("INVALID_RATE_UNIT", "Realtime token rates require a supported OpenAI model; realtime US-local minute rates require Telnyx.", 400);
+    }
+    if (input.targetMarginBps !== 0) {
+      throw new AppError("INVALID_REALTIME_RATE_MARGIN", "Realtime rate rows hold provider costs. Set row margin to zero; the separate 50% markup is applied to total usage.", 400);
+    }
+  }
   if (Number.isNaN(input.effectiveFrom.getTime())) throw new AppError("INVALID_RATE_DATE", "Rate effective date is invalid.", 400);
 
   const provider = input.provider.trim().toLowerCase();
