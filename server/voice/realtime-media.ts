@@ -215,7 +215,8 @@ export function attachRealtimeMedia({ telnyx, identity, streamId }: BridgeOption
       contentType: "CALL_TRANSCRIPT", body: transcript,
       provider: "openai-realtime", externalMessageId: eventId, status: "SENT",
       metadata: { voiceCallId: callId, transcriptSegmentId: segment.id,
-        voiceMode: call.mode, realtimeModel: call.metadata.realtimeModel },
+        voiceMode: call.mode, realtimeModel: call.metadata.realtimeModel,
+        potentiallyInterrupted: interruptedResponseIds.has(id) },
     });
   }
 
