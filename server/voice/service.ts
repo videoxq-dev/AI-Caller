@@ -6,7 +6,7 @@ import { db } from "@/db";
 import { usageEvents } from "@/db/schema";
 import { loadHostedRateSnapshot, quoteHostedUsage } from "@/server/billing/pricing";
 import { chargeUnavoidableCredits } from "@/server/credits/service";
-import { reserveCredits, releaseCreditReservation } from "@/server/credits/service";
+import { reserveCredits, releaseCreditReservation, getCreditBalance } from "@/server/credits/service";
 import {
   appendMessage,
   getOrCreateOpenConversation,
@@ -42,7 +42,7 @@ import { putVoiceRecording } from "./storage";
 import { resolveVoiceProfile } from "./voices";
 import { estimateSpeechDurationMs } from "./turn-duration";
 import { scheduleVoiceTurn } from "./turns";
-import { getVoiceTechnology, requireRealtimeReady, REALTIME_MIN_START_CREDITS } from "./technology";
+import { getVoiceTechnology, requireRealtimeReady, REALTIME_MIN_START_CREDITS, REALTIME_MAX_START_CREDITS } from "./technology";
 import { settleRealtimeCall } from "./realtime-usage";
 
 const MAX_VOICE_WEBHOOK_BYTES = 64 * 1024;
@@ -305,7 +305,13 @@ export function createVoiceWebhookService(dependencies: VoiceServiceDependencies
       if (phase(call.metadata) === "AWAITING_ANSWER" && call.status === "RINGING") {
         let reservationId: string | null = null;
         if (call.metadata.voiceTechnology === "REALTIME") {
-          const reservation = await reserveCredits(workspaceId, REALTIME_MIN_START_CREDITS, {
+          const availableCredits = await getCreditBalance(workspaceId);
+          if (availableCredits < REALTIME_MIN_START_CREDITS) {
+            throw new AppError("REALTIME_CREDITS_REQUIRED",
+              "Top up your voice credits before using Realtime.", 402);
+          }
+          const reservation = await reserveCredits(workspaceId,
+            Math.min(availableCredits, REALTIME_MAX_START_CREDITS), {
             referenceType: "VOICE_REALTIME_HOLD", referenceId: call.id,
           });
           reservationId = reservation.id;
