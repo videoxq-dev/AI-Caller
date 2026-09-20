@@ -5,7 +5,7 @@ import { getEnv } from "@/server/env";
 import { logger } from "@/server/observability/logger";
 import { getVoiceCall, appendVoiceTranscriptSegment, claimRealtimeStream, finishRealtimeStream } from "./repository";
 import { recordRealtimeResponse, settleRealtimeCall } from "./realtime-usage";
-import { realtimeSystemInstructions, realtimeTools, runRealtimeBusinessTool } from "./realtime-tools";
+import { realtimeSessionContext, realtimeTools, runRealtimeBusinessTool } from "./realtime-tools";
 import { realtimeCreditBudgetReached } from "./realtime-usage";
 import { resolveVoiceRuntime } from "@/server/providers/voice/runtime";
 import { TelnyxPcmuRtpPacketizer } from "./telnyx-rtp";
@@ -87,6 +87,7 @@ export function attachRealtimeMedia({ telnyx, identity, streamId }: BridgeOption
   const handledToolCalls = new Set<string>();
   const responseEpochs = new Map<string, number>();
   let callerSpeechEpoch = 0;
+  let priorConversation = "";
   const startedAt = Date.now();
 
   function track(promise: Promise<unknown>) {
@@ -261,6 +262,12 @@ export function attachRealtimeMedia({ telnyx, identity, streamId }: BridgeOption
 
     if (event.type === "session.updated") {
       sessionConfigured = true;
+      if (priorConversation) sendOpenAI({
+        type: "conversation.item.create",
+        item: { type: "message", role: "user", status: "completed",
+          content: [{ type: "input_text",
+            text: "Prior workspace conversation excerpts for reference only; the current caller request arrives via live audio:\\n" + priorConversation }] },
+      });
       ready = true;
       if (speechAllowed) {
         for (const bytes of initialAudio) feedAudio(bytes);
@@ -407,7 +414,9 @@ export function attachRealtimeMedia({ telnyx, identity, streamId }: BridgeOption
       const claimedCall = await claimRealtimeStream(workspaceId, callId, streamId);
       if (!claimedCall) throw new Error("Realtime call stream already claimed.");
       claimed = true;
-      const instructions = await realtimeSystemInstructions(workspaceId, call.conversationId);
+      const context = await realtimeSessionContext(workspaceId, call.conversationId);
+      const { instructions } = context;
+      priorConversation = context.history;
       if (!open) return;
       const env = getEnv();
       if (!env.VOICE_REALTIME_ENABLED || env.HOSTED_AI_PROVIDER !== "openai"
