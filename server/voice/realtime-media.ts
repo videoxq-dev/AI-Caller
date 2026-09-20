@@ -233,8 +233,7 @@ export function attachRealtimeMedia({ telnyx, identity, streamId }: BridgeOption
     const item = object(raw.item);
     if (item.type !== "function_call" || typeof item.call_id !== "string"
       || typeof item.name !== "string" || typeof item.arguments !== "string") return;
-    if (handledToolCalls.has(item.call_id) || epoch !== callerSpeechEpoch) return;
-    handledToolCalls.add(item.call_id);
+    if (epoch !== callerSpeechEpoch) return;
     const call = await getVoiceCall(workspaceId, callId);
     if (!call || !open || !ready || epoch !== callerSpeechEpoch
       || call.status !== "ACTIVE" || call.metadata.realtimeStreamId !== streamId
@@ -313,6 +312,7 @@ export function attachRealtimeMedia({ telnyx, identity, streamId }: BridgeOption
       if (epoch === undefined || epoch !== callerSpeechEpoch
         || item.type !== "function_call" || !callKey
         || handledToolCalls.has(callKey)) return;
+      handledToolCalls.add(callKey);
       responseWithTools.add(responseId);
       responseToolCounts.set(responseId, (responseToolCounts.get(responseId) ?? 0) + 1);
       toolSerial = toolSerial.then(async () => {
