@@ -109,6 +109,9 @@ jobs:
             echo 'Never initialize or silently rewrite PostgreSQL auth to trust.'
             exit 1
           fi
+      - name: Verify existing PostgreSQL data survives a Compose upgrade
+        run: sh scripts/verify-compose-postgres-compat.sh
+
       - name: Validate opt-in full-stack self-hosted Compose
         run: |
           cp .env.deploy.example .env.deploy
