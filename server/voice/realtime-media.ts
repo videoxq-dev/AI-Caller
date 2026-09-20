@@ -65,7 +65,7 @@ export function attachRealtimeMedia({ telnyx, identity, streamId }: BridgeOption
   let sessionConfigured = false;
   let claimed = false;
   let activeResponseId: string | null = null;
-  let interruptedResponseId: string | null = null;
+  const interruptedResponseIds = new Set<string>();
   let pendingResponses = new Set<string>();
   const pendingWork = new Set<Promise<unknown>>();
   const initialAudio: Buffer[] = [];
@@ -186,7 +186,7 @@ export function attachRealtimeMedia({ telnyx, identity, streamId }: BridgeOption
 
   function queueOutput(raw: unknown, responseId: unknown) {
     if (!open || !speechAllowed
-      || (typeof responseId === "string" && responseId === interruptedResponseId)) return;
+      || (typeof responseId === "string" && interruptedResponseIds.has(responseId))) return;
     const chunk = exactBase64(raw);
     if (!chunk) return fail("invalid-openai-audio");
     let bytes = Buffer.concat([outputTail, chunk]);
@@ -271,7 +271,7 @@ export function attachRealtimeMedia({ telnyx, identity, streamId }: BridgeOption
     }
     if (event.type === "input_audio_buffer.speech_started") {
       callerSpeechEpoch += 1;
-      interruptedResponseId = activeResponseId;
+      for (const id of pendingResponses) interruptedResponseIds.add(id);
       clearAudio();
       return;
     }
@@ -289,7 +289,7 @@ export function attachRealtimeMedia({ telnyx, identity, streamId }: BridgeOption
       return;
     }
     if (event.type === "response.output_audio.done") {
-      if (event.response_id === interruptedResponseId) {
+      if (typeof event.response_id === "string" && interruptedResponseIds.has(event.response_id)) {
         outputTail = Buffer.alloc(0);
         return;
       }
