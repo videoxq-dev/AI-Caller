@@ -1,7 +1,9 @@
 name: ai-caller
 
-# Self-provisioning PostgreSQL + app migrations + Next.js web + worker.
-# Automatically creates and persists private PostgreSQL if no external DATABASE_URL is set.
+# DeployOS app services use the EXISTING separately managed PostgreSQL database.
+# DATABASE_URL must resolve from each container. This file never creates a new DB.
+# To provision a brand-new all-in-one installation, use compose.selfhost.yaml.
+# DO NOT switch an existing bundled database without a backed-up migration.
 x-app: &app
   build:
     context: .
@@ -13,49 +15,11 @@ x-app: &app
       required: false
 
 services:
-  postgres:
-    image: postgres:16-alpine
-    restart: unless-stopped
-    environment:
-      POSTGRES_USER: ${POSTGRES_USER:?Set a database user in deployment secrets}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Set a strong password in deployment secrets}
-      POSTGRES_DB: ${POSTGRES_DB:?Set a database name in deployment secrets}
-      POSTGRES_HOST_AUTH_METHOD: scram-sha-256
-    # Existing trust-authenticated volumes must be backed up and upgraded by
-    # the operator. Never delete data or silently change access controls.
-    command:
-      - sh
-      - -ec
-      - |
-        if [ -f /var/lib/postgresql/data/pg_hba.conf ] &&
-           grep -Eq '^[[:space:]]*host[^[:space:]]*[[:space:]].*[[:space:]](trust|md5|password)([[:space:]]|$)' /var/lib/postgresql/data/pg_hba.conf; then
-          echo 'Legacy PostgreSQL host trust/md5/password authentication detected. Back up the volume and follow docs/postgres-auth-migration.md.' >&2
-          exit 1
-        fi
-        exec docker-entrypoint.sh postgres
-    volumes:
-      - postgres_data:/var/lib/postgresql/data
-    healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U \"$POSTGRES_USER\" -d \"$POSTGRES_DB\""]
-      interval: 5s
-      timeout: 5s
-      retries: 20
-      start_period: 10s
-    networks:
-      default:
-        aliases:
-          - postgres
-          - ai-caller
-          - aicaller
-
   migrate:
     <<: *app
     restart: "no"
     environment:
-      DATABASE_URL: ${DATABASE_URL:?Set an authenticated DATABASE_URL with the postgres Docker host}
-    depends_on:
-      postgres:
-        condition: service_healthy
+      DATABASE_URL: ${DATABASE_URL:?Set the existing authenticated DeployOS DATABASE_URL on this app}
     command: ["sh", "-ec", "npm run verify:database-connection && npm run db:migrate && npm run verify:deployment"]
 
   web:
@@ -116,5 +80,4 @@ services:
       retries: 3
 
 volumes:
-  postgres_data:
   recordings:
