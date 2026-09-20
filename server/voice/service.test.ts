@@ -1,4 +1,7 @@
-import { describe, expect, it, vi } from "vitest";
+import { afterAll, beforeEach, describe, expect, it, vi } from "vitest";
+import { closeDatabase, db } from "@/db";
+import { aiAgents, workspaces } from "@/db/schema";
+import type { NormalizedVoiceEvent } from "@/server/providers/contracts";
 import type { VoiceProvider } from "@/server/providers/contracts";
 import type { VoiceRuntime } from "@/server/providers/voice/runtime";
 import { createVoiceWebhookService } from "./service";
@@ -33,6 +36,8 @@ function provider(): VoiceProvider {
 }
 
 describe("voice webhook service", () => {
+  beforeEach(async () => { await db.delete(workspaces); });
+  afterAll(async () => { await closeDatabase(); });
   it("authenticates and acknowledges suspended hosted webhooks without processing events", async () => {
     const voiceProvider = provider();
     const runtime: VoiceRuntime = {
@@ -58,4 +63,41 @@ describe("voice webhook service", () => {
     expect(voiceProvider.verifyWebhook).toHaveBeenCalledTimes(1);
     expect(voiceProvider.normalizeWebhook).toHaveBeenCalledTimes(1);
   });
+  it("acknowledges a paused agent call without Realtime streaming, recording or AI speech", async () => {
+    const [workspace] = await db.insert(workspaces).values({ name: "Paused reception" }).returning();
+    await db.insert(aiAgents).values({ workspaceId: workspace.id, name: "Mia", status: "PAUSED" });
+    const voiceProvider = provider();
+    const runtime: VoiceRuntime = {
+      workspaceId: workspace.id, mode: "HOSTED", providerName: "telnyx",
+      integrationId: null, receiverNumber: "+12025550200",
+      serviceStatus: "ACTIVE", provider: voiceProvider,
+    };
+    const service = createVoiceWebhookService({
+      resolveRuntime: async () => runtime, fetchRecording: vi.fn(), putRecording: vi.fn(),
+    });
+    const base = {
+      externalCallId: "paused-call", callControlId: "paused-control", occurredAt: null,
+    };
+    const events: NormalizedVoiceEvent[] = [
+      { ...base, type: "CALL_INITIATED", externalEventId: "paused-start",
+        from: "+12025550100", to: "+12025550200" },
+      { ...base, type: "CALL_ANSWERED", externalEventId: "paused-answer" },
+      { ...base, type: "SPEAK_ENDED", externalEventId: "paused-notice-ended" },
+    ];
+    for (const event of events) {
+      vi.mocked(voiceProvider.normalizeWebhook).mockResolvedValueOnce([event]);
+      await expect(service.ingest(request(), workspace.id, "telnyx"))
+        .resolves.toMatchObject({ processed: 1, failed: 0 });
+    }
+    expect(voiceProvider.answer).toHaveBeenCalledWith(expect.objectContaining({
+      callControlId: "paused-control", streamUrl: null, bidirectional: false,
+    }));
+    expect(voiceProvider.speak).toHaveBeenCalledWith(expect.objectContaining({
+      text: expect.stringContaining("currently unavailable"),
+    }));
+    expect(voiceProvider.hangup).toHaveBeenCalledTimes(1);
+    expect(voiceProvider.startRecording).not.toHaveBeenCalled();
+    expect(voiceProvider.startTranscription).not.toHaveBeenCalled();
+  });
+
 });

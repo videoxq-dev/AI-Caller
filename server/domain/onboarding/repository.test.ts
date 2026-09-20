@@ -1,6 +1,8 @@
 import { afterAll, beforeEach, describe, expect, it } from "vitest";
 import { closeDatabase, db } from "@/db";
 import { workspaces } from "@/db/schema";
+import { setWorkspaceAgentCapabilities } from "@/server/agent/service";
+import { defaultAgentCapabilities } from "@/server/agent/capabilities";
 import { getAgentSetup, getBusinessSetup, getSetupStatus, saveAgentSetup, saveBusinessSetup } from "./repository";
 
 describe("onboarding persistence", () => {
@@ -78,4 +80,28 @@ describe("onboarding persistence", () => {
     expect(status.steps.business).toBe(true);
     expect(status.steps.ai).toBe(true);
   });
+  it("does not erase capability restrictions when the normal AI Agent form is saved", async () => {
+    await saveAgentSetup(workspaceId, {
+      name: "Mia", tone: "Friendly & professional", primaryGoal: "Answer questions",
+      whenUnsure: "Escalate to a human", guardrails: [],
+      voice: { profileKey: "ava-us-1", language: "en-US", speakingRate: 1,
+        recordingPolicy: "ANNOUNCE", afterHoursEnabled: true },
+      qualification: { enabled: false, criteria: [] }, completeStep: false,
+    });
+    await setWorkspaceAgentCapabilities(workspaceId, {
+      ...defaultAgentCapabilities, BOOK_APPOINTMENT: false,
+    });
+    await saveAgentSetup(workspaceId, {
+      name: "Mia", tone: "Professional", primaryGoal: "Answer questions",
+      whenUnsure: "Escalate to a human", guardrails: ["Never invent pricing"],
+      voice: { profileKey: "ava-us-1", language: "en-US", speakingRate: 1,
+        recordingPolicy: "ANNOUNCE", afterHoursEnabled: true },
+      qualification: { enabled: false, criteria: [] }, completeStep: false,
+    });
+    const saved = await getAgentSetup(workspaceId);
+    expect((saved.agent?.behaviorSettings.capabilities as Record<string, boolean>).BOOK_APPOINTMENT)
+      .toBe(false);
+    expect(saved.agent?.behaviorSettings.guardrails).toEqual(["Never invent pricing"]);
+  });
+
 });

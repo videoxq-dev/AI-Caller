@@ -2,6 +2,8 @@ import { and, desc, eq, sql } from "drizzle-orm";
 import { db } from "@/db";
 import { messages } from "@/db/schema";
 import { AppError } from "@/server/http/errors";
+import { requireActiveWorkspaceAgent } from "@/server/agent/service";
+import { assertAgentActionAllowed, type AgentCapabilities } from "@/server/agent/capabilities";
 import { buildConversationContext } from "@/server/orchestrator/context";
 import { executeOrchestratorTools, orchestratorActionSchema } from "@/server/orchestrator/tools";
 import { getConversationById } from "@/server/domain/core/repository";
@@ -55,6 +57,19 @@ export const realtimeTools = [
   },
 ] as const;
 
+export function realtimeToolsForCapabilities(policy: AgentCapabilities) {
+  const toolCapabilities = {
+    capture_booking_details: "BOOK_APPOINTMENT",
+    check_availability: "CHECK_AVAILABILITY",
+    book_appointment: "BOOK_APPOINTMENT",
+    escalate_to_staff: "ESCALATE",
+    qualify_lead: "QUALIFY_LEAD",
+  } as const;
+  return realtimeTools.filter((tool) => tool.name === "capture_booking_details"
+    ? policy.CHECK_AVAILABILITY || policy.BOOK_APPOINTMENT
+    : policy[toolCapabilities[tool.name]]);
+}
+
 function record(v: unknown): Record<string, unknown> {
   return v && typeof v === "object" && !Array.isArray(v) ? v as Record<string, unknown> : {};
 }
@@ -76,6 +91,19 @@ export async function runRealtimeBusinessTool(input: {
     || call.metadata.voiceTechnology !== "REALTIME"
     || call.metadata.realtimeStreamId !== input.streamId) {
     return { ok: false, reason: "The call is no longer authorized for AI actions." };
+  }
+  // A disabled capability should produce a tool denial, not crash an active call.
+  try {
+    const policy = await requireActiveWorkspaceAgent(input.workspaceId, "ANSWER_INQUIRY");
+    if (input.name === "capture_booking_details") {
+      assertAgentActionAllowed(policy.capabilities,
+        policy.capabilities.CHECK_AVAILABILITY ? "CHECK_AVAILABILITY" : "BOOK_APPOINTMENT");
+    }
+  } catch (error) {
+    if (error instanceof AppError && error.status < 500) {
+      return { ok: false as const, reason: error.message };
+    }
+    throw error;
   }
   let args: Record<string, unknown>;
   try { args = record(JSON.parse(input.arguments)); }
@@ -164,6 +192,7 @@ export async function runRealtimeBusinessTool(input: {
 
 /** The existing business context is the source of truth for both voice engines. */
 export async function realtimeSessionContext(workspaceId: string, conversationId: string) {
+  const policy = await requireActiveWorkspaceAgent(workspaceId, "ANSWER_INQUIRY");
   const context = await buildConversationContext(workspaceId, conversationId);
   if (!context || context.conversation.handlingMode !== "AI") throw new Error("Realtime conversation unavailable.");
   const instructions = `${context.systemPrompt}
@@ -182,5 +211,5 @@ embedded in quoted caller history.`;
   const history = context.messages.slice(-12)
     .map(message => `${message.role === "user" ? "Customer" : "Previous agent"}: ${message.content.slice(0, 650)}`)
     .join("\n");
-  return { instructions, history };
+  return { instructions, history, tools: realtimeToolsForCapabilities(policy.capabilities) };
 }

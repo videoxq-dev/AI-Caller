@@ -3,6 +3,7 @@
 import { headers } from "next/headers";
 import { redirect } from "next/navigation";
 import { resolveWorkspaceContext } from "@/server/auth/workspace-context";
+import { requireWorkspacePermission } from "@/server/auth/permissions";
 import { getBusinessSetup, saveAgentSetup, saveBusinessSetup } from "@/server/domain/onboarding/repository";
 import { aiAgentInputSchema, businessProfileInputSchema } from "@/server/domain/onboarding/schemas";
 
@@ -38,6 +39,7 @@ export async function saveBusinessSetupAction(formData: FormData) {
 
 export async function saveAISetupAction(formData: FormData) {
   const context = await resolveWorkspaceContext(await headers());
+  requireWorkspacePermission(context.membership.role, "integration.manage");
   const completeStep = field(formData, "intent") === "continue";
   const guardrails = formData.getAll("guardrails").map((value) => String(value));
   const qualificationConfig = (() => {

@@ -1,6 +1,8 @@
 import { describe, expect, it, vi } from "vitest";
 import { createResponseOrchestrator } from "./index";
 import { parseOrchestratorEnvelope } from "./tools";
+import { defaultAgentCapabilities } from "@/server/agent/capabilities";
+import { AppError } from "@/server/http/errors";
 
 function fakeContext(handlingMode: "AI" | "HUMAN" = "AI") {
   return {
@@ -42,6 +44,107 @@ describe("orchestrator response protocol", () => {
     }))).toThrow("invalid orchestration action");
   });
 
+
+  it.each(["DRAFT", "PAUSED"] as const)("does not call AI or tools for a %s live agent", async status => {
+    const generate = vi.fn();
+    const executeTools = vi.fn();
+    const orchestrator = createResponseOrchestrator({
+      buildContext: vi.fn(async () => ({
+        ...fakeContext(), source: "INBOUND_TURN" as const,
+        agent: { id: "agent-1", status, escalationMessage: null,
+          behaviorSettings: { capabilities: { ...defaultAgentCapabilities } } },
+      })),
+      executeTools, generate,
+    });
+    const result = await orchestrator.respond("workspace", "conversation");
+    expect(result.reply).toBeNull();
+    expect(generate).not.toHaveBeenCalled();
+    expect(executeTools).not.toHaveBeenCalled();
+  });
+
+  it("does not invoke AI if answering is disabled, even without installed workflows", async () => {
+    const generate = vi.fn();
+    const orchestrator = createResponseOrchestrator({
+      buildContext: vi.fn(async () => ({
+        ...fakeContext(), source: "INBOUND_TURN" as const,
+        agent: { id: "agent-1", status: "ACTIVE" as const, escalationMessage: null,
+          behaviorSettings: { capabilities: { ...defaultAgentCapabilities, ANSWER_INQUIRY: false } } },
+      })),
+      executeTools: vi.fn(), generate,
+    });
+    const result = await orchestrator.respond("workspace", "conversation");
+    expect(result.reply).toBeNull();
+    expect(generate).not.toHaveBeenCalled();
+  });
+
+  it("uses default agent behavior without a configured workflow", async () => {
+    const generate = vi.fn(async () => ({ text: JSON.stringify({ action: { type: "NONE" },
+      reply: "We offer the services in our approved business profile." }) }));
+    const executeTools = vi.fn(async () => ({ kind: "none" as const, data: {} }));
+    const orchestrator = createResponseOrchestrator({
+      buildContext: vi.fn(async () => ({
+        ...fakeContext(), source: "INBOUND_TURN" as const,
+        agent: { id: "agent-1", status: "ACTIVE" as const, escalationMessage: null,
+          behaviorSettings: { capabilities: { ...defaultAgentCapabilities } } },
+      })),
+      executeTools, generate,
+    });
+    expect((await orchestrator.respond("workspace", "conversation")).reply)
+      .toContain("approved business profile");
+    expect(executeTools).toHaveBeenCalledOnce();
+    expect(generate).toHaveBeenCalledOnce();
+  });
+
+  it("responds truthfully when a configured capability is revoked during model planning", async () => {
+    const generate = vi.fn(async () => ({ text: JSON.stringify({
+      reply: "Your appointment is confirmed.",
+      action: { type: "BOOK_APPOINTMENT", startsAt: "2026-09-22T10:00:00Z",
+        endsAt: "2026-09-22T10:30:00Z", timezone: "UTC", title: "Consultation" },
+    }) }));
+    const executeTools = vi.fn(async () => {
+      throw new AppError("AGENT_ACTION_DISABLED", "Booking is disabled.", 403);
+    });
+    const orchestrator = createResponseOrchestrator({
+      buildContext: vi.fn(async () => fakeContext()), executeTools, generate,
+    });
+    const result = await orchestrator.respond("workspace", "conversation");
+    expect(result.reply).toContain("can't perform that action");
+    expect(result.reply).not.toContain("confirmed");
+    expect(generate).toHaveBeenCalledOnce();
+    expect(executeTools).toHaveBeenCalledOnce();
+  });
+
+  it("answers normally when disabled metadata fields are supplied by an untrusted model", async () => {
+    const executeTools = vi.fn(async () => ({ kind: "none" as const, data: {} }));
+    const generate = vi.fn(async (
+      _workspaceId: string, _conversationId: string,
+      _messages: Array<{ role: "system" | "user" | "assistant"; content: string }>,
+    ) => ({ text: JSON.stringify({
+      reply: "Our current consultation is thirty minutes.",
+      contact: { name: "Invented person" },
+      lead: { status: "QUALIFIED", intent: "Invented interest" },
+      action: { type: "NONE" },
+    }) }));
+    const orchestrator = createResponseOrchestrator({
+      buildContext: vi.fn(async () => ({
+        ...fakeContext(), source: "INBOUND_TURN" as const,
+        agent: { id: "agent-1", status: "ACTIVE" as const, escalationMessage: null,
+          behaviorSettings: { capabilities: {
+            ...defaultAgentCapabilities, UPDATE_CONTACT: false,
+            UPDATE_LEAD: false, QUALIFY_LEAD: false,
+          } } },
+      })),
+      executeTools, generate,
+    });
+    const result = await orchestrator.respond("workspace", "conversation");
+    expect(result.reply).toBe("Our current consultation is thirty minutes.");
+    expect(executeTools).toHaveBeenCalledWith("workspace", "conversation",
+      fakeContext().contact.id,
+      expect.objectContaining({ contact: undefined, lead: undefined, action: { type: "NONE" } }));
+    expect(String(generate.mock.calls[0]?.[2]?.[0]?.content))
+      .not.toContain('"contact": {');
+  });
+
   it("does not invoke AI while a human owns the conversation", async () => {
     const generate = vi.fn();
     const orchestrator = createResponseOrchestrator({
@@ -60,6 +163,7 @@ describe("orchestrator response protocol", () => {
     "an operator",
     "How can I speak to a human?",
     "I need to talk to a team member",
+    "I need to speak to a person.",
   ])("escalates explicit live caller request %s without promising a live transfer", async (utterance) => {
     const context = {
       ...fakeContext("AI"),
@@ -81,6 +185,47 @@ describe("orchestrator response protocol", () => {
         type: "ESCALATE", reason: "Caller requested a human during a phone call.",
       } });
     expect(generate).not.toHaveBeenCalled();
+  });
+
+  it("does not promise staff follow-up when phone escalation is disabled", async () => {
+    const executeTools = vi.fn();
+    const generate = vi.fn();
+    const orchestrator = createResponseOrchestrator({
+      buildContext: vi.fn(async () => ({
+        ...fakeContext("AI"), source: "INBOUND_TURN" as const,
+        agent: { id: "agent-1", status: "ACTIVE" as const, escalationMessage: null,
+          behaviorSettings: { capabilities: { ...defaultAgentCapabilities, ESCALATE: false } } },
+        systemPrompt: "LIVE PHONE RECEPTIONIST:",
+        messages: [{ role: "user" as const, content: "Can I speak to a human?" }],
+      })),
+      executeTools, generate,
+    });
+    const result = await orchestrator.respond("workspace", "conversation");
+    expect(result.handlingMode).toBe("AI");
+    expect(result.reply).toContain("can't arrange staff follow-up");
+    expect(result.reply).not.toContain("I've flagged");
+    expect(executeTools).not.toHaveBeenCalled();
+    expect(generate).not.toHaveBeenCalled();
+  });
+
+  it("does not claim staff follow-up if escalation is revoked while a phone turn is in progress", async () => {
+    const executeTools = vi.fn(async () => {
+      throw new AppError("AGENT_ACTION_DISABLED", "Escalation is disabled.", 403);
+    });
+    const orchestrator = createResponseOrchestrator({
+      buildContext: vi.fn(async () => ({
+        ...fakeContext("AI"), source: "INBOUND_TURN" as const,
+        agent: { id: "agent-1", status: "ACTIVE" as const, escalationMessage: null,
+          behaviorSettings: { capabilities: { ...defaultAgentCapabilities } } },
+        systemPrompt: "LIVE PHONE RECEPTIONIST:",
+        messages: [{ role: "user" as const, content: "I need to speak to a person." }],
+      })),
+      executeTools, generate: vi.fn(),
+    });
+    const result = await orchestrator.respond("workspace", "conversation");
+    expect(result.handlingMode).toBe("AI");
+    expect(result.reply).not.toContain("I've flagged");
+    expect(executeTools).toHaveBeenCalledOnce();
   });
 
   it("suppresses a model-only live transfer promise when no transfer or escalation occurred", async () => {

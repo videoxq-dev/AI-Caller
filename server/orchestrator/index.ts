@@ -1,4 +1,5 @@
 import { AppError } from "@/server/http/errors";
+import { capabilitiesFromBehaviorSettings } from "@/server/agent/capabilities";
 import { logger } from "@/server/observability/logger";
 import { buildConversationContext, type OrchestratorContext } from "./context";
 import {
@@ -21,7 +22,7 @@ export type OrchestratorResponseOptions = {
 function isExplicitHumanRequest(message: string) {
   const text = message.trim().toLowerCase().replace(/[?!.,]+$/g, "");
   return /^(?:a|an|the)?\s*(?:human|operator|representative|real person|live person)(?: please)?$/.test(text)
-    || /\b(?:speak|talk|connect|transfer|reach|want|need|like|get)\b[^.!?]{0,100}\b(?:human|operator|representative|real person|live person|staff member|team member)\b/.test(text);
+    || /\b(?:speak|talk|connect|transfer|reach|want|need|like|get)\b[^.!?]{0,100}\b(?:human|operator|representative|real person|live person|staff member|team member|person)\b/.test(text);
 }
 
 const LIVE_PHONE_ESCALATION_REPLY = "I've flagged your request for our team to follow up. I can't transfer this call live.";
@@ -85,11 +86,24 @@ Rules:
 - Keep customer-facing replies concise and do not expose this JSON protocol.
 `;
 
+function actionProtocolFor(context: OrchestratorContext) {
+  if (!context.agent) return ACTION_PROTOCOL;
+  const policy = capabilitiesFromBehaviorSettings(context.agent.behaviorSettings);
+  return ACTION_PROTOCOL.split("\n").filter((line) => {
+    if (line.trimStart().startsWith('"contact":') && !policy.UPDATE_CONTACT) return false;
+    if (line.trimStart().startsWith('"lead":') && !policy.UPDATE_LEAD) return false;
+    const action = /^- \{ "type": "([A-Z_]+)"/.exec(line)?.[1];
+    if (!action || action === "NONE") return true;
+    // STOP/opt-out is a customer right, including when recording new consent is disabled.
+    return action === "RECORD_SMS_CONSENT" || policy[action as keyof typeof policy] === true;
+  }).join("\n");
+}
+
 function plannerMessages(context: OrchestratorContext): AIMessage[] {
   return [
     {
       role: "system",
-      content: `${context.systemPrompt}\n\nCurrent server time: ${new Date().toISOString()}\n${ACTION_PROTOCOL}`,
+      content: `${context.systemPrompt}\n\nCurrent server time: ${new Date().toISOString()}\n${actionProtocolFor(context)}`,
     },
     ...context.messages,
   ];
@@ -103,7 +117,7 @@ function finalizerMessages(
   return [
     {
       role: "system",
-      content: `${context.systemPrompt}\n\nCurrent server time: ${new Date().toISOString()}\n${ACTION_PROTOCOL}`,
+      content: `${context.systemPrompt}\n\nCurrent server time: ${new Date().toISOString()}\n${actionProtocolFor(context)}`,
     },
     ...context.messages,
     {
@@ -147,6 +161,15 @@ export function createResponseOrchestrator(dependencies: OrchestratorDependencie
         };
       }
 
+      // Only private test mode may use a DRAFT or PAUSED agent. Live inbound turns
+      // are suppressed before invoking or charging an AI provider.
+      if (context.source === "INBOUND_TURN") {
+        const capabilities = context.agent ? capabilitiesFromBehaviorSettings(context.agent.behaviorSettings) : null;
+        if (!context.agent || context.agent.status !== "ACTIVE" || !capabilities?.ANSWER_INQUIRY) {
+          return { reply: null, handlingMode: "AI" as const, action: { type: "NONE" as const },
+            toolResult: { kind: "none" as const, data: {} } };
+        }
+      }
       const isLivePhone = context.systemPrompt.includes("LIVE PHONE RECEPTIONIST:");
       const lastUserMessage = [...context.messages].reverse().find((message) => message.role === "user")?.content ?? "";
       if (isLivePhone && isExplicitHumanRequest(lastUserMessage)) {
@@ -155,22 +178,76 @@ export function createResponseOrchestrator(dependencies: OrchestratorDependencie
             toolResult: { kind: "none" as const, data: {} } };
         }
         const action = { type: "ESCALATE" as const, reason: "Caller requested a human during a phone call." };
-        const toolResult = await dependencies.executeTools(workspaceId, conversationId, context.contact.id, { action });
-        return { reply: LIVE_PHONE_ESCALATION_REPLY, handlingMode: "HUMAN" as const, action, toolResult };
+        const noEscalation = {
+          reply: "I can't arrange staff follow-up from this call. Please contact the business directly to speak with the team.",
+          handlingMode: "AI" as const,
+          action: { type: "NONE" as const },
+          toolResult: { kind: "none" as const, data: {} },
+        };
+        if (context.agent && !capabilitiesFromBehaviorSettings(context.agent.behaviorSettings).ESCALATE) {
+          return noEscalation;
+        }
+        try {
+          const toolResult = await dependencies.executeTools(workspaceId, conversationId, context.contact.id, { action });
+          return { reply: LIVE_PHONE_ESCALATION_REPLY, handlingMode: "HUMAN" as const, action, toolResult };
+        } catch (error) {
+          if (error instanceof AppError && error.code === "AGENT_ACTION_DISABLED") return noEscalation;
+          if (error instanceof AppError && (
+            error.code === "AGENT_NOT_ACTIVE" || error.code === "AGENT_NOT_CONFIGURED"
+            || error.code === "CONVERSATION_HUMAN_HANDLING"
+          )) {
+            return { reply: null, handlingMode: "AI" as const,
+              action: { type: "NONE" as const },
+              toolResult: { kind: "none" as const, data: {} } };
+          }
+          throw error;
+        }
       }
 
       const firstResponse = await dependencies.generate(workspaceId, conversationId, plannerMessages(context));
-      const first = parseOrchestratorEnvelope(firstResponse.text);
+      const planned = parseOrchestratorEnvelope(firstResponse.text);
+      const allowed = context.agent
+        ? capabilitiesFromBehaviorSettings(context.agent.behaviorSettings)
+        : null;
+      // Treat the model's metadata as optional hints. A disabled metadata
+      // capability cannot fail an otherwise valid answer or cause side effects.
+      // The executor still rechecks permissions on current DB state, including
+      // after a capability was revoked while the AI was generating.
+      const first: OrchestratorEnvelope = {
+        ...planned,
+        contact: allowed && !allowed.UPDATE_CONTACT ? undefined : planned.contact,
+        lead: allowed && !allowed.UPDATE_LEAD ? undefined
+          : allowed && !allowed.QUALIFY_LEAD && planned.lead?.status === "QUALIFIED"
+            ? { ...planned.lead, status: undefined } : planned.lead,
+      };
       if (options.beforeTools && !(await options.beforeTools())) {
         return { reply: null, handlingMode: "AI" as const, action: { type: "NONE" as const },
           toolResult: { kind: "none" as const, data: {} } };
       }
-      const toolResult = await dependencies.executeTools(
-        workspaceId,
-        conversationId,
-        context.contact.id,
-        first,
-      );
+      let toolResult: OrchestratorToolResult;
+      try {
+        toolResult = await dependencies.executeTools(
+          workspaceId,
+          conversationId,
+          context.contact.id,
+          first,
+        );
+      } catch (error) {
+        if (error instanceof AppError && (
+          error.code === "AGENT_NOT_ACTIVE" || error.code === "AGENT_NOT_CONFIGURED"
+          || error.code === "CONVERSATION_HUMAN_HANDLING"
+        )) {
+          return { reply: null, handlingMode: "AI" as const,
+            action: { type: "NONE" as const },
+            toolResult: { kind: "none" as const, data: {} } };
+        }
+        if (error instanceof AppError && error.code === "AGENT_ACTION_DISABLED") {
+          return { reply: "I can't perform that action. I can answer other questions or you can ask for staff follow-up.",
+            handlingMode: "AI" as const, action: { type: "NONE" as const },
+            toolResult: { kind: "none" as const, data: {} } };
+        }
+        throw error;
+      }
 
       if (toolResult.kind === "availability" || toolResult.kind === "booking" || toolResult.kind === "qualification" || toolResult.kind === "sms") {
         try {

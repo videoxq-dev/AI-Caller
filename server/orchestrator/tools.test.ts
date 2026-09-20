@@ -4,6 +4,8 @@ import { closeDatabase, db } from "@/db";
 import { aiAgents, contacts, leads, workspaces } from "@/db/schema";
 import { appendMessage, getOrCreateOpenConversation } from "@/server/domain/core/repository";
 import { executeOrchestratorTools } from "./tools";
+import { setWorkspaceAgentCapabilities } from "@/server/agent/service";
+import { defaultAgentCapabilities } from "@/server/agent/capabilities";
 
 describe("orchestrator lead updates", () => {
   let workspaceId = "";
@@ -14,6 +16,7 @@ describe("orchestrator lead updates", () => {
     await db.delete(workspaces);
     const [workspace] = await db.insert(workspaces).values({ name: "Orchestrator Tools Test" }).returning();
     workspaceId = workspace.id;
+    await db.insert(aiAgents).values({ workspaceId, status: "ACTIVE", name: "Mia" });
     const [contact] = await db.insert(contacts).values({ workspaceId, name: "Ada" }).returning();
     contactId = contact.id;
     const conversation = await getOrCreateOpenConversation(workspaceId, contactId);
@@ -84,9 +87,7 @@ describe("orchestrator lead updates", () => {
   });
 
   it("qualifies leads only after configured required answers are persisted", async () => {
-    await db.insert(aiAgents).values({
-      workspaceId,
-      name: "Qualification Agent",
+    await db.update(aiAgents).set({
       behaviorSettings: {
         qualification: {
           enabled: true,
@@ -96,7 +97,7 @@ describe("orchestrator lead updates", () => {
           ],
         },
       },
-    });
+    }).where(eq(aiAgents.workspaceId, workspaceId));
 
     await executeOrchestratorTools(workspaceId, conversationId, contactId, {
       lead: { status: "QUALIFIED", intent: "Service inquiry" },
@@ -131,4 +132,27 @@ describe("orchestrator lead updates", () => {
     expect(lead.qualificationData).toEqual({ service: "Commercial HVAC repair", urgency: "Today" });
     expect(lead.qualificationCompletedAt).toBeInstanceOf(Date);
   });
+  it("denies a forged booking before touching the calendar or customer record", async () => {
+    await setWorkspaceAgentCapabilities(workspaceId, { ...defaultAgentCapabilities, BOOK_APPOINTMENT: false });
+    await expect(executeOrchestratorTools(workspaceId, conversationId, contactId, {
+      contact: { name: "Changed by forged model" },
+      action: {
+        type: "BOOK_APPOINTMENT",
+        startsAt: "2026-09-22T10:00:00Z", endsAt: "2026-09-22T10:30:00Z",
+        timezone: "UTC", title: "Unauthorized booking",
+      },
+    })).rejects.toMatchObject({ code: "AGENT_ACTION_DISABLED", status: 403 });
+    const [contact] = await db.select().from(contacts).where(eq(contacts.id, contactId));
+    expect(contact.name).toBe("Ada");
+  });
+
+  it("denies metadata updates when contact permission is disabled", async () => {
+    await setWorkspaceAgentCapabilities(workspaceId, { ...defaultAgentCapabilities, UPDATE_CONTACT: false });
+    await expect(executeOrchestratorTools(workspaceId, conversationId, contactId, {
+      contact: { name: "Not permitted" }, action: { type: "NONE" },
+    })).rejects.toMatchObject({ code: "AGENT_ACTION_DISABLED" });
+    const [contact] = await db.select().from(contacts).where(eq(contacts.id, contactId));
+    expect(contact.name).toBe("Ada");
+  });
+
 });

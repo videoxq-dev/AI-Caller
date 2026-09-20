@@ -5,7 +5,7 @@ import { getEnv } from "@/server/env";
 import { logger } from "@/server/observability/logger";
 import { getVoiceCall, appendVoiceTranscriptSegment, claimRealtimeStream, finishRealtimeStream } from "./repository";
 import { recordRealtimeResponse, settleRealtimeCall } from "./realtime-usage";
-import { realtimeSessionContext, realtimeTools, runRealtimeBusinessTool } from "./realtime-tools";
+import { realtimeSessionContext, runRealtimeBusinessTool } from "./realtime-tools";
 import { realtimeCreditBudgetReached } from "./realtime-usage";
 import { resolveVoiceRuntime } from "@/server/providers/voice/runtime";
 
@@ -489,7 +489,7 @@ export function attachRealtimeMedia({ telnyx, identity, streamId }: BridgeOption
               create_response: true, interrupt_response: true } },
           output: { format: { type: "audio/pcmu" }, voice: "marin" },
         },
-        tools: realtimeTools, tool_choice: "auto",
+        tools: context.tools, tool_choice: context.tools.length ? "auto" : "none",
       } }));
       ws.on("message", onRealtimeMessage);
       ws.on("error", err => {

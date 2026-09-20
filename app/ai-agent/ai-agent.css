@@ -14,3 +14,26 @@
 .removeQualification{width:30px;height:34px;border:1px solid #dce4ed;border-radius:6px;color:#8d5560;background:#fff;font-size:16px;cursor:pointer}.removeQualification:disabled,.addQualification:disabled{opacity:.45;cursor:not-allowed}
 .addQualification{width:max-content;height:32px;padding:0 10px;border:1px solid #8ab6f3;border-radius:6px;color:#1769ee;background:#fff;font-size:8.5px;font-weight:750;cursor:pointer}
 @media(max-width:900px){.agentQualificationRow{grid-template-columns:minmax(0,1fr) auto}.agentQualificationRow .question{grid-column:1/-1}.agentQualificationRow .required{grid-column:1}.removeQualification{grid-column:2;grid-row:2}}
+
+/* Phase 1 live activity no longer uses the demo six-column table. */
+.agentActivityRow{min-width:0;display:grid;grid-template-columns:minmax(0,1fr) minmax(100px,.7fr) auto;align-items:center;gap:12px;min-height:50px;padding:8px 0;border-top:1px solid #edf1f5;font-size:11px;color:#4b5f78}
+.agentActivityRow:first-of-type{margin-top:10px}
+.agentActivityRow a{min-width:0;color:#233750;text-decoration:none;font-weight:650;overflow-wrap:anywhere}
+.agentActivityRow span{min-width:0;overflow-wrap:anywhere}
+.agentActivityRow time{font-size:10px;color:#718197;white-space:nowrap}
+.quickActionsCard>a{display:block;padding:13px 0}
+.agentHeroName span{color:#34506f;background:#e8eff9}
+@media(max-width:620px){.agentActivityRow{grid-template-columns:minmax(0,1fr);gap:4px}.agentActivityRow time{white-space:normal}.agentTitleActions .agentState{display:flex}}
+
+/* Readable Phase 1 agent controls and actual business state. */
+.agentGlobalSearch{display:inline-flex;align-items:center;justify-content:center;min-width:114px;width:auto;text-decoration:none;white-space:nowrap;font-size:12px;font-weight:650}
+.overviewTopGrid{grid-template-columns:minmax(0,1.6fr) minmax(260px,.8fr)}
+.agentTabContent>.agentCard{padding:16px;margin-top:14px}
+.agentHeroCopy>p{font-size:12px}
+.agentMetric small,.agentActivityRow{font-size:11px}
+.behaviorToggleRow strong{font-size:12px}
+.behaviorToggleRow small{font-size:11px}
+.agentTabContent>.behaviorCard>button:last-child{min-height:38px;margin-top:15px;padding:0 15px;border:0;border-radius:7px;color:#fff;background:#1769ee;font-size:12px;font-weight:700;cursor:pointer}
+.agentTabContent>.behaviorCard>button:last-child:disabled{opacity:.6;cursor:not-allowed}
+@media(max-width:1250px){.overviewTopGrid{grid-template-columns:minmax(0,1.4fr) minmax(260px,1fr)}}
+@media(max-width:900px){.overviewTopGrid{grid-template-columns:minmax(0,1fr)}}

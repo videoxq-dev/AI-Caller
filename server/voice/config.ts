@@ -1,14 +1,8 @@
-import { eq } from "drizzle-orm";
-import { db } from "@/db";
-import { aiAgents } from "@/db/schema";
+import { getWorkspaceAgent } from "@/server/agent/service";
 import { voiceConfigSchema } from "@/server/domain/onboarding/schemas";
 
 export async function getVoiceConfig(workspaceId: string) {
-  const [agent] = await db.select({
-    behaviorSettings: aiAgents.behaviorSettings,
-    openingMessage: aiAgents.openingMessage,
-    name: aiAgents.name,
-  }).from(aiAgents).where(eq(aiAgents.workspaceId, workspaceId)).limit(1);
+  const agent = await getWorkspaceAgent(workspaceId);
   const behavior = agent?.behaviorSettings && typeof agent.behaviorSettings === "object"
     ? agent.behaviorSettings as Record<string, unknown>
     : {};
