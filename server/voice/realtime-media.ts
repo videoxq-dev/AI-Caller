@@ -230,9 +230,14 @@ export function attachRealtimeMedia({ telnyx, identity, streamId }: BridgeOption
       return;
     }
     if (event.type === "response.output_audio.done") {
+      if (event.response_id === interruptedResponseId) {
+        outputTail = Buffer.alloc(0);
+        return;
+      }
       if (outputTail.length > 0) {
         const last = Buffer.alloc(AUDIO_PACKET_BYTES, 0xff);
         outputTail.copy(last);
+        if (outboundPackets.length >= MAX_OUTPUT_PACKETS) return fail("ai-output-overflow");
         outboundPackets.push(last);
         outputTail = Buffer.alloc(0);
       }
@@ -263,8 +268,15 @@ export function attachRealtimeMedia({ telnyx, identity, streamId }: BridgeOption
             logger.error({ err, workspaceId, callId }, "Unable to store Realtime usage");
             error = true;
           }));
-      } else if (status !== "cancelled") error = true;
+      } else {
+        // Cancelled generation can still have billable tokens. Without a
+        // provider usage object the final invoice cannot be reconstructed.
+        error = true;
+        logger.warn({ workspaceId, callId, responseId, status },
+          "Realtime response completed without authoritative token usage");
+      }
       pendingResponses.delete(responseId);
+      if (activeResponseId === responseId) activeResponseId = null;
       if (toolEscalated && !pendingResponses.size) {
         sendOpenAI({ type: "session.update", session: { type: "realtime",
           audio: { input: { turn_detection: { type: "semantic_vad",
