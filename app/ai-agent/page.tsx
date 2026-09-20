@@ -58,7 +58,6 @@ export default function AIAgentPage() {
   const [tone, setTone] = useState("Friendly & professional");
   const [goal, setGoal] = useState("Book appointments");
   const [whenUnsure, setWhenUnsure] = useState("Escalate to a human");
-  const [verbosity, setVerbosity] = useState("Concise");
   const [guardrails, setGuardrails] = useState({ pricing: true, availability: true, approvedInfo: true, collectContact: true });
   const [assistantName, setAssistantName] = useState("AI Assistant");
   const [openingMessage, setOpeningMessage] = useState("");
@@ -249,7 +248,7 @@ export default function AIAgentPage() {
 
           {tab === "overview" && <OverviewTab agentName={assistantName} status={agentStatus} configured={hasAgent} onStatusChange={updateStatus} canManage={canManage} loading={loadingSettings || savingSettings} setTab={setTab} />}
           {tab === "knowledge" && <KnowledgeTab counts={knowledgeCounts} />}
-          {tab === "behavior" && <BehaviorTab tone={tone} setTone={setTone} goal={goal} setGoal={setGoal} whenUnsure={whenUnsure} setWhenUnsure={setWhenUnsure} verbosity={verbosity} setVerbosity={setVerbosity} guardrails={guardrails} setGuardrails={setGuardrails} assistantName={assistantName} setAssistantName={setAssistantName} openingMessage={openingMessage} setOpeningMessage={setOpeningMessage} escalationMessage={escalationMessage} setEscalationMessage={setEscalationMessage} voiceProfile={voiceProfile} setVoiceProfile={setVoiceProfile} voiceLanguage={voiceLanguage} setVoiceLanguage={setVoiceLanguage} voiceSpeed={voiceSpeed} setVoiceSpeed={setVoiceSpeed} recordingPolicy={recordingPolicy} setRecordingPolicy={setRecordingPolicy} afterHoursEnabled={afterHoursEnabled} setAfterHoursEnabled={setAfterHoursEnabled} qualificationEnabled={qualificationEnabled} setQualificationEnabled={setQualificationEnabled} qualificationCriteria={qualificationCriteria} setQualificationCriteria={setQualificationCriteria} />}
+          {tab === "behavior" && <BehaviorTab tone={tone} setTone={setTone} goal={goal} setGoal={setGoal} whenUnsure={whenUnsure} setWhenUnsure={setWhenUnsure} guardrails={guardrails} setGuardrails={setGuardrails} assistantName={assistantName} setAssistantName={setAssistantName} openingMessage={openingMessage} setOpeningMessage={setOpeningMessage} escalationMessage={escalationMessage} setEscalationMessage={setEscalationMessage} voiceProfile={voiceProfile} setVoiceProfile={setVoiceProfile} voiceLanguage={voiceLanguage} setVoiceLanguage={setVoiceLanguage} voiceSpeed={voiceSpeed} setVoiceSpeed={setVoiceSpeed} recordingPolicy={recordingPolicy} setRecordingPolicy={setRecordingPolicy} afterHoursEnabled={afterHoursEnabled} setAfterHoursEnabled={setAfterHoursEnabled} qualificationEnabled={qualificationEnabled} setQualificationEnabled={setQualificationEnabled} qualificationCriteria={qualificationCriteria} setQualificationCriteria={setQualificationCriteria} />}
           {tab === "capabilities" && <CapabilitiesTab catalog={capabilityCatalog} capabilities={capabilities} setCapabilities={(value) => { setCapabilitiesSaved(false); setCapabilities(value); }} saved={capabilitiesSaved} onSave={saveCapabilities} loading={loadingSettings || savingSettings} canManage={canManage} />}
           {tab === "test" && <TestTab />}
         </div>
@@ -380,7 +379,7 @@ function CapabilitiesTab({ catalog, capabilities, setCapabilities, saved, onSave
 }
 
 function BehaviorTab({
-  tone, setTone, goal, setGoal, whenUnsure, setWhenUnsure, verbosity, setVerbosity,
+  tone, setTone, goal, setGoal, whenUnsure, setWhenUnsure,
   guardrails, setGuardrails, assistantName, setAssistantName, openingMessage, setOpeningMessage,
   escalationMessage, setEscalationMessage, voiceProfile, setVoiceProfile, voiceLanguage,
   setVoiceLanguage, voiceSpeed, setVoiceSpeed, recordingPolicy, setRecordingPolicy,
@@ -390,7 +389,6 @@ function BehaviorTab({
   tone: string; setTone: (value: string) => void;
   goal: string; setGoal: (value: string) => void;
   whenUnsure: string; setWhenUnsure: (value: string) => void;
-  verbosity: string; setVerbosity: (value: string) => void;
   guardrails: { pricing: boolean; availability: boolean; approvedInfo: boolean; collectContact: boolean };
   setGuardrails: (value: { pricing: boolean; availability: boolean; approvedInfo: boolean; collectContact: boolean }) => void;
   assistantName: string; setAssistantName: (value: string) => void;
@@ -430,7 +428,6 @@ function BehaviorTab({
             <label>Assistant name<input value={assistantName} onChange={(event) => setAssistantName(event.target.value)} /></label>
             <label>Tone<select value={tone} onChange={(event) => setTone(event.target.value)}><option>Friendly & professional</option><option>Warm & casual</option><option>Direct & concise</option><option>Formal</option></select></label>
             <label>Primary goal<select value={goal} onChange={(event) => setGoal(event.target.value)}><option>Book appointments</option><option>Qualify leads</option><option>Answer questions</option><option>Capture contact details</option></select></label>
-            <label>Response length<select value={verbosity} onChange={(event) => setVerbosity(event.target.value)}><option>Concise</option><option>Balanced</option><option>Detailed</option></select></label>
             <label>Phone voice<select value={voiceProfile} onChange={(event) => setVoiceProfile(event.target.value)}><option value="ava-us-1">Ava — warm &amp; professional</option><option value="marcus-us-1">Marcus — calm &amp; confident</option><option value="sofia-us-1">Sofia — friendly &amp; upbeat</option><option value="james-us-1">James — clear &amp; direct</option></select></label>
             <label>Voice language<select value={voiceLanguage} onChange={(event) => setVoiceLanguage(event.target.value)}><option value="en-US">English (US)</option><option value="en-GB">English (UK)</option><option value="es-US">Spanish (US)</option></select></label>
             <label>Speaking speed<select value={String(voiceSpeed)} onChange={(event) => setVoiceSpeed(Number(event.target.value))}><option value="0.85">Relaxed</option><option value="1">Natural</option><option value="1.15">Brisk</option></select></label>
