@@ -508,7 +508,9 @@ function TestTab() {
       const response = await fetch("/api/agent/test", {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ message: value, reset: resetNext, clientMessageId: crypto.randomUUID() }),
+        body: JSON.stringify({ message: value, history: messages.map((message) => ({
+          role: message.role === "customer" ? "user" : "assistant", content: message.text,
+        })), reset: resetNext, clientMessageId: crypto.randomUUID() }),
       });
       const payload = await response.json() as {
         reply?: string | null;
