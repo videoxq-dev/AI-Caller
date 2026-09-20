@@ -18,11 +18,12 @@ function withDockerMock(testCase, config = {}) {
     '    case "$3" in',
     '      *com.docker.compose.project*) printf "%s\\n" "${MOCK_PROJECT:-ai-caller}" ;;',
     '      *com.docker.compose.service*) echo postgres ;;',
-    '      *var/lib/postgresql/data*) echo ai-caller_postgres_data ;;',
+    '      *var/lib/postgresql/data*) echo "${MOCK_VOLUME-ai-caller_postgres_data}" ;;',
     '      *) exit 22 ;;',
     '    esac ;;',
     '  port) exit "${MOCK_PUBLISHED:-1}" ;;',
     '  exec)',
+    '    if [ "${MOCK_EXEC_FAIL:-0}" = 1 ]; then exit 42; fi',
     '    echo "hba_host_non_scram=2"',
     '    echo "workspaces=3"',
     '    echo "credit_ledger=5"',
@@ -72,4 +73,19 @@ test('flags a published database port without printing sensitive configuration',
     assert.equal(status, 0);
     assert.match(stdout, /postgres_host_port_published=yes/);
   }, { MOCK_PUBLISHED: '0' });
+});
+
+test('fails closed if the selected database lacks a named data volume', () => {
+  withDockerMock(({ status, stderr, stdout }) => {
+    assert.notEqual(status, 0);
+    assert.match(stderr, /No named PostgreSQL data volume found/);
+    assert.doesNotMatch(stdout, /Read-only inventory complete/);
+  }, { MOCK_VOLUME: '' });
+});
+
+test('never prints success when the database query fails', () => {
+  withDockerMock(({ status, stdout }) => {
+    assert.notEqual(status, 0);
+    assert.doesNotMatch(stdout, /Read-only inventory complete/);
+  }, { MOCK_EXEC_FAIL: '1' });
 });
