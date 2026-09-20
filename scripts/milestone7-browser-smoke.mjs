@@ -207,6 +207,21 @@ try {
     replaceCurrent: false,
   }, "provision managed voice number");
   assert(managedNumber?.number?.status === "ACTIVE", `Managed voice number did not finish carrier activation: ${JSON.stringify(managedNumber?.number)}`);
+  const voiceTechnology = await api(context, "GET", "/api/voice/technology",
+    undefined, "workspace voice technology");
+  assert(voiceTechnology.technology === "STANDARD",
+    "Existing managed voice customers must remain on Standard by default.");
+  assert(voiceTechnology.realtimeConfigured === false,
+    "Realtime must fail closed without an explicitly enabled hosted AI gateway.");
+  await page.goto(`${baseUrl}/settings?tab=phone`, { waitUntil: "domcontentloaded" });
+  await page.getByRole("heading", { name: "AI voice technology" }).waitFor({ timeout: 10_000 });
+  const standardVoice = page.getByRole("radio", { name: /Standard/ });
+  const realtimeVoice = page.getByRole("radio", { name: /Realtime/ });
+  assert(await standardVoice.isChecked(), "Standard was not selected in Phone & Messaging.");
+  assert(await realtimeVoice.isDisabled(), "Unconfigured Realtime should not be selectable.");
+  await assertNoHorizontalOverflow(page, "Voice technology settings");
+  await page.screenshot({ path: path.join(outputDir, "voice-technology-settings.png"), fullPage: true });
+
   assert(managedNumber?.number?.messagingReadiness === "NOT_REGISTERED", "Voice activation incorrectly implied outbound SMS readiness.");
 
   const hostedRoutes = await pool.query(
