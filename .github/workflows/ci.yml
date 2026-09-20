@@ -90,6 +90,19 @@ jobs:
       - name: Build
         run: npm run build
 
+      - name: Validate secure default DeployOS Compose
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: ci-only-strong-scram-placeholder-123456
+          POSTGRES_DB: ai_caller_test
+        run: |
+          docker compose -f docker-compose.yml config --quiet
+          docker compose -f docker-compose.yml config | grep -q 'POSTGRES_HOST_AUTH_METHOD: scram-sha-256'
+          if grep -q 'ai_caller_auto_pass\|POSTGRES_HOST_AUTH_METHOD: trust' docker-compose.yml; then
+            echo "Unsafe DeployOS Compose auth fallback detected."
+            exit 1
+          fi
+
       - name: Validate opt-in full-stack self-hosted Compose
         run: |
           cp .env.deploy.example .env.deploy
