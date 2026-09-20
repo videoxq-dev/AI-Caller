@@ -156,6 +156,27 @@ try {
   assert(appointments.rows[0].count === 0,
     "A disabled agent booking created an actual appointment.");
 
+  const widget = await api(context, "GET", "/api/widget/config", undefined, "load public Web Chat widget");
+  assert(widget.publicKey, "Web Chat widget is missing.");
+  await page.setContent(`<!doctype html><html><body><h1>Business website</h1>
+    <script async src="${baseUrl}/widget/loader" data-ai-caller-key="${widget.publicKey}"></script>
+    </body></html>`);
+  await page.getByRole("button", { name: "Open chat" }).waitFor({ timeout: 15_000 });
+  await page.getByRole("button", { name: "Open chat" }).click();
+  const widgetFrame = page.frameLocator(`iframe[src*="/widget/${widget.publicKey}"]`);
+  const composer = widgetFrame.getByPlaceholder("Type your message…");
+  await composer.fill("How much is the QA Consultation?");
+  await composer.press("Enter");
+  await widgetFrame.getByText(/QA Consultation is \\$120/).last().waitFor({ timeout: 15_000 });
+  await composer.fill("Book the QA Consultation. My name is QA Visitor, qa.visitor@example.com");
+  await composer.press("Enter");
+  await widgetFrame.getByText(/can't perform that action/).last().waitFor({ timeout: 15_000 });
+  const forbiddenBookings = await pool.query(`SELECT count(*)::int AS count FROM appointments
+    WHERE workspace_id = $1`, [workspaceId]);
+  assert(forbiddenBookings.rows[0].count === 0,
+    "The real Web Chat channel persisted a booking disabled by the owner.");
+
+  await page.goto(`${baseUrl}/ai-agent`, { waitUntil: "networkidle" });
   await page.reload({ waitUntil: "networkidle" });
   await page.getByText("Agent active", { exact: true }).waitFor();
   await page.getByRole("button", { name: "Pause agent" }).click();
