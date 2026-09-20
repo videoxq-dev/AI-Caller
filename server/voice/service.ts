@@ -615,9 +615,12 @@ export function createVoiceWebhookService(dependencies: VoiceServiceDependencies
       });
       await recordVoiceUsage(workspaceId, runtime, updated);
       if (updated.metadata.voiceTechnology === "REALTIME"
-        && typeof updated.metadata.realtimeReservationId === "string") {
-        // Realtime charges are unavoidable and ledger-idempotent; release the
-        // unused start hold after hangup, including any incomplete provider session.
+        && typeof updated.metadata.realtimeReservationId === "string"
+        && updated.metadata.realtimeUsageComplete !== true
+        && (updated.metadata.realtimeUsageComplete === false
+          || !updated.metadata.realtimeStreamId)) {
+        // No authoritative usage and no active stream: do not strand a hold.
+        // If the OpenAI stream is still active, it will settle or release it.
         await releaseCreditReservation(workspaceId, updated.metadata.realtimeReservationId);
       }
     }
