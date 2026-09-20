@@ -54,13 +54,17 @@ try {
   await api(context, "PATCH", "/api/agent/status",
     { status: "ACTIVE" }, "cannot activate a missing agent", 409);
 
-  await api(context, "PATCH", "/api/agent", {
-    name: "Mia", tone: "Friendly & professional", primaryGoal: "Answer questions",
-    whenUnsure: "Escalate to a human", guardrails: ["Never invent pricing"],
-    voice: { profileKey: "ava-us-1", language: "en-US", speakingRate: 1,
-      recordingPolicy: "ANNOUNCE", afterHoursEnabled: true },
-    qualification: { enabled: false, criteria: [] }, completeStep: true,
-  }, "configure Mia");
+  await page.goto(`${baseUrl}/ai-agent`, { waitUntil: "networkidle" });
+  await page.getByRole("button", { name: "Behavior", exact: true }).click();
+  await page.getByLabel("Assistant name").fill("Mia");
+  await page.getByLabel("Primary goal").selectOption("Answer questions");
+  await page.getByRole("button", { name: "Save changes", exact: true }).click();
+  await page.getByRole("button", { name: "Saved", exact: true }).waitFor({ timeout: 10_000 });
+  await page.getByRole("button", { name: "Capabilities", exact: true }).click();
+  assert(await page.getByRole("button", { name: "Book appointments", exact: true })
+    .getAttribute("aria-pressed") === "true",
+    "A newly created agent did not populate its capability toggles without a page reload.");
+  await page.getByRole("button", { name: "Overview", exact: true }).click();
   let agent = await api(context, "GET", "/api/agent", undefined, "read persisted Mia");
   assert(agent.agent.name === "Mia" && agent.agent.status === "DRAFT",
     "Saving agent settings incorrectly activated Mia.");
