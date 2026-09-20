@@ -336,7 +336,7 @@ function OverviewTab({ agentName, status, configured, onStatusChange, canManage,
       </article>
       <article className="agentCard quickActionsCard"><h3>Hosted credits</h3>
         <p>{dashboard ? dashboard.credit.balance.toLocaleString() : error ? "Unavailable" : "Loading…"}</p>
-        <Link href="/settings">Manage credits and billing</Link>
+        <Link href="/settings/billing">Manage credits and billing</Link>
       </article>
     </section>
   </div>;
