@@ -309,7 +309,10 @@ export function createVoiceWebhookService(dependencies: VoiceServiceDependencies
             referenceType: "VOICE_REALTIME_HOLD", referenceId: call.id,
           });
           reservationId = reservation.id;
-          await updateVoiceCall(workspaceId, call.id, {}, { realtimeReservationId: reservation.id });
+          await updateVoiceCall(workspaceId, call.id, {}, {
+            realtimeReservationId: reservation.id,
+            realtimeReservationAmount: reservation.amount,
+          });
         }
         try {
         await runtime.provider.answer({
