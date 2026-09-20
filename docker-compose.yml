@@ -1,9 +1,9 @@
 name: ai-caller
 
-# DeployOS app services use the EXISTING separately managed PostgreSQL database.
-# DATABASE_URL must resolve from each container. This file never creates a new DB.
-# To provision a brand-new all-in-one installation, use compose.selfhost.yaml.
-# DO NOT switch an existing bundled database without a backed-up migration.
+# DeployOS-managed bundled PostgreSQL + migrations + web + worker + voice gateway.
+# Preserve the ORIGINAL Compose project name, service hostname and postgres_data
+# volume across branch upgrades. Never delete the volume to fix authentication.
+# An empty volume initializes only with an explicitly set strong DB password.
 x-app: &app
   build:
     context: .
@@ -15,11 +15,53 @@ x-app: &app
       required: false
 
 services:
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-postgres}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-ai_caller_auto_pass}
+      POSTGRES_DB: ${POSTGRES_DB:-ai_caller}
+      # Fresh volumes use SCRAM. An existing volume retains its own pg_hba.conf
+      # until the operator completes a verified, backup-gated auth migration.
+      POSTGRES_HOST_AUTH_METHOD: scram-sha-256
+    command:
+      - sh
+      - -ec
+      - |
+        if [ ! -s /var/lib/postgresql/data/PG_VERSION ]; then
+          if [ "$POSTGRES_PASSWORD" = "ai_caller_auto_pass" ]; then
+            echo "Refusing to create an insecure new database: set POSTGRES_PASSWORD and a matching DATABASE_URL in DeployOS. Existing database volumes will not be modified." >&2
+            exit 1
+          fi
+        elif [ -f /var/lib/postgresql/data/pg_hba.conf ] &&
+             grep -Eq '^[[:space:]]*host[^[:space:]]*[[:space:]].*[[:space:]](trust|md5|password)([[:space:]]|$)' /var/lib/postgresql/data/pg_hba.conf; then
+          echo "WARNING: Existing PostgreSQL volume has legacy network authentication. Preserve it, back up, then follow docs/postgres-auth-migration.md (Issue #28)." >&2
+        fi
+        exec docker-entrypoint.sh postgres
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d ai_caller"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+      start_period: 10s
+    networks:
+      default:
+        aliases:
+          - postgres
+          - ai-caller
+          - aicaller
+
   migrate:
     <<: *app
     restart: "no"
     environment:
-      DATABASE_URL: ${DATABASE_URL:?Set the existing authenticated DeployOS DATABASE_URL on this app}
+      DATABASE_URL: ${DATABASE_URL:-postgresql://postgres:ai_caller_auto_pass@postgres:5432/ai_caller}
+    depends_on:
+      postgres:
+        condition: service_healthy
     command: ["sh", "-ec", "npm run verify:database-connection && npm run db:migrate && npm run verify:deployment"]
 
   web:
@@ -31,7 +73,7 @@ services:
       HOSTNAME: 0.0.0.0
       VOICE_RECORDING_ALLOW_PERSISTENT_FILESYSTEM: "true"
       VOICE_RECORDING_DIR: /app/.data/recordings
-      DATABASE_URL: ${DATABASE_URL:?Set the existing authenticated DeployOS DATABASE_URL on this app}
+      DATABASE_URL: ${DATABASE_URL:-postgresql://postgres:ai_caller_auto_pass@postgres:5432/ai_caller}
     depends_on:
       migrate:
         condition: service_completed_successfully
@@ -50,7 +92,7 @@ services:
     <<: *app
     restart: unless-stopped
     environment:
-      DATABASE_URL: ${DATABASE_URL:?Set the existing authenticated DeployOS DATABASE_URL on this app}
+      DATABASE_URL: ${DATABASE_URL:-postgresql://postgres:ai_caller_auto_pass@postgres:5432/ai_caller}
     depends_on:
       migrate:
         condition: service_completed_successfully
@@ -64,7 +106,7 @@ services:
     environment:
       NODE_ENV: production
       VOICE_GATEWAY_PORT: "3002"
-      DATABASE_URL: ${DATABASE_URL:?Set the existing authenticated DeployOS DATABASE_URL on this app}
+      DATABASE_URL: ${DATABASE_URL:-postgresql://postgres:ai_caller_auto_pass@postgres:5432/ai_caller}
     depends_on:
       migrate:
         condition: service_completed_successfully
@@ -79,4 +121,5 @@ services:
       retries: 3
 
 volumes:
+  postgres_data:
   recordings:
