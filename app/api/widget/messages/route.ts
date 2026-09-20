@@ -59,8 +59,19 @@ export async function POST(request: Request) {
           controller.enqueue(event("status", { state: claim.state === "completed" ? "cached" : "thinking" }));
 
           if (claim.state === "completed") {
-            if (claim.responseText) enqueueReply(controller, claim.responseText);
-            controller.enqueue(event("done", { cached: true }));
+            if (claim.responseText) {
+              enqueueReply(controller, claim.responseText);
+            } else {
+              // A null cached reply may represent a paused agent or human
+              // ownership. Do not invent a human handoff after a retry.
+              const current = await getConversationById(workspaceId, resolved.session.conversationId);
+              if (current?.handlingMode === "HUMAN") {
+                controller.enqueue(event("handoff", { message: "A team member is handling this conversation." }));
+              } else {
+                controller.enqueue(event("notice", { message: "This message did not receive an automatic reply. Please try again later or contact the business directly." }));
+              }
+            }
+            controller.enqueue(event("done", { cached: true, agentAvailable: Boolean(claim.responseText) }));
             controller.close();
             return;
           }
@@ -90,8 +101,14 @@ export async function POST(request: Request) {
           const result = await responseOrchestrator.respond(workspaceId, resolved.session.conversationId);
           if (!result.reply) {
             await completeWebchatTurn(workspaceId, claim.turnId, null);
-            controller.enqueue(event("handoff", { message: "A team member is handling this conversation." }));
-            controller.enqueue(event("done", { handlingMode: result.handlingMode }));
+            if (result.handlingMode === "HUMAN") {
+              controller.enqueue(event("handoff", { message: "A team member is handling this conversation." }));
+            } else {
+              controller.enqueue(event("unavailable", {
+                message: "The AI assistant is currently unavailable. Your message is saved. Please try again later or contact the business directly.",
+              }));
+            }
+            controller.enqueue(event("done", { handlingMode: result.handlingMode, agentAvailable: false }));
             controller.close();
             return;
           }
