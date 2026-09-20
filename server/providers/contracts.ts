@@ -183,7 +183,7 @@ export type NormalizedVoiceEvent =
 export interface VoiceProvider {
   verifyWebhook(input: VoiceWebhookInput): Promise<boolean>;
   normalizeWebhook(input: VoiceWebhookInput): Promise<NormalizedVoiceEvent[]>;
-  answer(input: { callControlId: string; streamUrl?: string | null; commandId?: string }): Promise<void>;
+  answer(input: { callControlId: string; streamUrl?: string | null; bidirectional?: boolean; commandId?: string }): Promise<void>;
   gatherConsent(input: { callControlId: string; text: string; voice: string; language: string; commandId?: string }): Promise<void>;
   startTranscription(input: { callControlId: string; language: string; commandId?: string }): Promise<void>;
   startRecording(input: { callControlId: string; commandId?: string }): Promise<void>;
