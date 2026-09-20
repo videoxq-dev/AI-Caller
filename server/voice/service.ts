@@ -6,6 +6,7 @@ import { db } from "@/db";
 import { usageEvents } from "@/db/schema";
 import { loadHostedRateSnapshot, quoteHostedUsage } from "@/server/billing/pricing";
 import { chargeUnavoidableCredits } from "@/server/credits/service";
+import { reserveCredits, releaseCreditReservation } from "@/server/credits/service";
 import {
   appendMessage,
   getOrCreateOpenConversation,
@@ -41,7 +42,7 @@ import { putVoiceRecording } from "./storage";
 import { resolveVoiceProfile } from "./voices";
 import { estimateSpeechDurationMs } from "./turn-duration";
 import { scheduleVoiceTurn } from "./turns";
-import { getVoiceTechnology, requireRealtimeReady } from "./technology";
+import { getVoiceTechnology, requireRealtimeReady, REALTIME_MIN_START_CREDITS } from "./technology";
 import { settleRealtimeCall } from "./realtime-usage";
 
 const MAX_VOICE_WEBHOOK_BYTES = 64 * 1024;
@@ -302,12 +303,25 @@ export function createVoiceWebhookService(dependencies: VoiceServiceDependencies
       });
 
       if (phase(call.metadata) === "AWAITING_ANSWER" && call.status === "RINGING") {
+        let reservationId: string | null = null;
+        if (call.metadata.voiceTechnology === "REALTIME") {
+          const reservation = await reserveCredits(workspaceId, REALTIME_MIN_START_CREDITS, {
+            referenceType: "VOICE_REALTIME_HOLD", referenceId: call.id,
+          });
+          reservationId = reservation.id;
+          await updateVoiceCall(workspaceId, call.id, {}, { realtimeReservationId: reservation.id });
+        }
+        try {
         await runtime.provider.answer({
           callControlId: event.callControlId,
           streamUrl: buildVoiceGatewayStreamUrl(workspaceId, call.id, event.externalCallId),
           bidirectional: call.metadata.voiceTechnology === "REALTIME",
           commandId: deterministicCommandId(`${event.externalEventId}:answer`),
         });
+        } catch (error) {
+          if (reservationId) await releaseCreditReservation(workspaceId, reservationId);
+          throw error;
+        }
       }
       return;
     }
@@ -586,6 +600,12 @@ export function createVoiceWebhookService(dependencies: VoiceServiceDependencies
         },
       });
       await recordVoiceUsage(workspaceId, runtime, updated);
+      if (updated.metadata.voiceTechnology === "REALTIME"
+        && typeof updated.metadata.realtimeReservationId === "string") {
+        // Realtime charges are unavoidable and ledger-idempotent; release the
+        // unused start hold after hangup, including any incomplete provider session.
+        await releaseCreditReservation(workspaceId, updated.metadata.realtimeReservationId);
+      }
     }
   }
 
