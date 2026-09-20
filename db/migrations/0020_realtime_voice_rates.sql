@@ -38,5 +38,7 @@ VALUES
   ('VOICE', 'telnyx', 'realtime-us-local',
    'VOICE_REALTIME_RECORDING_MINUTE', 2000, 1, 0, '2026-09-20T00:00:00Z', '{"currency":"USD","market":"US","numberType":"local","basis":"call_recording"}'),
   ('VOICE', 'telnyx', 'realtime-us-local',
-   'VOICE_REALTIME_TRANSCRIPTION_MINUTE', 15000, 1, 0, '2026-09-20T00:00:00Z', '{"currency":"USD","market":"US","numberType":"local","basis":"telnyx_stt_inbound_call_transcript"}')
+   'VOICE_REALTIME_TRANSCRIPTION_MINUTE', 15000, 1, 0, '2026-09-20T00:00:00Z', '{"currency":"USD","market":"US","numberType":"local","basis":"telnyx_stt_inbound_call_transcript"}'),
+  ('VOICE', 'telnyx', 'realtime-us-local',
+   'VOICE_REALTIME_GREETING_TTS_CHAR', 48, 1, 0, '2026-09-20T00:00:00Z', '{"currency":"USD","market":"US","numberType":"local","basis":"conservative_Telnyx_HD_TTS_proxy_for_configurable_greeting_voice_confirm_account_specific_Azure_rate"}')
 ON CONFLICT DO NOTHING;
