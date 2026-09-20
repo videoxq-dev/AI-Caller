@@ -127,7 +127,7 @@ export default function TestSetupPage() {
           </TestCard>
 
           <TestCard tone="green" icon={<MessageIcon size={23} />} title="Test a WhatsApp conversation" description="Send a WhatsApp message to your AI assistant." status={readyLabel("whatsapp")} statusState="ready">
-            <div className="testActionRow"><div className="testNumberBlock"><small>Message this number on WhatsApp</small><strong>Use the sender shown in your WhatsApp integration settings</strong>{copied ? "Copied" : "Copy"}</button></div><span className="orText">or</span><button type="button" className="secondaryTestButton whatsappButton" onClick={() => runTest("whatsapp")}><MessageIcon size={16} /> How to test</button></div><TipRow>Try asking about your availability or book a time.</TipRow>
+            <div className="testActionRow"><div className="testNumberBlock"><small>Message this number on WhatsApp</small><strong>Use the sender shown in your WhatsApp integration settings</strong></div><span className="orText">or</span><button type="button" className="secondaryTestButton whatsappButton" onClick={() => runTest("whatsapp")}><MessageIcon size={16} /> How to test</button></div><TipRow>Try asking about your availability or book a time.</TipRow>
           </TestCard>
 
           <TestCard tone="blue" icon={<MessageIcon size={23} />} title="Test the web chat" description="Use the chat widget to have a conversation with your AI assistant." status={readyLabel("webchat")} statusState="ready">
