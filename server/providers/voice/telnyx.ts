@@ -197,7 +197,15 @@ export function createTelnyxVoiceProvider(config: TelnyxVoiceConfig): VoiceProvi
     async answer(input) {
       await action(input.callControlId, "answer", {
         command_id: commandId(input.commandId),
-        ...(input.streamUrl ? { stream_url: input.streamUrl, stream_track: "inbound_track" } : {}),
+        ...(input.streamUrl ? {
+          stream_url: input.streamUrl,
+          stream_track: "inbound_track",
+          ...(input.bidirectional ? {
+            stream_bidirectional_mode: "rtp",
+            stream_bidirectional_codec: "PCMU",
+            stream_codec: "PCMU",
+          } : {}),
+        } : {}),
       });
     },
 
