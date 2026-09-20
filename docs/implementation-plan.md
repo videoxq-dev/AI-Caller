@@ -1,3 +1,5 @@
+> **September 20, 2026 remediation scope override:** [Intelligent Automation Phase 0 contract](./intelligent-automation-remediation-phase-0.md) governs the new remediation increment wherever older MVP/OTO roadmap language conflicts. Keep **one AI agent and one managed Telnyx phone number per workspace**; ordinary conversations work from the agent's default configuration without a workflow. Add optional situational conversational workflows and editable deterministic workflows through **one structured, non-drag-and-drop Automation Builder**, with execution mode derived by registered actions rather than chosen by the user. The old five-presets-only/no-builder statements below describe the historical MVP, not the approved remediation scope. Existing SMS carrier and deployment acceptance gates still apply.
+
 # AI Caller — Backend & Full-Stack Implementation Plan
 
 This document is the engineering roadmap for turning the completed UI into the working MVP defined in `docs/PRD.md`.
