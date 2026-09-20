@@ -1,4 +1,6 @@
 import { escalateConversation } from "@/server/collaboration/service";
+import { assertAgentActionAllowed } from "@/server/agent/capabilities";
+import { requireActiveWorkspaceAgent } from "@/server/agent/service";
 import { and, desc, eq } from "drizzle-orm";
 import { db } from "@/db";
 import { messages } from "@/db/schema";
@@ -13,6 +15,7 @@ import { updateContactProfile } from "@/server/domain/core/contact-profile";
 import { getActiveConversationChannel, type ConversationChannel } from "@/server/domain/core/conversation-channels";
 import {
   appendMessage,
+  getConversationById,
   getContactDetail,
   upsertLead,
 } from "@/server/domain/core/repository";
@@ -145,7 +148,7 @@ async function updateLeadFromEnvelope(
   if (!detail) throw new Error("The conversation contact no longer exists.");
   const existing = detail.lead;
   return upsertLead(workspaceId, contactId, {
-    status: qualificationStatus(existing?.status, qualificationEnabled && lead.status === "QUALIFIED" ? undefined : lead.status),
+    status: qualificationStatus(existing?.status, lead.status === "QUALIFIED" ? undefined : lead.status),
     intent: lead.intent !== undefined ? lead.intent : existing?.intent ?? null,
     serviceRequested: lead.serviceRequested !== undefined ? lead.serviceRequested : existing?.serviceRequested ?? null,
     source: existing?.source ?? channel,
@@ -195,6 +198,22 @@ export async function executeOrchestratorTools(
   contactId: string,
   envelope: OrchestratorEnvelope,
 ): Promise<OrchestratorToolResult> {
+  // Re-read the current policy at the execution boundary; the model and its prompt are untrusted.
+  const agent = await requireActiveWorkspaceAgent(workspaceId);
+  if (envelope.contact) assertAgentActionAllowed(agent.capabilities, "UPDATE_CONTACT");
+  if (envelope.lead) assertAgentActionAllowed(agent.capabilities, "UPDATE_LEAD");
+  if (envelope.lead?.status === "QUALIFIED") assertAgentActionAllowed(agent.capabilities, "QUALIFY_LEAD");
+  if (envelope.action.type !== "NONE") {
+    // Revocation must remain available even when new opt-ins have been disabled.
+    if (!(envelope.action.type === "RECORD_SMS_CONSENT" && envelope.action.status === "OPTED_OUT")) {
+      assertAgentActionAllowed(agent.capabilities, envelope.action.type);
+    }
+  }
+  const conversation = await getConversationById(workspaceId, conversationId);
+  if (!conversation) throw new AppError("CONVERSATION_NOT_FOUND", "Conversation not found.", 404);
+  if (conversation.handlingMode === "HUMAN") {
+    throw new AppError("CONVERSATION_HUMAN_HANDLING", "Staff now controls this conversation.", 409);
+  }
   const channel = await getActiveConversationChannel(workspaceId, conversationId) ?? "WEBCHAT";
   const needsQualificationConfig = envelope.action.type === "QUALIFY_LEAD" || envelope.lead?.status === "QUALIFIED";
   const qualificationConfig = needsQualificationConfig ? await getQualificationConfig(workspaceId) : null;
