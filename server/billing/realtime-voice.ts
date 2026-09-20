@@ -41,6 +41,8 @@ export type RealtimeVoiceBill = {
   model: RealtimeVoiceModel;
   callSeconds: number;
   recorded: boolean;
+  // Cost of Telnyx-rendered consent disclosure/opening, not the AI audio.
+  ttsCharacters?: number;
   numberType: "local";
   usage: RealtimeVoiceUsage;
 };
@@ -74,6 +76,7 @@ export function quoteRealtimeVoiceFromRates(
     throw new AppError("REALTIME_NUMBER_RATE_NOT_CONFIGURED", "Realtime voice currently requires a US local-number rate.", 422);
   }
   const seconds = integer(input.callSeconds, "callSeconds");
+  const ttsCharacters = integer(input.ttsCharacters ?? 0, "ttsCharacters");
   const usage = input.usage;
   for (const [field, value] of Object.entries(usage)) integer(value, field);
   if (usage.audioCachedInputTokens > usage.audioInputTokens
@@ -94,6 +97,7 @@ export function quoteRealtimeVoiceFromRates(
     { unit: "VOICE_REALTIME_STREAM_MINUTE", units: minutes },
     { unit: "VOICE_REALTIME_RECORDING_MINUTE", units: input.recorded ? minutes : 0 },
     { unit: "VOICE_REALTIME_TRANSCRIPTION_MINUTE", units: minutes },
+    { unit: "VOICE_REALTIME_GREETING_TTS_CHAR", units: ttsCharacters },
   ];
 
   // Use versioned admin rate cards solely to calculate provider cost.
@@ -114,6 +118,7 @@ export function quoteRealtimeVoiceFromRates(
       model: input.model,
       numberType: input.numberType,
       callSeconds: seconds,
+      ttsCharacters,
       recorded: input.recorded,
       markupBps: REALTIME_VOICE_MARKUP_BPS,
       creditValueMicros: REALTIME_VOICE_CREDIT_VALUE_MICROS,
