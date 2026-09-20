@@ -114,6 +114,34 @@ describe("orchestrator response protocol", () => {
     expect(executeTools).toHaveBeenCalledOnce();
   });
 
+  it("answers normally when disabled metadata fields are supplied by an untrusted model", async () => {
+    const executeTools = vi.fn(async () => ({ kind: "none" as const, data: {} }));
+    const generate = vi.fn(async () => ({ text: JSON.stringify({
+      reply: "Our current consultation is thirty minutes.",
+      contact: { name: "Invented person" },
+      lead: { status: "QUALIFIED", intent: "Invented interest" },
+      action: { type: "NONE" },
+    }) }));
+    const orchestrator = createResponseOrchestrator({
+      buildContext: vi.fn(async () => ({
+        ...fakeContext(), source: "INBOUND_TURN" as const,
+        agent: { id: "agent-1", status: "ACTIVE" as const, escalationMessage: null,
+          behaviorSettings: { capabilities: {
+            ...defaultAgentCapabilities, UPDATE_CONTACT: false,
+            UPDATE_LEAD: false, QUALIFY_LEAD: false,
+          } } },
+      })),
+      executeTools, generate,
+    });
+    const result = await orchestrator.respond("workspace", "conversation");
+    expect(result.reply).toBe("Our current consultation is thirty minutes.");
+    expect(executeTools).toHaveBeenCalledWith("workspace", "conversation",
+      fakeContext().contact.id,
+      expect.objectContaining({ contact: undefined, lead: undefined, action: { type: "NONE" } }));
+    expect(String(vi.mocked(generate).mock.calls[0][2][0]?.content))
+      .not.toContain('"contact": {');
+  });
+
   it("does not invoke AI while a human owns the conversation", async () => {
     const generate = vi.fn();
     const orchestrator = createResponseOrchestrator({
