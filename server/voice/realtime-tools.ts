@@ -114,6 +114,7 @@ export async function runRealtimeBusinessTool(input: {
     // utterances and that the AI actually asked for confirmation.
     const history = await db.select({ body: messages.body, sender: messages.senderType,
       channel: messages.channel, contentType: messages.contentType,
+      metadata: messages.metadata,
     }).from(messages).where(and(
       eq(messages.workspaceId, input.workspaceId), eq(messages.conversationId, input.conversationId),
       eq(messages.channel, "PHONE"), eq(messages.contentType, "CALL_TRANSCRIPT"),
@@ -121,7 +122,10 @@ export async function runRealtimeBusinessTool(input: {
     )).orderBy(desc(messages.createdAt)).limit(10);
     const customerIndex = history.findIndex(row => row.sender === "CUSTOMER");
     const customer = customerIndex < 0 ? "" : history[customerIndex].body.trim();
-    const question = history.slice(customerIndex + 1).find(row => row.sender === "AI")?.body ?? "";
+    // A transcript from interrupted OpenAI speech is NOT proof that the
+    // customer heard or approved the appointment confirmation.
+    const question = history.slice(customerIndex + 1).find(row =>
+      row.sender === "AI" && row.metadata?.potentiallyInterrupted !== true)?.body ?? "";
     if (!/^(yes|yeah|yep|sure|please|okay|ok|confirm|go ahead|book it|sounds good)\b/i.test(customer)
       || !/\b(confirm|book|schedule|reserve)\b/i.test(question)) {
       return { ok: false, reason: "Ask the caller to explicitly approve this specific appointment before booking." };
