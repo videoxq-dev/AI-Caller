@@ -1,5 +1,6 @@
 import WebSocket from "ws";
 import { appendMessage } from "@/server/domain/core/repository";
+import { releaseCreditReservation } from "@/server/credits/service";
 import { getEnv } from "@/server/env";
 import { logger } from "@/server/observability/logger";
 import { getVoiceCall, appendVoiceTranscriptSegment, claimRealtimeStream, finishRealtimeStream } from "./repository";
@@ -386,7 +387,17 @@ export function attachRealtimeMedia({ telnyx, identity, streamId }: BridgeOption
     const verified = providerConfirmed && !error && ready && pendingResponses.size === 0;
     if (claimed) {
       const completed = await finishRealtimeStream(workspaceId, callId, streamId, verified);
-      if (completed && verified) await settleRealtimeCall(workspaceId, callId);
+      if (completed && verified) {
+        await settleRealtimeCall(workspaceId, callId);
+      } else if (completed && !verified) {
+        const call = await getVoiceCall(workspaceId, callId);
+        if (call?.status === "COMPLETED"
+          && typeof call.metadata.realtimeReservationId === "string") {
+          await releaseCreditReservation(workspaceId, call.metadata.realtimeReservationId);
+        }
+        logger.error({ workspaceId, callId, streamId },
+          "Realtime session usage incomplete; manual provider invoice reconciliation required");
+      }
     }
     if (telnyx.readyState === WebSocket.OPEN) telnyx.close(1000, "Media stream stopped");
     logger.info({ workspaceId, callId, verified, durationMs: Date.now() - startedAt },
