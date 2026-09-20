@@ -188,6 +188,10 @@ export function attachRealtimeMedia({ telnyx, identity, streamId }: BridgeOption
   }
 
   function queueOutput(raw: unknown, responseId: unknown) {
+    if (!open || !speechAllowed
+      || (typeof responseId === "string" && interruptedResponseIds.has(responseId))) return;
+    const chunk = exactBase64(raw);
+    if (!chunk) return fail("invalid-openai-audio");
     if (typeof responseId === "string" && callerLastSpeechStoppedAt != null
       && !measuredResponses.has(responseId)) {
       measuredResponses.add(responseId);
@@ -196,10 +200,6 @@ export function attachRealtimeMedia({ telnyx, identity, streamId }: BridgeOption
         "Realtime measured speech-end to first generated audio");
       callerLastSpeechStoppedAt = null;
     }
-    if (!open || !speechAllowed
-      || (typeof responseId === "string" && interruptedResponseIds.has(responseId))) return;
-    const chunk = exactBase64(raw);
-    if (!chunk) return fail("invalid-openai-audio");
     let bytes = Buffer.concat([outputTail, chunk]);
     while (bytes.length >= AUDIO_PACKET_BYTES) {
       if (outboundPackets.length >= MAX_OUTPUT_PACKETS) return fail("ai-output-overflow");
