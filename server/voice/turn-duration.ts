@@ -1,4 +1,4 @@
-export const VOICE_TURN_SILENCE_MS = 900;
+export const VOICE_TURN_SILENCE_MS = 1500;
 
 export function estimateSpeechDurationMs(text: string, speakingRate = 1) {
   const words = Math.max(1, text.trim().split(/\s+/).length);
