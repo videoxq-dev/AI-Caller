@@ -22,6 +22,7 @@ const telnyxUnits = [
   "VOICE_REALTIME_CARRIER_MINUTE",
   "VOICE_REALTIME_STREAM_MINUTE",
   "VOICE_REALTIME_RECORDING_MINUTE",
+  "VOICE_REALTIME_TRANSCRIPTION_MINUTE",
 ] as const satisfies readonly HostedPricingUnit[];
 
 export type RealtimeVoiceUsage = {
@@ -91,6 +92,7 @@ export function quoteRealtimeVoiceFromRates(
     { unit: "VOICE_REALTIME_CARRIER_MINUTE", units: minutes },
     { unit: "VOICE_REALTIME_STREAM_MINUTE", units: minutes },
     { unit: "VOICE_REALTIME_RECORDING_MINUTE", units: input.recorded ? minutes : 0 },
+    { unit: "VOICE_REALTIME_TRANSCRIPTION_MINUTE", units: minutes },
   ];
 
   // Use versioned admin rate cards solely to calculate provider cost.
