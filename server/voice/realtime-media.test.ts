@@ -44,7 +44,7 @@ vi.mock("@/server/voice/realtime-usage", () => ({
   realtimeCreditBudgetReached: vi.fn(async () => false),
 }));
 vi.mock("@/server/env", () => ({
-  getEnv: vi.fn(() => ({ HOSTED_AI_API_KEY: "fixture", VOICE_REALTIME_ENABLED: true })),
+  getEnv: vi.fn(() => ({ HOSTED_AI_PROVIDER: "openai", HOSTED_AI_API_KEY: "fixture", VOICE_REALTIME_ENABLED: true })),
 }));
 vi.mock("@/server/credits/service", () => ({ releaseCreditReservation: vi.fn(async () => 0) }));
 vi.mock("@/server/providers/voice/runtime", () => ({ resolveVoiceRuntime: vi.fn() }));
