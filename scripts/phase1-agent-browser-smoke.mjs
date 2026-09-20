@@ -167,7 +167,7 @@ try {
   const composer = widgetFrame.getByPlaceholder("Type your message…");
   await composer.fill("How much is the QA Consultation?");
   await composer.press("Enter");
-  await widgetFrame.getByText(/QA Consultation is \\$120/).last().waitFor({ timeout: 15_000 });
+  await widgetFrame.getByText(/QA Consultation is \$120/).last().waitFor({ timeout: 15_000 });
   await composer.fill("Book the QA Consultation. My name is QA Visitor, qa.visitor@example.com");
   await composer.press("Enter");
   await widgetFrame.getByText(/can't perform that action/).last().waitFor({ timeout: 15_000 });
