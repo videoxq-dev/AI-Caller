@@ -43,6 +43,7 @@ const envSchema = z.object({
   META_WEBHOOK_VERIFY_TOKEN: z.string().min(8).optional(),
   META_PHONE_REGISTRATION_PIN: z.string().regex(/^\d{6}$/).optional(),
   VOICE_GATEWAY_URL: z.string().url().optional(),
+  VOICE_REALTIME_ENABLED: z.enum(["true", "false"]).default("false").transform(v => v === "true"),
   VOICE_GATEWAY_PORT: z.coerce.number().int().min(1).max(65535).default(3002),
   VOICE_RECORDING_STORAGE_BACKEND: z.enum(["filesystem", "s3"]).default("filesystem"),
   VOICE_RECORDING_ALLOW_PERSISTENT_FILESYSTEM: z.enum(["true", "false"]).default("false").transform((value) => value === "true"),
