@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 import { createResponseOrchestrator } from "./index";
 import { parseOrchestratorEnvelope } from "./tools";
 import { defaultAgentCapabilities } from "@/server/agent/capabilities";
+import { AppError } from "@/server/http/errors";
 
 function fakeContext(handlingMode: "AI" | "HUMAN" = "AI") {
   return {
@@ -92,6 +93,25 @@ describe("orchestrator response protocol", () => {
       .toContain("approved business profile");
     expect(executeTools).toHaveBeenCalledOnce();
     expect(generate).toHaveBeenCalledOnce();
+  });
+
+  it("responds truthfully when a configured capability is revoked during model planning", async () => {
+    const generate = vi.fn(async () => ({ text: JSON.stringify({
+      reply: "Your appointment is confirmed.",
+      action: { type: "BOOK_APPOINTMENT", startsAt: "2026-09-22T10:00:00Z",
+        endsAt: "2026-09-22T10:30:00Z", timezone: "UTC", title: "Consultation" },
+    }) }));
+    const executeTools = vi.fn(async () => {
+      throw new AppError("AGENT_ACTION_DISABLED", "Booking is disabled.", 403);
+    });
+    const orchestrator = createResponseOrchestrator({
+      buildContext: vi.fn(async () => fakeContext()), executeTools, generate,
+    });
+    const result = await orchestrator.respond("workspace", "conversation");
+    expect(result.reply).toContain("can't perform that action");
+    expect(result.reply).not.toContain("confirmed");
+    expect(generate).toHaveBeenCalledOnce();
+    expect(executeTools).toHaveBeenCalledOnce();
   });
 
   it("does not invoke AI while a human owns the conversation", async () => {
