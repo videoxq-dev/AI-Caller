@@ -10,14 +10,15 @@ existing `pg_hba.conf` entries to `trust`, and advertised a fixed fallback
 password. Merely replacing the environment variable does not fix an existing
 volume: its `pg_hba.conf` and role password are persisted.
 
-The DeployOS default `docker-compose.yml` now connects to the existing
-separately managed database via `DATABASE_URL` and has no postgres service
-or `POSTGRES_USER`/`POSTGRES_DB`/`POSTGRES_PASSWORD` interpolation.
-If the installed application actually uses the old bundled PostgreSQL volume,
-keep its existing database container available and perform this migration
-before changing topology. Do not point the app at a new empty DB.
-An independently managed database must be assessed for its own authentication
-and TLS; do not run this script against an unrelated managed database.
+The DeployOS default `docker-compose.yml` has been restored to its original
+`postgres` service, `ai-caller` Compose project and `postgres_data`
+persistent volume. An existing `pg_hba.conf` is left untouched and the
+old volume can continue to run until the operator backs up and migrates it.
+**Compatibility does not equal an authenticated-database security close.**
+For a NEW empty volume, the entrypoint refuses the historical known default
+password; supply a strong `POSTGRES_PASSWORD` and matching `DATABASE_URL`.
+An independently managed database must be assessed separately; do not run
+this script against an unrelated managed database.
 
 ## Production migration (one coordinated maintenance window)
 
@@ -51,11 +52,10 @@ and TLS; do not run this script against an unrelated managed database.
    characters in the password inside the database URL; use Docker DNS hostname
    `postgres`. The URL password MUST match the rotated database role password.
    Do not put the secrets in source control, Docker build arguments, or CI logs.
-6. Deploy the intended authenticated DB topology retaining the **same actual
-   database volume and records**. If the original DB was bundled, migrate it
-   deliberately before pointing the default external-DB app at it. Confirm the postgres service
-   healthcheck, migration job, web, worker, gateway, existing user data and
-   fresh application DB connections. Confirm a valid password authenticates
+6. Deploy the restored bundled-DB Compose topology retaining the **same
+   existing PostgreSQL service, Compose project and named data volume**.
+   Confirm postgres healthcheck, migration job, web, worker, gateway,
+   existing user data and fresh application DB connections. Confirm a valid password authenticates
    from web/worker and a missing or wrong password is rejected on the Docker
    network. Confirm no active host trust/md5 rules remain in pg_hba.conf.
 7. Inspect reconciliation/recordings/credit balances and compare the saved
@@ -66,14 +66,16 @@ and TLS; do not run this script against an unrelated managed database.
 
 ## Fail-safe / rollback
 
-The previous draft hardened bundled Postgres service refused startup on legacy
-network trust; the current DeployOS default has **no** postgres service at all.
-Neither situation authorizes removing or wiping the old volume. If the upgrade fails, keep the write freeze;
+The current DeployOS default retains the bundled PostgreSQL service and
+existing volume; it warns rather than altering existing network trust rules.
+That is a temporary backwards-compatible state, not a security approval.
+Neither an authentication problem nor a failed upgrade authorizes removing
+or wiping the old volume. If the upgrade fails, keep the write freeze;
 restore the saved pg_hba.conf file and reload PostgreSQL while investigating.
 If needed, restore the verified backup into a separate, authenticated container
 with the same data and inspect it before repointing app services. Never silently
 revert production to passwordless network authentication.
 
-Fresh manual bundled installations via `compose.selfhost.yaml` must supply
+Fresh bundled installations (default DeployOS or manual `compose.selfhost.yaml`) must supply
 credentials and create SCRAM access. Separately managed DeployOS databases
 should use their provider's TLS/authenticated connection in `DATABASE_URL`.
