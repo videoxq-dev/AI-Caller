@@ -34,6 +34,30 @@ if ! grep -q 'Refusing to create an insecure new database' "$temp_log"; then
 fi
 echo "PASS: empty PostgreSQL volume cannot initialize with legacy fallback."
 
+# A fresh install STILL auto-provisions the same private database when a
+# strong password is supplied; wrong-password TCP access must be rejected.
+fresh_password="ci-strong-scram-password-1234567890"
+env POSTGRES_PASSWORD="$fresh_password" \
+  docker compose -p "$fresh" -f docker-compose.yml up -d --no-build postgres >/dev/null
+attempt=0
+until docker compose -p "$fresh" -f docker-compose.yml exec -T \
+  -e PGPASSWORD="$fresh_password" postgres \
+  psql -h 127.0.0.1 -U postgres -d ai_caller -Atc "select 1" >/dev/null 2>&1; do
+  attempt=$((attempt + 1))
+  if [ "$attempt" -ge 30 ]; then
+    echo "Fresh PostgreSQL with explicit strong password did not become reachable." >&2
+    exit 1
+  fi
+  sleep 1
+done
+if docker compose -p "$fresh" -f docker-compose.yml exec -T \
+  -e PGPASSWORD="definitely-wrong-password" postgres \
+  psql -h 127.0.0.1 -U postgres -d ai_caller -Atc "select 1" >/dev/null 2>&1; then
+  echo "Fresh PostgreSQL unexpectedly accepted a wrong TCP password." >&2
+  exit 1
+fi
+echo "PASS: fresh PostgreSQL auto-provisions with SCRAM and rejects wrong passwords."
+
 # Model the OLD Compose file's real persisted role, hostname and trust HBA.
 docker volume create "$volume" >/dev/null
 docker run -d --name "$old" \
