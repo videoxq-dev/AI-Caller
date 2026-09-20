@@ -1,4 +1,4 @@
-import { and, asc, eq } from "drizzle-orm";
+import { and, asc, eq, sql } from "drizzle-orm";
 import { db } from "@/db";
 import { getWorkspaceAgent } from "@/server/agent/service";
 import {
@@ -110,15 +110,7 @@ export async function getAgentSetup(workspaceId: string) {
 
 export async function saveAgentSetup(workspaceId: string, input: AIAgentInput) {
   const now = new Date();
-  const [existingAgent] = await db.select({ behaviorSettings: aiAgents.behaviorSettings })
-    .from(aiAgents)
-    .where(eq(aiAgents.workspaceId, workspaceId))
-    .limit(1);
-  const existingBehavior = existingAgent?.behaviorSettings && typeof existingAgent.behaviorSettings === "object"
-    ? existingAgent.behaviorSettings
-    : {};
   const behaviorSettings = {
-    ...existingBehavior,
     guardrails: input.guardrails,
     voice: input.voice,
     qualification: input.qualification,
@@ -147,7 +139,9 @@ export async function saveAgentSetup(workspaceId: string, input: AIAgentInput) {
         advancedInstructions: cleanNullable(input.advancedInstructions),
         escalationMessage: cleanNullable(input.escalationMessage),
         openingMessage: cleanNullable(input.openingMessage),
-        behaviorSettings,
+        // Merge against the current row atomically so concurrently saved
+        // capability permissions are never overwritten by an agent form save.
+        behaviorSettings: sql`coalesce(${aiAgents.behaviorSettings}, '{}'::jsonb) || ${JSON.stringify(behaviorSettings)}::jsonb`,
         updatedAt: now,
       },
     })
