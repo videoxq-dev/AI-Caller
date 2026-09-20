@@ -51,7 +51,7 @@ docker exec -u postgres "$container" sh -eu -c '
   role=${POSTGRES_USER:-postgres}
   database=${POSTGRES_DB:-ai_caller}
   export PGOPTIONS="-c default_transaction_read_only=on -c statement_timeout=15000"
-  psql -X -q -w -v ON_ERROR_STOP=1 -At -U "$role" -d "$database" <<SQL
+  psql -X -q -w -v ON_ERROR_STOP=1 -At -h /var/run/postgresql -p 5432 -U "$role" -d "$database" <<SQL
 BEGIN TRANSACTION ISOLATION LEVEL REPEATABLE READ READ ONLY;
 SELECT '\''pg_version='\'' || current_setting('\''server_version'\'');
 SELECT '\''role_uses_scram='\'' || COALESCE((SELECT (rolpassword LIKE '\''SCRAM-SHA-256$%'\'')::text FROM pg_authid WHERE rolname = current_user), '\''false'\'');
