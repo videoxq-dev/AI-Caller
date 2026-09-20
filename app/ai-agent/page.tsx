@@ -258,57 +258,109 @@ export default function AIAgentPage() {
   );
 }
 
-function OverviewTab({ agentOnline, setAgentOnline, channels, setChannels, setTab }: { agentOnline: boolean; setAgentOnline: (value: boolean) => void; channels: Record<Channel, boolean>; setChannels: (value: Record<Channel, boolean>) => void; setTab: (tab: AgentTab) => void }) {
-  return (
-    <div className="agentTabContent">
-      <section className="overviewTopGrid">
-        <article className="agentHeroCard">
-          <div className="agentBotAvatar"><BotFaceIcon /></div>
-          <div className="agentHeroCopy"><div className="agentHeroName"><h2>Juvi AI</h2><span><i />Online</span></div><p>Your AI agent is ready to assist customers across all channels.</p><p>Juvi AI answers questions, books appointments, provides product information and captures leads — 24/7.</p><div className="agentHeroButtons"><button type="button" onClick={() => setAgentOnline(!agentOnline)}>{agentOnline ? <PauseIcon /> : <PlayIcon />}{agentOnline ? "Pause agent" : "Resume agent"}</button><button type="button" onClick={() => setTab("behavior")}><GearIcon size={16} />Edit settings</button></div></div>
-        </article>
+function OverviewTab({ agentName, status, onStatusChange, canManage, loading, setTab }: {
+  agentName: string; status: AgentStatus; onStatusChange: () => void;
+  canManage: boolean; loading: boolean; setTab: (tab: AgentTab) => void;
+}) {
+  const [dashboard, setDashboard] = useState<DashboardData | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  useEffect(() => {
+    let cancelled = false;
+    fetch("/api/dashboard?days=7", { cache: "no-store" })
+      .then(async (response) => {
+        if (!response.ok) throw new Error("Unable to load operational metrics.");
+        return response.json() as Promise<DashboardData>;
+      })
+      .then((value) => { if (!cancelled) setDashboard(value); })
+      .catch((reason) => { if (!cancelled) setError(reason instanceof Error ? reason.message : "Metrics unavailable."); });
+    return () => { cancelled = true; };
+  }, []);
 
-        <article className="agentCard channelCard"><h3>Channels</h3><div className="channelRows">{(["WhatsApp", "Phone", "SMS", "Web Chat"] as Channel[]).map((channel) => <div className="channelRow" key={channel}><span className={`channelIcon ${channelClass(channel)}`}>{channelIcon(channel)}</span><strong>{channel === "Phone" ? "Phone calls" : channel}</strong><em>{channels[channel] ? "Active" : "Off"}</em><button type="button" className={`switch ${channels[channel] ? "on" : ""}`} onClick={() => setChannels({ ...channels, [channel]: !channels[channel] })}><i /></button></div>)}</div></article>
-
-        <article className="agentCard quickActionsCard"><h3>Quick actions</h3><button type="button" onClick={() => setTab("knowledge")}><span><DocumentIcon /></span><div><strong>Update knowledge</strong><small>Add or edit business information</small></div><b>›</b></button><button type="button" onClick={() => setTab("test")}><span><MessageIcon size={16} /></span><div><strong>Test your agent</strong><small>Start a conversation</small></div><b>›</b></button><Link href="/inbox"><span><MessageIcon size={16} /></span><div><strong>View conversations</strong><small>See recent interactions</small></div><b>›</b></Link><button type="button" onClick={() => setTab("behavior")}><span><GearIcon size={16} /></span><div><strong>Agent settings</strong><small>Voice, personality and more</small></div><b>›</b></button></article>
-      </section>
-
-      <section className="agentMetricGrid">
-        <Metric icon={<MessageIcon size={20} />} label="Conversations" value="248" change="↑ 12%" />
-        <Metric icon={<CalendarIcon size={20} />} label="Appointments booked" value="37" change="↑ 23%" />
-        <Metric icon={<UsersIcon size={20} />} label="Leads captured" value="92" change="↑ 18%" />
-        <Metric icon={<StarIcon />} label="Customer satisfaction" value="4.8 / 5" change="↑ 6%" tone="gold" />
-      </section>
-
-      <section className="agentAnalyticsGrid">
-        <article className="agentCard conversationChart"><div className="agentCardHeader"><h3>Conversations over time</h3><button type="button">Last 7 days <ChevronDown /></button></div><div className="chartLegendRow"><span className="wa">WhatsApp</span><span className="phone">Phone</span><span className="sms">SMS</span><span className="chat">Web Chat</span></div><div className="stackedBars">{[40,48,52,56,42,53,60].map((height, index) => <div className="stackColumn" key={height + index}><span className="web" style={{ height: `${Math.round(height * .18)}px` }} /><span className="sms" style={{ height: `${Math.round(height * .16)}px` }} /><span className="phone" style={{ height: `${Math.round(height * .30)}px` }} /><span className="wa" style={{ height: `${Math.round(height * .36)}px` }} /><small>Sep {8 + index}</small></div>)}</div></article>
-        <article className="agentCard outcomesCard"><h3>Conversation outcomes</h3><div className="outcomesBody"><div className="outcomeDonut"><div><strong>248</strong><span>Total</span></div></div><div className="outcomeLegend"><span><i className="green" />Appointments booked <b>37</b></span><span><i className="blue" />Product inquiries <b>96</b></span><span><i className="purple" />General questions <b>67</b></span><span><i className="gray" />Other <b>48</b></span></div></div></article>
-      </section>
-
-      <section className="agentBottomGrid">
-        <article className="agentCard recentConversationsCard"><div className="agentCardHeader"><h3>Recent conversations</h3><Link href="/inbox">View all</Link></div><div className="recentConversationTable"><div className="recentHeader"><span>Contact</span><span>Channel</span><span>Message</span><span>Outcome</span><span>Time</span><span /></div>{recentConversations.map((item) => <div className="recentRow" key={item.name}><div className="recentIdentity"><span>{item.initials}</span><strong>{item.name}</strong></div><span className={`miniChannel ${channelClass(item.channel)}`}>{channelIcon(item.channel)}</span><p>{item.message}</p><em>{item.outcome}</em><time>{item.time}</time><b>•••</b></div>)}</div></article>
-        <article className="agentCard topQuestionsCard"><div className="agentCardHeader"><h3>Top questions</h3><button type="button">View all</button></div>{["Do you have ginger shots in stock?","How much does it cost?","Can I book an appointment?","What are the ingredients?","Do you deliver to Lagos?"].map((question, index) => <div className="questionRow" key={question}><span>{index + 1}</span><strong>{question}</strong><i><b style={{ width: `${88 - index * 10}%` }} /></i><em>{[32,28,24,18,16][index]}</em></div>)}</article>
-      </section>
-    </div>
-  );
+  return <div className="agentTabContent">
+    <section className="overviewTopGrid">
+      <article className="agentHeroCard">
+        <div className="agentBotAvatar"><BotFaceIcon /></div>
+        <div className="agentHeroCopy">
+          <div className="agentHeroName"><h2>{agentName}</h2><span>{status}</span></div>
+          <p>{status === "ACTIVE" ? "Your configured agent is active for eligible inbound conversations." :
+            status === "PAUSED" ? "New AI replies are paused. Incoming messages remain in your Inbox." :
+            "Activate your agent after checking its knowledge, capabilities and communication setup."}</p>
+          <div className="agentHeroButtons">
+            <button type="button" disabled={loading || !canManage} onClick={onStatusChange}>
+              {status === "ACTIVE" ? <PauseIcon /> : <PlayIcon />}{status === "ACTIVE" ? "Pause agent" : "Activate agent"}
+            </button>
+            <button type="button" onClick={() => setTab("behavior")}><GearIcon size={16} />Edit settings</button>
+          </div>
+        </div>
+      </article>
+      <article className="agentCard quickActionsCard">
+        <h3>Manage your AI</h3>
+        <button type="button" onClick={() => setTab("knowledge")}><span><DocumentIcon /></span><strong>Update business knowledge</strong></button>
+        <button type="button" onClick={() => setTab("capabilities")}><span><GearIcon /></span><strong>Manage capabilities</strong></button>
+        <button type="button" onClick={() => setTab("test")}><span><MessageIcon /></span><strong>Test your agent</strong></button>
+        <Link href="/settings"><strong>Phone &amp; Messaging status</strong></Link>
+      </article>
+    </section>
+    <section className="agentMetricGrid">
+      <Metric icon={<MessageIcon size={20} />} label="Inbound inquiries · 7 days" value={dashboard?.metrics.inquiries.value} />
+      <Metric icon={<MessageIcon size={20} />} label="AI conversations · 7 days" value={dashboard?.metrics.aiConversations.value} />
+      <Metric icon={<UsersIcon size={20} />} label="Qualified leads · 7 days" value={dashboard?.metrics.qualifiedLeads.value} />
+      <Metric icon={<CalendarIcon size={20} />} label="Appointments booked · 7 days" value={dashboard?.metrics.appointments.value} />
+    </section>
+    {error && <div className="agentSettingsError">{error}</div>}
+    <section className="agentBottomGrid">
+      <article className="agentCard recentConversationsCard">
+        <div className="agentCardHeader"><h3>Recent activity</h3><Link href="/inbox">Open Inbox</Link></div>
+        {dashboard ? dashboard.activity.length
+          ? dashboard.activity.map((item) => <div className="recentRow" key={item.id}>
+              <Link href={item.href}><strong>{item.label}</strong></Link><span>{item.detail}</span>
+              <time>{new Date(item.occurredAt).toLocaleString()}</time>
+            </div>)
+          : <p>No activity recorded in the last 7 days.</p>
+          : <p>{error ? "Activity is unavailable." : "Loading actual activity…"}</p>}
+      </article>
+      <article className="agentCard quickActionsCard"><h3>Hosted credits</h3>
+        <p>{dashboard ? dashboard.credit.balance.toLocaleString() : error ? "Unavailable" : "Loading…"}</p>
+        <Link href="/settings">Manage credits and billing</Link>
+      </article>
+    </section>
+  </div>;
 }
 
-function KnowledgeTab() {
-  const [expanded, setExpanded] = useState<number | null>(0);
-  const [website, setWebsite] = useState("www.brightsideautospa.com");
-  return (
-    <div className="agentTabContent knowledgeLayout">
-      <section className="agentCard knowledgeMainCard">
-        <div className="sectionTitle"><div><h2>Knowledge</h2><p>Information your AI can use when answering customers.</p></div><button type="button">＋ Add knowledge</button></div>
-        <div className="knowledgeList">{knowledgeItems.map((item, index) => <article key={item.title} className={`knowledgeItem ${expanded === index ? "open" : ""}`}><button type="button" onClick={() => setExpanded(expanded === index ? null : index)}><span className="knowledgeIcon">{item.icon}</span><div><strong>{item.title}</strong><small>{item.subtitle}</small></div><em>{item.state}</em><b>{expanded === index ? "⌃" : "⌄"}</b></button>{expanded === index && <div className="knowledgeExpanded">{index === 0 && <><label>Business summary<textarea defaultValue="Brightside Auto Spa is a Miami-based auto detailing shop focused on exterior washes, full detailing and ceramic coating." /></label><div className="inlineFields"><label>Business hours<input defaultValue="Mon–Sat, 8:00 AM–6:00 PM" /></label><label>Service area<input defaultValue="Miami + 20 miles" /></label></div></>}{index === 1 && <div className="websiteImport"><input value={website} onChange={(event) => setWebsite(event.target.value)} /><button type="button">Refresh website</button></div>}{index === 2 && <div className="miniKnowledgeRows"><span>Exterior Wash <b>Starts at $25</b></span><span>Full Detailing <b>Starts at $120</b></span><span>Ceramic Coating <b>By quote</b></span></div>}{index === 3 && <div className="miniKnowledgeRows"><span>Do you offer same-day appointments?<b>Yes, when availability allows.</b></span><span>How long does full detailing take?<b>Usually 2–4 hours.</b></span><span>Do you accept walk-ins?<b>Appointments are recommended.</b></span></div>}{index === 4 && <div className="documentGrid"><span>services.pdf <b>PDF</b></span><span>pricing.docx <b>DOCX</b></span><span>policies.txt <b>TXT</b></span><span>faq.pdf <b>PDF</b></span></div>}</div>}</article>)}</div>
-      </section>
+function KnowledgeTab({ counts }: { counts: { services: number; faqs: number; policies: number } }) {
+  return <div className="agentTabContent">
+    <section className="agentCard knowledgeMainCard">
+      <div className="sectionTitle"><div><h2>Business knowledge</h2><p>The AI uses your saved business profile, services, FAQs, policies and imported knowledge.</p></div>
+        <Link href="/setup/ai">Manage knowledge</Link>
+      </div>
+      <div className="knowledgeList">
+        <p>Saved services: {counts.services}</p>
+        <p>Saved FAQs: {counts.faqs}</p>
+        <p>Saved policies: {counts.policies}</p>
+        <p>Manage imported documents and website information from your existing AI setup.</p>
+      </div>
+    </section>
+  </div>;
+}
 
-      <aside className="knowledgeSideColumn">
-        <article className="agentCard knowledgeHealth"><h3>Knowledge health</h3><div className="knowledgeScore"><strong>92%</strong><span>Ready</span></div><div className="healthRows"><span><i className="ok">✓</i>Business details <b>Complete</b></span><span><i className="ok">✓</i>Services <b>3 added</b></span><span><i className="ok">✓</i>FAQs <b>12 added</b></span><span><i className="warn">!</i>Pricing <b>Review</b></span></div></article>
-        <article className="agentCard uploadKnowledge"><h3>Upload documents</h3><div className="uploadDrop"><DocumentIcon /><strong>Choose files</strong><span>PDF, DOCX or TXT</span></div></article>
-        <article className="agentCard syncCard"><h3>Auto-sync</h3><div className="syncRow"><div><strong>Website changes</strong><small>Keep imported content up to date.</small></div><span className="switch on"><i /></span></div></article>
-      </aside>
-    </div>
-  );
+function CapabilitiesTab({ catalog, capabilities, setCapabilities, onSave, loading, canManage }: {
+  catalog: Capability[]; capabilities: Record<string, boolean>;
+  setCapabilities: (value: Record<string, boolean>) => void; onSave: () => void;
+  loading: boolean; canManage: boolean;
+}) {
+  return <div className="agentTabContent"><section className="agentCard behaviorCard">
+    <div className="sectionTitle"><div><h2>Agent capabilities</h2>
+      <p>These permissions control actual backend tools. Existing SMS consent, carrier and workspace protections always apply.</p>
+    </div></div>
+    {catalog.map((item) => <div className="behaviorToggleRow" key={item.key}>
+      <div><strong>{item.label}</strong><small>{item.description}</small></div>
+      <button type="button" aria-label={item.label} aria-pressed={capabilities[item.key] === true}
+        disabled={loading || !canManage} className={`switch ${capabilities[item.key] ? "on" : ""}`}
+        onClick={() => setCapabilities({ ...capabilities, [item.key]: !capabilities[item.key] })}><i /></button>
+    </div>)}
+    {!catalog.length && <p>{loading ? "Loading capabilities…" : "No capabilities available."}</p>}
+    <button type="button" disabled={loading || !canManage || !catalog.length} onClick={onSave}>Save capabilities</button>
+  </section></div>;
 }
 
 function BehaviorTab({
@@ -496,7 +548,7 @@ function TestTab() {
   );
 }
 
-function Metric({ icon, label, value, change, tone = "blue" }: { icon: React.ReactNode; label: string; value: string; change: string; tone?: string }) { return <article className="agentCard agentMetric"><span className={`metricArt ${tone}`}>{icon}</span><div><small>{label}</small><strong>{value}</strong><em>{change}</em><p>vs last 7 days</p></div></article>; }
+function Metric({ icon, label, value }: { icon: React.ReactNode; label: string; value?: number }) { return <article className="agentCard agentMetric"><span className="metricArt blue">{icon}</span><div><small>{label}</small><strong>{value === undefined ? "—" : value.toLocaleString()}</strong><p>{value === undefined ? "Loading actual data…" : "Recorded activity"}</p></div></article>; }
 function GuardrailRow({ label, checked, onChange }: { label: string; checked: boolean; onChange: (value: boolean) => void }) { return <div className="guardrailRow"><span>{label}</span><button type="button" className={`switch ${checked ? "on" : ""}`} onClick={() => onChange(!checked)}><i /></button></div>; }
 function ChecklistItem({ label, status }: { label: string; status: string }) { return <div className="checklistItem"><span>✓</span><strong>{label}</strong><em>{status}</em></div>; }
 function channelClass(channel: Channel) { return channel.toLowerCase().replace(/\s+/g, "-"); }
