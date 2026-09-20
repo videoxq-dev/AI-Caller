@@ -66,6 +66,7 @@ wss.on("connection", (ws, request) => {
   let mediaFrames = 0;
   let realtime: ReturnType<typeof attachRealtimeMedia> | null = null;
   let mediaStarting = false;
+  const awaitingAuthorizationMedia: string[] = [];
 
   ws.on("message", (data, isBinary) => {
     if (isBinary) {
@@ -113,6 +114,10 @@ wss.on("connection", (ws, request) => {
           });
         }
         verifiedStart = true;
+        for (const payload of awaitingAuthorizationMedia) {
+          realtime?.onMedia(payload);
+        }
+        awaitingAuthorizationMedia.length = 0;
         logger.info({ workspaceId: auth.workspaceId, callId: auth.callId,
           technology: call.metadata.voiceTechnology ?? "STANDARD" },
           "Inbound voice media stream started");
@@ -125,11 +130,23 @@ wss.on("connection", (ws, request) => {
     }
 
     if (frame.event === "media") {
-      if (!verifiedStart) {
-        ws.close(1008, "Media arrived before verified start");
+      if (!verifiedStart && !mediaStarting) {
+        ws.close(1008, "Media arrived before stream start");
         return;
       }
       const payload = typeof frame.media?.payload === "string" ? frame.media.payload : "";
+      if (!verifiedStart) {
+        if (awaitingAuthorizationMedia.length >= 100) {
+          ws.close(1009, "Authorization media buffer exceeded");
+          return;
+        }
+        if (payload.length > 65_536) {
+          ws.close(1009, "Media frame too large");
+          return;
+        }
+        awaitingAuthorizationMedia.push(payload);
+        return;
+      }
       if (!payload) return;
       mediaFrames += 1;
       mediaBytes += Buffer.byteLength(payload, "base64");
