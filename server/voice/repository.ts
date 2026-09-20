@@ -105,7 +105,7 @@ export async function getVoiceCallWithTranscript(workspaceId: string, callId: st
   const transcript = await db.select().from(voiceTranscriptSegments).where(and(
     eq(voiceTranscriptSegments.workspaceId, workspaceId),
     eq(voiceTranscriptSegments.voiceCallId, callId),
-  )).orderBy(asc(voiceTranscriptSegments.sequence)).limit(2000);
+  )).orderBy(asc(voiceTranscriptSegments.startedMs), asc(voiceTranscriptSegments.sequence)).limit(2000);
   return { call, transcript };
 }
 
