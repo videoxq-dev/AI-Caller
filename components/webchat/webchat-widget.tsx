@@ -92,7 +92,13 @@ export function WebchatWidget({ widgetKey, config }: { widgetKey: string; config
       if (!response.ok) return;
       const data = await response.json() as { history?: ChatMessage[] };
       if (cancelled || !data.history?.length) return;
-      setMessages(data.history);
+      // Provider history does not contain transient service notices (e.g. a
+      // PAUSED agent did not generate an AI message). Keep those notices
+      // visible when the four-second polling refresh replaces server history.
+      setMessages((current) => [
+        ...data.history!,
+        ...current.filter((message) => message.id.startsWith("notice_")).slice(-8),
+      ]);
     };
 
     void refresh();
@@ -177,7 +183,7 @@ export function WebchatWidget({ widgetKey, config }: { widgetKey: string; config
             }
             if (eventName === "unavailable" || eventName === "notice") {
               setStatus(eventName === "unavailable" ? "AI unavailable" : "No AI reply");
-              if (data.message) appendAssistantDelta(replyId, data.message);
+              if (data.message) appendAssistantDelta(`notice_${clientMessageId}`, data.message);
             }
             if (eventName === "error") throw new Error(data.message ?? "Unable to process message.");
             if (eventName === "done" && data.agentAvailable !== false
