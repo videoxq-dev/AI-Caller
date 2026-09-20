@@ -51,7 +51,7 @@ function integer(value: number, field: string) {
 }
 
 function ceilDiv(left: bigint, right: bigint) {
-  return (left + right - 1n) / right;
+  return (left + right - BigInt(1)) / right;
 }
 
 function safeNumber(value: bigint, label: string) {
@@ -98,7 +98,7 @@ export function quoteRealtimeVoiceFromRates(
   const aiQuote = quoteHostedUsage(openaiRates.map((rate) => ({ ...rate, targetMarginBps: 0 })), openaiLines);
   const carrierQuote = quoteHostedUsage(telnyxRates.map((rate) => ({ ...rate, targetMarginBps: 0 })), telnyxLines);
   const costMicros = BigInt(aiQuote.providerCostMicros) + BigInt(carrierQuote.providerCostMicros);
-  const retailMicros = ceilDiv(costMicros * BigInt(10_000 + REALTIME_VOICE_MARKUP_BPS), 10_000n);
+  const retailMicros = ceilDiv(costMicros * BigInt(10_000 + REALTIME_VOICE_MARKUP_BPS), BigInt(10_000));
   const credits = ceilDiv(retailMicros, BigInt(REALTIME_VOICE_CREDIT_VALUE_MICROS));
 
   return {
