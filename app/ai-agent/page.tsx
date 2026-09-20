@@ -248,9 +248,15 @@ function OverviewTab({ agentName, status, onStatusChange, canManage, loading, se
   canManage: boolean; loading: boolean; setTab: (tab: AgentTab) => void;
 }) {
   const [dashboard, setDashboard] = useState<DashboardData | null>(null);
+  const [managedNumber, setManagedNumber] = useState<{ status: string; messagingReadiness: string } | null>(null);
+  const [phoneError, setPhoneError] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   useEffect(() => {
     let cancelled = false;
+    fetch("/api/phone-numbers", { cache: "no-store" })
+      .then(async response => { if (!response.ok) throw new Error("Phone status unavailable."); return response.json(); })
+      .then((data: { number: { status: string; messagingReadiness: string } | null }) => { if (!cancelled) setManagedNumber(data.number); })
+      .catch(() => { if (!cancelled) setPhoneError("Phone status unavailable."); });
     fetch("/api/dashboard?days=7", { cache: "no-store" })
       .then(async (response) => {
         if (!response.ok) throw new Error("Unable to load operational metrics.");
@@ -285,6 +291,13 @@ function OverviewTab({ agentName, status, onStatusChange, canManage, loading, se
         <button type="button" onClick={() => setTab("test")}><span><MessageIcon /></span><strong>Test your agent</strong></button>
         <Link href="/settings"><strong>Phone &amp; Messaging status</strong></Link>
       </article>
+    </section>
+    <section className="agentCard">
+      <div className="agentCardHeader"><h3>Managed phone and messaging</h3><Link href="/settings">Configure</Link></div>
+      <p>{phoneError ?? (managedNumber
+        ? `Phone: ${managedNumber.status} · Outbound SMS: ${managedNumber.messagingReadiness}`
+        : "No managed phone number connected.")}</p>
+      <p>Phone activation and outbound SMS approval are separate. One managed number per workspace.</p>
     </section>
     <section className="agentMetricGrid">
       <Metric icon={<MessageIcon size={20} />} label="Inbound inquiries · 7 days" value={dashboard?.metrics.inquiries.value} />
