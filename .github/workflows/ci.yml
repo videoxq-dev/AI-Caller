@@ -90,26 +90,25 @@ jobs:
       - name: Build
         run: npm run build
 
-      - name: Validate DeployOS Compose with existing DB and no PostgreSQL credentials
+      - name: Validate backwards-compatible DeployOS PostgreSQL volume and new database guard
         run: |
-          # Regression for DeployOS: its application has DATABASE_URL but
-          # does NOT provide POSTGRES_USER/PASSWORD/DB for a separate database.
+          # The existing DeployOS install uses its Compose postgres service;
+          # an upgrade MUST NOT remove the service or its persistent volume.
           env -u POSTGRES_USER -u POSTGRES_PASSWORD -u POSTGRES_DB \
             docker compose -f docker-compose.yml config --quiet
           services=$(env -u POSTGRES_USER -u POSTGRES_PASSWORD -u POSTGRES_DB \
             docker compose -f docker-compose.yml config --services)
-          for expected in migrate web worker gateway; do
+          for expected in postgres migrate web worker gateway; do
             printf '%s\n' "$services" | grep -qx "$expected"
           done
-          if printf '%s\n' "$services" | grep -qx postgres; then
-            echo "Default DeployOS Compose must not provision a new PostgreSQL instance."
+          docker compose -f docker-compose.yml config --volumes | grep -qx postgres_data
+          grep -Fq 'POSTGRES_HOST_AUTH_METHOD: scram-sha-256' docker-compose.yml
+          grep -Fq 'if [ ! -s /var/lib/postgresql/data/PG_VERSION ]; then' docker-compose.yml
+          grep -Fq '"$$POSTGRES_PASSWORD" = "ai_caller_auto_pass"' docker-compose.yml
+          if grep -Eq 'POSTGRES_HOST_AUTH_METHOD:[[:space:]]*trust|sed -i .*trust' docker-compose.yml; then
+            echo 'Never initialize or silently rewrite PostgreSQL auth to trust.'
             exit 1
           fi
-          if grep -Eq 'ai_caller_auto_pass|POSTGRES_HOST_AUTH_METHOD:[[:space:]]*trust' docker-compose.yml; then
-            echo "Unsafe Compose authentication fallback detected."
-            exit 1
-          fi
-
       - name: Validate opt-in full-stack self-hosted Compose
         run: |
           cp .env.deploy.example .env.deploy
