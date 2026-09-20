@@ -120,10 +120,10 @@ export async function runRealtimeBusinessTool(input: {
     const result = await executeOrchestratorTools(input.workspaceId,
       input.conversationId, input.contactId, { action: parsed.data });
     if (parsed.data.type === "CHECK_AVAILABILITY") {
+      const start = parsed.data.startsAt;
       const slots = Array.isArray(result.data.slots) ? result.data.slots : [];
-      const available = slots.some(slot => record(slot).startsAt === parsed.data.startsAt);
-      await saveRealtimeAvailability(input.workspaceId, input.callId,
-        parsed.data.startsAt, available);
+      const available = slots.some(slot => record(slot).startsAt === start);
+      await saveRealtimeAvailability(input.workspaceId, input.callId, start, available);
     }
     return { ok: true as const, ...result, ...(result.kind === "escalation"
       ? { spokenInstruction: "Tell the caller staff will follow up. Never promise a live phone transfer." } : {}) };
