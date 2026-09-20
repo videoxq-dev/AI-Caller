@@ -185,7 +185,22 @@ try {
   await page.getByText("Agent paused", { exact: true }).waitFor();
   assert((await api(context, "GET", "/api/agent", undefined, "read pause")).agent.status === "PAUSED",
     "Pause did not persist.");
-  await page.reload({ waitUntil: "networkidle" });
+
+  await page.setContent(`<!doctype html><html><body><h1>Paused business website</h1>
+    <script async src="${baseUrl}/widget/loader" data-ai-caller-key="${widget.publicKey}"></script>
+    </body></html>`);
+  await page.getByRole("button", { name: "Open chat" }).waitFor({ timeout: 15_000 });
+  await page.getByRole("button", { name: "Open chat" }).click();
+  const pausedFrame = page.frameLocator(`iframe[src*="/widget/${widget.publicKey}"]`);
+  const pausedComposer = pausedFrame.getByPlaceholder("Type your message…");
+  await pausedComposer.fill("Hello, Mia, are you there?");
+  await pausedComposer.press("Enter");
+  await pausedFrame.getByText(/AI assistant is currently unavailable/).waitFor({ timeout: 15_000 });
+  assert(await pausedFrame.getByText("A team member is handling this conversation.").count() === 0,
+    "Paused agent falsely claimed an actual staff handoff.");
+  await page.screenshot({ path: path.join(dir, "paused-agent-webchat.png"), fullPage: true });
+
+  await page.goto(`${baseUrl}/ai-agent`, { waitUntil: "networkidle" });
   await page.getByText("Agent paused", { exact: true }).waitFor();
   await page.getByRole("button", { name: "Activate agent" }).click();
 
