@@ -320,7 +320,9 @@ export async function yieldSupersededVoiceTurn(workspaceId: string, callId: stri
 export async function claimRealtimeStream(workspaceId: string, callId: string, streamId: string) {
   return lockedVoiceCall(workspaceId, callId, async (tx, call) => {
     if (call.status !== "ACTIVE" || call.metadata.voiceTechnology !== "REALTIME"
-      || call.metadata.phase !== "ACTIVE" || call.metadata.realtimeUsageComplete !== null
+      || !["OPENING_SPEAKING", "ACTIVE"].includes(String(call.metadata.phase))
+      || !["ANNOUNCED", "GRANTED"].includes(call.recordingConsentStatus ?? "")
+      || call.metadata.realtimeUsageComplete !== null
       || call.metadata.realtimeStreamId) return null;
     const [updated] = await tx.update(voiceCalls).set({
       metadata: { ...call.metadata, realtimeStreamId: streamId },
