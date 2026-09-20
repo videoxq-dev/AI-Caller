@@ -18,3 +18,13 @@ CREATE TABLE IF NOT EXISTS "voice_realtime_response_usage" (
 );
 CREATE INDEX IF NOT EXISTS "voice_realtime_response_usage_workspace_call_idx"
   ON "voice_realtime_response_usage" ("workspace_id","voice_call_id");
+
+CREATE TABLE IF NOT EXISTS "voice_realtime_booking_state" (
+  "voice_call_id" uuid PRIMARY KEY REFERENCES "voice_calls"("id") ON DELETE CASCADE,
+  "workspace_id" uuid NOT NULL REFERENCES "workspaces"("id") ON DELETE CASCADE,
+  "details" jsonb NOT NULL DEFAULT '{}'::jsonb,
+  "available_start" text,
+  "updated_at" timestamptz NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS "voice_realtime_booking_state_workspace_idx"
+  ON "voice_realtime_booking_state" ("workspace_id");
