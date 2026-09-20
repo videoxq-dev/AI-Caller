@@ -100,7 +100,7 @@ wss.on("connection", (ws, request) => {
       mediaStarting = true;
       const streamId = typeof frame.stream_id === "string" ? frame.stream_id : "";
       void getVoiceCall(auth.workspaceId, auth.callId).then((call) => {
-        if (!call || call.externalCallId !== auth.externalCallId || call.status !== "ACTIVE") {
+        if (!call || call.externalCallId !== auth.externalCallId || !["RINGING", "ACTIVE"].includes(call.status)) {
           ws.close(1008, "Voice call is not active");
           return;
         }
