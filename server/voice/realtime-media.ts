@@ -116,10 +116,13 @@ export function attachRealtimeMedia({ telnyx, identity, streamId }: BridgeOption
     if (!open) return;
     error = true;
     logger.warn({ workspaceId, callId, reason }, "Realtime media bridge ended early");
+    // Closing the media WebSocket alone would strand a live telephone call in
+    // silence. End the provider call as well, even on OpenAI session failure.
+    void hangupForBudget("bridge-error");
     void stop(false);
   }
 
-  async function hangupForBudget(reason: "budget" | "max-duration" | "escalation") {
+  async function hangupForBudget(reason: "budget" | "max-duration" | "escalation" | "bridge-error") {
     if (!open || budgetHangupRequested) return;
     budgetHangupRequested = true;
     const call = await getVoiceCall(workspaceId, callId);
