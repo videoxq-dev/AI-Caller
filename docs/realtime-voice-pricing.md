@@ -43,7 +43,8 @@ Telnyx US **local inbound** public starting/list rates per minute:
 | Inbound SIP, from | $0.0032 |
 | Media streaming WebSocket | $0.0035 |
 | Recording, if enabled | $0.0020 |
-| Total, recorded example | **from $0.0107** |
+| Telnyx STT (caller transcript) | $0.0150 |
+| Total, recorded example | **from $0.0257** |
 
 - https://telnyx.com/pricing/voice-api
 - https://telnyx.com/pricing/elastic-sip
@@ -83,12 +84,12 @@ tokens (example token counts, NOT a per-minute OpenAI consumption guarantee):
 
 | Model | OpenAI COGS | Telnyx COGS | Total COGS | Retail 50% markup | Credits |
 | --- | ---: | ---: | ---: | ---: | ---: |
-| gpt-realtime-2.1 | $0.06080 | $0.01070 | $0.07150 | $0.10725 | 108 |
-| gpt-realtime-2.1-mini | $0.01668 | $0.01070 | $0.02738 | $0.04107 | 42 |
+| gpt-realtime-2.1 | $0.06080 | $0.02570 | $0.08650 | $0.12975 | 130 |
+| gpt-realtime-2.1-mini | $0.01668 | $0.02570 | $0.04238 | $0.06357 | 64 |
 
 Monthly at exactly 1,000 calls with that same usage and 1-minute rounding:
-full model provider $71.50 / retail $108.00; mini provider $27.38 /
-retail $42.00. Actual costs will vary with tokenized conversation history,
+full model provider $86.50 / retail $130.00; mini provider $42.38 /
+retail $64.00. Actual costs will vary with tokenized conversation history,
 turn count, silence, caching, speaking time and customer behavior.
 
 ## Required work before Realtime may be enabled
@@ -108,3 +109,5 @@ turn count, silence, caching, speaking time and customer behavior.
   remain independent of voice technology.
 - Live Telnyx and OpenAI invoice reconciliation and customer-visible usage
   breakdown before declaring paid Realtime generally available.
+
+The transcription line was added when connecting the live gateway to the existing caller transcript store; the earlier price example omitted this additional Telnyx STT cost. Source: https://telnyx.com/pricing/speech-to-text . Transcription runs asynchronously and does not gate Realtime responses. Actual Telnyx invoice rates must be reconciled before general availability.
