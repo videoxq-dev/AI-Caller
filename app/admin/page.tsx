@@ -460,6 +460,7 @@ export default function AdminPage() {
                     <option value="VOICE_REALTIME_CARRIER_MINUTE">Realtime US local carrier minute</option>
                     <option value="VOICE_REALTIME_STREAM_MINUTE">Realtime media-streaming minute</option>
                     <option value="VOICE_REALTIME_RECORDING_MINUTE">Realtime recording minute</option>
+                    <option value="VOICE_REALTIME_TRANSCRIPTION_MINUTE">Realtime Telnyx STT minute</option>
                   </> : <><option value="AI_INPUT_TOKEN">AI input token</option><option value="AI_CACHED_INPUT_TOKEN">AI cached input token</option><option value="AI_OUTPUT_TOKEN">AI output token</option></>}</select></label>
                   <label><span>Provider cost (micro-USD)</span><input type="number" value={newRate.costMicros} onChange={(event) => setNewRate((value) => ({ ...value, costMicros: event.target.value }))} /></label>
                   <label><span>Units per cost</span><input type="number" value={newRate.unitsPerCost} onChange={(event) => setNewRate((value) => ({ ...value, unitsPerCost: event.target.value }))} /></label>
