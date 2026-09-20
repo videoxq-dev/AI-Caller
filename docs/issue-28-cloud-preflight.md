@@ -31,10 +31,10 @@ The result contains only:
   and ledger amounts (in existing AI Caller credits).
 
 It does **not** print the DB password, hash, HBA CIDRs, `DATABASE_URL`,
-customer records or provider credentials. It uses PostgreSQL read-only
-transactions and a 15-second SQL statement timeout so large-table scans fail
-rather than run without a time bound. It never invokes a migration, backup or restart. If the
-PostgreSQL local Unix-socket login or any expected table is unavailable,
+customer records or provider credentials. It uses one consistent PostgreSQL repeatable-read, read-only
+transaction and a 15-second SQL statement timeout so large-table scans fail
+rather than run without a time bound. It never invokes a migration, backup,
+or restart. If the PostgreSQL local Unix-socket login or any expected table is unavailable,
 the script fails: investigate rather than interpreting missing output as zero.
 
 Capture the sanitized output in the private operational change record. Do
