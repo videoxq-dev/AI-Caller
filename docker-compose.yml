@@ -17,22 +17,26 @@ services:
     image: postgres:16-alpine
     restart: unless-stopped
     environment:
-      POSTGRES_USER: ${POSTGRES_USER:-postgres}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-ai_caller_auto_pass}
-      POSTGRES_DB: ${POSTGRES_DB:-ai_caller}
-      POSTGRES_HOST_AUTH_METHOD: trust
-    command: >
-      sh -c "
-        if [ -f /var/lib/postgresql/data/pg_hba.conf ]; then
-          sed -i 's/scram-sha-256/trust/g' /var/lib/postgresql/data/pg_hba.conf
-          sed -i 's/md5/trust/g' /var/lib/postgresql/data/pg_hba.conf
-        fi;
+      POSTGRES_USER: ${POSTGRES_USER:?Set a database user in deployment secrets}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Set a strong password in deployment secrets}
+      POSTGRES_DB: ${POSTGRES_DB:?Set a database name in deployment secrets}
+      POSTGRES_HOST_AUTH_METHOD: scram-sha-256
+    # Existing trust-authenticated volumes must be backed up and upgraded by
+    # the operator. Never delete data or silently change access controls.
+    command:
+      - sh
+      - -ec
+      - |
+        if [ -f /var/lib/postgresql/data/pg_hba.conf ] &&
+           grep -Eq '^[[:space:]]*host[^[:space:]]*[[:space:]].*[[:space:]]trust([[:space:]]|$)' /var/lib/postgresql/data/pg_hba.conf; then
+          echo 'Legacy PostgreSQL host trust authentication detected. Back up the volume and follow docs/postgres-auth-migration.md.' >&2
+          exit 1
+        fi
         exec docker-entrypoint.sh postgres
-      "
     volumes:
       - postgres_data:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U postgres -d ai_caller"]
+      test: ["CMD-SHELL", "pg_isready -U \"$POSTGRES_USER\" -d \"$POSTGRES_DB\""]
       interval: 5s
       timeout: 5s
       retries: 20
@@ -48,7 +52,7 @@ services:
     <<: *app
     restart: "no"
     environment:
-      DATABASE_URL: ${DATABASE_URL:-postgresql://postgres:ai_caller_auto_pass@postgres:5432/ai_caller}
+      DATABASE_URL: ${DATABASE_URL:?Set an authenticated DATABASE_URL with the postgres Docker host}
     depends_on:
       postgres:
         condition: service_healthy
@@ -63,7 +67,7 @@ services:
       HOSTNAME: 0.0.0.0
       VOICE_RECORDING_ALLOW_PERSISTENT_FILESYSTEM: "true"
       VOICE_RECORDING_DIR: /app/.data/recordings
-      DATABASE_URL: ${DATABASE_URL:-postgresql://postgres:ai_caller_auto_pass@postgres:5432/ai_caller}
+      DATABASE_URL: ${DATABASE_URL:?Set an authenticated DATABASE_URL with the postgres Docker host}
     depends_on:
       migrate:
         condition: service_completed_successfully
@@ -82,7 +86,7 @@ services:
     <<: *app
     restart: unless-stopped
     environment:
-      DATABASE_URL: ${DATABASE_URL:-postgresql://postgres:ai_caller_auto_pass@postgres:5432/ai_caller}
+      DATABASE_URL: ${DATABASE_URL:?Set an authenticated DATABASE_URL with the postgres Docker host}
     depends_on:
       migrate:
         condition: service_completed_successfully
@@ -97,7 +101,7 @@ services:
     environment:
       NODE_ENV: production
       VOICE_GATEWAY_PORT: "3002"
-      DATABASE_URL: ${DATABASE_URL:-postgresql://postgres:ai_caller_auto_pass@postgres:5432/ai_caller}
+      DATABASE_URL: ${DATABASE_URL:?Set an authenticated DATABASE_URL with the postgres Docker host}
     depends_on:
       migrate:
         condition: service_completed_successfully
