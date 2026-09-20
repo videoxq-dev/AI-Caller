@@ -19,8 +19,13 @@ describe("agent capability policy", () => {
 
   it("rejects disabled booking even when the planner supplies a well-formed action", () => {
     const policy = agentCapabilitiesSchema.parse({ ...defaultAgentCapabilities, BOOK_APPOINTMENT: false });
-    expect(() => assertAgentActionAllowed(policy, "BOOK_APPOINTMENT"))
-      .toMatchObject({ code: "AGENT_ACTION_DISABLED", status: 403 });
+    try {
+      assertAgentActionAllowed(policy, "BOOK_APPOINTMENT");
+      throw new Error("Expected booking to be blocked.");
+    } catch (error) {
+      expect(error).toBeInstanceOf(AppError);
+      expect(error).toMatchObject({ code: "AGENT_ACTION_DISABLED", status: 403 });
+    }
     expect(() => assertAgentActionAllowed(policy, "CHECK_AVAILABILITY")).not.toThrow();
   });
 });
