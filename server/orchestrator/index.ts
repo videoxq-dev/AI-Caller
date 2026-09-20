@@ -159,9 +159,9 @@ export function createResponseOrchestrator(dependencies: OrchestratorDependencie
 
       // Only private test mode may use a DRAFT or PAUSED agent. Live inbound turns
       // are suppressed before invoking or charging an AI provider.
-      if (context.source !== "AGENT_TEST" && context.agent) {
-        const capabilities = capabilitiesFromBehaviorSettings(context.agent.behaviorSettings);
-        if (context.agent.status !== "ACTIVE" || !capabilities.ANSWER_INQUIRY) {
+      if (context.source === "INBOUND_TURN") {
+        const capabilities = context.agent ? capabilitiesFromBehaviorSettings(context.agent.behaviorSettings) : null;
+        if (!context.agent || context.agent.status !== "ACTIVE" || !capabilities?.ANSWER_INQUIRY) {
           return { reply: null, handlingMode: "AI" as const, action: { type: "NONE" as const },
             toolResult: { kind: "none" as const, data: {} } };
         }
