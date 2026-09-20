@@ -9,6 +9,7 @@ import { loadRealtimeRateSnapshots, type RealtimeVoiceModel } from "@/server/bil
 
 export type VoiceTechnology = "STANDARD" | "REALTIME";
 export const REALTIME_MIN_START_CREDITS = 500;
+export const REALTIME_MAX_START_CREDITS = 1500;
 
 export async function getVoiceTechnology(workspaceId: string) {
   const [row] = await db.select().from(workspaceVoiceTechnology)
