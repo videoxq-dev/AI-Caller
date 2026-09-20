@@ -79,10 +79,17 @@ export async function runRealtimeBusinessTool(input: {
     || call.metadata.realtimeStreamId !== input.streamId) {
     return { ok: false, reason: "The call is no longer authorized for AI actions." };
   }
-  // Realtime uses the same current policy as Standard voice, not only a prompt allowlist.
-  const policy = await requireActiveWorkspaceAgent(input.workspaceId);
-  if (input.name === "capture_booking_details") {
-    assertAgentActionAllowed(policy.capabilities, "BOOK_APPOINTMENT");
+  // A disabled capability should produce a tool denial, not crash an active call.
+  try {
+    const policy = await requireActiveWorkspaceAgent(input.workspaceId, "ANSWER_INQUIRY");
+    if (input.name === "capture_booking_details") {
+      assertAgentActionAllowed(policy.capabilities, "BOOK_APPOINTMENT");
+    }
+  } catch (error) {
+    if (error instanceof AppError && error.status < 500) {
+      return { ok: false as const, reason: error.message };
+    }
+    throw error;
   }
   let args: Record<string, unknown>;
   try { args = record(JSON.parse(input.arguments)); }
