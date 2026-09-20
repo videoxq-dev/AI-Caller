@@ -367,7 +367,8 @@ export function attachRealtimeMedia({ telnyx, identity, streamId }: BridgeOption
       const instructions = await realtimeSystemInstructions(workspaceId, call.conversationId);
       if (!open) return;
       const env = getEnv();
-      if (!env.VOICE_REALTIME_ENABLED || !env.HOSTED_AI_API_KEY) throw new Error("Realtime configuration disabled.");
+      if (!env.VOICE_REALTIME_ENABLED || env.HOSTED_AI_PROVIDER !== "openai"
+        || !env.HOSTED_AI_API_KEY) throw new Error("Realtime configuration disabled.");
       const model = call.metadata.realtimeModel;
       if (model !== "gpt-realtime-2.1" && model !== "gpt-realtime-2.1-mini")
         throw new Error("Invalid per-call Realtime model.");
