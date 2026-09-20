@@ -1,4 +1,6 @@
 import { calendarBookingService } from "@/server/domain/core/calendar-booking";
+import { getAgentPolicySnapshot } from "@/server/agent/service";
+import { assertAgentActionAllowed } from "@/server/agent/capabilities";
 import type { AIProvider } from "@/server/providers/contracts";
 import { buildAgentTestContext, type OrchestratorMessage } from "./context";
 import { createResponseOrchestrator } from "./index";
@@ -13,6 +15,13 @@ async function executeTestTools(
   _contactId: string,
   envelope: OrchestratorEnvelope,
 ): Promise<OrchestratorToolResult> {
+  const agent = await getAgentPolicySnapshot(workspaceId);
+  if (envelope.contact) assertAgentActionAllowed(agent.capabilities, "UPDATE_CONTACT");
+  if (envelope.lead) assertAgentActionAllowed(agent.capabilities, "UPDATE_LEAD");
+  if (envelope.lead?.status === "QUALIFIED") assertAgentActionAllowed(agent.capabilities, "QUALIFY_LEAD");
+  if (envelope.action.type !== "NONE" && !(envelope.action.type === "RECORD_SMS_CONSENT" && envelope.action.status === "OPTED_OUT")) {
+    assertAgentActionAllowed(agent.capabilities, envelope.action.type);
+  }
   const captured = {
     ...(envelope.contact ? { contact: envelope.contact, contactUpdateSimulated: true } : {}),
     ...(envelope.lead ? { lead: envelope.lead, leadUpdateSimulated: true } : {}),
