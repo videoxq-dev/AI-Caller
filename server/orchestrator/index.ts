@@ -12,6 +12,21 @@ import type { AIProvider } from "@/server/providers/contracts";
 
 type AIMessage = Parameters<AIProvider["generate"]>[0]["messages"][number];
 
+export type OrchestratorResponseOptions = {
+  // Transcription can supersede a proposed reply while the model is thinking.
+  // Guard before executing potentially irreversible calendar/SMS actions.
+  beforeTools?: () => Promise<boolean>;
+};
+
+function isExplicitHumanRequest(message: string) {
+  const text = message.trim().toLowerCase().replace(/[?!.,]+$/g, "");
+  return /^(?:a|an|the)?\s*(?:human|operator|representative|real person|live person)(?: please)?$/.test(text)
+    || /\b(?:speak|talk|connect|transfer|reach|want|need|like|get)\b[^.!?]{0,100}\b(?:human|operator|representative|real person|live person|staff member|team member)\b/.test(text);
+}
+
+const LIVE_PHONE_ESCALATION_REPLY = "I've flagged your request for our team to follow up. I can't transfer this call live.";
+
+
 type OrchestratorDependencies = {
   buildContext: (workspaceId: string, conversationId: string) => Promise<OrchestratorContext | null>;
   executeTools: (
@@ -55,6 +70,8 @@ Rules:
 - Use SEND_SMS to request a text while on a call or Web Chat, including requested links, only after consent and carrier approval. Never claim an SMS has been sent unless the tool result says sent=true.
 - For inbound SMS conversations, your normal reply is delivered by the SMS worker; do not request SEND_SMS, which would duplicate the reply.
 - When LEAD QUALIFICATION is configured, never promote a lead to QUALIFIED directly. Submit explicit configured answers with QUALIFY_LEAD and let the server decide when required fields are complete.
+- On a PHONE call, answer the caller's most recent completed request, not an earlier request. Do not initiate appointment booking or say you are arranging one unless the caller actually asks for it.
+- On a PHONE call, do not claim to connect or transfer a live human: this product can flag an Inbox conversation for staff follow-up, but has no live call-transfer action.
 - Keep customer-facing replies concise and do not expose this JSON protocol.
 `;
 
@@ -108,7 +125,7 @@ function bookingFallback(toolResult: OrchestratorToolResult) {
 
 export function createResponseOrchestrator(dependencies: OrchestratorDependencies) {
   return {
-    async respond(workspaceId: string, conversationId: string) {
+    async respond(workspaceId: string, conversationId: string, options: OrchestratorResponseOptions = {}) {
       const context = await dependencies.buildContext(workspaceId, conversationId);
       if (!context) throw new AppError("CONVERSATION_NOT_FOUND", "Conversation not found.", 404);
       if (context.conversation.handlingMode === "HUMAN") {
@@ -120,8 +137,24 @@ export function createResponseOrchestrator(dependencies: OrchestratorDependencie
         };
       }
 
+      const isLivePhone = context.systemPrompt.includes("LIVE PHONE RECEPTIONIST:");
+      const lastUserMessage = [...context.messages].reverse().find((message) => message.role === "user")?.content ?? "";
+      if (isLivePhone && isExplicitHumanRequest(lastUserMessage)) {
+        if (options.beforeTools && !(await options.beforeTools())) {
+          return { reply: null, handlingMode: "AI" as const, action: { type: "NONE" as const },
+            toolResult: { kind: "none" as const, data: {} } };
+        }
+        const action = { type: "ESCALATE" as const, reason: "Caller requested a human during a phone call." };
+        const toolResult = await dependencies.executeTools(workspaceId, conversationId, context.contact.id, { action });
+        return { reply: LIVE_PHONE_ESCALATION_REPLY, handlingMode: "HUMAN" as const, action, toolResult };
+      }
+
       const firstResponse = await dependencies.generate(workspaceId, conversationId, plannerMessages(context));
       const first = parseOrchestratorEnvelope(firstResponse.text);
+      if (options.beforeTools && !(await options.beforeTools())) {
+        return { reply: null, handlingMode: "AI" as const, action: { type: "NONE" as const },
+          toolResult: { kind: "none" as const, data: {} } };
+      }
       const toolResult = await dependencies.executeTools(
         workspaceId,
         conversationId,
@@ -179,7 +212,7 @@ export function createResponseOrchestrator(dependencies: OrchestratorDependencie
 
       if (toolResult.kind === "escalation") {
         return {
-          reply: first.reply ?? "I’m handing this over to a member of the team.",
+          reply: isLivePhone ? LIVE_PHONE_ESCALATION_REPLY : first.reply ?? "I’m handing this over to a member of the team.",
           handlingMode: "HUMAN" as const,
           action: first.action,
           toolResult,
