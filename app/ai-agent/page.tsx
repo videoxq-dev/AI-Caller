@@ -232,27 +232,25 @@ export default function AIAgentPage() {
         <header className="agentTopbar">
           <label className="agentGlobalSearch"><SearchIcon /><input placeholder="Search contacts, appointments, or anything..." /><kbd>⌘ K</kbd></label>
           <div className="agentTopActions">
-            <button className="agentOnlinePill" type="button"><i />AI Agent Online <ChevronDown /></button>
-            <button className="agentCredits" type="button"><MessageIcon size={15} />2,480 credits</button>
-            <button className="agentBell" type="button" aria-label="Notifications">♧<i /></button>
-            <div className="profileBlock agentProfile"><span className="avatar">B</span><span className="profileCopy"><strong>Bella</strong><small>Wellness Juvi</small></span><ChevronDown /></div>
+            <Link className="agentOnlinePill" href="/settings">Phone &amp; Messaging settings</Link>
           </div>
         </header>
 
         <div className="agentBody">
           <div className="agentTitleRow">
             <div><h1>AI Agent</h1><p>Configure, train and test your AI agent.</p></div>
-            <div className="agentTitleActions"><span className={`agentState ${agentOnline ? "online" : "paused"}`}><i />{agentOnline ? "Agent Online" : "Agent Paused"}</span><button type="button" disabled={savingSettings} onClick={() => void saveChanges()}>{savingSettings ? "Saving…" : saved ? "Saved" : "Save changes"}</button></div>
+            <div className="agentTitleActions"><span className={`agentState ${agentStatus === "ACTIVE" ? "online" : "paused"}`}><i />{loadingSettings ? "Loading status…" : `Agent ${agentStatus.toLowerCase()}`}</span><button type="button" disabled={savingSettings || loadingSettings || !canManage} onClick={() => void saveChanges()}>{savingSettings ? "Saving…" : saved ? "Saved" : "Save changes"}</button></div>
           </div>
 
           {settingsError && <div className="agentSettingsError">{settingsError}</div>}
           <div className="agentTabs" role="tablist" aria-label="AI Agent sections">
-            {(["overview", "knowledge", "behavior", "test"] as AgentTab[]).map((item) => <button key={item} type="button" className={tab === item ? "active" : ""} onClick={() => setTab(item)}>{item[0].toUpperCase() + item.slice(1)}</button>)}
+            {(["overview", "knowledge", "behavior", "capabilities", "test"] as AgentTab[]).map((item) => <button key={item} type="button" className={tab === item ? "active" : ""} onClick={() => setTab(item)}>{item[0].toUpperCase() + item.slice(1)}</button>)}
           </div>
 
-          {tab === "overview" && <OverviewTab agentOnline={agentOnline} setAgentOnline={setAgentOnline} channels={channels} setChannels={setChannels} setTab={setTab} />}
-          {tab === "knowledge" && <KnowledgeTab />}
+          {tab === "overview" && <OverviewTab agentName={assistantName} status={agentStatus} onStatusChange={updateStatus} canManage={canManage} loading={loadingSettings || savingSettings} setTab={setTab} />}
+          {tab === "knowledge" && <KnowledgeTab counts={knowledgeCounts} />}
           {tab === "behavior" && <BehaviorTab tone={tone} setTone={setTone} goal={goal} setGoal={setGoal} whenUnsure={whenUnsure} setWhenUnsure={setWhenUnsure} verbosity={verbosity} setVerbosity={setVerbosity} guardrails={guardrails} setGuardrails={setGuardrails} assistantName={assistantName} setAssistantName={setAssistantName} openingMessage={openingMessage} setOpeningMessage={setOpeningMessage} escalationMessage={escalationMessage} setEscalationMessage={setEscalationMessage} voiceProfile={voiceProfile} setVoiceProfile={setVoiceProfile} voiceLanguage={voiceLanguage} setVoiceLanguage={setVoiceLanguage} voiceSpeed={voiceSpeed} setVoiceSpeed={setVoiceSpeed} recordingPolicy={recordingPolicy} setRecordingPolicy={setRecordingPolicy} afterHoursEnabled={afterHoursEnabled} setAfterHoursEnabled={setAfterHoursEnabled} qualificationEnabled={qualificationEnabled} setQualificationEnabled={setQualificationEnabled} qualificationCriteria={qualificationCriteria} setQualificationCriteria={setQualificationCriteria} />}
+          {tab === "capabilities" && <CapabilitiesTab catalog={capabilityCatalog} capabilities={capabilities} setCapabilities={setCapabilities} onSave={saveCapabilities} loading={loadingSettings || savingSettings} canManage={canManage} />}
           {tab === "test" && <TestTab />}
         </div>
       </section>
