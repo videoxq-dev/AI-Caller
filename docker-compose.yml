@@ -116,12 +116,23 @@ services:
     command: ["npm", "run", "voice-gateway"]
     expose:
       - "3002"
+    # DeployOS Traefik runs on the external "edge" network. Retain the
+    # private default network for Postgres, and expose only via Traefik.
+    networks:
+      default: {}
+      edge:
+        aliases:
+          - aicaller-voice-gateway
     healthcheck:
       test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:3002/health', {signal:AbortSignal.timeout(5000)}).then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
       interval: 30s
       timeout: 8s
       start_period: 30s
       retries: 3
+
+networks:
+  edge:
+    external: true
 
 volumes:
   postgres_data:
