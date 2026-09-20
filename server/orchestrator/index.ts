@@ -89,10 +89,10 @@ Rules:
 function actionProtocolFor(context: OrchestratorContext) {
   if (!context.agent) return ACTION_PROTOCOL;
   const policy = capabilitiesFromBehaviorSettings(context.agent.behaviorSettings);
-  return ACTION_PROTOCOL.split("\\n").filter((line) => {
-    const action = /^- \\{ "type": "([A-Z_]+)"/.exec(line)?.[1];
+  return ACTION_PROTOCOL.split("\n").filter((line) => {
+    const action = /^- \{ "type": "([A-Z_]+)"/.exec(line)?.[1];
     return !action || action === "NONE" || policy[action as keyof typeof policy] === true;
-  }).join("\\n");
+  }).join("\n");
 }
 
 function plannerMessages(context: OrchestratorContext): AIMessage[] {
