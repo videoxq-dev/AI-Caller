@@ -52,6 +52,7 @@ docker exec -u postgres "$container" sh -eu -c '
   database=${POSTGRES_DB:-ai_caller}
   export PGOPTIONS="-c default_transaction_read_only=on -c statement_timeout=15000"
   psql -X -q -w -v ON_ERROR_STOP=1 -At -U "$role" -d "$database" <<SQL
+BEGIN TRANSACTION ISOLATION LEVEL REPEATABLE READ READ ONLY;
 SELECT '\''pg_version='\'' || current_setting('\''server_version'\'');
 SELECT '\''role_uses_scram='\'' || COALESCE((SELECT (rolpassword LIKE '\''SCRAM-SHA-256$%'\'')::text FROM pg_authid WHERE rolname = current_user), '\''false'\'');
 SELECT '\''hba_parse_errors='\'' || count(*) FROM pg_hba_file_rules WHERE error IS NOT NULL;
@@ -65,6 +66,7 @@ SELECT '\''credit_wallets='\'' || count(*) FROM public.credit_wallets;
 SELECT '\''credit_ledger='\'' || count(*) FROM public.credit_ledger;
 SELECT '\''credit_wallet_total_credits='\'' || COALESCE(sum(balance), 0) FROM public.credit_wallets;
 SELECT '\''credit_ledger_amount_total_credits='\'' || COALESCE(sum(amount), 0) FROM public.credit_ledger;
+COMMIT;
 SQL
 '
 
