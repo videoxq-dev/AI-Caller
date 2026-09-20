@@ -158,11 +158,16 @@ wss.on("connection", (ws, request) => {
     if (frame.event === "stop") {
       if (realtime) void realtime.stop();
       else ws.close(1000, "Stream ended");
+      return;
+    }
+    if (frame.event === "error") {
+      if (realtime) void realtime.stop(false);
+      ws.close(1011, "Carrier media stream error");
     }
   });
 
-  ws.on("close", () => {
-    if (realtime) void realtime.stop();
+  ws.on("close", (code) => {
+    if (realtime) void realtime.stop(code === 1000);
     logger.info(
       { workspaceId: auth.workspaceId, callId: auth.callId, mediaFrames, mediaBytes },
       "Inbound voice media stream closed",
