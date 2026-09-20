@@ -41,3 +41,7 @@ for (const [name, path] of checks) {
 }
 console.log("Telnyx authenticated. Read-only checks passed: " + verified + "; unavailable: " + blocked + ".");
 console.log("Carrier approvals, assignment, delivery and STOP handling remain unverified.");
+if (blocked > 0) {
+  // Do not let a green job imply that restricted carrier capabilities passed.
+  process.exitCode = 1;
+}

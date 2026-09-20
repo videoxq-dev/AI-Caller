@@ -292,7 +292,9 @@ jobs:
 
   telnyx_readonly:
     name: Telnyx read-only API smoke
-    if: github.event_name == 'push' && github.ref == 'refs/heads/feat/issue-24-messaging-compliance'
+    # Explicit operator-triggered live API check only; never expose the
+    # protected Telnyx key to PRs or run carrier probes for every push.
+    if: github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     timeout-minutes: 5
     environment: AI-Caller
