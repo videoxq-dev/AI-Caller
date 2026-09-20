@@ -310,7 +310,7 @@ function OverviewTab({ agentName, status, onStatusChange, canManage, loading, se
       <article className="agentCard recentConversationsCard">
         <div className="agentCardHeader"><h3>Recent activity</h3><Link href="/inbox">Open Inbox</Link></div>
         {dashboard ? dashboard.activity.length
-          ? dashboard.activity.map((item) => <div className="recentRow" key={item.id}>
+          ? dashboard.activity.map((item) => <div className="agentActivityRow" key={item.id}>
               <Link href={item.href}><strong>{item.label}</strong></Link><span>{item.detail}</span>
               <time>{new Date(item.occurredAt).toLocaleString()}</time>
             </div>)
