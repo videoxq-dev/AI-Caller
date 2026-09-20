@@ -202,6 +202,18 @@ jobs:
       - name: Milestone 10 billing and admin browser acceptance verification
         run: npm run test:browser:m10
 
+      - name: Phase 1 AI Agent browser acceptance verification
+        run: npm run test:browser:phase1
+
+      - name: Upload Phase 1 AI Agent browser screenshots
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: phase1-agent-browser-verification
+          path: artifacts/phase1-agent
+          if-no-files-found: warn
+          retention-days: 14
+
       - name: Upload Milestone 3 browser screenshots
         if: always()
         uses: actions/upload-artifact@v4
