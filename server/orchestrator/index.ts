@@ -178,8 +178,30 @@ export function createResponseOrchestrator(dependencies: OrchestratorDependencie
             toolResult: { kind: "none" as const, data: {} } };
         }
         const action = { type: "ESCALATE" as const, reason: "Caller requested a human during a phone call." };
-        const toolResult = await dependencies.executeTools(workspaceId, conversationId, context.contact.id, { action });
-        return { reply: LIVE_PHONE_ESCALATION_REPLY, handlingMode: "HUMAN" as const, action, toolResult };
+        const noEscalation = {
+          reply: "I can't arrange staff follow-up from this call. Please contact the business directly to speak with the team.",
+          handlingMode: "AI" as const,
+          action: { type: "NONE" as const },
+          toolResult: { kind: "none" as const, data: {} },
+        };
+        if (context.agent && !capabilitiesFromBehaviorSettings(context.agent.behaviorSettings).ESCALATE) {
+          return noEscalation;
+        }
+        try {
+          const toolResult = await dependencies.executeTools(workspaceId, conversationId, context.contact.id, { action });
+          return { reply: LIVE_PHONE_ESCALATION_REPLY, handlingMode: "HUMAN" as const, action, toolResult };
+        } catch (error) {
+          if (error instanceof AppError && error.code === "AGENT_ACTION_DISABLED") return noEscalation;
+          if (error instanceof AppError && (
+            error.code === "AGENT_NOT_ACTIVE" || error.code === "AGENT_NOT_CONFIGURED"
+            || error.code === "CONVERSATION_HUMAN_HANDLING"
+          )) {
+            return { reply: null, handlingMode: "AI" as const,
+              action: { type: "NONE" as const },
+              toolResult: { kind: "none" as const, data: {} } };
+          }
+          throw error;
+        }
       }
 
       const firstResponse = await dependencies.generate(workspaceId, conversationId, plannerMessages(context));
