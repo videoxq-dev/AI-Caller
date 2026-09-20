@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import { createResponseOrchestrator } from "./index";
 import { parseOrchestratorEnvelope } from "./tools";
+import { defaultAgentCapabilities } from "@/server/agent/capabilities";
 
 function fakeContext(handlingMode: "AI" | "HUMAN" = "AI") {
   return {
@@ -40,6 +41,57 @@ describe("orchestrator response protocol", () => {
         timezone: "Definitely/Not-A-Timezone",
       },
     }))).toThrow("invalid orchestration action");
+  });
+
+
+  it.each(["DRAFT", "PAUSED"] as const)("does not call AI or tools for a %s live agent", async status => {
+    const generate = vi.fn();
+    const executeTools = vi.fn();
+    const orchestrator = createResponseOrchestrator({
+      buildContext: vi.fn(async () => ({
+        ...fakeContext(), source: "INBOUND_TURN" as const,
+        agent: { id: "agent-1", status, escalationMessage: null,
+          behaviorSettings: { capabilities: { ...defaultAgentCapabilities } } },
+      })),
+      executeTools, generate,
+    });
+    const result = await orchestrator.respond("workspace", "conversation");
+    expect(result.reply).toBeNull();
+    expect(generate).not.toHaveBeenCalled();
+    expect(executeTools).not.toHaveBeenCalled();
+  });
+
+  it("does not invoke AI if answering is disabled, even without installed workflows", async () => {
+    const generate = vi.fn();
+    const orchestrator = createResponseOrchestrator({
+      buildContext: vi.fn(async () => ({
+        ...fakeContext(), source: "INBOUND_TURN" as const,
+        agent: { id: "agent-1", status: "ACTIVE" as const, escalationMessage: null,
+          behaviorSettings: { capabilities: { ...defaultAgentCapabilities, ANSWER_INQUIRY: false } } },
+      })),
+      executeTools: vi.fn(), generate,
+    });
+    const result = await orchestrator.respond("workspace", "conversation");
+    expect(result.reply).toBeNull();
+    expect(generate).not.toHaveBeenCalled();
+  });
+
+  it("uses default agent behavior without a configured workflow", async () => {
+    const generate = vi.fn(async () => ({ text: JSON.stringify({ action: { type: "NONE" },
+      reply: "We offer the services in our approved business profile." }) }));
+    const executeTools = vi.fn(async () => ({ kind: "none" as const, data: {} }));
+    const orchestrator = createResponseOrchestrator({
+      buildContext: vi.fn(async () => ({
+        ...fakeContext(), source: "INBOUND_TURN" as const,
+        agent: { id: "agent-1", status: "ACTIVE" as const, escalationMessage: null,
+          behaviorSettings: { capabilities: { ...defaultAgentCapabilities } } },
+      })),
+      executeTools, generate,
+    });
+    expect((await orchestrator.respond("workspace", "conversation")).reply)
+      .toContain("approved business profile");
+    expect(executeTools).toHaveBeenCalledOnce();
+    expect(generate).toHaveBeenCalledOnce();
   });
 
   it("does not invoke AI while a human owns the conversation", async () => {
