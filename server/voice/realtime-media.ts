@@ -248,6 +248,7 @@ export function attachRealtimeMedia({ telnyx, identity, streamId }: BridgeOption
     const result = await runRealtimeBusinessTool({
       workspaceId, callId, streamId, conversationId: call.conversationId, contactId: call.contactId,
       name: item.name, arguments: item.arguments,
+      isCurrentTurn: () => open && epoch === callerSpeechEpoch,
     });
     if (!open) return;
     if (result.ok && result.kind === "escalation") toolEscalated = true;
