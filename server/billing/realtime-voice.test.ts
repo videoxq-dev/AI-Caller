@@ -21,6 +21,7 @@ const telnyxUnits: HostedPricingUnit[] = [
   "VOICE_REALTIME_CARRIER_MINUTE",
   "VOICE_REALTIME_STREAM_MINUTE",
   "VOICE_REALTIME_RECORDING_MINUTE",
+  "VOICE_REALTIME_TRANSCRIPTION_MINUTE",
 ];
 function rate(model: string, unit: HostedPricingUnit, micros: number, unitsPerCost: number): HostedRate {
   return {
@@ -32,7 +33,7 @@ function rate(model: string, unit: HostedPricingUnit, micros: number, unitsPerCo
 function rates(model: RealtimeVoiceModel) {
   return {
     ai: aiUnits.map((unit, i) => rate(model, unit, openai[model][i], 1_000_000)),
-    telnyx: telnyxUnits.map((unit, i) => rate("realtime-us-local", unit, [5200, 3500, 2000][i], 1)),
+    telnyx: telnyxUnits.map((unit, i) => rate("realtime-us-local", unit, [5200, 3500, 2000, 15000][i], 1)),
   };
 }
 const usage: RealtimeVoiceBill["usage"] = {
@@ -55,10 +56,10 @@ describe("realtime voice pricing / 50% cost markup", () => {
     const r = rates("gpt-realtime-2.1");
     const q = quoteRealtimeVoiceFromRates(sample("gpt-realtime-2.1"), r.ai, r.telnyx);
     expect(q.pricingDetails.openaiProviderCostMicros).toBe(60800);
-    expect(q.pricingDetails.telnyxProviderCostMicros).toBe(10700);
-    expect(q.providerCostMicros).toBe(71500);
-    expect(q.retailMicros).toBe(107250);
-    expect(q.credits).toBe(108);
+    expect(q.pricingDetails.telnyxProviderCostMicros).toBe(25700);
+    expect(q.providerCostMicros).toBe(86500);
+    expect(q.retailMicros).toBe(129750);
+    expect(q.credits).toBe(130);
     expect(q.pricingDetails.markupBps).toBe(5000);
   });
 
@@ -66,9 +67,9 @@ describe("realtime voice pricing / 50% cost markup", () => {
     const r = rates("gpt-realtime-2.1-mini");
     const q = quoteRealtimeVoiceFromRates(sample("gpt-realtime-2.1-mini"), r.ai, r.telnyx);
     expect(q.pricingDetails.openaiProviderCostMicros).toBe(16680);
-    expect(q.providerCostMicros).toBe(27380);
-    expect(q.retailMicros).toBe(41070);
-    expect(q.credits).toBe(42);
+    expect(q.providerCostMicros).toBe(42380);
+    expect(q.retailMicros).toBe(63570);
+    expect(q.credits).toBe(64);
   });
 
   it("bills cached audio and cached text subsets at their cached rates exactly once", () => {
@@ -80,8 +81,8 @@ describe("realtime voice pricing / 50% cost markup", () => {
     expect(q.billedUnits.VOICE_REALTIME_AUDIO_CACHED_INPUT_TOKEN).toBe(100);
     expect(q.billedUnits.VOICE_REALTIME_TEXT_INPUT_TOKEN).toBe(1500);
     expect(q.billedUnits.VOICE_REALTIME_TEXT_CACHED_INPUT_TOKEN).toBe(500);
-    expect(q.providerCostMicros).toBe(26140);
-    expect(q.credits).toBe(40);
+    expect(q.providerCostMicros).toBe(41140);
+    expect(q.credits).toBe(62);
   });
 
   it("charges started carrier minutes and omits recording cost when declined", () => {
@@ -92,8 +93,8 @@ describe("realtime voice pricing / 50% cost markup", () => {
     expect(q.billedUnits.VOICE_REALTIME_CARRIER_MINUTE).toBe(2);
     expect(q.billedUnits.VOICE_REALTIME_STREAM_MINUTE).toBe(2);
     expect(q.billedUnits.VOICE_REALTIME_RECORDING_MINUTE).toBeUndefined();
-    expect(q.providerCostMicros).toBe(34080);
-    expect(q.credits).toBe(52);
+    expect(q.providerCostMicros).toBe(64080);
+    expect(q.credits).toBe(97);
   });
 
   it("rejects impossible cached usage and unsupported number types", () => {
