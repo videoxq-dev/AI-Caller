@@ -221,7 +221,9 @@ export function attachRealtimeMedia({ telnyx, identity, streamId }: BridgeOption
       || responseStatuses.get(responseId) !== "completed"
       || (responseToolCounts.get(responseId) ?? 0) !== 0) return;
     resumedToolResponses.add(responseId);
-
+    sendOpenAI({ type: "response.create", response: toolEscalated
+      ? { instructions: "Say only: I have flagged your request for staff follow-up. I cannot transfer this call live. Do not call more tools.", tool_choice: "none" }
+      : {} });
     if (toolEscalated) {
       sendOpenAI({ type: "session.update", session: { type: "realtime",
         audio: { input: { turn_detection: { type: "semantic_vad",
@@ -247,9 +249,6 @@ export function attachRealtimeMedia({ telnyx, identity, streamId }: BridgeOption
     sendOpenAI({ type: "conversation.item.create", item: {
       type: "function_call_output", call_id: item.call_id, output: JSON.stringify(result),
     } });
-    sendOpenAI({ type: "response.create", response: toolEscalated
-      ? { instructions: "Say only: I have flagged your request for staff follow-up. I cannot transfer this call live. Do not call more tools.", tool_choice: "none" }
-      : {} });
   }
 
   function onRealtimeMessage(payload: WebSocket.RawData) {
