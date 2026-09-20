@@ -142,6 +142,56 @@ describe("credits", () => {
     expect(await db.select().from(creditLedger).where(eq(creditLedger.workspaceId, workspaceId))).toHaveLength(0);
   });
 
+  it("settles a prefunded Realtime voice call once and refunds unused credits", async () => {
+    await db.insert(creditWallets).values({ workspaceId, balance: 500 });
+    const hold = await reserveCredits(workspaceId, 300, {
+      referenceType: "VOICE_REALTIME_HOLD", referenceId: "call-under",
+    });
+    const charge = {
+      reason: "Hosted Realtime inbound voice call",
+      referenceType: "VOICE_CALL", referenceId: "call-under",
+    };
+    expect(await settleCreditReservation(workspaceId, hold.id, 100, charge)).toBe(400);
+    expect(await settleCreditReservation(workspaceId, hold.id, 100, charge)).toBe(400);
+    const entries = await db.select().from(creditLedger).where(eq(creditLedger.workspaceId, workspaceId));
+    expect(entries).toHaveLength(1);
+    expect(entries[0]).toMatchObject({ type: "DEBIT", amount: -100 });
+    const [reservation] = await db.select().from(creditReservations)
+      .where(eq(creditReservations.id, hold.id));
+    expect(reservation).toMatchObject({ status: "SETTLED", actualAmount: 100 });
+  });
+
+  it("charges unavoidable Realtime voice overage even after held credits are exhausted", async () => {
+    await db.insert(creditWallets).values({ workspaceId, balance: 500 });
+    const hold = await reserveCredits(workspaceId, 300, {
+      referenceType: "VOICE_REALTIME_HOLD", referenceId: "call-over",
+    });
+    const charge = {
+      reason: "Hosted Realtime inbound voice call",
+      referenceType: "VOICE_CALL", referenceId: "call-over",
+    };
+    expect(await settleCreditReservation(workspaceId, hold.id, 700, charge)).toBe(-200);
+    expect(await settleCreditReservation(workspaceId, hold.id, 700, charge)).toBe(-200);
+    const entries = await db.select().from(creditLedger).where(eq(creditLedger.workspaceId, workspaceId));
+    expect(entries).toHaveLength(1);
+    expect(entries[0]).toMatchObject({
+      type: "DEBIT", amount: -700, balanceAfter: -200,
+    });
+  });
+
+  it("does not allow ordinary reservations to bypass the Realtime-only overage rule", async () => {
+    await db.insert(creditWallets).values({ workspaceId, balance: 5 });
+    const hold = await reserveCredits(workspaceId, 4, {
+      referenceType: "ORCHESTRATOR_RESERVATION", referenceId: "call-ordinary",
+    });
+    await expect(settleCreditReservation(workspaceId, hold.id, 6, {
+      reason: "Hosted text AI",
+      referenceType: "ORCHESTRATOR_CALL", referenceId: "call-ordinary",
+    })).rejects.toThrow("not enough hosted credits");
+    expect((await db.select().from(creditWallets))[0].balance).toBe(1);
+    expect(await db.select().from(creditLedger)).toHaveLength(0);
+  });
+
   it("records unavoidable provider spend even when it creates a negative balance", async () => {
     await db.insert(creditWallets).values({ workspaceId, balance: 2 });
     const input = {

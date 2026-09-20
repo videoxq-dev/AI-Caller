@@ -1,0 +1,154 @@
+# V2 — Live basic AI receptionist: local acceptance contract
+
+**Business objective:** A real caller dials a customer-authorized AI Caller-managed Telnyx US number, hears the configured assistant, speaks one business-knowledge question, and hears a grounded answer produced through the owner's global **direct OpenAI GPT-5.6 Luna** account. This is the *basic turn-based receptionist* gate, not yet V3 real-time interruption/latency acceptance.
+
+**Gate status:** Awaiting a real local inbound call. CI's guarded Telnyx/OpenAI fixtures are useful regression checks but cannot certify voice quality or actual carrier routing. This stage does not require US 10DLC SMS registration and must not send any unapproved outbound SMS.
+
+If cloud signup returns `Unable to create account` with PostgreSQL `ECONNREFUSED`, first complete `docs/cloud-deployment-signup-database.md` and run `npm run verify:deployment` **inside the deployed web container**. Do not purchase a number before signup and database readiness work.
+
+## Prerequisites and cost warning
+
+- V1 local provider probe accepted, including both real API credentials and the Telnyx webhook-signing public key.
+- A workspace with completed business profile, one configured AI Agent, at least one approved FAQ/service/price that can be asked about during the call, and sufficient credits to purchase and exercise a managed number.
+- A **public HTTPS tunnel** (or staging URL) terminating at your local Next.js app on port 3000. Telnyx cannot call `http://localhost:3000` from its infrastructure.
+- A separately reachable database, app, and worker. Telnyx number search and purchasing may incur carrier/credit charges; confirm the displayed price before pressing the button. Do not create a duplicate Call Control application manually: managed number provisioning creates one.
+- `HOSTED_WEBHOOK_BASE_URL` must point to the **app** on port 3000, not to the voice media gateway on port 3002.
+- The current `voice/gateway.ts` only authenticates/counts media; V2 uses Telnyx Call Control transcription webhooks and `speak`. Leave `VOICE_GATEWAY_URL` unset unless you intentionally have a publicly reachable gateway. The worker remains required for phone order reconciliation.
+
+## September 20 live-call follow-up — incoherent replies and truthful handoff
+
+The second live call confirmed **recording archival and caller/AI transcript visibility now work**. However, the transcript showed an unsolicited office-cleaning appointment offer in response to a services inquiry, repeated service-list answers, and a promise to connect a live human even though only Inbox escalation is implemented. Transcript offsets are approximate (webhook delivery and estimated TTS durations), so they are not proof of exact simultaneous speech.
+
+This revision increases the short final-segment quiet window to 1.5s and keeps caller segments received during the opening greeting for the first turn **after** its `call.speak.ended`. Before potentially irreversible orchestration tools, the worker verifies that the requested turn has not been superseded; it discards replies to stale fragments even if a newer final callback arrives while the model is generating, with a second atomic guard before issuing the Telnyx speech command. Live-phone prompt language now prioritizes the **latest caller question**, does not convert service inquiries into bookings, and states only supported handoff options. Explicit operator/human requests are escalated through the existing staff Inbox tool and acknowledged audibly with a truthful note that this implementation does not provide live transfers; the call's AI turn state transitions to HUMAN after that acknowledgement finishes. A mere "I want to speak with you" is not automatically classified as a request for a human.
+
+**Retest gate:** ask for service names only (no price or booking intent), then a separate price question, interrupt with a correction while AI is preparing a response, and explicitly request a human. Expect the latest request answered once, no unrequested bookings, no stale queued answers, a single truthful staff-follow-up acknowledgement, and no more autonomous answers after handoff. Record real perceived delay from the end of caller speech to the beginning of AI speech; a static 1.5s debounce and pg-boss queueing are not a guarantee of subsecond latency. Retained call recordings and transcripts remain subject to configured storage, access controls, and retention.
+
+## September 19 live-cloud acceptance follow-up — persistence and turn pacing
+
+The real V2 test on `adacertifyexperts.com` established that the carrier answered, disclosed recording, greeted with the correct assistant/voice, and grounded answers in configured knowledge. **V2 remains failed until a repeat real call proves archiving, visible dialogue, and coherent turn-taking.** A successful fixture browser test or green CI alone does not close that live gate.
+
+The previous call's caller/AI `CALL_TRANSCRIPT` messages were persisted but hidden by the Inbox UI; they should become visible on redeploy. A recording that was never archived is **not recoverable from AI Caller's filesystem**: only Telnyx retention/a valid re-delivered `call.recording.saved` can restore it.
+
+For DeployOS's bundled Docker Compose deployment:
+
+- The web service mounts its private `recordings` volume at `/app/.data/recordings`. Its Compose configuration explicitly sets `VOICE_RECORDING_ALLOW_PERSISTENT_FILESYSTEM=true` and `VOICE_RECORDING_DIR=/app/.data/recordings`. **Do not set the flag on an ephemeral path.** Include this volume in encrypted backups, define a retention/access policy, and test that recording playback survives a web container restart.
+- For S3 instead, set `VOICE_RECORDING_STORAGE_BACKEND=s3` and the actual application env names `VOICE_RECORDING_S3_BUCKET`, `VOICE_RECORDING_S3_REGION`, and optional `VOICE_RECORDING_S3_ENDPOINT` / `VOICE_RECORDING_S3_ACCESS_KEY_ID` / `VOICE_RECORDING_S3_SECRET_ACCESS_KEY`. Use least-privileged private bucket permissions. Generic `S3_BUCKET` / `AWS_ACCESS_KEY_ID` variables alone are not this app's supported configuration.
+- Telnyx `call.recording.saved` should change `voice_calls.recording_status` to `AVAILABLE`, store the object, and expose a protected `/api/voice/calls/<callId>/recording` endpoint in the Inbox card. A completed call must show its card/transcript **even when the archive has not arrived**.
+- Final inbound transcription events are persisted immediately, but AI generation is scheduled after **1,500 ms** of quiet using `voice.respond-turn` in the worker. Additional final fragments supersede earlier queued events, a database per-call phase prevents concurrent speaks, and `call.speak.ended` returns the call to listening. The background worker must remain running. This is conservative turn-taking, **not** V3 natural barge-in or streamed low-latency dialogue.
+- Retest with a multi-clause question and a deliberate mid-sentence pause; verify one grounded answer to the whole question, one visible caller transcript and one visible AI transcript per actual segment, and no back-to-back fragmented AI speaks. Record caller-perceived response latency after this pacing change rather than carrying forward the earlier ~0–1s figure.
+
+## 1. Configure and start
+
+Use a non-production workspace and an external test phone. If your local auth currently works with `BETTER_AUTH_URL=http://localhost:3000`, **keep it**; the new webhook base is independent.
+
+In `.env.local` (untracked):
+
+```dotenv
+BETTER_AUTH_URL=http://localhost:3000
+HOSTED_WEBHOOK_BASE_URL=https://YOUR-ACTUAL-TUNNEL.example-TLD
+HOSTED_AI_PROVIDER=openai
+HOSTED_AI_MODEL=gpt-5.6-luna
+HOSTED_AI_API_KEY=<your-direct-OpenAI-key>
+HOSTED_TELNYX_API_KEY=<your-Telnyx-key>
+HOSTED_TELNYX_WEBHOOK_PUBLIC_KEY=<your-Telnyx-signing-public-key>
+```
+
+The URL shown is only a placeholder. Use your actual public HTTPS tunnel URL, with no path or query. Do not use an IP address, `localhost`, an `http://` URL, or a local-only hostname. If your deployment already has public HTTPS `BETTER_AUTH_URL`, you may omit `HOSTED_WEBHOOK_BASE_URL`.
+
+```bash
+npm install --no-audit --no-fund
+npm run db:migrate
+npm run dev
+# Separate terminal:
+npm run worker
+# Separate terminal: start your own trusted HTTPS tunnel forwarding to localhost:3000
+```
+
+From a different network if possible, verify `https://YOUR-ACTUAL-TUNNEL/api/health` reaches the real local Next.js service. The existing `/api/health` endpoint checks the database. Do **not** send fabricated Telnyx events to the voice webhook; live events must be signed by Telnyx.
+
+For production/staging, do not terminate TLS incorrectly or publicly expose the database, admin endpoints, or secrets. Do not log API keys or raw provider headers.
+
+## 2. Provision and verify routing
+
+1. Sign in as workspace owner, open **Settings → Phone & Messaging** or communication onboarding, and search US voice+SMS-capable inventory.
+2. Inspect pricing/credits; confirm the purchase **once**. The app must reject an unreachable public webhook URL with `PUBLIC_WEBHOOK_URL_REQUIRED` **before** reserving credits or creating a Telnyx app/number order.
+3. Confirm status becomes `ACTIVE` only once Telnyx order and owned inventory are fully usable. If `PROVISIONING`/`RECONCILING`, leave the worker running and let the product reconcile; do not repeat purchase with a new request ID.
+4. Run `npm run verify:voice-providers:live` again. Its Telnyx line should no longer say `no Call Control application found yet` when this account has an app.
+5. Confirm in Telnyx that the application's **v2 voice callback** is the public tunnel URL ending in `/api/webhooks/voice/telnyx/<workspace-id>`, and the purchased number is assigned to it. Do not paste the private account details or raw webhook signatures.
+6. Phone UI should show `Calls: Active` while outbound SMS may independently show `Registration required` or `Registration pending`. This is expected while Issue #24 is unresolved.
+
+**If you change your tunnel hostname after purchasing the number**, update `HOSTED_WEBHOOK_BASE_URL`, restart the local app, then use **Settings → Phone & Messaging → Repair voice routing**. This owner-only action PATCHes the exact persisted Telnyx Call Control application with the new voice callback. It does not repurchase, release, or replace the number and does not change SMS approval. Repeat the live probe and call test after repair. Keep a stable tunnel for the test where possible.
+
+## 3. Make a live call
+
+1. Call the number from a different phone; let the configured assistant answer.
+2. Complete the recording disclosure or explicit DTMF `1` consent as configured. If consent is declined, the app must not transcribe/record the conversation.
+3. Listen for the configured opening message, spoken in the chosen voice.
+4. Ask a question whose approved answer is in the workspace knowledge (e.g. a configured service price). Avoid real patient/customer data during testing.
+5. Wait for the AI answer. Confirm that it is relevant and grounded in that *actual* workspace's knowledge, not generic invented pricing or information from another workspace.
+6. Ask a brief follow-up to verify the second turn can proceed; hang up normally.
+7. In **Inbox → Phone**, confirm the correct contact and conversation, one call recording (if consented and Telnyx recording callback succeeded), caller transcript segments and spoken AI transcript. Confirm no duplicated or cross-workspace messages and the relevant AI/voice usage events.
+
+The `Voice AI reply accepted by telephony provider` server log contains `callId`, `orchestrationMs` and `voiceTurnMs`; **voiceTurnMs is server transcription-to-speak-command processing time, not audible end-to-end latency**. Separately estimate the real caller-perceived gap between finishing a question and hearing the AI reply.
+
+## Definition of working — all required for V2 acceptance
+
+| Check | Required evidence |
+|---|---|
+| Public routing | Signed Telnyx callback accepted and correct workspace/number identified |
+| Call answered | Real external caller hears an AI assistant; no unintended hang-up |
+| Consent | Configured recording/consent policy respected |
+| Greeting | Correct assistant name, opening message, voice profile |
+| Recognition | Final caller transcription meaningfully matches spoken question |
+| Reasoning | Direct hosted GPT-5.6 Luna generates a grounded, helpful answer |
+| Speech | Caller hears the actual AI answer, not just a saved transcript |
+| Two turns | A follow-up utterance also receives an appropriate answer |
+| Persistence | Call/contact and transcript visible in correct Inbox; recording where consented and saved |
+| Isolation | No other workspace, phone, conversation, or customer is mixed in |
+| Billing | Voice and AI usage persisted without duplicates; no outbound SMS sent without approval |
+
+**Fail:** silent AI after transcription, fabricated prices, mismatched workspace/destination, stale local callback, missing actual speech, consent bypass, duplicate charge, or unexpected SMS sends. Record failures even if the carrier/API returned HTTP 200.
+
+**V2 does not claim:** natural barge-in, real-time streaming, subsecond latency, multi-action task completion, speech overlap handling, zero downtime, or passed US messaging approval. Those belong to V3–V5 and Issue #24.
+
+## Troubleshooting evidence (redact)
+
+Send this report without keys, raw signed headers, full phone numbers, or customer PII:
+
+```text
+Stage: V2 — Live basic AI receptionist
+Commit SHA:
+Local OS / Node version:
+Tunnel hostname only (no secret URL/query):
+Hosted AI provider/model: openai / gpt-5.6-luna
+Managed phone status: ACTIVE / PROVISIONING / RECONCILING / other
+Telnyx voice app exists and points to current tunnel: yes / no
+Call received: yes / no
+Greeting heard / consent result:
+Question asked (test business facts only):
+Transcription observed:
+AI text response recorded:
+AI response heard on the phone:
+Caller-perceived delay (approximately seconds):
+Voice AI reply accepted log: callId + orchestrationMs + voiceTurnMs
+Inbox call/contact/transcript/recording:
+Usage event / duplicate result:
+Error codes or sanitized logs:
+V2 result: PASS / FAIL / BLOCKED
+```
+
+## V2 failure isolation
+
+- **Search returns a number but purchase says “no longer available”:** before a carrier order, AI Caller rechecks the exact selected E.164 number using Telnyx area code, exchange, and final-four pattern filters, then verifies an exact response match and confirms the quote. Earlier revisions rechecked the entire 10-digit national number as `starts_with`, and the first proposed fix incorrectly used flattened `filter[starts_with]` / `filter[ends_with]` keys; Telnyx requires `filter[phone_number][starts_with]` and `filter[phone_number][ends_with]`. Both mistakes can block a real purchase. Deploy the corrected revision, search again and explicitly confirm the displayed price; do not repeatedly click purchase or buy a number manually. This preflight error occurs before credits are reserved or a carrier order is created. A carrier order rejection *after* preflight is a separate failure; inspect its sanitized provider code and reconciliation state.
+- **No number / no Call Control app:** inspect managed-number status and worker; do not manually buy a duplicate number.
+- **Telnyx app points to localhost or stale tunnel:** fix deployment/tunnel and click **Repair voice routing**. Do not retry purchasing the number. This action updates the existing voice app only; if you also need to fix a stale SMS webhook, handle that separately under the messaging compliance workstream.
+- **No webhook arrives:** validate public HTTPS tunnel, number's exact Call Control assignment and callback URL.
+- **Webhook returns 401:** inspect the public signing-key configuration and raw-body handling; do not disable verification.
+- **Webhook returns 409:** investigate workspace/number/call lifecycle mismatch or out-of-order events, not the AI API key.
+- **Opening message heard, but no response:** check `transcription_start`, final `call.transcription` delivery, orchestrator errors, model/credit usage, and `speak` acceptance.
+- **AI transcript saved but no audible speech:** inspect Telnyx `speak` command result and call-leg state.
+- **No recording:** verify consent, `call.recording.saved`, storage backend and guarded download behavior.
+- **Number purchase returns HTTP 502 with `TELNYX_NUMBER_PROVISIONING_REJECTED`:** examine the safe `error.details.stage`, `providerStatus`, `providerCode` and `providerField` from the API response or the web server warning. `AVAILABILITY_RECHECK` occurs before any credit reservation or carrier order, `VOICE_APPLICATION` and `MESSAGING_PROFILE` occur after a credit reservation and before the number order, and `NUMBER_ORDER` occurs at purchase submission. For a definitive 4xx rejection, AI Caller releases its reservation and cleans up known auxiliary resources; verify balance and account inventory before intentionally retrying. Do not assume Telnyx 10DLC approval caused a carrier 400 without a carrier error code or support confirmation.
+- **Number activation blocked by Telnyx:** record carrier HTTP status and order state; do not claim the live call passed. 10DLC messaging restrictions do not independently certify or invalidate voice capability.
+
+**Acceptance is pending until the owner returns an actual live call report against the exact PR/deployment commit.**

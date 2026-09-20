@@ -85,6 +85,7 @@ export function PhoneNumberManager({
   const [selected, setSelected] = useState<SearchResult | null>(null);
   const [searching, setSearching] = useState(false);
   const [provisioning, setProvisioning] = useState(false);
+  const [repairingVoiceWebhook, setRepairingVoiceWebhook] = useState(false);
   const [changing, setChanging] = useState(false);
   const [loaded, setLoaded] = useState(false);
 
@@ -157,8 +158,15 @@ export function PhoneNumberManager({
           replaceCurrent: Boolean(current),
         }),
       });
-      const payload = await response.json().catch(() => null) as { number?: ManagedPhoneNumber; error?: { message?: string } } | null;
-      if (!response.ok || !payload?.number) throw new Error(apiError(payload, "Unable to activate that phone number."));
+      const payload = await response.json().catch(() => null) as { number?: ManagedPhoneNumber; error?: { code?: string; message?: string } } | null;
+      if (!response.ok || !payload?.number) {
+        if (payload?.error?.code === "PHONE_NUMBER_UNAVAILABLE") {
+          // A stale quote must not remain selected after the carrier recheck.
+          setResults((items) => items.filter((item) => item.phoneNumber !== selected.phoneNumber));
+          setSelected(null);
+        }
+        throw new Error(apiError(payload, "Unable to activate that phone number."));
+      }
       setCurrent(payload.number);
       onNumberChange?.(payload.number);
       setChanging(false);
@@ -179,6 +187,22 @@ export function PhoneNumberManager({
       showToast(error instanceof Error ? error.message : "Unable to activate that phone number.", "error");
     } finally {
       setProvisioning(false);
+    }
+  }
+
+  async function repairVoiceWebhook() {
+    if (repairingVoiceWebhook) return;
+    if (!window.confirm("Update this managed number's existing Telnyx voice callback to the public HTTPS URL configured on your server? This does not buy or replace a number.")) return;
+    setRepairingVoiceWebhook(true);
+    try {
+      const response = await fetch("/api/phone-numbers/voice-webhook", { method: "POST" });
+      const payload = await response.json().catch(() => null) as { webhookOrigin?: string; error?: { message?: string } } | null;
+      if (!response.ok) throw new Error(apiError(payload, "Unable to update the existing voice callback."));
+      showToast("Voice callback updated on Telnyx. Make a test call to verify routing.", "success");
+    } catch (error) {
+      showToast(error instanceof Error ? error.message : "Unable to update voice callback.", "error");
+    } finally {
+      setRepairingVoiceWebhook(false);
     }
   }
 
@@ -229,6 +253,7 @@ export function PhoneNumberManager({
           {canManage && <div><span>Next billing</span><strong>{current.nextBillingAt ? new Date(current.nextBillingAt).toLocaleDateString() : "Pending"}</strong></div>}
           <div><span>Calls</span><strong>{callStatus}</strong></div>
           <div><span>Outbound SMS</span><strong>{smsStatus}</strong></div>
+          {canManage && phoneOperational && <button type="button" disabled={repairingVoiceWebhook} onClick={() => void repairVoiceWebhook()}>{repairingVoiceWebhook ? "Updating voice callback…" : "Repair voice routing"}</button>}
           {canManage && <button type="button" onClick={() => setChanging(true)}>{settingsMode ? "Change number" : "Choose a different number"}</button>}
         </div>
       </div>

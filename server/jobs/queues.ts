@@ -6,6 +6,7 @@ export const ADMIN_USER_WELCOME_EMAIL = "admin.user-welcome-email";
 export const TEAM_INVITATION_EMAIL = "team.invitation-email";
 export const SMS_INBOUND_RESPONSE = "sms.inbound-response";
 export const WHATSAPP_INBOUND_RESPONSE = "whatsapp.inbound-response";
+export const VOICE_RESPOND_TURN = "voice.respond-turn";
 export const AUTOMATION_DISPATCH_EVENT = "automation.dispatch-event";
 export const AUTOMATION_EXECUTE_RUN = "automation.execute-run";
 
@@ -49,6 +50,12 @@ export const automationDispatchEventJobSchema = z.object({
 export const automationExecuteRunJobSchema = z.object({
   workspaceId: z.string().uuid(),
   runId: z.string().uuid(),
+});
+
+export const voiceRespondTurnJobSchema = z.object({
+  workspaceId: z.string().uuid(),
+  callId: z.string().uuid(),
+  eventId: z.string().min(1).max(500),
 });
 
 export const whatsappInboundResponseJobSchema = z.object({

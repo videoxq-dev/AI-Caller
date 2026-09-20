@@ -9,6 +9,7 @@ import {
 } from "@/components/icons";
 import { AppNav } from "@/components/core-domain/app-nav";
 import { PhoneNumberManager } from "@/components/phone-number-manager";
+import { VoiceTechnologySettings } from "@/components/voice-technology-settings";
 import { SmsRegistrationSettings } from "@/components/sms-registration-settings";
 import "../dashboard/dashboard.css";
 import "./settings.css";
@@ -181,6 +182,7 @@ export default function SettingsPage() {
               <article className="settingsCard phoneManagementCard">
                 <div className="sectionHeading"><div><h2>Phone &amp; Messaging</h2><p>Manage your AI Caller voice + SMS-capable number and see its current outbound messaging readiness.</p></div><span className="statusPill">Managed by AI Caller</span></div>
                 <div className="settingsPhoneManager"><PhoneNumberManager settingsMode /></div>
+                <VoiceTechnologySettings />
                 <SmsRegistrationSettings />
               </article>
               <aside className="settingsCard compactCard phoneBillingHelp">

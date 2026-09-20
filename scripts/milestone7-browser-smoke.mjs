@@ -16,9 +16,11 @@ function assert(condition, message) {
   if (!condition) throw new Error(message);
 }
 
-const privateKey = createPrivateKey(`-----BEGIN PRIVATE KEY-----
-MC4CAQAwBQYDK2VwBCIEIOgDv5zaVsY5ojeyMYHRlFb2ZKLJp62/+AxAzM+9lRMB
------END PRIVATE KEY-----`);
+const testSigningKeyDer = Buffer.from(
+  "MC4CAQAwBQYDK2VwBCIEIOgDv5zaVsY5ojeyMYHRlFb2ZKLJp62/+AxAzM+9lRMB",
+  "base64",
+);
+const privateKey = createPrivateKey({ key: testSigningKeyDer, format: "der", type: "pkcs8" });
 
 function telnyxSignature(timestamp, rawBody) {
   return sign(null, Buffer.from(`${timestamp}|${rawBody}`, "utf8"), privateKey).toString("base64");
@@ -205,6 +207,21 @@ try {
     replaceCurrent: false,
   }, "provision managed voice number");
   assert(managedNumber?.number?.status === "ACTIVE", `Managed voice number did not finish carrier activation: ${JSON.stringify(managedNumber?.number)}`);
+  const voiceTechnology = await api(context, "GET", "/api/voice/technology",
+    undefined, "workspace voice technology");
+  assert(voiceTechnology.technology === "STANDARD",
+    "Existing managed voice customers must remain on Standard by default.");
+  assert(voiceTechnology.realtimeConfigured === false,
+    "Realtime must fail closed without an explicitly enabled hosted AI gateway.");
+  await page.goto(`${baseUrl}/settings?tab=phone`, { waitUntil: "domcontentloaded" });
+  await page.getByRole("heading", { name: "AI voice technology" }).waitFor({ timeout: 10_000 });
+  const standardVoice = page.getByRole("radio", { name: /Standard/ });
+  const realtimeVoice = page.getByRole("radio", { name: /Realtime/ });
+  assert(await standardVoice.isChecked(), "Standard was not selected in Phone & Messaging.");
+  assert(await realtimeVoice.isDisabled(), "Unconfigured Realtime should not be selectable.");
+  await assertNoHorizontalOverflow(page, "Voice technology settings");
+  await page.screenshot({ path: path.join(outputDir, "voice-technology-settings.png"), fullPage: true });
+
   assert(managedNumber?.number?.messagingReadiness === "NOT_REGISTERED", "Voice activation incorrectly implied outbound SMS readiness.");
 
   const hostedRoutes = await pool.query(
@@ -279,6 +296,11 @@ try {
   assert(consentState.rows[0].recording_consent_status === "GRANTED", "Affirmative keypad recording consent was not persisted.");
   assert(consentState.rows[0].recording_disclosed_at, "Recording consent evidence timestamp was not persisted.");
 
+  const openingSpeakEnd = await sendWebhook(
+    workspaceId, eventPayload("call.speak.ended", "m7-opening-ended", callSessionId, callControlId),
+  );
+  assert(openingSpeakEnd.data?.processed === 1, "Greeting must finish before first caller AI turn.");
+
   const qualificationTurn = await sendWebhook(
     workspaceId,
     eventPayload("call.transcription", "m7-turn-1", callSessionId, callControlId, {
@@ -308,6 +330,21 @@ try {
   );
   assert(groundedReply.rows[0].body.includes("$120"), "Voice knowledge response was not grounded in configured pricing.");
 
+  const firstSpeakEnd = await sendWebhook(
+    workspaceId,
+    eventPayload("call.speak.ended", "m7-reply-1-ended", callSessionId, callControlId),
+  );
+  assert(firstSpeakEnd.data?.processed === 1, "AI reply completion event failed.");
+
+  // Two final STT fragments in quick succession should yield one AI turn.
+  const fragment = await sendWebhook(
+    workspaceId,
+    eventPayload("call.transcription", "m7-turn-2-fragment", callSessionId, callControlId, {
+      transcription_data: { transcript: "Could you check availability?", is_final: true, confidence: 0.95 },
+    }),
+  );
+  assert(fragment.data?.processed === 1, "Intermediate final segment did not persist.");
+
   const availability = await sendWebhook(
     workspaceId,
     eventPayload("call.transcription", "m7-turn-2", callSessionId, callControlId, {
@@ -322,6 +359,19 @@ try {
     (rows) => rows.rowCount === 1,
     "voice availability response",
   );
+
+  const availabilityReplies = await pool.query(
+    `SELECT count(*)::int AS count FROM messages WHERE workspace_id = $1
+      AND channel = 'PHONE' AND sender_type = 'AI' AND body = 'I have a 10:00 AM opening tomorrow.'`,
+    [workspaceId],
+  );
+  assert(availabilityReplies.rows[0].count === 1, "Two STT final fragments generated duplicate AI replies.");
+
+  const secondSpeakEnd = await sendWebhook(
+    workspaceId,
+    eventPayload("call.speak.ended", "m7-reply-2-ended", callSessionId, callControlId),
+  );
+  assert(secondSpeakEnd.data?.processed === 1, "AI reply completion event failed.");
 
   const booking = await sendWebhook(
     workspaceId,
@@ -357,6 +407,14 @@ try {
 
   const hangup = await sendWebhook(workspaceId, eventPayload("call.hangup", "m7-hangup", callSessionId, callControlId, { hangup_cause: "normal_clearing" }, new Date(callClock)));
   assert(hangup.data?.processed === 1, "Voice hangup event failed.");
+
+  const pendingArtifact = await pool.query(
+    `SELECT count(*)::int AS count FROM messages WHERE workspace_id = $1
+      AND content_type = 'CALL_RECORDING'
+      AND metadata->>'voiceCallId' = $2`,
+    [workspaceId, callId],
+  );
+  assert(pendingArtifact.rows[0].count === 1, "A call without archived audio must still have an Inbox artifact.");
 
   const recording = await sendWebhook(
     workspaceId,
@@ -402,11 +460,17 @@ try {
   await page.getByLabel("Channel filter").selectOption("PHONE");
   await page.getByText("Voice Visitor", { exact: true }).first().click();
   await page.getByText("Incoming call", { exact: true }).waitFor({ timeout: 10_000 });
+  assert(await page.getByText("I need a QA Consultation today. How much is it?", { exact: true }).count() >= 1,
+    "Caller phone transcript was hidden from the Inbox thread.");
+  assert(await page.getByText("QA Consultation is $120. I can also check tomorrow's availability.", { exact: true }).count() >= 1,
+    "AI spoken transcript was hidden from the Inbox thread.");
   const audio = page.locator(`audio[src="/api/voice/calls/${callId}/recording"]`);
   assert(await audio.count() === 1, "Inbox did not render the archived recording as the primary call artifact.");
   await page.getByRole("button", { name: "View transcript" }).click();
-  await page.getByText("I need a QA Consultation today. How much is it?", { exact: true }).waitFor({ timeout: 10_000 });
-  assert(await page.getByText("QA Consultation is $120. I can also check tomorrow's availability.", { exact: true }).count() === 1, "Expandable transcript did not render the AI response.");
+  await page.locator(".voiceTranscriptPanel").first().waitFor({ timeout: 10_000 });
+  await page.locator(".voiceTranscriptPanel").getByText("I need a QA Consultation today. How much is it?", { exact: true }).waitFor({ timeout: 10_000 });
+  assert(await page.locator(".voiceTranscriptPanel").getByText("QA Consultation is $120. I can also check tomorrow's availability.", { exact: true }).count() === 1,
+    "Expanded call transcript did not contain the spoken AI response.");
   await assertNoHorizontalOverflow(page, "Voice Inbox desktop");
   await page.screenshot({ path: path.join(outputDir, "voice-inbox-desktop.png"), fullPage: true });
 

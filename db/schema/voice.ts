@@ -83,3 +83,32 @@ export const voiceTranscriptSegments = pgTable(
     index("voice_transcript_call_created_idx").on(table.voiceCallId, table.createdAt),
   ],
 );
+
+export const workspaceVoiceTechnology = pgTable("workspace_voice_technology", {
+  workspaceId: uuid("workspace_id").primaryKey().references(() => workspaces.id, { onDelete: "cascade" }),
+  technology: text("technology").$type<"STANDARD" | "REALTIME">().default("STANDARD").notNull(),
+  realtimeModel: text("realtime_model").$type<"gpt-realtime-2.1" | "gpt-realtime-2.1-mini">().default("gpt-realtime-2.1").notNull(),
+  updatedAt: timestamp("updated_at", { withTimezone: true, mode: "date" }).defaultNow().notNull(),
+});
+
+export const voiceRealtimeResponseUsage = pgTable("voice_realtime_response_usage", {
+  id: uuid("id").defaultRandom().primaryKey(),
+  workspaceId: uuid("workspace_id").notNull().references(() => workspaces.id, { onDelete: "cascade" }),
+  voiceCallId: uuid("voice_call_id").notNull().references(() => voiceCalls.id, { onDelete: "cascade" }),
+  responseId: text("response_id").notNull(),
+  usage: jsonb("usage").$type<Record<string, number>>().notNull(),
+  createdAt: timestamp("created_at", { withTimezone: true, mode: "date" }).defaultNow().notNull(),
+}, (table) => [
+  uniqueIndex("voice_realtime_response_usage_voice_call_id_response_id_key").on(table.voiceCallId, table.responseId),
+  index("voice_realtime_response_usage_workspace_call_idx").on(table.workspaceId, table.voiceCallId),
+]);
+
+export const voiceRealtimeBookingState = pgTable("voice_realtime_booking_state", {
+  voiceCallId: uuid("voice_call_id").primaryKey().references(() => voiceCalls.id, { onDelete: "cascade" }),
+  workspaceId: uuid("workspace_id").notNull().references(() => workspaces.id, { onDelete: "cascade" }),
+  details: jsonb("details").$type<Record<string, string>>().default({}).notNull(),
+  availableStart: text("available_start"),
+  updatedAt: timestamp("updated_at", { withTimezone: true, mode: "date" }).defaultNow().notNull(),
+}, (table) => [
+  index("voice_realtime_booking_state_workspace_idx").on(table.workspaceId),
+]);

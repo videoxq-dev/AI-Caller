@@ -74,6 +74,7 @@ export async function searchTelnyxNumbers(input: {
   areaCode?: string | null;
   numberType?: "local" | "toll_free";
   startsWith?: string | null;
+  endsWith?: string | null;
   limit?: number;
 }, fetcher: typeof fetch = fetch): Promise<TelnyxAvailableNumber[]> {
   if (isE2EProviderFixtureMode()) {
@@ -107,7 +108,8 @@ export async function searchTelnyxNumbers(input: {
   if (input.administrativeArea?.trim()) params.set("filter[administrative_area]", input.administrativeArea.trim().toUpperCase());
   if (input.locality?.trim()) params.set("filter[locality]", input.locality.trim());
   if (input.areaCode?.trim()) params.set("filter[national_destination_code]", input.areaCode.replace(/\D/g, ""));
-  if (input.startsWith?.trim()) params.set("filter[starts_with]", input.startsWith.replace(/\D/g, ""));
+  if (input.startsWith?.trim()) params.set("filter[phone_number][starts_with]", input.startsWith.replace(/\D/g, ""));
+  if (input.endsWith?.trim()) params.set("filter[phone_number][ends_with]", input.endsWith.replace(/\D/g, ""));
 
   const response = await providerJson<{
     data?: Array<{
@@ -159,6 +161,34 @@ export async function createTelnyxCallControlApplication(
   const id = response.data?.id;
   if (!id) throw new Error("Telnyx did not return a Call Control application ID.");
   return id;
+}
+
+// A tunnel hostname can change during local acceptance. Repair only the known
+// workspace-owned Call Control application; never buy another number to fix it.
+export async function updateTelnyxCallControlApplication(
+  workspaceId: string,
+  applicationId: string,
+  webhookUrl: string,
+  fetcher: typeof fetch = fetch,
+) {
+  if (isE2EProviderFixtureMode()) return applicationId;
+  const { apiKey } = telnyxConfig();
+  const response = await providerJson<{ data?: { id?: string } }>(
+    `${BASE_URL}/call_control_applications/${encodeURIComponent(applicationId)}`,
+    {
+      method: "PATCH",
+      headers: authHeaders(apiKey),
+      body: JSON.stringify({
+        application_name: `AI Caller ${workspaceId}`,
+        webhook_event_url: webhookUrl,
+      }),
+    },
+    fetcher,
+  );
+  if (response.data?.id !== applicationId) {
+    throw new Error("Telnyx did not confirm the expected Call Control application.");
+  }
+  return applicationId;
 }
 
 export async function createTelnyxMessagingProfile(

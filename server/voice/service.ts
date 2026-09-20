@@ -6,9 +6,9 @@ import { db } from "@/db";
 import { usageEvents } from "@/db/schema";
 import { loadHostedRateSnapshot, quoteHostedUsage } from "@/server/billing/pricing";
 import { chargeUnavoidableCredits } from "@/server/credits/service";
+import { reserveCredits, releaseCreditReservation, getCreditBalance } from "@/server/credits/service";
 import {
   appendMessage,
-  getConversationById,
   getOrCreateOpenConversation,
 } from "@/server/domain/core/repository";
 import { normalizePhone } from "@/server/domain/core/schemas";
@@ -16,7 +16,6 @@ import { getBusinessSetup } from "@/server/domain/onboarding/repository";
 import { getEnv } from "@/server/env";
 import { AppError } from "@/server/http/errors";
 import { logger } from "@/server/observability/logger";
-import { responseOrchestrator } from "@/server/orchestrator";
 import type { NormalizedVoiceEvent, VoiceWebhookInput } from "@/server/providers/contracts";
 import { isE2EProviderFixtureMode } from "@/server/providers/e2e-fixtures";
 import { resolveVoiceRuntime, type VoiceProviderName, type VoiceRuntime } from "@/server/providers/voice/runtime";
@@ -24,7 +23,6 @@ import {
   claimProviderWebhookEvent,
   claimQueuedProviderWebhookEvent,
   completeProviderWebhookEvent,
-  failProviderWebhookEvent,
   markProviderWebhookQueued,
   releaseProviderWebhookEventForRetry,
 } from "@/server/providers/webhooks/repository";
@@ -34,22 +32,25 @@ import { resolveVoiceContact } from "./identity";
 import { resolveInboundVoiceMode } from "./modes";
 import {
   appendVoiceTranscriptSegment,
+  queueVoiceTurn,
+  releaseVoiceSpeech,
   createVoiceCall,
   getVoiceCallByExternalId,
   updateVoiceCall,
 } from "./repository";
 import { putVoiceRecording } from "./storage";
 import { resolveVoiceProfile } from "./voices";
+import { estimateSpeechDurationMs } from "./turn-duration";
+import { scheduleVoiceTurn } from "./turns";
+import { getVoiceTechnology, requireRealtimeReady, REALTIME_MIN_START_CREDITS, REALTIME_MAX_START_CREDITS } from "./technology";
+import { settleRealtimeCall } from "./realtime-usage";
 
 const MAX_VOICE_WEBHOOK_BYTES = 64 * 1024;
 const MAX_RECORDING_BYTES = 50 * 1024 * 1024;
 const DISCLOSURE_VERSION = "voice-recording-v1";
 
-type VoiceOrchestratorResult = Awaited<ReturnType<typeof responseOrchestrator.respond>>;
-
 type VoiceServiceDependencies = {
   resolveRuntime: (workspaceId: string, provider: VoiceProviderName) => Promise<VoiceRuntime>;
-  respond: (workspaceId: string, conversationId: string) => Promise<VoiceOrchestratorResult>;
   fetchRecording: typeof fetch;
   putRecording: (key: string, bytes: Uint8Array, contentType: string) => Promise<void>;
 };
@@ -92,12 +93,6 @@ function deterministicCommandId(seed: string) {
 
 function phase(metadata: Record<string, unknown>) {
   return typeof metadata.phase === "string" ? metadata.phase : "UNKNOWN";
-}
-
-function estimateSpeechDurationMs(text: string, speakingRate = 1) {
-  const words = Math.max(1, text.trim().split(/\s+/).length);
-  const wordsPerSecond = 2.5 * Math.max(0.75, Math.min(1.25, speakingRate));
-  return Math.max(400, Math.min(20_000, Math.round((words / wordsPerSecond) * 1000)));
 }
 
 function elapsedMs(startedAt: Date, occurredAt: Date | null) {
@@ -205,6 +200,10 @@ async function recordVoiceUsage(
   call: NonNullable<Awaited<ReturnType<typeof getVoiceCallByExternalId>>>,
 ) {
   try {
+    if (call.metadata.voiceTechnology === "REALTIME") {
+      await settleRealtimeCall(workspaceId, call.id);
+      return;
+    }
     const durationSeconds = Math.max(0, call.durationSeconds ?? 0);
     let creditsCharged = 0;
     let providerCostMicros = 0;
@@ -266,6 +265,13 @@ export function createVoiceWebhookService(dependencies: VoiceServiceDependencies
         throw new AppError("VOICE_DESTINATION_MISMATCH", "The inbound call destination does not match this workspace.", 409);
       }
 
+      const preference = await getVoiceTechnology(workspaceId);
+      const realtimeRates = preference.technology === "REALTIME"
+        ? runtime.mode === "HOSTED"
+          ? await requireRealtimeReady(workspaceId, preference.realtimeModel)
+          : (() => { throw new AppError("REALTIME_HOSTED_ONLY",
+              "Realtime voice is currently supported only for managed Telnyx numbers.", 409); })()
+        : null;
       const contact = await resolveVoiceContact(workspaceId, event.from);
       const conversation = await getOrCreateOpenConversation(workspaceId, contact.id);
       const [mode, voice] = await Promise.all([
@@ -285,6 +291,10 @@ export function createVoiceWebhookService(dependencies: VoiceServiceDependencies
         recordingDisclosureVersion: DISCLOSURE_VERSION,
         metadata: {
           phase: "AWAITING_ANSWER",
+          voiceTechnology: preference.technology,
+          realtimeModel: preference.technology === "REALTIME" ? preference.realtimeModel : null,
+          realtimeRates,
+          realtimeUsageComplete: null,
           voiceProfile: voice.config.profileKey,
           language: voice.config.language,
           speakingRate: voice.config.speakingRate,
@@ -293,11 +303,34 @@ export function createVoiceWebhookService(dependencies: VoiceServiceDependencies
       });
 
       if (phase(call.metadata) === "AWAITING_ANSWER" && call.status === "RINGING") {
+        let reservationId: string | null = null;
+        if (call.metadata.voiceTechnology === "REALTIME") {
+          const availableCredits = await getCreditBalance(workspaceId);
+          if (availableCredits < REALTIME_MIN_START_CREDITS) {
+            throw new AppError("REALTIME_CREDITS_REQUIRED",
+              "Top up your voice credits before using Realtime.", 402);
+          }
+          const reservation = await reserveCredits(workspaceId,
+            Math.min(availableCredits, REALTIME_MAX_START_CREDITS), {
+            referenceType: "VOICE_REALTIME_HOLD", referenceId: call.id,
+          });
+          reservationId = reservation.id;
+          await updateVoiceCall(workspaceId, call.id, {}, {
+            realtimeReservationId: reservation.id,
+            realtimeReservationAmount: reservation.amount,
+          });
+        }
+        try {
         await runtime.provider.answer({
           callControlId: event.callControlId,
           streamUrl: buildVoiceGatewayStreamUrl(workspaceId, call.id, event.externalCallId),
+          bidirectional: call.metadata.voiceTechnology === "REALTIME",
           commandId: deterministicCommandId(`${event.externalEventId}:answer`),
         });
+        } catch (error) {
+          if (reservationId) await releaseCreditReservation(workspaceId, reservationId);
+          throw error;
+        }
       }
       return;
     }
@@ -327,6 +360,8 @@ export function createVoiceWebhookService(dependencies: VoiceServiceDependencies
           recordingDisclosedAt: event.occurredAt ?? new Date(),
         }, {
           phase: "AWAITING_RECORDING_CONSENT",
+          ...(call.metadata.voiceTechnology === "REALTIME"
+            ? { voiceTelnyxTtsCharacters: text.length } : {}),
         });
         return;
       }
@@ -342,7 +377,10 @@ export function createVoiceWebhookService(dependencies: VoiceServiceDependencies
       await updateVoiceCall(workspaceId, call.id, {
         status: "ACTIVE",
         answeredAt: event.occurredAt ?? new Date(),
-      }, { phase: "AWAITING_DISCLOSURE_END" });
+      }, { phase: "AWAITING_DISCLOSURE_END",
+        ...(call.metadata.voiceTechnology === "REALTIME"
+          ? { voiceTelnyxTtsCharacters: text.length } : {}),
+      });
       return;
     }
 
@@ -354,6 +392,26 @@ export function createVoiceWebhookService(dependencies: VoiceServiceDependencies
           commandId: deterministicCommandId(`${event.externalEventId}:declined-hangup`),
         });
         await updateVoiceCall(workspaceId, call.id, {}, { phase: "TERMINATING" });
+        return;
+      }
+      if (currentPhase === "AI_SPEAKING") {
+        const pending = await releaseVoiceSpeech(workspaceId, call.id);
+        if (pending) await scheduleVoiceTurn(workspaceId, call.id, pending, "after-speak");
+        const requestedAt = call.metadata.voiceSpeechRequestedAt;
+        logger.info({
+          workspaceId,
+          callId: call.id,
+          speechElapsedMs: typeof requestedAt === "string"
+            ? Math.max(0, Date.now() - new Date(requestedAt).getTime()) : null,
+          pendingCallerTurn: Boolean(pending),
+        }, "Voice assistant speech ended");
+        return;
+      }
+      if (currentPhase === "OPENING_SPEAKING") {
+        const latest = await updateVoiceCall(workspaceId, call.id, {}, { phase: "ACTIVE" });
+        const pending = typeof latest.metadata.pendingVoiceTurnEventId === "string"
+          ? latest.metadata.pendingVoiceTurnEventId : null;
+        if (pending && call.metadata.voiceTechnology !== "REALTIME") await scheduleVoiceTurn(workspaceId, call.id, pending, "after-greeting");
         return;
       }
       if (currentPhase !== "AWAITING_DISCLOSURE_END") return;
@@ -381,7 +439,12 @@ export function createVoiceWebhookService(dependencies: VoiceServiceDependencies
         recordingConsentStatus: "ANNOUNCED",
         recordingDisclosedAt: event.occurredAt ?? new Date(),
         transcriptStatus: "ACTIVE",
-      }, { phase: "ACTIVE" });
+      }, { phase: "OPENING_SPEAKING",
+        ...(call.metadata.voiceTechnology === "REALTIME"
+          ? { voiceTelnyxTtsCharacters:
+            Number(call.metadata.voiceTelnyxTtsCharacters ?? 0) + openingText(voice.openingMessage).length }
+          : {}),
+      });
       return;
     }
 
@@ -414,9 +477,13 @@ export function createVoiceWebhookService(dependencies: VoiceServiceDependencies
           recordingConsentStatus: "GRANTED",
           transcriptStatus: "ACTIVE",
         }, {
-          phase: "ACTIVE",
+          phase: "OPENING_SPEAKING",
           consentEvidence: "DTMF_1",
           consentEventId: event.externalEventId,
+          ...(call.metadata.voiceTechnology === "REALTIME"
+            ? { voiceTelnyxTtsCharacters:
+              Number(call.metadata.voiceTelnyxTtsCharacters ?? 0) + openingText(voice.openingMessage).length }
+            : {}),
         });
         return;
       }
@@ -445,11 +512,10 @@ export function createVoiceWebhookService(dependencies: VoiceServiceDependencies
     }
 
     if (event.type === "TRANSCRIPTION") {
-      if (!event.isFinal) return;
+      if (call.metadata.voiceTechnology === "REALTIME" && phase(call.metadata) === "ENDED") return;
+      if (!event.isFinal || !event.transcript.trim()) return;
       const currentPhase = phase(call.metadata);
-      const voice = await getVoiceConfig(workspaceId);
-
-      if (currentPhase !== "ACTIVE") return;
+      if (!["ACTIVE", "OPENING_SPEAKING", "AI_RESPONDING", "AI_SPEAKING"].includes(currentPhase)) return;
 
       const endedMs = elapsedMs(call.startedAt, event.occurredAt);
       const startedMs = Math.max(0, endedMs - estimateSpeechDurationMs(event.transcript));
@@ -473,48 +539,13 @@ export function createVoiceWebhookService(dependencies: VoiceServiceDependencies
         metadata: { voiceCallId: call.id, transcriptSegmentId: segment.id, voiceMode: call.mode, startedMs, endedMs },
       });
 
-      const result = await dependencies.respond(workspaceId, call.conversationId);
-      if (!result.reply) {
-        await updateVoiceCall(workspaceId, call.id, {}, { phase: result.handlingMode === "HUMAN" ? "HUMAN" : "ACTIVE" });
-        return;
-      }
-
-      const latestConversation = await getConversationById(workspaceId, call.conversationId);
-      if (!latestConversation || latestConversation.handlingMode !== "AI") {
-        await updateVoiceCall(workspaceId, call.id, {}, { phase: "HUMAN" });
-        return;
-      }
-
-      const aiStartedMs = elapsedMs(call.startedAt, new Date());
-      const aiEndedMs = aiStartedMs + estimateSpeechDurationMs(result.reply, voice.config.speakingRate);
-      const aiSegment = await appendVoiceTranscriptSegment(workspaceId, call.id, {
-        speaker: "AI",
-        text: result.reply,
-        startedMs: aiStartedMs,
-        endedMs: aiEndedMs,
-        externalEventId: `${event.externalEventId}:ai`,
-      });
-      await appendMessage(workspaceId, call.conversationId, {
-        channel: "PHONE",
-        direction: "OUTBOUND",
-        senderType: "AI",
-        contentType: "CALL_TRANSCRIPT",
-        body: result.reply,
-        provider: "telnyx-voice",
-        externalMessageId: `${event.externalEventId}:ai`,
-        status: "SENT",
-        metadata: { voiceCallId: call.id, transcriptSegmentId: aiSegment.id, voiceMode: call.mode, startedMs: aiStartedMs, endedMs: aiEndedMs },
-      });
-      await runtime.provider.speak({
-        callControlId: event.callControlId,
-        text: result.reply,
-        voice: resolveVoiceProfile(voice.config.profileKey).providerVoiceId,
-        language: voice.config.language,
-        speakingRate: voice.config.speakingRate,
-        commandId: deterministicCommandId(`${event.externalEventId}:reply`),
-      });
-      if (result.handlingMode === "HUMAN") {
-        await updateVoiceCall(workspaceId, call.id, {}, { phase: "HUMAN" });
+      // The latest final segment wins after a short silence interval. The
+      // database phase prevents overlap while the assistant is responding or
+      // speaking, and the worker survives web/container restarts.
+      if (call.metadata.voiceTechnology === "REALTIME") return;
+      if (await queueVoiceTurn(workspaceId, call.id, event.externalEventId)
+        && currentPhase === "ACTIVE") {
+        await scheduleVoiceTurn(workspaceId, call.id, event.externalEventId);
       }
       return;
     }
@@ -540,7 +571,7 @@ export function createVoiceWebhookService(dependencies: VoiceServiceDependencies
         contentType: "CALL_RECORDING",
         body: "Incoming call recording",
         provider: "telnyx-voice",
-        externalMessageId: `recording:${event.recordingId ?? event.externalEventId}`,
+        externalMessageId: `voice-call:${call.id}:artifact`,
         status: "AVAILABLE",
         metadata: {
           voiceCallId: call.id,
@@ -573,7 +604,34 @@ export function createVoiceWebhookService(dependencies: VoiceServiceDependencies
         phase: "ENDED",
         hangupCause: event.cause,
       });
+      // A call artifact belongs in the Inbox even when Telnyx has not yet
+      // archived audio or storage delivery is delayed/failed. Stable id allows
+      // recording.saved and hangup callbacks in either order without two cards.
+      await appendMessage(workspaceId, call.conversationId, {
+        channel: "PHONE",
+        direction: "INBOUND",
+        senderType: "SYSTEM",
+        contentType: "CALL_RECORDING",
+        body: "Incoming call",
+        provider: "telnyx-voice",
+        externalMessageId: `voice-call:${call.id}:artifact`,
+        status: updated.recordingStatus,
+        metadata: {
+          voiceCallId: call.id,
+          durationSeconds,
+          voiceMode: call.mode,
+        },
+      });
       await recordVoiceUsage(workspaceId, runtime, updated);
+      if (updated.metadata.voiceTechnology === "REALTIME"
+        && typeof updated.metadata.realtimeReservationId === "string"
+        && updated.metadata.realtimeUsageComplete !== true
+        && (updated.metadata.realtimeUsageComplete === false
+          || !updated.metadata.realtimeStreamId)) {
+        // No authoritative usage and no active stream: do not strand a hold.
+        // If the OpenAI stream is still active, it will settle or release it.
+        await releaseCreditReservation(workspaceId, updated.metadata.realtimeReservationId);
+      }
     }
   }
 
@@ -588,7 +646,7 @@ export function createVoiceWebhookService(dependencies: VoiceServiceDependencies
       const events = await runtime.provider.normalizeWebhook(input);
       let processed = 0;
       let duplicates = 0;
-      let failed = 0;
+      const failed = 0;
       let suppressed = 0;
 
       for (const event of events) {
@@ -628,21 +686,11 @@ export function createVoiceWebhookService(dependencies: VoiceServiceDependencies
           continue;
         }
 
-        let failClosed = false;
         try {
-          if (event.type === "TRANSCRIPTION" && event.isFinal) failClosed = phase(
-            (await getVoiceCallByExternalId(workspaceId, runtime.providerName, event.externalCallId))?.metadata ?? {},
-          ) === "ACTIVE";
           await processEvent(workspaceId, runtime, event);
           await completeProviderWebhookEvent(workspaceId, claim.eventId);
           processed += 1;
         } catch (error) {
-          if (failClosed) {
-            await failProviderWebhookEvent(workspaceId, claim.eventId, error);
-            logger.error({ err: error, workspaceId, eventType: event.type, eventId: event.externalEventId }, "Voice event failed closed after orchestration began");
-            failed += 1;
-            continue;
-          }
           await releaseProviderWebhookEventForRetry(workspaceId, claim.eventId, error);
           throw error;
         }
@@ -655,7 +703,6 @@ export function createVoiceWebhookService(dependencies: VoiceServiceDependencies
 
 export const voiceWebhookService = createVoiceWebhookService({
   resolveRuntime: resolveVoiceRuntime,
-  respond: (workspaceId, conversationId) => responseOrchestrator.respond(workspaceId, conversationId),
   fetchRecording: fetch,
   putRecording: putVoiceRecording,
 });

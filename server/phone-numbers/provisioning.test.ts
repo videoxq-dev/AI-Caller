@@ -6,6 +6,7 @@ import type { TelnyxNumberOrder } from "@/server/providers/telnyx-platform";
 const platform = vi.hoisted(() => ({
   createTelnyxCallControlApplication: vi.fn(async () => "call-control-1"),
   createTelnyxMessagingProfile: vi.fn(async () => "messaging-profile-1"),
+  updateTelnyxCallControlApplication: vi.fn(async () => "call-control-1"),
   deleteTelnyxCallControlApplication: vi.fn(async () => undefined),
   deleteTelnyxMessagingProfile: vi.fn(async () => undefined),
   findOwnedTelnyxNumber: vi.fn<() => Promise<{ id: string; phone_number: string; status: string } | null>>(async () => ({ id: "owned-number-1", phone_number: "+12025550200", status: "active" })),
@@ -31,7 +32,7 @@ vi.mock("@/server/providers/telnyx-platform", () => platform);
 
 import { closeDatabase, db } from "@/db";
 import { capabilityBindings, creditWallets, hostedPhoneNumbers, integrations, usageEvents, workspaces } from "@/db/schema";
-import { processPendingPhoneNumberProvisioning, provisionManagedPhoneNumber, releaseManagedPhoneNumber } from "./service";
+import { processPendingPhoneNumberProvisioning, provisionManagedPhoneNumber, refreshManagedVoiceWebhook, releaseManagedPhoneNumber } from "./service";
 
 const requestId = "11111111-1111-4111-8111-111111111111";
 
@@ -42,6 +43,7 @@ describe("managed phone provisioning lifecycle", () => {
     vi.clearAllMocks();
     platform.createTelnyxCallControlApplication.mockResolvedValue("call-control-1");
     platform.createTelnyxMessagingProfile.mockResolvedValue("messaging-profile-1");
+    platform.updateTelnyxCallControlApplication.mockResolvedValue("call-control-1");
     platform.deleteTelnyxCallControlApplication.mockResolvedValue(undefined);
     platform.deleteTelnyxMessagingProfile.mockResolvedValue(undefined);
     platform.releaseTelnyxNumber.mockResolvedValue(undefined);
@@ -124,6 +126,72 @@ describe("managed phone provisioning lifecycle", () => {
     expect((await db.select().from(capabilityBindings)).map((row) => row.capability).sort()).toEqual(["SMS", "VOICE"]);
     expect((await db.select().from(usageEvents))).toHaveLength(1);
     expect((await db.select().from(creditWallets))[0].balance).toBe(8_000);
+  });
+
+  it("repairs an owned active voice app without buying or replacing a number", async () => {
+    const [row] = await db.insert(hostedPhoneNumbers).values({
+      workspaceId, provider: "telnyx", phoneNumber: "+12025550200",
+      countryCode: "US", numberType: "local", status: "ACTIVE",
+      messagingReadiness: "NOT_REGISTERED", voiceConnectionId: "call-control-1",
+      providerMonthlyCostMicros: 1_000_000, providerUpfrontCostMicros: 0,
+      purchaseCredits: 2000, monthlyCredits: 2000,
+    }).returning();
+    await expect(refreshManagedVoiceWebhook(workspaceId)).resolves.toEqual({
+      phoneNumberId: row.id, status: "UPDATED", webhookOrigin: "http://localhost:3000",
+    });
+    expect(platform.updateTelnyxCallControlApplication).toHaveBeenCalledWith(
+      workspaceId, "call-control-1",
+      `http://localhost:3000/api/webhooks/voice/telnyx/${workspaceId}`,
+    );
+    expect(platform.createTelnyxCallControlApplication).not.toHaveBeenCalled();
+    expect(platform.orderTelnyxNumber).not.toHaveBeenCalled();
+    expect((await db.select().from(creditWallets))[0].balance).toBe(10_000);
+  });
+
+  it("refuses voice callback repair without an existing active owned app", async () => {
+    await expect(refreshManagedVoiceWebhook(workspaceId)).rejects.toMatchObject({
+      code: "VOICE_CONNECTION_NOT_READY", status: 409,
+    });
+    expect(platform.updateTelnyxCallControlApplication).not.toHaveBeenCalled();
+  });
+
+  it("rechecks selected number by area, exchange and final four before any charge or order", async () => {
+    await provisionManagedPhoneNumber(workspaceId, {
+      phoneNumber: "+12025550200",
+      requestId,
+      expectedPurchaseCredits: 2000,
+      expectedMonthlyCredits: 2000,
+    });
+    expect(platform.searchTelnyxNumbers).toHaveBeenCalledWith({
+      countryCode: "US",
+      areaCode: "202",
+      startsWith: "555",
+      endsWith: "0200",
+      numberType: "local",
+      limit: 30,
+    });
+    expect(platform.orderTelnyxNumber).toHaveBeenCalledTimes(1);
+  });
+
+  it("does not order a similar number or reserve credits if the exact number vanishes", async () => {
+    platform.searchTelnyxNumbers.mockResolvedValue([{
+      phoneNumber: "+12025550201",
+      countryCode: "US", administrativeArea: "DC", locality: "Washington",
+      numberType: "local", monthlyCost: "1.00", upfrontCost: "0.00",
+      currency: "USD", bestEffort: false,
+    }]);
+    await expect(provisionManagedPhoneNumber(workspaceId, {
+      phoneNumber: "+12025550200",
+      requestId,
+      expectedPurchaseCredits: 2000,
+      expectedMonthlyCredits: 2000,
+    })).rejects.toMatchObject({ code: "PHONE_NUMBER_UNAVAILABLE", status: 409 });
+    expect(platform.searchTelnyxNumbers).toHaveBeenCalledTimes(2);
+    expect(platform.orderTelnyxNumber).not.toHaveBeenCalled();
+    expect(platform.createTelnyxCallControlApplication).not.toHaveBeenCalled();
+    expect(platform.createTelnyxMessagingProfile).not.toHaveBeenCalled();
+    expect(await db.select().from(hostedPhoneNumbers)).toHaveLength(0);
+    expect((await db.select().from(creditWallets))[0].balance).toBe(10_000);
   });
 
   it("rejects a changed carrier quote before reserving credits or ordering the number", async () => {
@@ -418,6 +486,60 @@ describe("managed phone provisioning lifecycle", () => {
     expect(platform.orderTelnyxNumber).toHaveBeenCalledTimes(1);
   });
 
+  it("reports a carrier 400 in exact recheck without reserving credits or creating resources", async () => {
+    platform.searchTelnyxNumbers.mockRejectedValueOnce(
+      new ProviderRequestError("Bearer secret shouldn't reach browser", 400, "10002", "/phone_number"),
+    );
+    await expect(provisionManagedPhoneNumber(workspaceId, {
+      phoneNumber: "+12025550200",
+      requestId,
+      expectedPurchaseCredits: 2000,
+      expectedMonthlyCredits: 2000,
+    })).rejects.toMatchObject({
+      code: "TELNYX_NUMBER_PROVISIONING_REJECTED",
+      status: 502,
+      details: {
+        stage: "AVAILABILITY_RECHECK",
+        providerStatus: 400,
+        providerCode: "10002",
+        providerField: "/phone_number",
+      },
+    });
+    expect(platform.createTelnyxCallControlApplication).not.toHaveBeenCalled();
+    expect(platform.createTelnyxMessagingProfile).not.toHaveBeenCalled();
+    expect(platform.orderTelnyxNumber).not.toHaveBeenCalled();
+    expect((await db.select().from(creditWallets))[0].balance).toBe(10_000);
+    expect(await db.select().from(hostedPhoneNumbers)).toHaveLength(0);
+  });
+
+  it.each([
+    ["VOICE_APPLICATION", "createTelnyxCallControlApplication", false],
+    ["MESSAGING_PROFILE", "createTelnyxMessagingProfile", true],
+    ["NUMBER_ORDER", "orderTelnyxNumber", true],
+  ] as const)("reports %s carrier rejection, releases credits, and avoids false activation", async (
+    stage, rejectedMethod, expectVoiceCleanup,
+  ) => {
+    platform[rejectedMethod].mockRejectedValueOnce(
+      new ProviderRequestError("Bearer secret shouldn't reach browser", 400, "10002", "/messaging_profile_id"),
+    );
+    await expect(provisionManagedPhoneNumber(workspaceId, {
+      phoneNumber: "+12025550200",
+      requestId,
+      expectedPurchaseCredits: 2000,
+      expectedMonthlyCredits: 2000,
+    })).rejects.toMatchObject({
+      code: "TELNYX_NUMBER_PROVISIONING_REJECTED",
+      status: 502,
+      details: { stage, providerStatus: 400, providerCode: "10002" },
+    });
+    expect(platform.orderTelnyxNumber).toHaveBeenCalledTimes(stage === "NUMBER_ORDER" ? 1 : 0);
+    expect(platform.deleteTelnyxCallControlApplication).toHaveBeenCalledTimes(expectVoiceCleanup ? 1 : 0);
+    expect(platform.deleteTelnyxMessagingProfile).toHaveBeenCalledTimes(stage === "NUMBER_ORDER" ? 1 : 0);
+    expect(platform.releaseTelnyxNumber).not.toHaveBeenCalled();
+    expect((await db.select().from(creditWallets))[0].balance).toBe(10_000);
+    expect((await db.select().from(hostedPhoneNumbers))[0].status).toBe("FAILED");
+  });
+
   it("preserves a failed outcome on an idempotent retry instead of reporting accepted provisioning", async () => {
     platform.orderTelnyxNumber.mockRejectedValueOnce(new ProviderRequestError("Invalid order", 422));
 
@@ -426,7 +548,11 @@ describe("managed phone provisioning lifecycle", () => {
       requestId,
       expectedPurchaseCredits: 2000,
       expectedMonthlyCredits: 2000,
-    })).rejects.toThrow("Invalid order");
+    })).rejects.toMatchObject({
+      code: "TELNYX_NUMBER_PROVISIONING_REJECTED",
+      status: 502,
+      details: { stage: "NUMBER_ORDER", providerStatus: 422 },
+    });
 
     await expect(provisionManagedPhoneNumber(workspaceId, {
       phoneNumber: "+12025550200",
@@ -448,7 +574,11 @@ describe("managed phone provisioning lifecycle", () => {
       requestId,
       expectedPurchaseCredits: 2000,
       expectedMonthlyCredits: 2000,
-    })).rejects.toThrow("Invalid order");
+    })).rejects.toMatchObject({
+      code: "TELNYX_NUMBER_PROVISIONING_REJECTED",
+      status: 502,
+      details: { stage: "NUMBER_ORDER", providerStatus: 422 },
+    });
 
     expect(platform.deleteTelnyxCallControlApplication).toHaveBeenCalledWith("call-control-1");
     expect(platform.deleteTelnyxMessagingProfile).toHaveBeenCalledWith("messaging-profile-1");

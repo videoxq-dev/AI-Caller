@@ -6,6 +6,8 @@ import {
   TEAM_INVITATION_EMAIL,
   SMS_INBOUND_RESPONSE,
   WHATSAPP_INBOUND_RESPONSE,
+  VOICE_RESPOND_TURN,
+  voiceRespondTurnJobSchema,
   AUTOMATION_DISPATCH_EVENT,
   AUTOMATION_EXECUTE_RUN,
   passwordResetEmailJobSchema,
@@ -20,6 +22,7 @@ import {
 import { sendAdminUserWelcomeEmail, sendPasswordResetEmail, sendTeamInvitationEmail, sendWelcomeEmail } from "@/server/email/mailer";
 import { logger } from "@/server/observability/logger";
 import { smsWebhookService } from "@/server/sms/service";
+import { processVoiceTurn } from "@/server/voice/turns";
 import { processPendingSmsRegistrations } from "@/server/sms/registration-service";
 import { whatsAppWebhookService } from "@/server/whatsapp/service";
 import { dispatchAutomationEvent } from "@/server/automations/dispatcher";
@@ -34,6 +37,7 @@ export async function startWorker() {
   const teamBoss = await ensureQueue(TEAM_INVITATION_EMAIL);
   const smsBoss = await ensureQueue(SMS_INBOUND_RESPONSE);
   const whatsappBoss = await ensureQueue(WHATSAPP_INBOUND_RESPONSE);
+  const voiceBoss = await ensureQueue(VOICE_RESPOND_TURN);
   const automationDispatchBoss = await ensureQueue(AUTOMATION_DISPATCH_EVENT);
   const automationExecuteBoss = await ensureQueue(AUTOMATION_EXECUTE_RUN);
 
@@ -76,6 +80,13 @@ export async function startWorker() {
     for (const job of jobs) {
       const payload = whatsappInboundResponseJobSchema.parse(job.data);
       await whatsAppWebhookService.processInboundJob(payload);
+    }
+  });
+
+  await voiceBoss.work(VOICE_RESPOND_TURN, async (jobs) => {
+    for (const job of jobs) {
+      const payload = voiceRespondTurnJobSchema.parse(job.data);
+      await processVoiceTurn(payload);
     }
   });
 
@@ -178,7 +189,7 @@ export async function startWorker() {
   const renewalTimer = setInterval(() => void renewManagedNumbers(), 60 * 60 * 1000);
   renewalTimer.unref();
 
-  logger.info({ queues: [AUTH_PASSWORD_RESET_EMAIL, COMMERCE_WELCOME_EMAIL, ADMIN_USER_WELCOME_EMAIL, TEAM_INVITATION_EMAIL, SMS_INBOUND_RESPONSE, WHATSAPP_INBOUND_RESPONSE, AUTOMATION_DISPATCH_EVENT, AUTOMATION_EXECUTE_RUN] }, "AI Caller worker started");
+  logger.info({ queues: [AUTH_PASSWORD_RESET_EMAIL, COMMERCE_WELCOME_EMAIL, ADMIN_USER_WELCOME_EMAIL, TEAM_INVITATION_EMAIL, SMS_INBOUND_RESPONSE, WHATSAPP_INBOUND_RESPONSE, VOICE_RESPOND_TURN, AUTOMATION_DISPATCH_EVENT, AUTOMATION_EXECUTE_RUN] }, "AI Caller worker started");
 
   const shutdown = async (signal: string) => {
     logger.info({ signal }, "Stopping AI Caller worker");

@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { MessageIcon, PhoneIcon, UsersIcon } from "@/components/icons";
 import { AppNav } from "./app-nav";
 
@@ -53,6 +53,38 @@ function VoiceCallCard({ message }: { message: Message }) {
   const [loadingDetail, setLoadingDetail] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const audioRef = useRef<HTMLAudioElement | null>(null);
+  const recordingStatus = detail?.call.recordingStatus
+    ?? (typeof message.metadata.recordingStatus === "string" ? message.metadata.recordingStatus : "PENDING");
+
+  useEffect(() => {
+    if (!callId) return;
+    let cancelled = false;
+    let settled = false;
+    let checks = 0;
+    const refresh = async () => {
+      try {
+        const response = await fetch(`/api/voice/calls/${callId}`, { cache: "no-store" });
+        if (!response.ok) return;
+        const updated = await response.json() as VoiceCallDetail;
+        if (!cancelled) {
+          setDetail(updated);
+          if (["AVAILABLE", "FAILED", "DECLINED"].includes(updated.call.recordingStatus)) {
+            settled = true;
+            window.clearInterval(timer);
+          }
+        }
+      } catch {
+        // The transcript button provides an explicit retry/error state.
+      }
+    };
+    void refresh();
+    const timer = window.setInterval(() => {
+      // A recording callback can arrive after hangup. Stop polling after 1 min.
+      if (settled || ++checks > 10 || cancelled) { window.clearInterval(timer); return; }
+      void refresh();
+    }, 6_000);
+    return () => { cancelled = true; window.clearInterval(timer); };
+  }, [callId]);
 
   async function toggleTranscript() {
     if (!callId) return;
@@ -92,7 +124,9 @@ function VoiceCallCard({ message }: { message: Message }) {
       </div>
       <div className="callPlayback">
         <span className="voiceCallDuration">{formatDuration(duration)}</span>
-        {callId ? <audio ref={audioRef} controls preload="metadata" src={`/api/voice/calls/${callId}/recording`} /> : <span>Recording unavailable</span>}
+        {callId && recordingStatus === "AVAILABLE"
+          ? <audio ref={audioRef} controls preload="metadata" src={`/api/voice/calls/${callId}/recording`} />
+          : <span>{recordingStatus === "DECLINED" ? "Recording declined" : recordingStatus === "FAILED" ? "Recording unavailable" : "Recording processing or unavailable"}</span>}
       </div>
       <div className="voiceCallActions">
         <button type="button" disabled={!callId || loadingDetail} onClick={() => void toggleTranscript()}>
@@ -283,6 +317,24 @@ export function InboxDataPage() {
     }
   }
 
+  // Older live calls may have transcript messages but no recording artifact:
+  // still show their call card and allow opening the persisted transcript.
+  const fallbackCallCards = new Set<string>();
+  if (timeline) {
+    const callsWithCards = new Set(timeline.messages
+      .filter((message) => message.contentType === "CALL_RECORDING")
+      .map((message) => message.metadata.voiceCallId)
+      .filter((id): id is string => typeof id === "string"));
+    const seen = new Set<string>();
+    for (const message of timeline.messages) {
+      const callId = message.metadata.voiceCallId;
+      if (message.contentType !== "CALL_TRANSCRIPT" || typeof callId !== "string"
+        || callsWithCards.has(callId) || seen.has(callId)) continue;
+      seen.add(callId);
+      fallbackCallCards.add(message.id);
+    }
+  }
+
   return (
     <main className="inboxShell">
       <AppNav active="Inbox" className="appSidebar inboxSidebarNav" />
@@ -312,10 +364,9 @@ export function InboxDataPage() {
               <div className="threadBody">
                 {!timeline.messages.length && <div className="dayDivider"><span>No messages yet</span></div>}
                 {timeline.messages.map((message) => {
-                  if (message.contentType === "CALL_TRANSCRIPT") return null;
                   if (message.contentType === "CALL_RECORDING") return <VoiceCallCard key={message.id} message={message} />;
                   const customer = message.senderType === "CUSTOMER";
-                  return <div key={message.id} className={`messageRow ${customer ? "customer" : "agent"}`}>{customer && <span className="miniAvatar">{initials(timeline.contact.name)}</span>}<div className={`messageBubble ${customer ? "incoming" : "outgoing"}`}><div className="messageMeta"><span className={`channelBadge ${channelLabels[message.channel].toLowerCase().replace(" ", "-")}`}>{message.channel === "PHONE" ? <PhoneIcon size={13} /> : <MessageIcon size={13} />}{channelLabels[message.channel]}</span><time>{displayTime(message.createdAt)}</time></div><p>{message.body}</p></div>{!customer && <span className="botAvatar">{message.senderType === "USER" ? <UsersIcon size={16} /> : "✦"}</span>}</div>;
+                  return <Fragment key={message.id}>{fallbackCallCards.has(message.id) && <VoiceCallCard message={message} />}<div className={`messageRow ${customer ? "customer" : "agent"}`}>{customer && <span className="miniAvatar">{initials(timeline.contact.name)}</span>}<div className={`messageBubble ${customer ? "incoming" : "outgoing"}`}><div className="messageMeta"><span className={`channelBadge ${channelLabels[message.channel].toLowerCase().replace(" ", "-")}`}>{message.channel === "PHONE" ? <PhoneIcon size={13} /> : <MessageIcon size={13} />}{channelLabels[message.channel]}</span><time>{displayTime(message.createdAt)}</time></div><p>{message.body}</p></div>{!customer && <span className="botAvatar">{message.senderType === "USER" ? <UsersIcon size={16} /> : "✦"}</span>}</div></Fragment>;
                 })}
               </div>
               <div className="composerWrap"><div className="composerTabs"><button className="active" type="button">Message</button></div><textarea aria-label="Conversation reply" value={draft} onChange={(event) => setDraft(event.target.value)} disabled={!canReplyOnStaffChannel || sendingReply} placeholder={canReplyOnStaffChannel ? `Reply by ${channelLabels[latestChannel]}…` : latestChannel === "WHATSAPP" || latestChannel === "SMS" || latestChannel === "WEBCHAT" ? `Take over this conversation to reply by ${channelLabels[latestChannel]}.` : `Staff outbound ${channelLabels[latestChannel]} replies are not enabled yet.`} /><div className="composerFooter"><span>{canReplyOnStaffChannel ? latestChannel === "WHATSAPP" ? "Free-form WhatsApp replies require an active 24-hour customer window." : latestChannel === "SMS" ? "Staff SMS replies use the workspace's active SMS provider." : "Web Chat replies appear in the customer's active widget session." : "Take over a supported messaging conversation to reply as staff."}</span>{canReplyOnStaffChannel && <button className="sendButton" type="button" disabled={sendingReply || !draft.trim()} onClick={() => void sendStaffReply()}>{sendingReply ? "Sending…" : "Send"}</button>}</div></div>

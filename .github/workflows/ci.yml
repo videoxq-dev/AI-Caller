@@ -78,11 +78,61 @@ jobs:
       - name: Voice provider readiness unit tests (no network or secrets)
         run: npm run test:voice-readiness
 
+      - name: Cloud deployment database probe unit tests
+        run: npm run test:deployment
+
+      - name: Database deployment readiness after migrations
+        run: npm run verify:deployment
+
       - name: Typecheck
         run: npm run typecheck
 
       - name: Build
         run: npm run build
+
+      - name: Validate backwards-compatible DeployOS PostgreSQL volume and new database guard
+        run: |
+          # The existing DeployOS install uses its Compose postgres service;
+          # an upgrade MUST NOT remove the service or its persistent volume.
+          env -u POSTGRES_USER -u POSTGRES_PASSWORD -u POSTGRES_DB \
+            docker compose -f docker-compose.yml config --quiet
+          services=$(env -u POSTGRES_USER -u POSTGRES_PASSWORD -u POSTGRES_DB \
+            docker compose -f docker-compose.yml config --services)
+          for expected in postgres migrate web worker gateway; do
+            printf '%s\n' "$services" | grep -qx "$expected"
+          done
+          docker compose -f docker-compose.yml config --volumes | grep -qx postgres_data
+          # Gateway must survive redeploy on Traefik's edge network while
+          # preserving its private default network for PostgreSQL.
+          docker compose -f docker-compose.yml config --format json | node -e '
+            const fs = require("node:fs");
+            const config = JSON.parse(fs.readFileSync(0, "utf8"));
+            const gateway = config.services.gateway.networks;
+            if (!config.networks.edge?.external || !gateway.default ||
+                !gateway.edge?.aliases?.includes("aicaller-voice-gateway") ||
+                config.services.postgres.networks.edge) process.exit(1);
+          '
+          grep -Fq 'POSTGRES_HOST_AUTH_METHOD: scram-sha-256' docker-compose.yml
+          grep -Fq 'if [ ! -s /var/lib/postgresql/data/PG_VERSION ]; then' docker-compose.yml
+          grep -Fq '"$$POSTGRES_PASSWORD" = "ai_caller_auto_pass"' docker-compose.yml
+          if grep -Eq 'POSTGRES_HOST_AUTH_METHOD:[[:space:]]*trust|sed -i .*trust' docker-compose.yml; then
+            echo 'Never initialize or silently rewrite PostgreSQL auth to trust.'
+            exit 1
+          fi
+      - name: Verify existing PostgreSQL data survives a Compose upgrade
+        run: sh scripts/verify-compose-postgres-compat.sh
+
+      - name: Validate opt-in full-stack self-hosted Compose
+        run: |
+          cp .env.deploy.example .env.deploy
+          docker compose --env-file .env.deploy -f compose.selfhost.yaml config --quiet
+          rm .env.deploy
+
+      - name: Build deployable app image and check runtime tooling
+        run: |
+          docker build --tag ai-caller-ci:latest .
+          docker run --rm --entrypoint sh ai-caller-ci:latest -ec \
+            'test -f .next/BUILD_ID && test -f db/migrations/0019_knowledge_sources.sql && test -x node_modules/.bin/tsx'
 
       - name: Install Chromium for browser verification
         run: npx playwright install --with-deps chromium

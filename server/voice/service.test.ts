@@ -46,7 +46,6 @@ describe("voice webhook service", () => {
     };
     const service = createVoiceWebhookService({
       resolveRuntime: async () => runtime,
-      respond: vi.fn(),
       fetchRecording: vi.fn(),
       putRecording: vi.fn(),
     });

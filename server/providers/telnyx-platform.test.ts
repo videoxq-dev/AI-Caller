@@ -13,9 +13,34 @@ vi.mock("@/server/env", () => ({
   }),
 }));
 
-import { deleteTelnyxCallControlApplication, deleteTelnyxMessagingProfile, findTelnyxNumberOrderByReference, orderTelnyxNumber, releaseTelnyxNumber, retrieveTelnyxNumberOrder, retrieveTelnyxOrderPhoneNumber, searchTelnyxNumbers } from "./telnyx-platform";
+import { deleteTelnyxCallControlApplication, deleteTelnyxMessagingProfile, findTelnyxNumberOrderByReference, orderTelnyxNumber, releaseTelnyxNumber, retrieveTelnyxNumberOrder, retrieveTelnyxOrderPhoneNumber, searchTelnyxNumbers, updateTelnyxCallControlApplication } from "./telnyx-platform";
 
 describe("managed Telnyx number search", () => {
+  it("updates the exact existing Call Control app to a new public callback without a purchase", async () => {
+    const fetcher = vi.fn(async (_url: RequestInfo | URL) => new Response(JSON.stringify({
+      data: { id: "app-123" },
+    }), { status: 200, headers: { "content-type": "application/json" } })) as typeof fetch;
+    await expect(updateTelnyxCallControlApplication(
+      "workspace-abc", "app-123", "https://my-test-tunnel.ngrok-free.app/api/webhooks/voice/telnyx/workspace-abc", fetcher,
+    )).resolves.toBe("app-123");
+    const [url, init] = vi.mocked(fetcher).mock.calls[0] as unknown as [string, RequestInit];
+    expect(url).toBe("https://api.telnyx.com/v2/call_control_applications/app-123");
+    expect(init.method).toBe("PATCH");
+    expect(JSON.parse(String(init.body))).toEqual({
+      application_name: "AI Caller workspace-abc",
+      webhook_event_url: "https://my-test-tunnel.ngrok-free.app/api/webhooks/voice/telnyx/workspace-abc",
+    });
+  });
+
+  it("rejects an update response that does not confirm the owned connection ID", async () => {
+    const fetcher = vi.fn(async () => new Response(JSON.stringify({
+      data: { id: "some-other-connection" },
+    }), { status: 200, headers: { "content-type": "application/json" } })) as typeof fetch;
+    await expect(updateTelnyxCallControlApplication(
+      "workspace-abc", "app-123", "https://my-test-tunnel.ngrok-free.app/api/webhooks/voice/telnyx/workspace-abc", fetcher,
+    )).rejects.toThrow("Telnyx did not confirm the expected Call Control application.");
+  });
+
   it("sends state, city and area-code filters and requires voice + SMS", async () => {
     const fetcher = vi.fn(async (input: RequestInfo | URL) => {
       const url = new URL(String(input));
@@ -51,6 +76,34 @@ describe("managed Telnyx number search", () => {
       locality: "Sheridan",
       monthlyCost: "1.10",
     });
+  });
+
+  it("uses Telnyx-documented area/prefix/suffix filters for an exact US number recheck", async () => {
+    const fetcher = vi.fn(async (input: RequestInfo | URL) => {
+      const params = new URL(String(input)).searchParams;
+      expect(params.get("filter[national_destination_code]")).toBe("307");
+      expect(params.get("filter[phone_number][starts_with]")).toBe("555");
+      expect(params.get("filter[phone_number][ends_with]")).toBe("0184");
+      expect(params.get("filter[best_effort]")).toBe("false");
+      expect(params.get("filter[exclude_held_numbers]")).toBe("true");
+      expect(params.get("filter[phone_number_type]")).toBe("local");
+      expect(params.get("filter[limit]")).toBe("30");
+      expect(params.has("filter[starts_with]")).toBe(false);
+      expect(params.has("filter[ends_with]")).toBe(false);
+      return new Response(JSON.stringify({
+        data: [{
+          phone_number: "+13075550184",
+          cost_information: { monthly_cost: "1.10", upfront_cost: "0.00", currency: "USD" },
+          features: [{ name: "voice" }, { name: "sms" }],
+        }],
+      }), { status: 200, headers: { "content-type": "application/json" } });
+    }) as typeof fetch;
+    const numbers = await searchTelnyxNumbers({
+      countryCode: "US", numberType: "local", areaCode: "307",
+      startsWith: "555", endsWith: "0184", limit: 30,
+    }, fetcher);
+    expect(numbers).toHaveLength(1);
+    expect(numbers[0].phoneNumber).toBe("+13075550184");
   });
 
   it("requests quickship inventory for US toll-free numbers", async () => {

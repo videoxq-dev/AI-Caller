@@ -43,6 +43,12 @@ export function normalizeAIModel(provider: AIProviderId, model: string | undefin
   return legacyModelAliases[provider][selected] ?? selected;
 }
 
+// Keep the hosted conversational path aligned with the direct Luna V1 readiness probe.
+// Other models keep their own provider defaults instead of receiving an unsupported setting.
+export function openAIReasoningSettings(model: string) {
+  return model === "gpt-5.6-luna" ? { reasoning: { effort: "none" as const } } : {};
+}
+
 export function hostedAIModel() {
   const env = getEnv();
   if (env.HOSTED_AI_PROVIDER === "gemini") {
@@ -86,6 +92,7 @@ class OpenAIResponsesProvider implements AIProvider {
       headers: { authorization: `Bearer ${this.apiKey}`, "content-type": "application/json" },
       body: JSON.stringify({
         model,
+        ...openAIReasoningSettings(model),
         ...(instructions ? { instructions } : {}),
         input: messages,
         store: false,

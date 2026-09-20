@@ -13,6 +13,7 @@
 # local env files
 .env*
 !.env.example
+!.env.deploy.example
 
 # logs
 npm-debug.log*
