@@ -3,7 +3,7 @@ import { db } from "@/db";
 import { usageEvents, voiceRealtimeResponseUsage } from "@/db/schema";
 import { chargeUnavoidableCredits } from "@/server/credits/service";
 import { logger } from "@/server/observability/logger";
-import { getVoiceCall, updateVoiceCall } from "./repository";
+import { getVoiceCall } from "./repository";
 import { quoteRealtimeVoiceFromRates, type RealtimeVoiceModel, type RealtimeVoiceUsage } from "@/server/billing/realtime-voice";
 import type { HostedRate } from "@/server/billing/pricing";
 
@@ -52,18 +52,6 @@ export async function recordRealtimeResponse(workspaceId: string, callId: string
   await db.insert(voiceRealtimeResponseUsage).values({
     workspaceId, voiceCallId: callId, responseId, usage,
   }).onConflictDoNothing();
-}
-
-export async function markRealtimeSessionClosed(workspaceId: string, callId: string, confirmed: boolean) {
-  const call = await getVoiceCall(workspaceId, callId);
-  if (!call || call.metadata.voiceTechnology !== "REALTIME") return;
-  // Do not overwrite a failed close with a successful one from a stale stream.
-  if (call.metadata.realtimeUsageComplete === false) return;
-  await updateVoiceCall(workspaceId, callId, {}, {
-    realtimeUsageComplete: confirmed,
-    realtimeClosedAt: new Date().toISOString(),
-  });
-  if (confirmed) await settleRealtimeCall(workspaceId, callId);
 }
 
 function sumUsage(rows: Array<{ usage: Record<string, number> }>): RealtimeVoiceUsage {
