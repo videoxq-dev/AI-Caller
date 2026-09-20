@@ -383,7 +383,7 @@ export function createVoiceWebhookService(dependencies: VoiceServiceDependencies
         const latest = await updateVoiceCall(workspaceId, call.id, {}, { phase: "ACTIVE" });
         const pending = typeof latest.metadata.pendingVoiceTurnEventId === "string"
           ? latest.metadata.pendingVoiceTurnEventId : null;
-        if (pending) await scheduleVoiceTurn(workspaceId, call.id, pending, "after-greeting");
+        if (pending && call.metadata.voiceTechnology !== "REALTIME") await scheduleVoiceTurn(workspaceId, call.id, pending, "after-greeting");
         return;
       }
       if (currentPhase !== "AWAITING_DISCLOSURE_END") return;
@@ -393,7 +393,7 @@ export function createVoiceWebhookService(dependencies: VoiceServiceDependencies
         callControlId: event.callControlId,
         commandId: deterministicCommandId(`${event.externalEventId}:record`),
       });
-            await runtime.provider.startTranscription({
+      await runtime.provider.startTranscription({
         callControlId: event.callControlId,
         language: voice.config.language,
         commandId: deterministicCommandId(`${event.externalEventId}:transcription`),
@@ -426,7 +426,7 @@ export function createVoiceWebhookService(dependencies: VoiceServiceDependencies
           callControlId: event.callControlId,
           commandId: deterministicCommandId(`${event.externalEventId}:record-after-consent`),
         });
-                await runtime.provider.startTranscription({
+        await runtime.provider.startTranscription({
           callControlId: event.callControlId,
           language: voice.config.language,
           commandId: deterministicCommandId(`${event.externalEventId}:transcription-after-consent`),
