@@ -20,6 +20,8 @@ password; supply a strong `POSTGRES_PASSWORD` and matching `DATABASE_URL`.
 An independently managed database must be assessed separately; do not run
 this script against an unrelated managed database.
 
+Before touching the deployed database, run the [sanitized read-only cloud inventory](issue-28-cloud-preflight.md) on the current Docker host and preserve its row-count baseline. CI's disposable restore rehearsal does not substitute for this step.
+
 ## Production migration (one coordinated maintenance window)
 
 1. Identify the actual DeployOS deployment, its Compose project and PostgreSQL
