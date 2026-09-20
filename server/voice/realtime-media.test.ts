@@ -34,7 +34,7 @@ vi.mock("@/server/domain/core/repository", () => ({
   appendMessage: vi.fn(async () => ({})),
 }));
 vi.mock("@/server/voice/realtime-tools", () => ({
-  realtimeSessionContext: vi.fn(async () => ({ instructions: "Answer the caller.", history: "" })),
+  realtimeSessionContext: vi.fn(async () => ({ instructions: "Answer the caller.", history: "", tools: [] })),
   realtimeTools: [],
   runRealtimeBusinessTool: vi.fn(),
 }));
@@ -281,6 +281,7 @@ describe("Realtime Telnyx/OpenAI media contract", () => {
     vi.mocked(realtimeSessionContext).mockResolvedValueOnce({
       instructions: "Continue with the caller and do not invent bookings.",
       history: "Customer: The office is in Sheridan.\\nPrevious agent: What day would you like?",
+      tools: [],
     });
     const telnyx = telnyxSocket();
     const bridge = attachRealtimeMedia({
