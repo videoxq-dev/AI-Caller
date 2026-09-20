@@ -409,15 +409,17 @@ export function attachRealtimeMedia({ telnyx, identity, streamId }: BridgeOption
     }
   }
 
-  async function waitUntilGreetingEnds() {
+  async function waitUntilGreetingEnds(allowOpening = false) {
     const until = Date.now() + OPENING_WAIT_MS;
     while (open && Date.now() < until) {
       const call = await getVoiceCall(workspaceId, callId);
       if (!call || call.metadata.voiceTechnology !== "REALTIME"
         || !["RINGING", "ACTIVE"].includes(call.status))
         throw new Error("Realtime call is no longer active.");
-      if (call.status === "ACTIVE" && call.metadata.phase === "ACTIVE" && ["ANNOUNCED", "GRANTED"]
-        .includes(call.recordingConsentStatus)) return call;
+      if (call.status === "ACTIVE"
+        && (call.metadata.phase === "ACTIVE"
+          || (allowOpening && call.metadata.phase === "OPENING_SPEAKING"))
+        && ["ANNOUNCED", "GRANTED"].includes(call.recordingConsentStatus)) return call;
       if (["ENDED", "TERMINATING", "HUMAN", "DECLINED_NOTICE"].includes(String(call.metadata.phase)))
         throw new Error("Realtime call is not authorized to stream.");
       await new Promise(resolve => setTimeout(resolve, 150));
@@ -427,10 +429,12 @@ export function attachRealtimeMedia({ telnyx, identity, streamId }: BridgeOption
 
   async function start() {
     try {
-      const call = await waitUntilGreetingEnds();
+      // Preconnect the model while Telnyx speaks the consented opening message.
+      // No media is forwarded until the greeting ends; this removes model
+      // handshake latency from the caller's first conversational response.
+      const call = await waitUntilGreetingEnds(true);
       if (!open) return;
-      // Drop all frames captured before the recording/transcription disclosure
-      // and opening message completed. Those frames are not consented AI input.
+      // All audio captured before the complete opening is discarded.
       initialAudio.length = 0;
       initialBytes = 0;
       const claimedCall = await claimRealtimeStream(workspaceId, callId, streamId);
@@ -477,13 +481,16 @@ export function attachRealtimeMedia({ telnyx, identity, streamId }: BridgeOption
         if (!sessionConfigured) fail("openai-session-timeout");
       }, OPENAI_READY_MS);
       timeout.unref();
-      speechAllowed = true;
-      // If session.updated arrived before we switched speechAllowed, flush.
-      if (ready) {
-        for (const frame of initialAudio) feedAudio(frame);
+      track(waitUntilGreetingEnds().then(() => {
+        if (!open) return;
+        // Discard audio captured during recording disclosure/opening playback.
         initialAudio.length = 0;
         initialBytes = 0;
-      }
+        speechAllowed = true;
+      }).catch(err => {
+        logger.warn({ err, workspaceId, callId }, "Realtime greeting authorization failed");
+        fail("realtime-greeting-ended-abnormally");
+      }));
     } catch (err) {
       logger.warn({ err, workspaceId, callId }, "Realtime session was not established");
       fail("realtime-start-failure");
