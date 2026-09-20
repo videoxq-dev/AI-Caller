@@ -351,6 +351,14 @@ export function createVoiceWebhookService(dependencies: VoiceServiceDependencies
       if (currentPhase === "AI_SPEAKING") {
         const pending = await releaseVoiceSpeech(workspaceId, call.id);
         if (pending) await scheduleVoiceTurn(workspaceId, call.id, pending, "after-speak");
+        const requestedAt = call.metadata.voiceSpeechRequestedAt;
+        logger.info({
+          workspaceId,
+          callId: call.id,
+          speechElapsedMs: typeof requestedAt === "string"
+            ? Math.max(0, Date.now() - new Date(requestedAt).getTime()) : null,
+          pendingCallerTurn: Boolean(pending),
+        }, "Voice assistant speech ended");
         return;
       }
       if (currentPhase === "OPENING_SPEAKING") {
