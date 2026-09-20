@@ -86,6 +86,8 @@ export function attachRealtimeMedia({ telnyx, identity, streamId }: BridgeOption
   const handledToolCalls = new Set<string>();
   const responseEpochs = new Map<string, number>();
   let callerSpeechEpoch = 0;
+  let callerLastSpeechStoppedAt: number | null = null;
+  const measuredResponses = new Set<string>();
   let priorConversation = "";
   let historyInjected = false;
   const startedAt = Date.now();
@@ -186,6 +188,14 @@ export function attachRealtimeMedia({ telnyx, identity, streamId }: BridgeOption
   }
 
   function queueOutput(raw: unknown, responseId: unknown) {
+    if (typeof responseId === "string" && callerLastSpeechStoppedAt != null
+      && !measuredResponses.has(responseId)) {
+      measuredResponses.add(responseId);
+      logger.info({ workspaceId, callId, responseId,
+        modelAudioFirstByteLatencyMs: Date.now() - callerLastSpeechStoppedAt },
+        "Realtime measured speech-end to first generated audio");
+      callerLastSpeechStoppedAt = null;
+    }
     if (!open || !speechAllowed
       || (typeof responseId === "string" && interruptedResponseIds.has(responseId))) return;
     const chunk = exactBase64(raw);
@@ -279,6 +289,10 @@ export function attachRealtimeMedia({ telnyx, identity, streamId }: BridgeOption
         initialAudio.length = 0;
         initialBytes = 0;
       }
+      return;
+    }
+    if (event.type === "input_audio_buffer.speech_stopped") {
+      callerLastSpeechStoppedAt = Date.now();
       return;
     }
     if (event.type === "input_audio_buffer.speech_started") {
