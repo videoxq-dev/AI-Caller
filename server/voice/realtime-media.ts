@@ -487,8 +487,26 @@ export function attachRealtimeMedia({ telnyx, identity, streamId }: BridgeOption
     }
     if (upstream && upstream.readyState === WebSocket.OPEN) upstream.close(1000);
     if (upstream && upstream.readyState === WebSocket.CONNECTING) upstream.terminate();
-    // Do not claim authoritative billing if any chargeable response was lost.
-    await Promise.allSettled([...pendingWork]);
+    // Do not allow an unresponsive downstream booking or storage operation to
+    // hold the media socket open forever after the carrier has disconnected.
+    // Incomplete work must never be marked as clean billable usage.
+    let pendingTimeout: NodeJS.Timeout | null = null;
+    let drained = false;
+    try {
+      drained = await Promise.race([
+        Promise.allSettled([...pendingWork]).then(() => true),
+        new Promise<boolean>(resolve => {
+          pendingTimeout = setTimeout(() => resolve(false), 3000);
+        }),
+      ]);
+    } finally {
+      if (pendingTimeout) clearTimeout(pendingTimeout);
+    }
+    if (!drained) {
+      error = true;
+      logger.error({ workspaceId, callId, pendingTasks: pendingWork.size },
+        "Realtime session closed with unfinished provider or business work");
+    }
     const verified = providerConfirmed && !error && ready && pendingResponses.size === 0;
     if (claimed) {
       const completed = await finishRealtimeStream(workspaceId, callId, streamId, verified);
