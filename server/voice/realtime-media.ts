@@ -278,9 +278,10 @@ export function attachRealtimeMedia({ telnyx, identity, streamId }: BridgeOption
     const until = Date.now() + OPENING_WAIT_MS;
     while (open && Date.now() < until) {
       const call = await getVoiceCall(workspaceId, callId);
-      if (!call || call.metadata.voiceTechnology !== "REALTIME" || call.status !== "ACTIVE")
+      if (!call || call.metadata.voiceTechnology !== "REALTIME"
+        || !["RINGING", "ACTIVE"].includes(call.status))
         throw new Error("Realtime call is no longer active.");
-      if (call.metadata.phase === "ACTIVE" && ["ANNOUNCED", "GRANTED"]
+      if (call.status === "ACTIVE" && call.metadata.phase === "ACTIVE" && ["ANNOUNCED", "GRANTED"]
         .includes(call.recordingConsentStatus)) return call;
       if (["ENDED", "TERMINATING", "HUMAN", "DECLINED_NOTICE"].includes(String(call.metadata.phase)))
         throw new Error("Realtime call is not authorized to stream.");
