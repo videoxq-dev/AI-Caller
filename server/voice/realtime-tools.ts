@@ -5,8 +5,19 @@ import { AppError } from "@/server/http/errors";
 import { buildConversationContext } from "@/server/orchestrator/context";
 import { executeOrchestratorTools, orchestratorActionSchema } from "@/server/orchestrator/tools";
 import { getConversationById } from "@/server/domain/core/repository";
+import { assertRealtimeBookingReady, captureRealtimeBookingDetails, saveRealtimeAvailability } from "./realtime-booking";
 
 export const realtimeTools = [
+  {
+    type: "function", name: "capture_booking_details",
+    description: "Record only booking details the caller has clearly provided. Call again when they correct details. Never invent missing values.",
+    parameters: { type: "object", properties: {
+      serviceName: { type: "string" }, location: { type: "string" },
+      date: { type: "string", description: "YYYY-MM-DD; ask if the year is ambiguous" },
+      time: { type: "string", description: "HH:MM in business local time" },
+      timezone: { type: "string", description: "IANA time zone" },
+    } },
+  },
   {
     type: "function", name: "check_availability",
     description: "Check actual calendar availability. Do not claim a slot is available until this returns it.",
@@ -48,7 +59,7 @@ function record(v: unknown): Record<string, unknown> {
 }
 
 export async function runRealtimeBusinessTool(input: {
-  workspaceId: string; conversationId: string; contactId: string;
+  workspaceId: string; conversationId: string; contactId: string; callId: string;
   name: string; arguments: string;
 }) {
   const convo = await getConversationById(input.workspaceId, input.conversationId);
@@ -58,6 +69,17 @@ export async function runRealtimeBusinessTool(input: {
   let args: Record<string, unknown>;
   try { args = record(JSON.parse(input.arguments)); }
   catch { return { ok: false, reason: "The tool arguments were invalid." }; }
+  if (input.name === "capture_booking_details") {
+    try {
+      const saved = await captureRealtimeBookingDetails(input.workspaceId, input.callId, args);
+      return { ok: true as const, kind: "booking_state" as const, data: saved };
+    } catch (error) {
+      if (error instanceof Error && error.name === "ZodError") {
+        return { ok: false as const, reason: "Please collect valid booking details before storing them." };
+      }
+      throw error;
+    }
+  }
   const actions: Record<string, string> = {
     check_availability: "CHECK_AVAILABILITY",
     book_appointment: "BOOK_APPOINTMENT",
@@ -70,6 +92,12 @@ export async function runRealtimeBusinessTool(input: {
   if (!parsed.success) return { ok: false, reason: "Please collect the missing booking details before trying again." };
 
   if (parsed.data.type === "BOOK_APPOINTMENT") {
+    try {
+      await assertRealtimeBookingReady(input.workspaceId, input.callId, parsed.data);
+    } catch (error) {
+      if (error instanceof AppError) return { ok: false as const, reason: error.message };
+      throw error;
+    }
     // A model assertion is not a customer's consent. Verify persisted call
     // utterances and that the AI actually asked for confirmation.
     const history = await db.select({ body: messages.body, sender: messages.senderType,
@@ -90,7 +118,13 @@ export async function runRealtimeBusinessTool(input: {
   try {
     const result = await executeOrchestratorTools(input.workspaceId,
       input.conversationId, input.contactId, { action: parsed.data });
-    return { ok: true, ...result, ...(result.kind === "escalation"
+    if (parsed.data.type === "CHECK_AVAILABILITY") {
+      const slots = Array.isArray(result.data.slots) ? result.data.slots : [];
+      const available = slots.some(slot => record(slot).startsAt === parsed.data.startsAt);
+      await saveRealtimeAvailability(input.workspaceId, input.callId,
+        parsed.data.startsAt, available);
+    }
+    return { ok: true as const, ...result, ...(result.kind === "escalation"
       ? { spokenInstruction: "Tell the caller staff will follow up. Never promise a live phone transfer." } : {}) };
   } catch (error) {
     if (error instanceof AppError && error.status < 500) return { ok: false, reason: error.message };
