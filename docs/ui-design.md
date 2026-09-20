@@ -1,3 +1,5 @@
+> **September 20, 2026 remediation UI override:** [Phase 0 intelligent automation contract](./intelligent-automation-remediation-phase-0.md) supersedes the historical five-preset-only Automations UI below. The approved scope uses **one AI agent**, **one managed Telnyx phone number**, and **one structured non-drag-and-drop automation builder** for custom deterministic workflows and optional conversational objectives. Built-in recipes remain starting points, not an exhaustive fixed list; execution mode is determined by validated workflow structure rather than a user toggle. Ordinary AI Agent conversations must work with no configured automations. Preserve existing frontend patterns and do not add a multi-number or multi-agent UI.
+
 For the **FE/MVP**, I’d keep the product deliberately compact. We should design only the pages required to get someone from purchase → setup → live customer conversations → appointments.
 
 I’d break it into **15 primary pages/screens**, with the onboarding flow treated as one guided experience.
