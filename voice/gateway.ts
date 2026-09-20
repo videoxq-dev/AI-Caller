@@ -9,6 +9,7 @@ import { getVoiceCall } from "@/server/voice/repository";
 
 type TelnyxStreamFrame = {
   event?: unknown;
+  stream_id?: unknown;
   start?: {
     call_session_id?: unknown;
     call_control_id?: unknown;
@@ -97,7 +98,7 @@ wss.on("connection", (ws, request) => {
         return;
       }
       mediaStarting = true;
-      const streamId = typeof frame.start?.stream_id === "string" ? frame.start.stream_id : "";
+      const streamId = typeof frame.stream_id === "string" ? frame.stream_id : "";
       void getVoiceCall(auth.workspaceId, auth.callId).then((call) => {
         if (!call || call.externalCallId !== auth.externalCallId || call.status !== "ACTIVE") {
           ws.close(1008, "Voice call is not active");
