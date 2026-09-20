@@ -31,7 +31,7 @@ services:
       HOSTNAME: 0.0.0.0
       VOICE_RECORDING_ALLOW_PERSISTENT_FILESYSTEM: "true"
       VOICE_RECORDING_DIR: /app/.data/recordings
-      DATABASE_URL: ${DATABASE_URL:?Set an authenticated DATABASE_URL with the postgres Docker host}
+      DATABASE_URL: ${DATABASE_URL:?Set the existing authenticated DeployOS DATABASE_URL on this app}
     depends_on:
       migrate:
         condition: service_completed_successfully
@@ -50,7 +50,7 @@ services:
     <<: *app
     restart: unless-stopped
     environment:
-      DATABASE_URL: ${DATABASE_URL:?Set an authenticated DATABASE_URL with the postgres Docker host}
+      DATABASE_URL: ${DATABASE_URL:?Set the existing authenticated DeployOS DATABASE_URL on this app}
     depends_on:
       migrate:
         condition: service_completed_successfully
@@ -58,14 +58,13 @@ services:
     volumes:
       - recordings:/app/.data/recordings
 
-
   gateway:
     <<: *app
     restart: unless-stopped
     environment:
       NODE_ENV: production
       VOICE_GATEWAY_PORT: "3002"
-      DATABASE_URL: ${DATABASE_URL:?Set an authenticated DATABASE_URL with the postgres Docker host}
+      DATABASE_URL: ${DATABASE_URL:?Set the existing authenticated DeployOS DATABASE_URL on this app}
     depends_on:
       migrate:
         condition: service_completed_successfully
