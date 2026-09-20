@@ -5,7 +5,7 @@ import { AppError } from "@/server/http/errors";
 import { buildConversationContext } from "@/server/orchestrator/context";
 import { executeOrchestratorTools, orchestratorActionSchema } from "@/server/orchestrator/tools";
 import { getConversationById } from "@/server/domain/core/repository";
-import { assertRealtimeBookingReady, captureRealtimeBookingDetails, saveRealtimeAvailability } from "./realtime-booking";
+import { assertRealtimeBookingReady, captureRealtimeBookingDetails, saveRealtimeAvailability, sameBookingInstant } from "./realtime-booking";
 import { getVoiceCall } from "./repository";
 
 export const realtimeTools = [
@@ -131,9 +131,8 @@ export async function runRealtimeBusinessTool(input: {
     if (parsed.data.type === "CHECK_AVAILABILITY") {
       const start = parsed.data.startsAt;
       const slots = Array.isArray(result.data.slots) ? result.data.slots : [];
-      const requested = new Date(start).getTime();
-      const available = Number.isFinite(requested) && slots.some(slot =>
-        new Date(String(record(slot).startsAt)).getTime() === requested);
+      const available = slots.some(slot =>
+        sameBookingInstant(String(record(slot).startsAt), start));
       await saveRealtimeAvailability(input.workspaceId, input.callId, start, available);
     }
     return { ok: true as const, ...result, ...(result.kind === "escalation"
