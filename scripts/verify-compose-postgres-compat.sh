@@ -64,6 +64,17 @@ docker run -d --name "$old" \
   -e POSTGRES_USER=postgres -e POSTGRES_PASSWORD=ai_caller_auto_pass \
   -e POSTGRES_DB=ai_caller -e POSTGRES_HOST_AUTH_METHOD=trust \
   -v "$volume:/var/lib/postgresql/data" postgres:16-alpine >/dev/null
+# postgres:16-alpine briefly starts an INIT-only UNIX socket, then shuts it
+# down and starts the real server. Do not write the marker during that window.
+attempt=0
+until docker logs "$old" 2>&1 | grep -Fq 'PostgreSQL init process complete; ready for start up.'; do
+  attempt=$((attempt + 1))
+  if [ "$attempt" -ge 30 ]; then
+    echo "Legacy isolated PostgreSQL did not finish bootstrap." >&2
+    exit 1
+  fi
+  sleep 1
+done
 attempt=0
 until docker exec "$old" pg_isready -U postgres -d ai_caller >/dev/null 2>&1; do
   attempt=$((attempt + 1))
