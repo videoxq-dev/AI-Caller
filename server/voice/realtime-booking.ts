@@ -67,7 +67,7 @@ export async function getRealtimeBookingDetails(workspaceId: string, callId: str
 /** Never confirm a calendar result from a superseded caller service/date/time. */
 export async function saveRealtimeAvailability(workspaceId: string, callId: string,
   startsAt: string, available: boolean, expectedDetails: Record<string, string>): Promise<boolean> {
-  await db.transaction(async tx => {
+  return db.transaction(async tx => {
     await tx.execute(sql`select pg_advisory_xact_lock(hashtext(${callId}))`);
     const [existing] = await tx.select().from(voiceRealtimeBookingState).where(and(
       eq(voiceRealtimeBookingState.workspaceId, workspaceId),
