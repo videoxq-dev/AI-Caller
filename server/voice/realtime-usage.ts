@@ -1,7 +1,7 @@
 import { and, eq } from "drizzle-orm";
 import { db } from "@/db";
 import { usageEvents, voiceRealtimeResponseUsage } from "@/db/schema";
-import { chargeUnavoidableCredits } from "@/server/credits/service";
+import { chargeUnavoidableCredits, settleCreditReservation } from "@/server/credits/service";
 import { logger } from "@/server/observability/logger";
 import { getVoiceCall } from "./repository";
 import { quoteRealtimeVoiceFromRates, type RealtimeVoiceModel, type RealtimeVoiceUsage } from "@/server/billing/realtime-voice";
@@ -118,12 +118,18 @@ export async function settleRealtimeCall(workspaceId: string, callId: string) {
       ? call.metadata.voiceTelnyxTtsCharacters : 0,
     usage: sumUsage(rows),
   }, aiRates, telnyxRates);
-  // Idempotent wallet ledger and unique VOICE_CALL usage reference make retries safe.
-  if (quote.credits > 0) {
-    await chargeUnavoidableCredits(workspaceId, quote.credits, {
-      reason: "Hosted Realtime inbound voice call",
-      referenceType: "VOICE_CALL", referenceId: call.id,
-    });
+  // Settle the original held credits instead of releasing them at hangup
+  // and separately debiting a mutable balance. The ledger reference is unique.
+  const charge = {
+    reason: "Hosted Realtime inbound voice call",
+    referenceType: "VOICE_CALL", referenceId: call.id,
+  };
+  const reservationId = call.metadata.realtimeReservationId;
+  if (typeof reservationId === "string") {
+    await settleCreditReservation(workspaceId, reservationId, quote.credits, charge);
+  } else if (quote.credits > 0) {
+    // Recover older calls without a hold rather than silently dropping COGS.
+    await chargeUnavoidableCredits(workspaceId, quote.credits, charge);
   }
   await db.insert(usageEvents).values({
     workspaceId, capability: "VOICE", provider: call.provider, mode: "HOSTED",
