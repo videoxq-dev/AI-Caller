@@ -1,4 +1,5 @@
 import { EventEmitter } from "node:events";
+import type WebSocket from "ws";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 const shared = vi.hoisted(() => ({ client: null as unknown }));
@@ -77,7 +78,7 @@ describe("Realtime Telnyx/OpenAI media contract", () => {
   it("bridges caller PCMU and sends correct RTP packets; clears buffered speech on interruption", async () => {
     const telnyx = telnyxSocket();
     const bridge = attachRealtimeMedia({
-      telnyx, identity: { workspaceId: "ws", callId: "call-id", externalCallId: "telnyx-call" },
+      telnyx: telnyx as unknown as WebSocket, identity: { workspaceId: "ws", callId: "call-id", externalCallId: "telnyx-call" },
       streamId: "stream",
     });
     await vi.waitFor(() => expect(shared.client).not.toBeNull());
