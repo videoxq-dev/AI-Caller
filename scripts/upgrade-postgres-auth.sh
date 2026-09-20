@@ -40,7 +40,7 @@ ALTER ROLE "$role" WITH LOGIN PASSWORD '$escaped';
 SQL
 # Match only HOST entries; keep unix-socket local rules unchanged. Existing
 # trust/md5 network entries (including hostssl) become SCRAM.
-sed -i -E '/^[[:space:]]*host[^[:space:]]*[[:space:]]/s/[[:space:]]+(trust|md5)([[:space:]]*(#.*)?)$/ scram-sha-256\\2/' "$pgdata/pg_hba.conf"
+sed -i -E '/^[[:space:]]*host[^[:space:]]*[[:space:]]/s/[[:space:]]+(trust|md5)([[:space:]]*(#.*)?)$/ scram-sha-256\2/' "$pgdata/pg_hba.conf"
 if grep -Eq '^[[:space:]]*host[^[:space:]]*[[:space:]].*[[:space:]](trust|md5)([[:space:]]|$)' "$pgdata/pg_hba.conf"; then
   echo "A legacy network trust/md5 entry remains. Inspect pg_hba.conf manually." >&2
   exit 1
