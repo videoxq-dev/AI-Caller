@@ -169,14 +169,19 @@ export function WebchatWidget({ widgetKey, config }: { widgetKey: string; config
           const eventName = lines.find((line) => line.startsWith("event: "))?.slice(7);
           const dataLine = lines.find((line) => line.startsWith("data: "))?.slice(6);
           if (eventName && dataLine) {
-            const data = JSON.parse(dataLine) as { delta?: string; message?: string; handlingMode?: string };
+            const data = JSON.parse(dataLine) as { delta?: string; message?: string; handlingMode?: string; agentAvailable?: boolean };
             if (eventName === "message" && data.delta) appendAssistantDelta(replyId, data.delta);
             if (eventName === "handoff") {
               setStatus("Human handoff");
               if (data.message) appendAssistantDelta(replyId, data.message);
             }
+            if (eventName === "unavailable" || eventName === "notice") {
+              setStatus(eventName === "unavailable" ? "AI unavailable" : "No AI reply");
+              if (data.message) appendAssistantDelta(replyId, data.message);
+            }
             if (eventName === "error") throw new Error(data.message ?? "Unable to process message.");
-            if (eventName === "done" && data.handlingMode !== "HUMAN") setStatus("AI online");
+            if (eventName === "done" && data.agentAvailable !== false
+              && data.handlingMode === "AI") setStatus("AI online");
           }
           boundary = buffer.indexOf("\n\n");
         }
