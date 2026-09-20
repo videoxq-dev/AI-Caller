@@ -1,6 +1,6 @@
 import { afterAll, beforeEach, describe, expect, it } from "vitest";
 import { closeDatabase, db } from "@/db";
-import { aiAgents, workspaces } from "@/db/schema";
+import { aiAgents, setupProgress, workspaces } from "@/db/schema";
 import { eq } from "drizzle-orm";
 import { AppError } from "@/server/http/errors";
 import { defaultAgentCapabilities } from "./capabilities";
@@ -34,6 +34,9 @@ describe("one workspace agent service", () => {
     await expect(requireActiveWorkspaceAgent(workspaceId))
       .rejects.toMatchObject({ code: "AGENT_NOT_ACTIVE" });
     await setWorkspaceAgentStatus(workspaceId, "ACTIVE");
+    const [setup] = await db.select().from(setupProgress)
+      .where(eq(setupProgress.workspaceId, workspaceId));
+    expect(setup?.liveCompletedAt).toBeInstanceOf(Date);
     await requireActiveWorkspaceAgent(workspaceId, "ANSWER_INQUIRY");
     await setWorkspaceAgentCapabilities(workspaceId, {
       ...defaultAgentCapabilities, BOOK_APPOINTMENT: false,
