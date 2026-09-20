@@ -36,5 +36,7 @@ VALUES
   ('VOICE', 'telnyx', 'realtime-us-local',
    'VOICE_REALTIME_STREAM_MINUTE', 3500, 1, 0, '2026-09-20T00:00:00Z', '{"currency":"USD","market":"US","numberType":"local","basis":"websocket_media_streaming"}'),
   ('VOICE', 'telnyx', 'realtime-us-local',
-   'VOICE_REALTIME_RECORDING_MINUTE', 2000, 1, 0, '2026-09-20T00:00:00Z', '{"currency":"USD","market":"US","numberType":"local","basis":"call_recording"}')
+   'VOICE_REALTIME_RECORDING_MINUTE', 2000, 1, 0, '2026-09-20T00:00:00Z', '{"currency":"USD","market":"US","numberType":"local","basis":"call_recording"}'),
+  ('VOICE', 'telnyx', 'realtime-us-local',
+   'VOICE_REALTIME_TRANSCRIPTION_MINUTE', 15000, 1, 0, '2026-09-20T00:00:00Z', '{"currency":"USD","market":"US","numberType":"local","basis":"telnyx_stt_inbound_call_transcript"}')
 ON CONFLICT DO NOTHING;
