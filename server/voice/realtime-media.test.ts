@@ -2,7 +2,7 @@ import { EventEmitter } from "node:events";
 import type WebSocket from "ws";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-const shared = vi.hoisted(() => ({ client: null as unknown, phase: "ACTIVE" }));
+const shared = vi.hoisted(() => ({ client: null as unknown, phase: "ACTIVE", voiceProfile: "marcus-us-1" }));
 vi.mock("ws", async () => {
   const { EventEmitter } = await import("node:events");
   class MockWebSocket extends EventEmitter {
@@ -24,7 +24,8 @@ vi.mock("@/server/voice/repository", () => ({
     conversationId: "conversation", contactId: "contact",
     recordingConsentStatus: "ANNOUNCED",
     metadata: { phase: shared.phase, voiceTechnology: "REALTIME",
-      realtimeModel: "gpt-realtime-2.1-mini", realtimeStreamId: "stream" },
+      realtimeModel: "gpt-realtime-2.1-mini", realtimeStreamId: "stream",
+      voiceProfile: shared.voiceProfile, openingMessage: "How can I help you today?" },
   })),
   claimRealtimeStream: vi.fn(async () => ({ id: "call-id" })),
   finishRealtimeStream: vi.fn(async () => true),
@@ -77,7 +78,7 @@ function telnyxSocket(): Socket {
 function currentOpenai() { return shared.client as Socket; }
 
 describe("Realtime Telnyx/OpenAI media contract", () => {
-  afterEach(() => { shared.client = null; shared.phase = "ACTIVE"; vi.clearAllMocks(); });
+  afterEach(() => { shared.client = null; shared.phase = "ACTIVE"; shared.voiceProfile = "marcus-us-1"; vi.clearAllMocks(); });
 
   it("bridges PCMU as headerless Telnyx RTP payloads; clears speech on interruption", async () => {
     const telnyx = telnyxSocket();
@@ -93,6 +94,7 @@ describe("Realtime Telnyx/OpenAI media contract", () => {
     expect((update?.session as Record<string, unknown>).output_modalities).toEqual(["audio"]);
     expect((update?.session as Record<string, unknown>).max_output_tokens).toBe(2048);
     const audio = (update?.session as Record<string, unknown>).audio as Record<string, unknown>;
+    expect((audio.output as Record<string, unknown>).voice).toBe("cedar");
     expect((audio.input as Record<string, unknown>).noise_reduction).toEqual({ type: "near_field" });
     openai.emit("message", Buffer.from(JSON.stringify({ type: "session.updated" })));
 
