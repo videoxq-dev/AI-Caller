@@ -49,6 +49,15 @@ async function latestCustomerText(
   return message?.body ?? "";
 }
 
+export async function getAwaitingPendingAction(workspaceId: string, conversationId: string) {
+  const [action] = await db.select().from(pendingAgentActions).where(and(
+    eq(pendingAgentActions.workspaceId, workspaceId),
+    eq(pendingAgentActions.conversationId, conversationId),
+    eq(pendingAgentActions.status, "AWAITING_CONFIRMATION"),
+  )).orderBy(desc(pendingAgentActions.createdAt)).limit(1);
+  return action ?? null;
+}
+
 export async function stagePendingActionProposal(input: {
   workspaceId: string;
   conversationId: string;
@@ -145,7 +154,14 @@ export async function stageOrConfirmPendingAction(input: {
       eq(pendingAgentActions.payloadHash, hash),
       eq(pendingAgentActions.status, "CONFIRMED"),
     )).orderBy(desc(pendingAgentActions.updatedAt)).limit(1);
-    if (confirmed) return { state: "READY", action: confirmed };
+    if (confirmed) {
+      const latestText = await latestCustomerText(tx, input.workspaceId, input.conversationId);
+      if (isExplicitActionConfirmation(latestText)) return { state: "READY", action: confirmed };
+      await tx.update(pendingAgentActions).set({
+        status: "SUPERSEDED",
+        updatedAt: new Date(),
+      }).where(eq(pendingAgentActions.id, confirmed.id));
+    }
 
     const [awaiting] = await tx.select().from(pendingAgentActions).where(and(
       eq(pendingAgentActions.workspaceId, input.workspaceId),
