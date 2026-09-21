@@ -31,6 +31,7 @@ function payloadHash(payload: Record<string, unknown>) {
 export function isExplicitActionConfirmation(text: string) {
   const normalized = text.trim().toLowerCase()
     .replace(/[.!?]+$/g, "")
+    .replace(/[,;:]+/g, " ")
     .replace(/\s+/g, " ");
   if (!normalized || /\b(?:no|not|don't|do not|cancel|wait|hold on|instead|change)\b/i.test(normalized)) return false;
   return /^(?:yes|yes please|yep|yeah|sure|okay|ok|absolutely|please do|do it|go ahead|go ahead and do it|book it|confirm it|confirm|that works|sounds good|looks good|send it)$/i
