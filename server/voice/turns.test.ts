@@ -6,6 +6,7 @@ import { getConversationById, appendMessage } from "@/server/domain/core/reposit
 import { enqueueUniqueJobAt } from "@/server/jobs";
 import { resolveVoiceRuntime } from "@/server/providers/voice/runtime";
 import { appendVoiceTranscriptSegment } from "./repository";
+import { resolveVoiceProfile } from "./voices";
 
 vi.mock("./repository", () => ({
   claimVoiceTurn: vi.fn(),
@@ -46,7 +47,12 @@ const call = {
   recordingConsentStatus: "ANNOUNCED",
   startedAt: new Date(),
   mode: "AI_FIRST",
-  metadata: { pendingVoiceTurnAt: new Date().toISOString() },
+  metadata: {
+    pendingVoiceTurnAt: new Date().toISOString(),
+    voiceProfile: "marcus-us-1",
+    language: "en-GB",
+    speakingRate: 0.85,
+  },
 };
 
 describe("live voice response gating", () => {
@@ -82,6 +88,24 @@ describe("live voice response gating", () => {
       { ...ids, eventId: "latest-final" },
       expect.any(Date),
     );
+  });
+
+  it("uses the per-call voice snapshot instead of switching when workspace settings change mid-call", async () => {
+    vi.mocked(responseOrchestrator.respond).mockResolvedValue({
+      reply: "The selected voice should stay consistent.",
+      handlingMode: "AI",
+      action: { type: "NONE" },
+      toolResult: { kind: "none", data: {} },
+    });
+
+    await expect(processVoiceTurn(ids)).resolves.toMatchObject({ status: "SPOKEN" });
+
+    expect(resolveVoiceProfile).toHaveBeenCalledWith("marcus-us-1");
+    expect(speak).toHaveBeenCalledWith(expect.objectContaining({
+      voice: "test-voice",
+      language: "en-GB",
+      speakingRate: 0.85,
+    }));
   });
 
   it("speaks a truthful human-follow-up acknowledgement even after escalation changes conversation ownership", async () => {
