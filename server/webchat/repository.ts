@@ -12,6 +12,7 @@ import {
   webchatWidgets,
   workspaces,
 } from "@/db/schema";
+import { isBookingV2Enabled } from "@/server/booking/rollout";
 import { getOrCreateContactByIdentity, getOrCreateOpenConversation } from "@/server/domain/core/repository";
 import { AppError } from "@/server/http/errors";
 import type { WebchatSessionInput } from "./schemas";
@@ -216,6 +217,7 @@ export async function createOrResumeWebchatSession(input: WebchatSessionInput) {
     conversationId: conversation.id,
     visitorId,
     tokenHash: tokenHash(sessionToken),
+    bookingEngineVersion: await isBookingV2Enabled(widget.workspaceId) ? "v2" : "v1",
     expiresAt: new Date(Date.now() + SESSION_TTL_MS),
   }).returning();
 
