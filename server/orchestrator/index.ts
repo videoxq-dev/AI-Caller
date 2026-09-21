@@ -75,7 +75,7 @@ Rules:
 - Never say an appointment is booked unless BOOK_APPOINTMENT returned a confirmed booking.
 - Populate contact fields only when the customer explicitly provided them in the conversation. Never infer or invent contact details.
 - A verified customer conversation/contact is sufficient for an in-app appointment; email is optional. Never invent missing contact data.
-- Use ESCALATE for an explicit human request, or when a human handoff is required AND the ESCALATE capability is enabled. A disabled capability alone never authorizes human handoff; explain what you can and cannot do, offer staff follow-up only as an option, and never claim staff were notified without a successful ESCALATE result.
+- Use ESCALATE for an explicit human request, or when the saved When Unsure policy is "Escalate to a human" and you cannot complete the request with the enabled capabilities. A disabled capability does not silently hand off by itself: explain the limitation truthfully, and request ESCALATE only when that policy requires it and ESCALATE is enabled. Never claim staff were notified without a successful ESCALATE result.
 - Lead updates are optional and must reflect only evidence from the conversation.
 - On phone calls, offer appointment confirmations and future reminder SMS only after stating the SMS program clearly and asking the customer whether they agree. Use RECORD_SMS_CONSENT only after their explicit answer, never infer consent from a booking or general interest.
 - For a general opt-out or "stop all texts" request, invoke RECORD_SMS_CONSENT with category ALL and status OPTED_OUT so both categories are revoked.
@@ -218,6 +218,60 @@ export function createResponseOrchestrator(dependencies: OrchestratorDependencie
       }
       const isLivePhone = context.systemPrompt.includes("LIVE PHONE RECEPTIONIST:");
       const lastUserMessage = [...context.messages].reverse().find((message) => message.role === "user")?.content ?? "";
+      const allowed = context.agent
+        ? capabilitiesFromBehaviorSettings(context.agent.behaviorSettings)
+        : null;
+      const whenUnsure = context.agent?.whenUnsure?.trim() || "Escalate to a human";
+
+      const unresolvedWithoutHandoff = (reply: string) => ({
+        reply,
+        handlingMode: "AI" as const,
+        action: { type: "NONE" as const },
+        toolResult: { kind: "none" as const, data: {} },
+      });
+
+      const resolveUncertainRequest = async (reply: string, reason: string) => {
+        if (!context.agent || whenUnsure !== "Escalate to a human") {
+          return unresolvedWithoutHandoff(reply);
+        }
+        if (!allowed?.ESCALATE) {
+          return unresolvedWithoutHandoff(
+            `${reply} I can't arrange staff follow-up from this conversation right now.`,
+          );
+        }
+        const escalationAction = { type: "ESCALATE" as const, reason };
+        try {
+          const escalation = await dependencies.executeTools(
+            workspaceId, conversationId, context.contact.id, { action: escalationAction },
+          );
+          if (escalation.kind !== "escalation") {
+            logger.error({ workspaceId, conversationId, reason },
+              "When Unsure escalation did not return an escalation receipt");
+            return unresolvedWithoutHandoff(
+              `${reply} I couldn't arrange staff follow-up. Please contact the business directly.`,
+            );
+          }
+          const receipt = isLivePhone
+            ? LIVE_PHONE_ESCALATION_REPLY
+            : "I've flagged your request for staff follow-up. A team member can continue this conversation here when available.";
+          return {
+            reply: `${reply} ${receipt}`,
+            handlingMode: "HUMAN" as const,
+            action: escalationAction,
+            toolResult: escalation,
+          };
+        } catch (error) {
+          if (error instanceof AppError && [
+            "AGENT_ACTION_DISABLED", "AGENT_NOT_ACTIVE", "AGENT_NOT_CONFIGURED",
+            "CONVERSATION_HUMAN_HANDLING",
+          ].includes(error.code)) {
+            return unresolvedWithoutHandoff(
+              `${reply} I couldn't arrange staff follow-up. Please contact the business directly.`,
+            );
+          }
+          throw error;
+        }
+      };
       if (isLivePhone && isExplicitHumanRequest(lastUserMessage)) {
         if (options.beforeTools && !(await options.beforeTools())) {
           return { reply: null, handlingMode: "AI" as const, action: { type: "NONE" as const },
@@ -252,25 +306,21 @@ export function createResponseOrchestrator(dependencies: OrchestratorDependencie
 
       const firstResponse = await dependencies.generate(workspaceId, conversationId, plannerMessages(context));
       const planned = parseOrchestratorEnvelope(firstResponse.text);
-      const allowed = context.agent
-        ? capabilitiesFromBehaviorSettings(context.agent.behaviorSettings)
-        : null;
-      // Capability denials are not an instruction to silently hand the
-      // customer to staff. Human ownership requires an actual requested or
-      // independently justified escalation, not just a missing tool.
+      // Capability denials are resolved together with the saved When Unsure policy.
+      // If the model recognizes that an owner-disabled capability blocks the
+      // request, the server—not the model—decides whether When Unsure authorizes
+      // a real handoff. This keeps refusal text and ownership state consistent.
       if (planned.action.type === "ESCALATE" && allowed
         && !isExplicitHumanRequest(lastUserMessage)) {
         const wantsAvailability = /\b(?:available|availability|open slots?|check times?)\b/i.test(lastUserMessage);
         const wantsBooking = /\b(?:book|booking|reserve|appointment|schedule)\b/i.test(lastUserMessage);
         if ((wantsAvailability && !allowed.CHECK_AVAILABILITY)
           || (wantsBooking && !allowed.BOOK_APPOINTMENT)) {
-          return {
-            reply: wantsAvailability
-              ? "I can't check live appointment availability at the moment. No time has been reserved. Would you like to ask for staff follow-up?"
-              : "I can't book an appointment right now. Nothing has been booked. You can ask for staff follow-up if you'd like.",
-            handlingMode: "AI" as const, action: { type: "NONE" as const },
-            toolResult: { kind: "none" as const, data: {} },
-          };
+          const reply = wantsAvailability
+            ? "I can't check live appointment availability at the moment. No time has been reserved."
+            : "I can't book an appointment right now. Nothing has been booked.";
+          return resolveUncertainRequest(reply,
+            `Requested ${wantsAvailability ? "availability check" : "appointment booking"} is disabled; applying When Unsure policy.`);
         }
       }
       // Treat the model's metadata as optional hints. A disabled metadata
@@ -305,13 +355,25 @@ export function createResponseOrchestrator(dependencies: OrchestratorDependencie
             action: { type: "NONE" as const },
             toolResult: { kind: "none" as const, data: {} } };
         }
-        if (error instanceof AppError && (error.code === "AGENT_ACTION_DISABLED"
-          || ["APPOINTMENT_SLOT_UNAVAILABLE", "APPOINTMENT_OUTSIDE_HOURS",
-              "APPOINTMENT_IN_PAST", "BUSINESS_HOURS_NOT_CONFIGURED",
-              "AVAILABILITY_RANGE_INVALID", "CALENDAR_NOT_CONFIGURED"].includes(error.code))) {
-          return { reply: approvedToolFailure(first.action.type, error),
-            handlingMode: "AI" as const, action: { type: "NONE" as const },
-            toolResult: { kind: "none" as const, data: {} } };
+        if (error instanceof AppError && error.code === "AGENT_ACTION_DISABLED") {
+          return resolveUncertainRequest(
+            approvedToolFailure(first.action.type, error),
+            `Requested ${first.action.type} is disabled; applying When Unsure policy.`,
+          );
+        }
+        if (error instanceof AppError && [
+          "BUSINESS_HOURS_NOT_CONFIGURED", "CALENDAR_NOT_CONFIGURED", "NATIVE_BOOKING_UNAVAILABLE",
+        ].includes(error.code)) {
+          return resolveUncertainRequest(
+            approvedToolFailure(first.action.type, error),
+            `Unable to complete ${first.action.type}; applying When Unsure policy.`,
+          );
+        }
+        if (error instanceof AppError && [
+          "APPOINTMENT_SLOT_UNAVAILABLE", "APPOINTMENT_OUTSIDE_HOURS",
+          "APPOINTMENT_IN_PAST", "AVAILABILITY_RANGE_INVALID",
+        ].includes(error.code)) {
+          return unresolvedWithoutHandoff(approvedToolFailure(first.action.type, error));
         }
         throw error;
       }
