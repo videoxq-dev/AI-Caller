@@ -26,7 +26,7 @@ function isExplicitHumanRequest(message: string) {
     || /\b(?:speak|talk|connect|transfer|reach|want|need|like|get)\b[^.!?]{0,100}\b(?:human|operator|representative|real person|live person|staff member|team member|person)\b/.test(text);
 }
 
-const LIVE_PHONE_ESCALATION_REPLY = "I've flagged your request for our team to follow up. I can't transfer this call live.";
+const LIVE_PHONE_ESCALATION_REPLY = "I've flagged this issue for our team to follow up. I can't transfer this call live, but I can keep helping with anything else.";
 
 
 function safeLivePhoneReply(reply: string) {
@@ -74,11 +74,11 @@ Rules:
 - When the customer asks to check availability and supplies an identifiable date and time, invoke CHECK_AVAILABILITY immediately without requesting permission again. For a whole day, check a bounded date range. Use the actual saved service duration when provided; otherwise ask for the duration if needed.
 - Resolve ordinary relative dates and month/day dates from Current server time in the business timezone. If the month/day has not passed, use the current year; otherwise use the next year. Do not ask for a year when that rule makes the future date unambiguous.
 - Never say a slot is available unless CHECK_AVAILABILITY returned it. Describe the returned slots and ask the customer to choose and approve one.
-- When the customer approves a particular service/date/time, invoke BOOK_APPOINTMENT with the agreed slot (including its service duration); do not ask repeatedly to proceed. Native booking checks business hours and conflicts without any third-party calendar.
-- Never say an appointment is booked unless BOOK_APPOINTMENT returned a confirmed booking.
+- BOOK_APPOINTMENT and SEND_SMS are consequential actions with a server-enforced commit boundary. Gather the required details first. The first complete action proposal is staged and returned as a preview; it is not executed. After the customer explicitly confirms that exact preview, invoke the same action again so the server can commit it.
+- Never say an appointment is booked unless BOOK_APPOINTMENT returned a confirmed booking. Never say a staged action has already happened.
 - Populate contact fields only when the customer explicitly provided them in the conversation. Never infer or invent contact details.
 - A verified customer conversation/contact is sufficient for an in-app appointment; email is optional. Never invent missing contact data.
-- Use ESCALATE for an explicit human request, or when the saved When Unsure policy is "Escalate to a human" and you cannot complete the request with the enabled capabilities. A disabled capability does not silently hand off by itself: explain the limitation truthfully, and request ESCALATE only when that policy requires it and ESCALATE is enabled. Never claim staff were notified without a successful ESCALATE result.
+- Use ESCALATE for an explicit human request, or when the saved When Unsure policy is "Escalate to a human" and you cannot complete the request with the enabled capabilities. ESCALATE creates an issue-specific staff case; it does not transfer ownership of the whole conversation. Continue helping with unrelated supported requests. A disabled capability does not silently hand off by itself: explain the limitation truthfully, and request ESCALATE only when that policy requires it and ESCALATE is enabled. Never claim staff were notified without a successful ESCALATE result.
 - If the current customer request cannot be completed with approved information and enabled capabilities, set "unresolved" with a concise reason. Do not use it merely because you need one normal missing detail that the customer can answer.
 - Lead updates are optional and must reflect only evidence from the conversation.
 - On phone calls, offer appointment confirmations and future reminder SMS only after stating the SMS program clearly and asking the customer whether they agree. Use RECORD_SMS_CONSENT only after their explicit answer, never infer consent from a booking or general interest.
@@ -228,6 +228,33 @@ function deterministicAvailabilityPlan(
       ...(durationMinutes ? { durationMinutes } : {}),
     },
   };
+}
+
+function bookingMissingDetailReply(message: string) {
+  if (!/\b(?:book|booking|reserve|reservation|schedule|appointment)\b/i.test(message)) return null;
+  const hasDate = /\b(?:today|tomorrow|monday|tuesday|wednesday|thursday|friday|saturday|sunday|january|february|march|april|may|june|july|august|september|october|november|december|\d{4}-\d{2}-\d{2}|\d{1,2}[\/-]\d{1,2}(?:[\/-]\d{2,4})?)\b/i.test(message);
+  const hasTime = /\b(?:at|by)\s+\d{1,2}(?::\d{2})?\s*(?:a\.?m\.?|p\.?m\.?)?\b|\b(?:[01]?\d|2[0-3]):[0-5]\d\b/i.test(message);
+  if (!hasDate && !hasTime) return "I can help with that. What date and time would you prefer?";
+  if (!hasDate) return "I have the time. What date would you like?";
+  if (!hasTime) return "I have the date. What time would you prefer?";
+  return null;
+}
+
+function pendingActionReply(toolResult: OrchestratorToolResult, fallbackTimezone: string) {
+  if (toolResult.data.type === "BOOK_APPOINTMENT") {
+    const title = typeof toolResult.data.title === "string" ? toolResult.data.title : "appointment";
+    const startsAt = typeof toolResult.data.startsAt === "string" ? new Date(toolResult.data.startsAt) : null;
+    const timezone = typeof toolResult.data.timezone === "string" ? toolResult.data.timezone : fallbackTimezone;
+    const when = startsAt && Number.isFinite(startsAt.getTime())
+      ? new Intl.DateTimeFormat("en-US", { dateStyle: "medium", timeStyle: "short", timeZone: timezone }).format(startsAt)
+      : "the selected time";
+    return `I have everything needed to book your ${title} for ${when} (${timezone}). Would you like me to book it?`;
+  }
+  if (toolResult.data.type === "SEND_SMS") {
+    const text = typeof toolResult.data.text === "string" ? toolResult.data.text : "the prepared message";
+    return `I'm ready to send this text: “${text}” Would you like me to send it?`;
+  }
+  return "I have the action ready. Would you like me to proceed?";
 }
 
 function plannerMessages(context: OrchestratorContext): AIMessage[] {
@@ -426,10 +453,10 @@ export function createResponseOrchestrator(dependencies: OrchestratorDependencie
           }
           const receipt = isLivePhone
             ? LIVE_PHONE_ESCALATION_REPLY
-            : "I've flagged your request for staff follow-up. A team member can continue this conversation here when available.";
+            : "I've flagged this issue for staff follow-up. I can keep helping with anything else here.";
           return {
             reply: `${reply} ${receipt}`,
-            handlingMode: "HUMAN" as const,
+            handlingMode: "AI" as const,
             action: escalationAction,
             toolResult: escalation,
           };
@@ -462,7 +489,7 @@ export function createResponseOrchestrator(dependencies: OrchestratorDependencie
         }
         try {
           const toolResult = await dependencies.executeTools(workspaceId, conversationId, context.contact.id, { action });
-          return { reply: LIVE_PHONE_ESCALATION_REPLY, handlingMode: "HUMAN" as const, action, toolResult };
+          return { reply: LIVE_PHONE_ESCALATION_REPLY, handlingMode: "AI" as const, action, toolResult };
         } catch (error) {
           if (error instanceof AppError && error.code === "AGENT_ACTION_DISABLED") return noEscalation;
           if (error instanceof AppError && (
@@ -529,6 +556,15 @@ export function createResponseOrchestrator(dependencies: OrchestratorDependencie
             "I'm still handling this conversation. Please restate your current request and I'll continue from here.",
           );
         }
+      }
+
+      // A normal missing booking detail is not uncertainty and must never trigger
+      // staff escalation. The server owns this distinction even if the model
+      // incorrectly labels the incomplete request as unresolved.
+      const bookingClarification = bookingMissingDetailReply(lastUserMessage);
+      if (bookingClarification
+        && (planned.action.type === "ESCALATE" || Boolean(planned.unresolved?.reason))) {
+        return unresolvedWithoutHandoff(bookingClarification);
       }
 
       // Capability denials are resolved together with the saved When Unsure policy.
@@ -631,6 +667,15 @@ export function createResponseOrchestrator(dependencies: OrchestratorDependencie
         throw error;
       }
 
+      if (toolResult.kind === "pending_action") {
+        return {
+          reply: pendingActionReply(toolResult, context.timezone ?? "UTC"),
+          handlingMode: "AI" as const,
+          action: first.action,
+          toolResult,
+        };
+      }
+
       if (toolResult.kind === "availability") {
         // Present verified calendar slots directly, not a second model's
         // possible assertion that it never checked or an invented opening.
@@ -687,8 +732,8 @@ export function createResponseOrchestrator(dependencies: OrchestratorDependencie
       if (toolResult.kind === "escalation") {
         return {
           reply: isLivePhone ? LIVE_PHONE_ESCALATION_REPLY
-            : "I've flagged your request for staff follow-up. A team member can continue this conversation here when available.",
-          handlingMode: "HUMAN" as const,
+            : "I've flagged this issue for staff follow-up. I can keep helping with anything else here.",
+          handlingMode: "AI" as const,
           action: first.action,
           toolResult,
         };
