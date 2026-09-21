@@ -8,6 +8,7 @@ import { recordRealtimeResponse, settleRealtimeCall } from "./realtime-usage";
 import { realtimeSessionContext, runRealtimeBusinessTool } from "./realtime-tools";
 import { realtimeCreditBudgetReached } from "./realtime-usage";
 import { resolveVoiceRuntime } from "@/server/providers/voice/runtime";
+import { resolveVoiceProfile } from "./voices";
 
 const MAX_BUFFERED_BYTES = 2 * 1024 * 1024;
 const MAX_OPENING_AUDIO_BYTES = 256 * 1024;
@@ -88,6 +89,8 @@ export function attachRealtimeMedia({ telnyx, identity, streamId }: BridgeOption
   const measuredResponses = new Set<string>();
   let priorConversation = "";
   let historyInjected = false;
+  let openingMessage = "How can I help you today?";
+  let openingRequested = false;
   const startedAt = Date.now();
 
   function track(promise: Promise<unknown>) {
@@ -148,6 +151,18 @@ export function attachRealtimeMedia({ telnyx, identity, streamId }: BridgeOption
   function feedAudio(bytes: Buffer) {
     if (!open || !ready || !speechAllowed) return;
     sendOpenAI({ type: "input_audio_buffer.append", audio: bytes.toString("base64") });
+  }
+
+  function requestOpening() {
+    if (!open || !ready || !speechAllowed || openingRequested) return;
+    openingRequested = true;
+    sendOpenAI({
+      type: "response.create",
+      response: {
+        instructions: `Begin the live call by saying exactly this opening greeting and nothing else: ${JSON.stringify(openingMessage)}. Do not call tools in this response.`,
+        tool_choice: "none",
+      },
+    });
   }
 
   const ticker = setInterval(() => {
@@ -288,6 +303,7 @@ export function attachRealtimeMedia({ telnyx, identity, streamId }: BridgeOption
       }
       ready = true;
       if (speechAllowed) {
+        requestOpening();
         for (const bytes of initialAudio) feedAudio(bytes);
         initialAudio.length = 0;
         initialBytes = 0;
@@ -467,6 +483,9 @@ export function attachRealtimeMedia({ telnyx, identity, streamId }: BridgeOption
       // handshake latency from the caller's first conversational response.
       const call = await waitUntilGreetingEnds(true);
       if (!open) return;
+      openingMessage = typeof call.metadata.openingMessage === "string" && call.metadata.openingMessage.trim()
+        ? call.metadata.openingMessage.trim().slice(0, 2000)
+        : "How can I help you today?";
       // All audio captured before the complete opening is discarded.
       initialAudio.length = 0;
       initialBytes = 0;
@@ -503,7 +522,10 @@ export function attachRealtimeMedia({ telnyx, identity, streamId }: BridgeOption
             noise_reduction: { type: "near_field" },
             turn_detection: { type: "semantic_vad", eagerness: "medium",
               create_response: true, interrupt_response: true } },
-          output: { format: { type: "audio/pcmu" }, voice: "marin" },
+          output: { format: { type: "audio/pcmu" },
+            voice: resolveVoiceProfile(
+              typeof call.metadata.voiceProfile === "string" ? call.metadata.voiceProfile : "",
+            ).realtimeVoiceId },
         },
         tools: context.tools, tool_choice: context.tools.length ? "auto" : "none",
       } }));
@@ -529,6 +551,7 @@ export function attachRealtimeMedia({ telnyx, identity, streamId }: BridgeOption
         }
         speechAllowed = true;
         if (ready) {
+          requestOpening();
           for (const frame of initialAudio) feedAudio(frame);
           initialAudio.length = 0;
           initialBytes = 0;
