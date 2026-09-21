@@ -232,6 +232,8 @@ try {
     { id: "wamid.m6.2", text: "What times are available tomorrow?",
       replyPattern: "%I checked the schedule. Available times include%10:00 AM%" },
     { id: "wamid.m6.3", text: "My name is WhatsApp Visitor, whatsapp.visitor@example.com. Book the 10:00 AM slot",
+      replyPattern: "%Would you like me to book it?%" },
+    { id: "wamid.m6.4", text: "Yes, please.",
       replyPattern: "%Your QA Consultation is booked for%10:00 AM%" },
   ];
 
@@ -254,12 +256,29 @@ try {
     );
     conversationId = result.rows[0].conversation_id;
     finalOutboundId = result.rows[0].external_message_id;
+
+    if (turn.id === "wamid.m6.3") {
+      const preConfirmationBooking = await pool.query(
+        `SELECT count(*)::int AS count FROM appointments WHERE workspace_id = $1`,
+        [workspaceId],
+      );
+      assert(preConfirmationBooking.rows[0].count === 0,
+        "WhatsApp booking executed before explicit customer confirmation.");
+      const stagedAction = await pool.query(
+        `SELECT status FROM pending_agent_actions
+          WHERE workspace_id = $1 AND conversation_id = $2 AND type = 'BOOK_APPOINTMENT'
+          ORDER BY created_at DESC LIMIT 1`,
+        [workspaceId, conversationId],
+      );
+      assert(stagedAction.rows[0]?.status === "AWAITING_CONFIRMATION",
+        "WhatsApp booking proposal was not persisted as awaiting confirmation.");
+    }
   }
   assert(conversationId, "WhatsApp flow did not create a conversation.");
   assert(finalOutboundId, "WhatsApp booking reply did not receive a provider message ID.");
 
   const duplicateBefore = await pool.query(`SELECT count(*)::int AS count FROM messages WHERE workspace_id = $1 AND conversation_id = $2`, [workspaceId, conversationId]);
-  const duplicate = await sendWebhook(inboundPayload({ id: "wamid.m6.3", phoneNumberId, waId, text: turns[2].text }));
+  const duplicate = await sendWebhook(inboundPayload({ id: "wamid.m6.4", phoneNumberId, waId, text: turns[3].text }));
   assert(duplicate.response.status === 200 && duplicate.data?.duplicates === 1, "Duplicate WhatsApp inbound webhook was not recognized as a duplicate.");
   await new Promise((resolve) => setTimeout(resolve, 300));
   const duplicateAfter = await pool.query(`SELECT count(*)::int AS count FROM messages WHERE workspace_id = $1 AND conversation_id = $2`, [workspaceId, conversationId]);
