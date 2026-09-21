@@ -1,8 +1,10 @@
 import { createHash, randomBytes, randomUUID } from "node:crypto";
-import { and, count, desc, eq, gt, gte, lt } from "drizzle-orm";
+import { and, count, desc, eq, gt, gte, inArray, lt } from "drizzle-orm";
 import { db } from "@/db";
 import {
   aiAgents,
+  bookingDrafts,
+  bookingPreviews,
   businessProfiles,
   messages,
   hostedPhoneNumbers,
@@ -158,7 +160,7 @@ export async function resolveWebchatSession(token: string, expectedWidgetKey?: s
   return row;
 }
 
-export async function sessionHistory(workspaceId: string, conversationId: string): Promise<WebchatHistoryMessage[]> {
+export async function sessionHistory(workspaceId: string, conversationId: string, sessionId?: string): Promise<WebchatHistoryMessage[]> {
   const rows = await db.select({
     id: messages.id,
     senderType: messages.senderType,
@@ -170,13 +172,40 @@ export async function sessionHistory(workspaceId: string, conversationId: string
     eq(messages.contentType, "TEXT"),
   )).orderBy(desc(messages.createdAt), desc(messages.id)).limit(30);
 
+  const previewIds = rows.map((row) => row.metadata?.bookingPreviewId)
+    .filter((id): id is string => typeof id === "string" &&
+      /^[0-9a-f]{8}-[0-9a-f-]{27,36}$/i.test(id));
+  const previewStatuses = new Map<string, "AWAITING_CONFIRMATION" | "STALE" | "CONFIRMED">();
+  if (previewIds.length) {
+    const previews = await db.select({
+      preview: bookingPreviews, draft: bookingDrafts,
+    }).from(bookingPreviews).innerJoin(bookingDrafts, eq(bookingDrafts.id, bookingPreviews.draftId))
+      .where(and(eq(bookingPreviews.workspaceId, workspaceId),
+        inArray(bookingPreviews.id, previewIds)));
+    for (const row of previews) {
+      const owner = !sessionId || row.draft.sessionKey === sessionId;
+      const current = owner && row.draft.currentPreviewId === row.preview.id &&
+        row.draft.version === row.preview.draftVersion;
+      const status = current && row.draft.status === "CONFIRMED" ? "CONFIRMED"
+        : current && row.draft.status === "AWAITING_CONFIRMATION" &&
+          row.preview.expiresAt > new Date() && row.draft.expiresAt > new Date()
+          ? "AWAITING_CONFIRMATION" : "STALE";
+      previewStatuses.set(row.preview.id, status);
+    }
+  }
   const history: WebchatHistoryMessage[] = [];
   for (const message of rows.reverse()) {
     if (message.senderType === "CUSTOMER") {
       history.push({ id: message.id, role: "customer", text: message.body });
     } else if (message.senderType === "AI" || message.senderType === "USER") {
+      const rawCard = message.metadata?.bookingCard;
+      const previewId = message.metadata?.bookingPreviewId;
+      const booking = rawCard && typeof rawCard === "object" && typeof previewId === "string"
+        ? { ...(rawCard as Record<string, unknown>),
+          status: previewStatuses.get(previewId) ?? "STALE" }
+        : null;
       history.push({ id: message.id, role: "assistant", text: message.body,
-        ...(message.metadata?.bookingCard ? { booking: message.metadata.bookingCard as Record<string, unknown> } : {}),
+        ...(booking ? { booking } : {}),
       });
     }
   }
@@ -196,7 +225,7 @@ export async function createOrResumeWebchatSession(input: WebchatSessionInput) {
         sessionId: resumed.session.id,
         conversationId: resumed.session.conversationId,
         widget,
-        history: await sessionHistory(resumed.session.workspaceId, resumed.session.conversationId),
+        history: await sessionHistory(resumed.session.workspaceId, resumed.session.conversationId, resumed.session.id),
       };
     }
   }
@@ -327,7 +356,7 @@ export async function getWebchatSessionHistory(token: string) {
   const resolved = await resolveWebchatSession(token, undefined, false);
   if (!resolved) return null;
   return {
-    history: await sessionHistory(resolved.session.workspaceId, resolved.session.conversationId),
+    history: await sessionHistory(resolved.session.workspaceId, resolved.session.conversationId, resolved.session.id),
     workspaceId: resolved.session.workspaceId,
     conversationId: resolved.session.conversationId,
   };
