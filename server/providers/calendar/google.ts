@@ -48,10 +48,21 @@ export class GoogleCalendarProvider implements CalendarProvider {
       this.fetcher,
     );
 
-    const busy = (response.calendars?.[calendarId]?.busy ?? []).map((item) => ({
-      startsAt: parseDate(item.start, input.startsAt),
-      endsAt: parseDate(item.end, input.endsAt),
-    }));
+    const calendar = response.calendars?.[calendarId];
+    if (!calendar || !Array.isArray(calendar.busy) ||
+      (Array.isArray((calendar as { errors?: unknown }).errors) &&
+        (calendar as { errors?: unknown[] }).errors!.length > 0)) {
+      throw new Error("Google Calendar did not return a complete successful free/busy result for the selected calendar.");
+    }
+    const busy = calendar.busy.map((item) => {
+      if (!item.start || !item.end ||
+        !Number.isFinite(new Date(item.start).getTime()) ||
+        !Number.isFinite(new Date(item.end).getTime()) ||
+        new Date(item.end) <= new Date(item.start)) {
+        throw new Error("Google Calendar returned an invalid busy interval.");
+      }
+      return { startsAt: new Date(item.start), endsAt: new Date(item.end) };
+    });
     return slotize(input.startsAt, input.endsAt, busy, input.durationMinutes ?? numberSetting(this.settings, "meetingDurationMinutes", 30));
   }
 
