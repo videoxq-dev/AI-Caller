@@ -393,7 +393,7 @@ describe("orchestrator response protocol", () => {
     expect(result.reply).not.toContain("connect you live");
   });
 
-  it("returns an authoritative confirmation if the AI finalizer fails after booking", async () => {
+  it("confirms a persisted booking without another unreliable AI finalizer", async () => {
     const generate = vi.fn()
       .mockResolvedValueOnce({
         text: JSON.stringify({
@@ -428,6 +428,6 @@ describe("orchestrator response protocol", () => {
     expect(result.toolResult.kind).toBe("booking");
     expect(result.reply).toContain("Consultation is booked");
     expect(result.reply).toContain("UTC");
-    expect(generate).toHaveBeenCalledTimes(2);
+    expect(generate).toHaveBeenCalledTimes(1);
   });
 });
