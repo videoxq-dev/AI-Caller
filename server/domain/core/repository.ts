@@ -531,13 +531,20 @@ export async function insertNativeAppointment(workspaceId: string, input: Appoin
   await ensureContactInWorkspace(workspaceId, input.contactId);
   return db.transaction(async tx => {
     await tx.execute(sql`SELECT pg_advisory_xact_lock(hashtext(${workspaceId}))`);
-    const [conflict] = await tx.select({ id: appointments.id }).from(appointments)
+    const [conflict] = await tx.select().from(appointments)
       .where(and(eq(appointments.workspaceId, workspaceId),
         inArray(appointments.status, ["PENDING", "CONFIRMED"]),
         lt(appointments.startsAt, input.endsAt), gt(appointments.endsAt, input.startsAt)))
       .limit(1);
-    if (conflict) throw new AppError("APPOINTMENT_SLOT_UNAVAILABLE",
-      "That time is already booked. Please choose another available slot.", 409);
+    if (conflict) {
+      const sameRequest = conflict.contactId === input.contactId
+        && conflict.title === input.title
+        && conflict.startsAt.getTime() === input.startsAt.getTime()
+        && conflict.endsAt.getTime() === input.endsAt.getTime();
+      if (sameRequest) return conflict;
+      throw new AppError("APPOINTMENT_SLOT_UNAVAILABLE",
+        "That time is already booked. Please choose another available slot.", 409);
+    }
     const [appointment] = await tx.insert(appointments).values({
       workspaceId, contactId: input.contactId,
       conversationId: input.conversationId ?? null, integrationId: null,
