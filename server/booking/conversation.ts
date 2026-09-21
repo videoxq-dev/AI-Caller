@@ -67,7 +67,7 @@ async function classifyBookingTurn(
       eq(services.active, true))).limit(30);
   const system = [
     "Extract the customer's latest booking intent. Output ONLY one JSON object; no markdown or extra keys.",
-    'Shape: {"action":"PATCH|CANCEL|QUESTION|UNRELATED|STATUS|CHECK","serviceId":null,"dateExpression":null,"timeExpression":null,"timezone":null,"location":null,"question":null}.',
+    'Shape: {"action":"PATCH|CANCEL|QUESTION|UNRELATED|STATUS|CHECK"}. Add only present fields: serviceId, dateExpression, timeExpression, timezone, location, question.',
     "Omit fields not supplied. Never invent dates or timezones. Never turn a question or a yes-but-correction into booking consent.",
     "A bare yes after a question about checking is not a booking confirmation.",
     "Use PATCH for newly supplied service/date/time/location or corrections. CHECK if the customer requests availability of an unchanged draft.",
@@ -115,7 +115,8 @@ export async function handleBookingTurn(
   message: { id: string; body: string },
   now = new Date(),
 ): Promise<BookingTurn | null> {
-  const existing = await activeDraft(ctx);
+  const active = await activeDraft(ctx);
+  const existing = active && active.expiresAt > now ? active : null;
   const isBookingRequest = /\b(?:book(?:ing)?|appointment|schedule|availability|available|reserve|reschedule)\b/i.test(message.body);
   if (!existing && !isBookingRequest) return null;
   // A no/yes answer to unrelated questions is not authority to commit.
@@ -202,6 +203,7 @@ export async function handleBookingTurn(
     const opened = existing
       ? { draft: existing }
       : await openBookingDraft(ctx, now);
+    if (!("draft" in opened)) throw new AppError("BOOKING_STATE_UNAVAILABLE", "Booking draft could not be created.", 503);
     const draft = opened.draft;
     const patch: BookingPatch = {};
     if (decision.serviceId !== undefined) patch.serviceId = decision.serviceId;
