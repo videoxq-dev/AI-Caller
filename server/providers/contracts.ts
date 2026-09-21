@@ -25,7 +25,10 @@ export interface AIProvider {
 
 export interface CalendarProvider {
   getAvailability(input: { startsAt: Date; endsAt: Date; timezone: string; durationMinutes?: number }): Promise<Array<{ startsAt: Date; endsAt: Date }>>;
-  book(input: { startsAt: Date; endsAt: Date; timezone: string; title: string; attendeeName?: string; attendeeEmail?: string }): Promise<{ externalId: string; startsAt: Date; endsAt: Date }>;
+  book(input: { startsAt: Date; endsAt: Date; timezone: string; title: string; attendeeName?: string; attendeeEmail?: string; location?: string; idempotencyKey?: string }): Promise<{ externalId: string; startsAt: Date; endsAt: Date }>;
+  // Only providers with a documented stable event key should implement this.
+  // A lookup failure is an uncertain outcome, not permission for a fresh create.
+  lookupByKey?(input: { idempotencyKey: string }): Promise<{ externalId: string; startsAt: Date; endsAt: Date } | null>;
   reschedule(input: { externalId: string; startsAt: Date; endsAt: Date; timezone: string }): Promise<{ externalId: string; startsAt: Date; endsAt: Date }>;
   cancel(input: { externalId: string }): Promise<void>;
 }
