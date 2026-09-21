@@ -126,3 +126,13 @@ button, textarea { font: inherit; }
 }
 
 .webchatContactForm{display:grid;gap:7px;margin:10px;padding:11px;border:1px solid #d9e5f5;border-radius:10px;background:#f7faff;color:#344660;font-size:11px}.webchatContactForm>strong{font-size:14px}.webchatContactForm label{display:grid;gap:4px}.webchatContactForm input:not([type=checkbox]){padding:8px;border:1px solid #cfdae8;border-radius:7px;background:#fff;font:inherit}.webchatContactForm .webchatConsentChoice{display:flex;align-items:start;gap:7px;line-height:1.4}.webchatContactForm small{font-size:9px;line-height:1.5}.webchatContactForm a{color:#1769ee}.webchatContactForm button{padding:9px;border:0;border-radius:8px;background:#1769ee;color:#fff;cursor:pointer}.webchatContactForm p{color:#a42323}
+
+.webchatMessage.withBooking{flex-direction:column;align-items:flex-start;gap:6px}
+.webchatBookingCard{width:min(100%,360px);max-width:88%;padding:12px;border:1px solid #b9d3f3;border-radius:12px;background:#fff;display:grid;gap:5px;font-size:13px;line-height:1.45;color:#172033}
+.webchatBookingCard>strong{font-size:15px}.webchatBookingCard>small{color:#52627c}
+.webchatBookingActions{display:flex;flex-wrap:wrap;align-items:center;gap:8px;margin-top:7px}
+.webchatBookingActions button{border:0;background:#173c86;color:#fff;border-radius:8px;padding:9px 11px;cursor:pointer;font-weight:700}
+.webchatBookingActions button.secondary{background:#edf3fc;color:#173c86}
+.webchatBookingActions button:disabled{opacity:.5;cursor:default}
+.webchatBookingActions strong{color:#187347}
+.webchatBookingActions small{color:#7b5a17}
