@@ -7,6 +7,8 @@ import {
   ilike,
   inArray,
   lte,
+  lt,
+  gt,
   or,
   sql,
   type SQL,
@@ -515,6 +517,43 @@ export async function insertAppointment(
         },
       }).onConflictDoNothing();
     }
+    return appointment;
+  });
+}
+
+/**
+ * In-app booking is the authoritative fallback when no external calendar is
+ * connected. Serialize competing bookings for a workspace before checking
+ * overlaps and persist the appointment + domain event in the same transaction.
+ */
+export async function insertNativeAppointment(workspaceId: string, input: AppointmentInput) {
+  await ensureContactInWorkspace(workspaceId, input.contactId);
+  return db.transaction(async tx => {
+    await tx.execute(sql`SELECT pg_advisory_xact_lock(hashtext(${workspaceId}))`);
+    const [conflict] = await tx.select({ id: appointments.id }).from(appointments)
+      .where(and(eq(appointments.workspaceId, workspaceId),
+        inArray(appointments.status, ["PENDING", "CONFIRMED"]),
+        lt(appointments.startsAt, input.endsAt), gt(appointments.endsAt, input.startsAt)))
+      .limit(1);
+    if (conflict) throw new AppError("APPOINTMENT_SLOT_UNAVAILABLE",
+      "That time is already booked. Please choose another available slot.", 409);
+    const [appointment] = await tx.insert(appointments).values({
+      workspaceId, contactId: input.contactId,
+      conversationId: input.conversationId ?? null, integrationId: null,
+      externalEventId: null, serviceId: input.serviceId ?? null,
+      title: input.title, startsAt: input.startsAt, endsAt: input.endsAt,
+      timezone: input.timezone, status: "CONFIRMED",
+      bookingSource: input.bookingSource ?? null, notes: input.notes ?? null,
+    }).returning();
+    await tx.insert(automationEvents).values({
+      workspaceId, type: "APPOINTMENT_CONFIRMED",
+      aggregateType: "APPOINTMENT", aggregateId: appointment.id,
+      payload: {
+        appointmentId: appointment.id, contactId: appointment.contactId,
+        conversationId: appointment.conversationId,
+        startsAt: appointment.startsAt.toISOString(),
+      },
+    }).onConflictDoNothing();
     return appointment;
   });
 }
