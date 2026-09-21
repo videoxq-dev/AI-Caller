@@ -255,6 +255,24 @@ export function createResponseOrchestrator(dependencies: OrchestratorDependencie
       const allowed = context.agent
         ? capabilitiesFromBehaviorSettings(context.agent.behaviorSettings)
         : null;
+      // Capability denials are not an instruction to silently hand the
+      // customer to staff. Human ownership requires an actual requested or
+      // independently justified escalation, not just a missing tool.
+      if (planned.action.type === "ESCALATE" && allowed
+        && !isExplicitHumanRequest(lastUserMessage)) {
+        const wantsAvailability = /\\b(?:available|availability|open slots?|check times?)\\b/i.test(lastUserMessage);
+        const wantsBooking = /\\b(?:book|booking|reserve|appointment|schedule)\\b/i.test(lastUserMessage);
+        if ((wantsAvailability && !allowed.CHECK_AVAILABILITY)
+          || (wantsBooking && !allowed.BOOK_APPOINTMENT && !allowed.CHECK_AVAILABILITY)) {
+          return {
+            reply: wantsAvailability
+              ? "I can't check live appointment availability at the moment. No time has been reserved. Would you like to ask for staff follow-up?"
+              : "I can't book an appointment right now. Nothing has been booked. You can ask for staff follow-up if you'd like.",
+            handlingMode: "AI" as const, action: { type: "NONE" as const },
+            toolResult: { kind: "none" as const, data: {} },
+          };
+        }
+      }
       // Treat the model's metadata as optional hints. A disabled metadata
       // capability cannot fail an otherwise valid answer or cause side effects.
       // The executor still rechecks permissions on current DB state, including
