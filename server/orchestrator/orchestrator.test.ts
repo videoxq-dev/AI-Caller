@@ -431,9 +431,15 @@ describe("orchestrator response protocol", () => {
   });
 
   it("uses structured unresolved requests to enforce When Unsure escalation even when the model returns NONE", async () => {
-    const executeTools = vi.fn(async () => ({
-      kind: "escalation" as const, data: { handlingMode: "HUMAN" },
-    }));
+    const executeTools = vi.fn(async (
+      _workspaceId: string,
+      _conversationId: string,
+      _contactId: string,
+      envelope: { action: { type: string } },
+    ) => {
+      expect(envelope.action.type).toBe("ESCALATE");
+      return { kind: "escalation" as const, data: { handlingMode: "HUMAN" } };
+    });
     const orchestrator = createResponseOrchestrator({
       buildContext: vi.fn(async () => ({
         ...fakeContext(), source: "INBOUND_TURN" as const,
@@ -453,7 +459,6 @@ describe("orchestrator response protocol", () => {
     expect(result.reply).toContain("can't verify that request");
     expect(result.reply).toContain("flagged your request for staff follow-up");
     expect(executeTools).toHaveBeenCalledTimes(1);
-    expect(executeTools.mock.calls[0][3]).toMatchObject({ action: { type: "ESCALATE" } });
   });
 
   it("keeps the conversation with AI when structured unresolved policy says ask a clarifying question", async () => {
