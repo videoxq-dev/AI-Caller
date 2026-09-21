@@ -430,6 +430,54 @@ describe("orchestrator response protocol", () => {
     expect(executeTools).not.toHaveBeenCalled();
   });
 
+  it("uses structured unresolved requests to enforce When Unsure escalation even when the model returns NONE", async () => {
+    const executeTools = vi.fn(async () => ({
+      kind: "escalation" as const, data: { handlingMode: "HUMAN" },
+    }));
+    const orchestrator = createResponseOrchestrator({
+      buildContext: vi.fn(async () => ({
+        ...fakeContext(), source: "INBOUND_TURN" as const,
+        agent: { id: "agent-1", status: "ACTIVE" as const,
+          whenUnsure: "Escalate to a human", escalationMessage: null,
+          behaviorSettings: { capabilities: { ...defaultAgentCapabilities, ESCALATE: true } } },
+      })),
+      executeTools,
+      generate: vi.fn(async () => ({ text: JSON.stringify({
+        reply: "I can't verify that request with the information available.",
+        unresolved: { reason: "Approved business information is insufficient." },
+        action: { type: "NONE" },
+      }) })),
+    });
+    const result = await orchestrator.respond("workspace", "conversation");
+    expect(result.handlingMode).toBe("HUMAN");
+    expect(result.reply).toContain("can't verify that request");
+    expect(result.reply).toContain("flagged your request for staff follow-up");
+    expect(executeTools).toHaveBeenCalledTimes(1);
+    expect(executeTools.mock.calls[0][3]).toMatchObject({ action: { type: "ESCALATE" } });
+  });
+
+  it("keeps the conversation with AI when structured unresolved policy says ask a clarifying question", async () => {
+    const executeTools = vi.fn();
+    const orchestrator = createResponseOrchestrator({
+      buildContext: vi.fn(async () => ({
+        ...fakeContext(), source: "INBOUND_TURN" as const,
+        agent: { id: "agent-1", status: "ACTIVE" as const,
+          whenUnsure: "Ask a clarifying question", escalationMessage: null,
+          behaviorSettings: { capabilities: { ...defaultAgentCapabilities } } },
+      })),
+      executeTools,
+      generate: vi.fn(async () => ({ text: JSON.stringify({
+        reply: "I’m not sure which location you mean. Which office should I use?",
+        unresolved: { reason: "Location is ambiguous." },
+        action: { type: "NONE" },
+      }) })),
+    });
+    const result = await orchestrator.respond("workspace", "conversation");
+    expect(result.handlingMode).toBe("AI");
+    expect(result.reply).toContain("Which office should I use?");
+    expect(executeTools).not.toHaveBeenCalled();
+  });
+
   it("does not invent staff notification when the model returns only a promise", async () => {
     const orchestrator = createResponseOrchestrator({
       buildContext: vi.fn(async () => fakeContext()),
