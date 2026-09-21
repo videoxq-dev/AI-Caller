@@ -132,8 +132,8 @@ async function latestRealtimeConfirmation(
     eq(messages.contentType, "CALL_TRANSCRIPT"),
     sql`${messages.metadata}->>'voiceCallId' = ${context.sessionKey}`,
   )).orderBy(desc(messages.createdAt), desc(messages.id)).limit(6);
-  return rows.find((message) =>
-    message.createdAt >= deliveredAt && isExplicitActionConfirmation(message.body)) ?? null;
+  const latest = rows.find((message) => message.createdAt >= deliveredAt) ?? null;
+  return latest && isExplicitActionConfirmation(latest.body) ? latest : null;
 }
 
 function previewSpokenInstruction(preview: typeof bookingPreviews.$inferSelect) {
