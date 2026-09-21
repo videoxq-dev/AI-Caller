@@ -252,6 +252,22 @@ export async function recordBookingPreviewDelivery(
           "The current appointment preview was not delivered in this conversation.", 409);
       }
     }
+    if (context.channel === "PHONE") {
+      const [spoken] = await tx.select().from(messages).where(and(
+        eq(messages.id, reference), eq(messages.workspaceId, context.workspaceId),
+        eq(messages.conversationId, context.conversationId!),
+        eq(messages.channel, "PHONE"), eq(messages.direction, "OUTBOUND"),
+        eq(messages.senderType, "AI"), eq(messages.contentType, "CALL_TRANSCRIPT"),
+      )).limit(1);
+      if (!spoken || spoken.metadata.voiceCallId !== context.sessionKey ||
+        spoken.metadata.bookingPreviewId !== previewId ||
+        spoken.metadata.bookingDraftId !== draftId ||
+        spoken.metadata.bookingVersion !== version ||
+        spoken.metadata.potentiallyInterrupted === true) {
+        throw new AppError("BOOKING_DELIVERY_NOT_VERIFIED",
+          "The booking preview was not fully played back to this caller.", 409);
+      }
+    }
     if (preview.deliveredAt) {
       if (preview.deliveryChannel !== input.deliveryChannel ||
         preview.deliveryReference !== reference) {
