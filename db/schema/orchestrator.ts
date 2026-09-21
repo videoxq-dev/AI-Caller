@@ -105,6 +105,7 @@ export const pendingAgentActions = pgTable(
     confirmedAt: timestamp("confirmed_at", { withTimezone: true, mode: "date" }),
     executedAt: timestamp("executed_at", { withTimezone: true, mode: "date" }),
     failureCode: text("failure_code"),
+    result: jsonb("result").$type<Record<string, unknown> | null>(),
   },
   (table) => [
     index("pending_agent_actions_conversation_status_idx").on(table.conversationId, table.status, table.createdAt),
