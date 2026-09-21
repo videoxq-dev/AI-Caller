@@ -5,6 +5,7 @@ import {
   contactIdentities,
   contacts,
   conversationHandlingEvents,
+  conversationHumanCases,
   conversations,
   memberships,
   messages,
@@ -15,7 +16,13 @@ import {
   workspaceInvitations,
   workspaces,
 } from "@/db/schema";
-import { assignConversation, returnConversationToAI, takeOverConversation } from "./service";
+import {
+  assignConversation,
+  escalateConversationIssue,
+  resolveConversationIssue,
+  returnConversationToAI,
+  takeOverConversation,
+} from "./service";
 
 const ownerId = "collab-owner";
 const staffId = "collab-staff";
@@ -25,6 +32,7 @@ let conversationId = "";
 describe("conversation collaboration", () => {
   beforeEach(async () => {
     await db.delete(notifications);
+    await db.delete(conversationHumanCases);
     await db.delete(conversationHandlingEvents);
     await db.delete(messages);
     await db.delete(conversations);
@@ -55,6 +63,85 @@ describe("conversation collaboration", () => {
 
   afterAll(async () => {
     await closeDatabase();
+  });
+
+  it("creates an issue-scoped staff case without pausing AI ownership", async () => {
+    await db.insert(messages).values({
+      workspaceId,
+      conversationId,
+      channel: "WEBCHAT",
+      direction: "INBOUND",
+      senderType: "CUSTOMER",
+      contentType: "TEXT",
+      body: "Can you approve a fee exception?",
+      status: "RECEIVED",
+      metadata: {},
+    });
+
+    const escalation = await escalateConversationIssue({
+      workspaceId,
+      conversationId,
+      reason: "Fee exception requires staff approval.",
+    });
+
+    expect(escalation.conversation.handlingMode).toBe("AI");
+    expect(escalation.issue).toMatchObject({
+      conversationId,
+      status: "OPEN",
+      reason: "Fee exception requires staff approval.",
+    });
+    const [conversation] = await db.select().from(conversations);
+    expect(conversation.handlingMode).toBe("AI");
+    expect(conversation.aiPausedAt).toBeNull();
+
+    const notices = await db.select().from(notifications);
+    expect(notices).toHaveLength(1);
+    expect(notices[0]).toMatchObject({
+      type: "HUMAN_CASE_OPENED",
+      conversationId,
+    });
+    const events = await db.select().from(conversationHandlingEvents);
+    expect(events).toHaveLength(1);
+    expect(events[0]).toMatchObject({
+      type: "ESCALATED",
+      metadata: expect.objectContaining({ scope: "ISSUE" }),
+    });
+  });
+
+  it("deduplicates the same issue on the same customer message and resolves it independently", async () => {
+    await db.insert(messages).values({
+      workspaceId,
+      conversationId,
+      channel: "WEBCHAT",
+      direction: "INBOUND",
+      senderType: "CUSTOMER",
+      contentType: "TEXT",
+      body: "Can you approve a fee exception?",
+      status: "RECEIVED",
+      metadata: {},
+    });
+    const first = await escalateConversationIssue({
+      workspaceId, conversationId, reason: "Fee exception requires staff approval.",
+    });
+    const repeated = await escalateConversationIssue({
+      workspaceId, conversationId, reason: "Fee exception requires staff approval.",
+    });
+
+    expect(repeated.issue.id).toBe(first.issue.id);
+    expect(repeated.created).toBe(false);
+    expect(await db.select().from(conversationHumanCases)).toHaveLength(1);
+
+    const resolved = await resolveConversationIssue({
+      workspaceId,
+      conversationId,
+      issueId: first.issue.id,
+      actorUserId: ownerId,
+    });
+    expect(resolved.status).toBe("RESOLVED");
+    expect(resolved.resolvedAt).toBeInstanceOf(Date);
+
+    const [conversation] = await db.select().from(conversations);
+    expect(conversation.handlingMode).toBe("AI");
   });
 
   it("takes over atomically and notifies a different assignee", async () => {
