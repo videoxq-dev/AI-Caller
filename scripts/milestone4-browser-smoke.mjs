@@ -229,12 +229,12 @@ try {
   assert(messageRow.rows.filter((row) => row.sender_type === "AI" && row.content_type === "TEXT").length === 3, "Expected three persisted AI replies.");
 
   const balanceAfterWidget = (await pool.query(`SELECT balance FROM credit_wallets WHERE workspace_id = $1`, [workspaceId])).rows[0].balance;
-  assert(balanceAfterWidget === balanceAfterTest - 5, `Expected five hosted AI credit debits for the widget flow; balance moved from ${balanceAfterTest} to ${balanceAfterWidget}.`);
+  assert(balanceAfterWidget === balanceAfterTest - 3, `Expected three hosted AI credit debits for the widget flow (one planning call per turn); balance moved from ${balanceAfterTest} to ${balanceAfterWidget}.`);
   const usageCount = (await pool.query(
     `SELECT count(*)::int AS count FROM usage_events WHERE workspace_id = $1 AND capability = 'AI_TEXT'`,
     [workspaceId],
   )).rows[0].count;
-  assert(usageCount >= 6, `Expected at least six AI usage events including Test tab and widget flow; received ${usageCount}.`);
+  assert(usageCount >= 4, `Expected at least four AI usage events including Test tab and three widget planning turns; received ${usageCount}.`);
 
   await page.goto(`${baseUrl}/inbox`, { waitUntil: "networkidle" });
   await page.getByRole("heading", { name: "Inbox", level: 1 }).waitFor();
