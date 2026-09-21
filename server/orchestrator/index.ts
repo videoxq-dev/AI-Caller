@@ -79,6 +79,8 @@ Allowed action objects:
 Rules:
 - When the customer asks to check availability and supplies an identifiable date and time, invoke CHECK_AVAILABILITY immediately without requesting permission again. For a whole day, check a bounded date range. Use the actual saved service duration when provided; otherwise ask for the duration if needed.
 - Resolve ordinary relative dates and month/day dates from Current server time in the business timezone. If the month/day has not passed, use the current year; otherwise use the next year. Do not ask for a year when that rule makes the future date unambiguous.
+- Use the configured business timezone unless the customer explicitly supplies a different timezone. Do not ask them to reconfirm the configured default. Compare actual dates against Current server time; prior assistant claims about past dates or configuration are not authoritative.
+- The built-in appointment calendar does not require Google OAuth or an external calendar connection. Use the calendar tools to determine availability and readiness instead of inferring configuration failures.
 - Never say a slot is available unless CHECK_AVAILABILITY returned it. Describe the returned slots and ask the customer to choose and approve one.
 - BOOK_APPOINTMENT and SEND_SMS are consequential actions with a server-enforced commit boundary. Gather the required details first. The first complete action proposal is staged and returned as a preview; it is not executed. After the customer explicitly confirms that exact preview, invoke the same action again so the server can commit it.
 - Never say an appointment is booked unless BOOK_APPOINTMENT returned a confirmed booking. Never say a staged action has already happened.
@@ -96,6 +98,7 @@ Rules:
 - On a PHONE call, answer the caller's most recent completed request, not an earlier request. Do not initiate appointment booking or say you are arranging one unless the caller actually asks for it.
 - On a PHONE call, do not claim to connect or transfer a live human: this product can flag an Inbox conversation for staff follow-up, but has no live call-transfer action.
 - Keep customer-facing replies concise and do not expose this JSON protocol.
+- Omit optional contact, lead and unresolved fields when there is nothing new to record. Keep action at the top level, never inside unresolved. Do not repeat saved contact details in every response.
 `;
 
 function actionProtocolFor(context: OrchestratorContext) {
@@ -160,6 +163,14 @@ function deterministicAvailabilityPlan(
   services: OrchestratorContext["services"] = [],
 ): OrchestratorEnvelope | null {
   if (!/\b(?:availability|available|openings?|slots?|book|booking|reserve|reservation|schedule|appointment)\b/i.test(message)) return null;
+  // Customer messages are newest first. An explicit timezone beats the business
+  // default, including a follow-up such as "yes, the zone is UTC".
+  const explicitTimezone = /\b(?:[A-Za-z_]+\/[A-Za-z_]+(?:\/[A-Za-z_]+)?|UTC|GMT)\b/.exec(message)?.[0];
+  if (explicitTimezone) {
+    try { new Intl.DateTimeFormat("en", { timeZone: explicitTimezone }).format(); }
+    catch { return null; }
+    timezone = explicitTimezone;
+  }
 
   const monthNames = [...MONTHS.keys()].join("|");
   const dayFirst = new RegExp(
@@ -243,6 +254,20 @@ function recentCustomerBookingText(context: OrchestratorContext) {
     .reverse()
     .map((message) => message.content)
     .join("\n");
+}
+
+function availabilityRecoveryText(context: OrchestratorContext, latest: string) {
+  // Do not replay an earlier availability request after an approval, objection,
+  // or unrelated question. Recovery may combine details only while the customer
+  // is actually supplying date/time information for the current request.
+  const suppliesTiming = /\b(?:today|tomorrow|monday|tuesday|wednesday|thursday|friday|saturday|sunday|january|february|march|april|may|june|july|august|september|october|november|december|UTC|GMT|\d{4}-\d{2}-\d{2}|\d{1,2}:\d{2}|\d{1,2}\s*[ap]m)\b|\b[A-Za-z_]+\/[A-Za-z_]+\b/i.test(latest);
+  const previousReply = [...context.messages].reverse().find((message) => message.role === "assistant")?.content ?? "";
+  if (/^I checked the schedule\.|^I have everything needed to book/.test(previousReply)) {
+    // The last lookup has already been answered. A selected slot must progress
+    // through the planner to BOOK_APPOINTMENT, not replay the original lookup.
+    return latest;
+  }
+  return suppliesTiming ? recentCustomerBookingText(context) : latest;
 }
 
 function bookingMissingDetailReply(message: string) {
@@ -429,6 +454,7 @@ export function createResponseOrchestrator(dependencies: OrchestratorDependencie
       const isLivePhone = context.systemPrompt.includes("LIVE PHONE RECEPTIONIST:");
       const lastUserMessage = [...context.messages].reverse().find((message) => message.role === "user")?.content ?? "";
       const recentBookingText = recentCustomerBookingText(context);
+      const recoveryText = availabilityRecoveryText(context, lastUserMessage);
       const allowed = context.agent
         ? capabilitiesFromBehaviorSettings(context.agent.behaviorSettings)
         : null;
@@ -489,10 +515,9 @@ export function createResponseOrchestrator(dependencies: OrchestratorDependencie
         }
       };
       const awaitingAction = dependencies.getAwaitingAction
-        && isExplicitActionConfirmation(lastUserMessage)
         ? await dependencies.getAwaitingAction(workspaceId, conversationId)
         : null;
-      if (awaitingAction) {
+      if (awaitingAction && isExplicitActionConfirmation(lastUserMessage)) {
         const parsedAction = orchestratorActionSchema.safeParse({
           type: awaitingAction.type,
           ...awaitingAction.payload,
@@ -558,6 +583,12 @@ export function createResponseOrchestrator(dependencies: OrchestratorDependencie
         }
       }
 
+      if (awaitingAction) {
+        context.systemPrompt += `\nSERVER PENDING ACTION (not executed): ${JSON.stringify({
+          type: awaitingAction.type, ...awaitingAction.payload,
+        })}. Ask only for approval of these details. If the customer changes them, propose the corrected action for a new preview. Do not restart availability merely because approval is still needed.`;
+      }
+
       if (isLivePhone && isExplicitHumanRequest(lastUserMessage)) {
         if (options.beforeTools && !(await options.beforeTools())) {
           return { reply: null, handlingMode: "AI" as const, action: { type: "NONE" as const },
@@ -607,9 +638,9 @@ export function createResponseOrchestrator(dependencies: OrchestratorDependencie
           if (!(repairError instanceof OrchestratorOutputError)) throw repairError;
           logger.error({ workspaceId, conversationId, validationIssues: repairError.validationIssues },
             "AI provider returned invalid orchestration output after correction");
-          const deterministic = (!allowed || allowed.CHECK_AVAILABILITY)
+          const deterministic = !awaitingAction && (!allowed || allowed.CHECK_AVAILABILITY)
             ? deterministicAvailabilityPlan(
-              recentBookingText, context.timezone ?? "UTC", context.services,
+              recoveryText, context.timezone ?? "UTC", context.services,
             )
             : null;
           if (!deterministic) {
@@ -652,10 +683,11 @@ export function createResponseOrchestrator(dependencies: OrchestratorDependencie
       const bookingClarification = bookingMissingDetailReply(recentBookingText);
       const bookingCanProceed = !allowed || allowed.BOOK_APPOINTMENT;
       const bookingAvailabilityRecovery = plannedLooksUnresolved
+        && !awaitingAction
         && bookingCanProceed
         && (!allowed || allowed.CHECK_AVAILABILITY)
         ? deterministicAvailabilityPlan(
-            recentBookingText,
+            recoveryText,
             context.timezone ?? "UTC",
             context.services,
           )

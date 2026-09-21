@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import { createResponseOrchestrator } from "./index";
-import { parseOrchestratorEnvelope } from "./tools";
+import { OrchestratorOutputError, parseOrchestratorEnvelope } from "./tools";
+import { isExplicitActionConfirmation } from "./pending-actions";
 import { defaultAgentCapabilities } from "@/server/agent/capabilities";
 import { AppError } from "@/server/http/errors";
 
@@ -16,6 +17,25 @@ function fakeContext(handlingMode: "AI" | "HUMAN" = "AI") {
 }
 
 describe("orchestrator response protocol", () => {
+  it.each([
+    '{"reply":"Please approve.","action":{"type":"BOOK_APPOINTMENT"}',
+    '```json\n{"reply":"Checking availability',
+    '{"reply":"Please approve.","unresolved":{"reason":"","action":{"type":"NONE"}}}',
+    JSON.stringify({ reply: '{"reply":"Leaked protocol","action":{"type":"NONE"}}', action: { type: "NONE" } }),
+  ])("rejects incomplete or nested protocol instead of leaking it: %s", (text) => {
+    expect(() => parseOrchestratorEnvelope(text)).toThrow(OrchestratorOutputError);
+  });
+
+  it.each(["approved", "Confirmed.", "I approve", "Yes, I approve!", "Yes, please."])(
+    "recognizes an explicit approval: %s", (text) => {
+      expect(isExplicitActionConfirmation(text)).toBe(true);
+    },
+  );
+  it.each(["not approved", "yes but change the time", "confirmed for tomorrow instead", "don't book it", "is it confirmed?"])(
+    "does not mistake a correction or question for approval: %s", (text) => {
+      expect(isExplicitActionConfirmation(text)).toBe(false);
+    },
+  );
   it("falls back to a safe text-only response when provider output is not JSON", () => {
     expect(parseOrchestratorEnvelope("I can help with that.")).toEqual({
       reply: "I can help with that.",
@@ -236,6 +256,48 @@ describe("orchestrator response protocol", () => {
     expect(executeTools).toHaveBeenCalledOnce();
   });
 
+  it("uses the explicitly confirmed UTC timezone during availability recovery", async () => {
+    const executeTools = vi.fn(async () => ({ kind: "availability" as const, data: { slots: [] } }));
+    const orchestrator = createResponseOrchestrator({
+      buildContext: vi.fn(async () => ({
+        ...fakeContext(), timezone: "Africa/Lagos",
+        services: [{ id: "service-office", name: "Office Cleaning", durationMinutes: 240 }],
+        messages: [
+          { role: "user" as const, content: "Check Office Cleaning availability for Wednesday 23 September 2037 at 10:00 AM." },
+          { role: "assistant" as const, content: "Is that UTC?" },
+          { role: "user" as const, content: "Yes, the zone is UTC." },
+        ],
+      })),
+      executeTools, generate: vi.fn(async () => ({ text: '{"reply":' })),
+    });
+    await orchestrator.respond("workspace", "conversation");
+    expect(executeTools).toHaveBeenCalledWith("workspace", "conversation", fakeContext().contact.id, {
+      action: { type: "CHECK_AVAILABILITY", startsAt: "2037-09-23T10:00:00.000Z",
+        endsAt: "2037-09-23T14:00:00.000Z", timezone: "UTC", durationMinutes: 240 },
+    });
+  });
+
+  it.each(["approved", "no it has not", "Sep 23, 2037, 11:00 AM (Africa/Lagos)"])(
+    "does not replay a completed availability lookup after %s if the planner fails", async latest => {
+      const executeTools = vi.fn();
+      const orchestrator = createResponseOrchestrator({
+        buildContext: vi.fn(async () => ({
+          ...fakeContext(), timezone: "UTC",
+          messages: [
+            { role: "user" as const, content: "Check Office Cleaning availability Wednesday 23 September 2037 at 10:00 AM." },
+            { role: "assistant" as const, content: "I checked the schedule. Available times include Sep 23, 2037, 11:00 AM (Africa/Lagos). Which would you like me to book?" },
+            { role: "user" as const, content: latest },
+          ],
+        })),
+        executeTools, generate: vi.fn(async () => ({ text: '{"reply":' })),
+      });
+      const result = await orchestrator.respond("workspace", "conversation");
+      expect(executeTools).not.toHaveBeenCalled();
+      expect(result.reply).not.toContain("Available times include");
+      expect(result.reply).not.toContain('"reply"');
+    },
+  );
+
   it("replans a returned-to-AI conversation around the latest legitimate request", async () => {
     const executeTools = vi.fn(async (
       _workspaceId: string,
@@ -436,7 +498,7 @@ describe("orchestrator response protocol", () => {
     expect(executeTools).toHaveBeenCalledOnce();
   });
 
-  it("commits a stored staged action directly when the customer explicitly confirms it", async () => {
+  it.each(["Yes, please.", "approved", "Confirmed."])("commits a stored staged action directly on %s", async (approval) => {
     const generate = vi.fn();
     const executeTools = vi.fn(async (
       _workspaceId: string,
@@ -482,7 +544,7 @@ describe("orchestrator response protocol", () => {
         ...fakeContext(),
         messages: [
           { role: "assistant" as const, content: "Office Cleaning on September 23 at 10 AM. Would you like me to book it?" },
-          { role: "user" as const, content: "Yes, please." },
+          { role: "user" as const, content: approval },
         ],
       })),
       executeTools,

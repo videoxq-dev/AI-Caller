@@ -181,7 +181,9 @@ async function approvedSmsPrompt(workspaceId: string, customerPhone: string | nu
   ].join("\n");
 }
 
-export async function buildConversationContext(workspaceId: string, conversationId: string) {
+export async function buildConversationContext(
+  workspaceId: string, conversationId: string, options: { voiceCallId?: string } = {},
+) {
   const timeline = await getConversationTimelinePage(workspaceId, conversationId, { limit: 30, offset: 0 });
   if (!timeline) return null;
 
@@ -197,6 +199,12 @@ export async function buildConversationContext(workspaceId: string, conversation
       .then((rows) => rows[0] ?? null),
   ]);
   if (!contact) return null;
+  // A new call shares the contact's Inbox thread, but not its unfinished chat
+  // proposals. Only the current call's transcript may supply booking details.
+  const conversationMessages = options.voiceCallId
+    ? timeline.messages.filter((message) => message.channel === "PHONE"
+      && message.metadata?.voiceCallId === options.voiceCallId)
+    : timeline.messages;
 
   const currentAppointment = contact.appointments.find((appointment) =>
     appointment.status === "CONFIRMED" || appointment.status === "PENDING",
@@ -213,20 +221,20 @@ export async function buildConversationContext(workspaceId: string, conversation
   });
 
   systemPrompt += await approvedSmsPrompt(workspaceId, contact.phone);
-  const mostRecentCustomerMessage = [...timeline.messages].reverse().find((message) =>
+  const mostRecentCustomerMessage = [...conversationMessages].reverse().find((message) =>
     message.senderType === "CUSTOMER" && ["TEXT", "CALL_TRANSCRIPT"].includes(message.contentType),
   );
   if (mostRecentCustomerMessage?.channel === "PHONE") {
     systemPrompt += "\n\nLIVE PHONE RECEPTIONIST: The caller's latest complete utterance controls the next answer; older messages are context, not new requests. Answer the question actually asked and do not pivot from a services inquiry into arranging an appointment. When asked what services exist, state the service names first; give prices, coverage or booking suggestions only when requested or necessary for accuracy. Use one or two natural spoken sentences, ask at most one follow-up, and avoid repeated lists or monologues. Do not promise a live phone transfer: the supported action is to flag the Inbox conversation for team follow-up. State business facts only when grounded in approved knowledge.";
   }
-  const latestPhoneMode = [...timeline.messages].reverse().find((message) =>
+  const latestPhoneMode = [...conversationMessages].reverse().find((message) =>
     message.channel === "PHONE" && typeof message.metadata?.voiceMode === "string",
   )?.metadata?.voiceMode;
   if (latestPhoneMode === "AFTER_HOURS") {
     systemPrompt += "\n\nVOICE MODE: AFTER_HOURS. The business is currently closed. You may answer approved business questions and book appointments, but never imply that staff are currently available or that same-day service is guaranteed.";
   }
 
-  const messages = timeline.messages
+  const messages = conversationMessages
     .filter((message) => message.contentType === "TEXT" || message.contentType === "CALL_TRANSCRIPT")
     .map((message) => {
       if (message.senderType === "CUSTOMER") return { role: "user" as const, content: clip(message.body, 4000) };

@@ -268,6 +268,10 @@ export function attachRealtimeMedia({ telnyx, identity, streamId }: BridgeOption
       name: item.name, arguments: item.arguments,
       isCurrentTurn: () => open && epoch === callerSpeechEpoch,
     });
+    logger.info({ workspaceId, callId, tool: item.name, ok: result.ok,
+      kind: "kind" in result ? result.kind : undefined,
+      code: "code" in result ? result.code : undefined,
+    }, "Realtime business tool completed");
     if (!open) return;
     sendOpenAI({ type: "conversation.item.create", item: {
       type: "function_call_output", call_id: item.call_id, output: JSON.stringify(result),
@@ -479,7 +483,7 @@ export function attachRealtimeMedia({ telnyx, identity, streamId }: BridgeOption
       const claimedCall = await claimRealtimeStream(workspaceId, callId, streamId);
       if (!claimedCall) throw new Error("Realtime call stream already claimed.");
       claimed = true;
-      const context = await realtimeSessionContext(workspaceId, call.conversationId);
+      const context = await realtimeSessionContext(workspaceId, call.conversationId, callId);
       const { instructions } = context;
       priorConversation = context.history;
       if (!open) return;

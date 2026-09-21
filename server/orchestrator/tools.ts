@@ -207,6 +207,14 @@ export function parseOrchestratorEnvelope(text: string): OrchestratorEnvelope {
     } catch {
       throw new OrchestratorOutputError("AI provider returned malformed orchestration JSON.");
     }
+    // A misplaced action must be repaired, never silently stripped as optional
+    // metadata. Otherwise a booking proposal turns into a text-only response.
+    const object = decoded as Record<string, unknown> | null;
+    if (!object || !("reply" in object || "action" in object)
+      || Object.entries(object).some(([key, value]) => key !== "action"
+        && value && typeof value === "object" && "action" in value)) {
+      throw new OrchestratorOutputError("AI provider returned an invalid orchestration envelope.");
+    }
     const parsed = orchestratorEnvelopeSchema.safeParse(decoded);
     if (!parsed.success) {
       throw new OrchestratorOutputError(
@@ -215,11 +223,19 @@ export function parseOrchestratorEnvelope(text: string): OrchestratorEnvelope {
           `${issue.path.join(".") || "response"}: ${issue.message}`),
       );
     }
+    if (parsed.data.reply && /(?:^\s*[\[{]|"(?:reply|action|unresolved)"\s*:)/.test(parsed.data.reply)) {
+      throw new OrchestratorOutputError("AI provider nested orchestration JSON in the customer reply.");
+    }
     return parsed.data;
   }
 
   const reply = text.trim();
   if (!reply) throw new OrchestratorOutputError("AI provider returned an empty orchestration response.");
+  // extractJson returns null for truncated objects too. Such output is not
+  // prose: fail closed so the orchestrator repairs it before executing tools.
+  if (/[{}]|^```|"(?:reply|action|contact|lead|unresolved)"\s*:/.test(reply)) {
+    throw new OrchestratorOutputError("AI provider returned malformed orchestration JSON.");
+  }
   return { reply: reply.slice(0, 5000), action: { type: "NONE" } };
 }
 
