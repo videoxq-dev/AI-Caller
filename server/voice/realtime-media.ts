@@ -277,8 +277,7 @@ export function attachRealtimeMedia({ telnyx, identity, streamId }: BridgeOption
     const messageId = await messagePromise;
     if (!messageId) return;
     const call = await getVoiceCall(workspaceId, callId);
-    const pending = call?.bookingAwaitingRealtimeDelivery ??
-      call?.metadata.bookingAwaitingRealtimeDelivery;
+    const pending = call?.metadata.bookingAwaitingRealtimeDelivery;
     if (!call || call.bookingEngineVersion !== "v2" ||
       !pending || typeof pending !== "object") return;
     const data = pending as Record<string, unknown>;
