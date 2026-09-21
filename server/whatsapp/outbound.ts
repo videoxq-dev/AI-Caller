@@ -96,7 +96,7 @@ export function createWhatsAppOutboundService(dependencies: OutboundDependencies
       if (input.senderType === "USER" && conversation.handlingMode !== "HUMAN"
         && !(await hasOpenConversationIssue(workspaceId, conversationId))) {
         throw new AppError(
-          "STAFF_REPLY_SCOPE_REQUIRED",
+          "HUMAN_TAKEOVER_REQUIRED",
           "Take over the conversation or open a staff issue before sending a staff WhatsApp reply.",
           409,
         );
@@ -159,7 +159,7 @@ export function createWhatsAppOutboundService(dependencies: OutboundDependencies
       if (input.senderType === "USER" && conversation.handlingMode !== "HUMAN"
         && !(await hasOpenConversationIssue(workspaceId, conversationId))) {
         throw new AppError(
-          "STAFF_REPLY_SCOPE_REQUIRED",
+          "HUMAN_TAKEOVER_REQUIRED",
           "Take over the conversation or open a staff issue before sending a staff WhatsApp template.",
           409,
         );
