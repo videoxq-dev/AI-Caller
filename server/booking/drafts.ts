@@ -174,9 +174,9 @@ export async function patchBookingDraft(
   const sourceEventId = eventIdSchema.parse(input.sourceEventId);
   return db.transaction(async (tx) => {
     await lockSession(tx, context);
+    const draft = await ownedDraft(tx, context, id);
     const replay = await recordedEvent(tx, context, id, sourceEventId, "PATCH");
     if (replay) return replay;
-    const draft = await ownedDraft(tx, context, id);
     if (!editable.some((state) => state === draft.status) || draft.expiresAt <= now) {
       throw new AppError("BOOKING_DRAFT_NOT_EDITABLE", "This booking draft can no longer be edited.", 409);
     }
@@ -222,9 +222,9 @@ export async function cancelBookingDraft(
   const sourceEventId = eventIdSchema.parse(input.sourceEventId);
   return db.transaction(async (tx) => {
     await lockSession(tx, context);
+    const draft = await ownedDraft(tx, context, id);
     const replay = await recordedEvent(tx, context, id, sourceEventId, "CANCEL");
     if (replay) return replay;
-    const draft = await ownedDraft(tx, context, id);
     if (draft.version !== version) throw new AppError("BOOKING_STALE_VERSION", "The appointment details have changed; reload the current draft.", 409);
     if (!editable.some((state) => state === draft.status)) {
       throw new AppError("BOOKING_DRAFT_NOT_EDITABLE", "The booking is no longer an uncommitted draft.", 409);
