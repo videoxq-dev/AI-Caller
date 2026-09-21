@@ -370,7 +370,7 @@ export function attachRealtimeMedia({ telnyx, identity, streamId }: BridgeOption
           sendOpenAI({ type: "conversation.item.create", item: {
             type: "function_call_output", call_id: callKey,
             output: JSON.stringify({ ok: false,
-              reason: "The requested action is temporarily unavailable. No booking or change was completed." }),
+              reason: "The requested action could not be completed. No booking or change was completed. Ask for corrected or missing details when appropriate." }),
           } });
         } finally {
           responseToolCounts.set(responseId,
