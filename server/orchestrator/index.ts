@@ -242,6 +242,11 @@ export function createResponseOrchestrator(dependencies: OrchestratorDependencie
           );
         }
         const escalationAction = { type: "ESCALATE" as const, reason };
+        if (options.beforeTools && !(await options.beforeTools())) {
+          return { reply: null, handlingMode: "AI" as const,
+            action: { type: "NONE" as const },
+            toolResult: { kind: "none" as const, data: {} } };
+        }
         try {
           const escalation = await dependencies.executeTools(
             workspaceId, conversationId, context.contact.id, { action: escalationAction },
