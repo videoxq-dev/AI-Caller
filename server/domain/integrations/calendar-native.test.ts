@@ -3,6 +3,7 @@ import { and, eq } from "drizzle-orm";
 import { closeDatabase, db } from "@/db";
 import { capabilityBindings, workspaces } from "@/db/schema";
 import { saveBusinessSetup } from "@/server/domain/onboarding/repository";
+import { calendarBookingService } from "@/server/domain/core/calendar-booking";
 import { bindCapability, getCalendarSetup, saveCalendarSetup } from "./repository";
 
 describe("native calendar onboarding", () => {
@@ -15,6 +16,40 @@ describe("native calendar onboarding", () => {
   });
 
   afterAll(async () => closeDatabase());
+
+  it("uses native availability at runtime even when a stale calendar binding still exists", async () => {
+    await saveBusinessSetup(workspaceId, {
+      businessName: "Runtime Native Scheduler",
+      timezone: "UTC",
+      completeStep: true,
+      hours: Array.from({ length: 7 }, (_, dayOfWeek) => ({
+        dayOfWeek,
+        enabled: true,
+        openTime: "00:00",
+        closeTime: "23:59",
+      })),
+    });
+
+    await bindCapability(workspaceId, "CALENDAR", "BYOP", "google");
+    const [staleBinding] = await db.select().from(capabilityBindings).where(and(
+      eq(capabilityBindings.workspaceId, workspaceId),
+      eq(capabilityBindings.capability, "CALENDAR"),
+    )).limit(1);
+    expect(staleBinding).toBeDefined();
+
+    const tomorrow = new Date(Date.now() + 24 * 60 * 60_000);
+    tomorrow.setUTCHours(10, 0, 0, 0);
+    const result = await calendarBookingService.getAvailability(workspaceId, {
+      startsAt: tomorrow,
+      endsAt: new Date(tomorrow.getTime() + 2 * 60 * 60_000),
+      timezone: "UTC",
+      durationMinutes: 30,
+    });
+
+    expect(result.timezone).toBe("UTC");
+    expect(result.slots.length).toBeGreaterThan(0);
+    expect(result.slots[0].startsAt.getTime()).toBe(tomorrow.getTime());
+  });
 
   it("completes calendar setup from business hours without requiring an external provider", async () => {
     await saveBusinessSetup(workspaceId, {
