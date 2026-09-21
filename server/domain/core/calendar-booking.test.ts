@@ -84,12 +84,23 @@ describe("calendar booking service", () => {
       bufferAfterMinutes: 0,
       maxBookingsPerDay: 8,
     }));
-    const insertNativeAppointment = vi.fn(async (_workspaceId, booking) => storedAppointment({
+    const insertNativeAppointment = vi.fn(async (_workspaceId: string, booking: typeof input) => ({
+      id: "appointment-native",
+      workspaceId: "workspace-1",
+      contactId: booking.contactId,
+      conversationId: booking.conversationId ?? null,
       integrationId: null,
       externalEventId: null,
+      serviceId: booking.serviceId ?? null,
+      title: booking.title,
       startsAt: booking.startsAt,
       endsAt: booking.endsAt,
       timezone: booking.timezone,
+      status: "CONFIRMED" as const,
+      bookingSource: booking.bookingSource ?? null,
+      notes: booking.notes ?? null,
+      createdAt: new Date("2026-09-20T12:00:00.000Z"),
+      updatedAt: new Date("2026-09-20T12:00:00.000Z"),
     }));
     const service = createCalendarBookingService({
       resolveCurrent: vi.fn(async () => null),
