@@ -159,6 +159,24 @@ function safeUnverifiedReply(reply: string) {
   return reply;
 }
 
+function availabilityReply(toolResult: OrchestratorToolResult, timezone: string) {
+  const slots = Array.isArray(toolResult.data.slots) ? toolResult.data.slots : [];
+  if (!slots.length) {
+    return "I checked the schedule and found no available slots in that window. Would you like to try another date or time?";
+  }
+  const names = slots.slice(0, 4).flatMap((item) => {
+    if (!item || typeof item !== "object" || !("startsAt" in item)) return [];
+    const start = new Date(String(item.startsAt));
+    if (!Number.isFinite(start.getTime())) return [];
+    return [new Intl.DateTimeFormat("en-US", {
+      dateStyle: "medium", timeStyle: "short", timeZone: timezone,
+    }).format(start)];
+  });
+  return names.length
+    ? `I checked the schedule. Available times include ${names.join("; ")} (${timezone}). Which would you like me to book?`
+    : "I couldn't read the returned appointment times. Please try another availability check.";
+}
+
 function bookingFallback(toolResult: OrchestratorToolResult) {
   const title = typeof toolResult.data.title === "string" ? toolResult.data.title : "appointment";
   const startsAt = typeof toolResult.data.startsAt === "string" ? toolResult.data.startsAt : null;
@@ -280,7 +298,14 @@ export function createResponseOrchestrator(dependencies: OrchestratorDependencie
         throw error;
       }
 
-      if (toolResult.kind === "availability" || toolResult.kind === "booking" || toolResult.kind === "qualification" || toolResult.kind === "sms") {
+      if (toolResult.kind === "availability") {
+        // Present verified calendar slots directly, not a second model's
+        // possible assertion that it never checked or an invented opening.
+        return { reply: availabilityReply(toolResult, context.timezone),
+          handlingMode: "AI" as const, action: first.action, toolResult };
+      }
+
+      if (toolResult.kind === "booking" || toolResult.kind === "qualification" || toolResult.kind === "sms") {
         try {
           const finalResponse = await dependencies.generate(
             workspaceId,
