@@ -323,7 +323,13 @@ export function createResponseOrchestrator(dependencies: OrchestratorDependencie
           handlingMode: "AI" as const, action: first.action, toolResult };
       }
 
-      if (toolResult.kind === "booking" || toolResult.kind === "qualification" || toolResult.kind === "sms") {
+      if (toolResult.kind === "booking") {
+        // A persisted appointment must always receive its exact server-backed
+        // confirmation, even if a second model call would deny or alter it.
+        return { reply: bookingFallback(toolResult),
+          handlingMode: "AI" as const, action: first.action, toolResult };
+      }
+      if (toolResult.kind === "qualification" || toolResult.kind === "sms") {
         try {
           const finalResponse = await dependencies.generate(
             workspaceId,
@@ -346,17 +352,7 @@ export function createResponseOrchestrator(dependencies: OrchestratorDependencie
               handlingMode: "AI" as const, action: first.action, toolResult,
             };
           }
-          if (toolResult.kind !== "booking") throw error;
-          logger.error(
-            { err: error, workspaceId, conversationId },
-            "AI booking finalizer failed after a confirmed booking; returning authoritative fallback confirmation",
-          );
-          return {
-            reply: bookingFallback(toolResult),
-            handlingMode: "AI" as const,
-            action: first.action,
-            toolResult,
-          };
+          throw error;
         }
       }
 
