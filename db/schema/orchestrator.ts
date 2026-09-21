@@ -89,6 +89,29 @@ export const webchatTurns = pgTable(
   ],
 );
 
+export const pendingAgentActions = pgTable(
+  "pending_agent_actions",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    workspaceId: uuid("workspace_id").notNull().references(() => workspaces.id, { onDelete: "cascade" }),
+    conversationId: uuid("conversation_id").notNull().references(() => conversations.id, { onDelete: "cascade" }),
+    contactId: uuid("contact_id").notNull().references(() => contacts.id, { onDelete: "cascade" }),
+    type: text("type").notNull(),
+    payload: jsonb("payload").$type<Record<string, unknown>>().notNull(),
+    payloadHash: text("payload_hash").notNull(),
+    status: text("status").default("AWAITING_CONFIRMIRMATION").notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true, mode: "date" }).defaultNow().notNull(),
+    updatedAt: timestamp("updated_at", { withTimezone: true, mode: "date" }).defaultNow().notNull(),
+    confirmedAt: timestamp("confirmed_at", { withTimezone: true, mode: "date" }),
+    executedAt: timestamp("executed_at", { withTimezone: true, mode: "date" }),
+    failureCode: text("failure_code"),
+  },
+  (table) => [
+    index("pending_agent_actions_conversation_status_idx").on(table.conversationId, table.status, table.createdAt),
+    index("pending_agent_actions_workspace_status_idx").on(table.workspaceId, table.status, table.createdAt),
+  ],
+);
+
 export const usageEvents = pgTable(
   "usage_events",
   {
