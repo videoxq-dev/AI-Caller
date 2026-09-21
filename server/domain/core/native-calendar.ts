@@ -77,4 +77,5 @@ export async function validateNativeBooking(workspaceId: string, window: Window)
   if (!withinBusinessHours(window, timezone, hours)) {
     throw new AppError("APPOINTMENT_OUTSIDE_HOURS", "That appointment is outside the configured business hours.", 409);
   }
+  return { timezone };
 }
