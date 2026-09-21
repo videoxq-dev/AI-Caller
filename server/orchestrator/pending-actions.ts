@@ -100,12 +100,14 @@ export async function stagePendingActionProposal(input: {
       return { state: "EXECUTED", action: completed, result: completed.result };
     }
 
-    let [awaiting] = await tx.select().from(pendingAgentActions).where(and(
-      eq(pendingAgentActions.workspaceId, input.workspaceId),
-      eq(pendingAgentActions.conversationId, input.conversationId),
-      eq(pendingAgentActions.type, input.type),
-      eq(pendingAgentActions.status, "AWAITING_CONFIRMATION"),
-    )).orderBy(desc(pendingAgentActions.createdAt)).limit(1);
+    let awaiting: typeof pendingAgentActions.$inferSelect | undefined = (
+      await tx.select().from(pendingAgentActions).where(and(
+        eq(pendingAgentActions.workspaceId, input.workspaceId),
+        eq(pendingAgentActions.conversationId, input.conversationId),
+        eq(pendingAgentActions.type, input.type),
+        eq(pendingAgentActions.status, "AWAITING_CONFIRMATION"),
+      )).orderBy(desc(pendingAgentActions.createdAt)).limit(1)
+    )[0];
     const now = new Date();
     if (awaiting && now.getTime() - awaiting.createdAt.getTime() > PENDING_ACTION_TTL_MS) {
       await tx.update(pendingAgentActions).set({
@@ -183,12 +185,14 @@ export async function stageOrConfirmPendingAction(input: {
       }).where(eq(pendingAgentActions.id, confirmed.id));
     }
 
-    let [awaiting] = await tx.select().from(pendingAgentActions).where(and(
-      eq(pendingAgentActions.workspaceId, input.workspaceId),
-      eq(pendingAgentActions.conversationId, input.conversationId),
-      eq(pendingAgentActions.type, input.type),
-      eq(pendingAgentActions.status, "AWAITING_CONFIRMATION"),
-    )).orderBy(desc(pendingAgentActions.createdAt)).limit(1);
+    let awaiting: typeof pendingAgentActions.$inferSelect | undefined = (
+      await tx.select().from(pendingAgentActions).where(and(
+        eq(pendingAgentActions.workspaceId, input.workspaceId),
+        eq(pendingAgentActions.conversationId, input.conversationId),
+        eq(pendingAgentActions.type, input.type),
+        eq(pendingAgentActions.status, "AWAITING_CONFIRMATION"),
+      )).orderBy(desc(pendingAgentActions.createdAt)).limit(1)
+    )[0];
 
     const now = new Date();
     if (awaiting && now.getTime() - awaiting.createdAt.getTime() > PENDING_ACTION_TTL_MS) {
