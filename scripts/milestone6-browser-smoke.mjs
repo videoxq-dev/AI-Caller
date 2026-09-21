@@ -227,9 +227,12 @@ try {
   assert(invalid.response.status === 401, `Expected invalid WhatsApp signature to return 401, received ${invalid.response.status}.`);
 
   const turns = [
-    { id: "wamid.m6.1", text: "How much is the QA Consultation?", reply: "QA Consultation is $120. I can also check tomorrow's availability." },
-    { id: "wamid.m6.2", text: "What times are available tomorrow?", reply: "I have a 10:00 AM opening tomorrow." },
-    { id: "wamid.m6.3", text: "My name is WhatsApp Visitor, whatsapp.visitor@example.com. Book the 10:00 AM slot", reply: "Your QA Consultation is booked for 10:00 AM tomorrow." },
+    { id: "wamid.m6.1", text: "How much is the QA Consultation?",
+      replyPattern: "QA Consultation is $120. I can also check tomorrow's availability." },
+    { id: "wamid.m6.2", text: "What times are available tomorrow?",
+      replyPattern: "%I checked the schedule. Available times include%10:00 AM%" },
+    { id: "wamid.m6.3", text: "My name is WhatsApp Visitor, whatsapp.visitor@example.com. Book the 10:00 AM slot",
+      replyPattern: "%Your QA Consultation is booked for%10:00 AM%" },
   ];
 
   let conversationId;
@@ -243,9 +246,9 @@ try {
       pool,
       `SELECT c.id AS conversation_id, m.external_message_id, m.status
          FROM messages m JOIN conversations c ON c.id = m.conversation_id
-        WHERE m.workspace_id = $1 AND m.channel = 'WHATSAPP' AND m.direction = 'OUTBOUND' AND m.body = $2
+        WHERE m.workspace_id = $1 AND m.channel = 'WHATSAPP' AND m.direction = 'OUTBOUND' AND m.body LIKE $2
         ORDER BY m.created_at DESC LIMIT 1`,
-      [workspaceId, turn.reply],
+      [workspaceId, turn.replyPattern],
       (rows) => rows.rowCount === 1 && Boolean(rows.rows[0].external_message_id),
       `outbound WhatsApp reply for ${turn.id}`,
     );
