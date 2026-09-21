@@ -319,7 +319,7 @@ export function createResponseOrchestrator(dependencies: OrchestratorDependencie
       if (toolResult.kind === "availability") {
         // Present verified calendar slots directly, not a second model's
         // possible assertion that it never checked or an invented opening.
-        return { reply: availabilityReply(toolResult, context.timezone),
+        return { reply: availabilityReply(toolResult, context.timezone ?? "UTC"),
           handlingMode: "AI" as const, action: first.action, toolResult };
       }
 
