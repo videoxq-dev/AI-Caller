@@ -306,7 +306,7 @@ try {
   await page.goto(`${baseUrl}/inbox`, { waitUntil: "networkidle" });
   await page.getByLabel("Channel filter").selectOption("WHATSAPP");
   await page.getByText("WhatsApp Visitor", { exact: true }).first().click();
-  await page.getByText(turns[2].reply, { exact: true }).waitFor({ timeout: 10_000 });
+  await page.getByText(/Your QA Consultation is booked for .*10:00 AM/).waitFor({ timeout: 10_000 });
   await assertNoHorizontalOverflow(page, "WhatsApp Inbox desktop");
   await page.screenshot({ path: path.join(outputDir, "whatsapp-inbox-desktop.png"), fullPage: true });
 
