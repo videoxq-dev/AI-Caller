@@ -13,7 +13,7 @@ import {
   updateNativeAppointmentAfterReschedule,
 } from "./repository";
 import type { AppointmentInput, AppointmentRescheduleInput } from "./schemas";
-import { nativeAvailability, validateNativeBooking } from "./native-calendar";
+import { filterSlotsThroughLocalPolicy, nativeAvailability, validateNativeBooking } from "./native-calendar";
 
 type StoredAppointment = {
   id: string;
@@ -28,6 +28,7 @@ type StoredAppointment = {
 type BookingDependencies = {
   resolveCurrent: (workspaceId: string) => Promise<{ integrationId: string; provider: CalendarProvider } | null>;
   nativeAvailability?: typeof nativeAvailability;
+  filterAvailability?: typeof filterSlotsThroughLocalPolicy;
   validateNativeBooking?: typeof validateNativeBooking;
   insertNativeAppointment?: typeof insertNativeAppointment;
   updateNativeAppointmentAfterReschedule?: typeof updateNativeAppointmentAfterReschedule;
@@ -66,6 +67,7 @@ async function defaultResolveCurrent(workspaceId: string) {
 const defaultDependencies: BookingDependencies = {
   resolveCurrent: defaultResolveCurrent,
   nativeAvailability,
+  filterAvailability: filterSlotsThroughLocalPolicy,
   validateNativeBooking,
   insertNativeAppointment,
   updateNativeAppointmentAfterReschedule,
@@ -88,10 +90,10 @@ export function createCalendarBookingService(dependencies: BookingDependencies) 
         if (!dependencies.nativeAvailability) throw new AppError("NATIVE_BOOKING_UNAVAILABLE", "In-app scheduling is temporarily unavailable.", 503);
         return dependencies.nativeAvailability(workspaceId, input);
       }
-      return {
-        slots: await current.provider.getAvailability(input),
-        timezone: input.timezone,
-      };
+      const slots = await current.provider.getAvailability(input);
+      return dependencies.filterAvailability
+        ? dependencies.filterAvailability(workspaceId, input, slots)
+        : { slots, timezone: input.timezone };
     },
 
     async book(workspaceId: string, input: AppointmentInput) {
@@ -108,6 +110,24 @@ export function createCalendarBookingService(dependencies: BookingDependencies) 
         }, validated);
       }
       const { integrationId, provider } = current;
+      if (dependencies.filterAvailability) {
+        const durationMinutes = (input.endsAt.getTime() - input.startsAt.getTime()) / 60_000;
+        if (!Number.isSafeInteger(durationMinutes) || durationMinutes < 5 || durationMinutes > 1440) {
+          throw new AppError("BOOKING_DURATION_INVALID", "The appointment duration is invalid.", 422);
+        }
+        // Recheck provider and local capacity immediately before external creation.
+        // This does not yet reserve capacity: the durable command layer will close
+        // concurrent external-create windows before the new engine is enabled.
+        const checked = await this.getAvailability(workspaceId, {
+          startsAt: input.startsAt, endsAt: input.endsAt,
+          timezone: input.timezone, durationMinutes,
+        });
+        if (!checked.slots.some((slot) =>
+          slot.startsAt.getTime() === input.startsAt.getTime() &&
+          slot.endsAt.getTime() === input.endsAt.getTime())) {
+          throw new AppError("APPOINTMENT_SLOT_UNAVAILABLE", "This time is no longer available. Please choose another available time.", 409);
+        }
+      }
       const providerBooking = await provider.book({
         startsAt: input.startsAt,
         endsAt: input.endsAt,
