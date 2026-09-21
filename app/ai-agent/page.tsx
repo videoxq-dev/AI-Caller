@@ -290,6 +290,7 @@ export default function AIAgentPage() {
             policies={knowledgePolicies}
             website={knowledgeWebsite}
             canManage={canManage}
+            agentName={assistantName}
           />}
           {tab === "behavior" && <BehaviorTab tone={tone} setTone={setTone} goal={goal} setGoal={setGoal} whenUnsure={whenUnsure} setWhenUnsure={setWhenUnsure} guardrails={guardrails} setGuardrails={setGuardrails} assistantName={assistantName} setAssistantName={setAssistantName} openingMessage={openingMessage} setOpeningMessage={setOpeningMessage} escalationMessage={escalationMessage} setEscalationMessage={setEscalationMessage} voiceProfile={voiceProfile} setVoiceProfile={setVoiceProfile} voiceLanguage={voiceLanguage} setVoiceLanguage={setVoiceLanguage} voiceSpeed={voiceSpeed} setVoiceSpeed={setVoiceSpeed} recordingPolicy={recordingPolicy} setRecordingPolicy={setRecordingPolicy} afterHoursEnabled={afterHoursEnabled} setAfterHoursEnabled={setAfterHoursEnabled} qualificationEnabled={qualificationEnabled} setQualificationEnabled={setQualificationEnabled} qualificationCriteria={qualificationCriteria} setQualificationCriteria={setQualificationCriteria} />}
           {tab === "capabilities" && <CapabilitiesTab catalog={capabilityCatalog} capabilities={capabilities} setCapabilities={(value) => { setCapabilitiesSaved(false); setCapabilities(value); }} saved={capabilitiesSaved} onSave={saveCapabilities} loading={loadingSettings || savingSettings} canManage={canManage} />}
@@ -385,18 +386,19 @@ function OverviewTab({ agentName, status, configured, onStatusChange, canManage,
   </div>;
 }
 
-function KnowledgeTab({ services, faqs, policies, website, canManage }: {
+function KnowledgeTab({ services, faqs, policies, website, canManage, agentName }: {
   services: ServiceRow[];
   faqs: FAQRow[];
   policies: PolicyRow[];
   website: string;
   canManage: boolean;
+  agentName: string;
 }) {
   return <div className="agentTabContent knowledgeManagement">
     <section className="agentCard knowledgeMainCard">
       <div className="sectionTitle"><div>
         <h2>Business knowledge</h2>
-        <p>Manage the approved services, FAQs and policies Mia can use across every channel.</p>
+        <p>Manage the approved services, FAQs and policies {agentName} can use across every channel.</p>
       </div></div>
       {canManage ? <KnowledgeEditor
         initialServices={services}
