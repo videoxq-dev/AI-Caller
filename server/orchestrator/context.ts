@@ -16,7 +16,7 @@ export type OrchestratorContext = {
   workspaceId: string;
   conversation: { handlingMode: "AI" | "HUMAN" };
   contact: { id: string };
-  agent: { id: string; status: "DRAFT" | "ACTIVE" | "PAUSED"; escalationMessage: string | null; behaviorSettings: Record<string, unknown> } | null;
+  agent: { id: string; status: "DRAFT" | "ACTIVE" | "PAUSED"; whenUnsure?: string; escalationMessage: string | null; behaviorSettings: Record<string, unknown> } | null;
   source?: "INBOUND_TURN" | "AGENT_TEST";
   systemPrompt: string;
   timezone?: string;
