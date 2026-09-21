@@ -77,6 +77,10 @@ try {
     (workspace_id, business_name, industry, timezone, summary)
     VALUES ($1, 'Phase One Auto Spa', 'Auto detailing', 'UTC', 'Bookings are available by appointment.')
     ON CONFLICT (workspace_id) DO UPDATE SET business_name = EXCLUDED.business_name`, [workspaceId]);
+  await pool.query(`INSERT INTO business_hours (workspace_id, day_of_week, enabled, open_time, close_time)
+    SELECT $1, n, true, '08:00', '18:00' FROM generate_series(0, 6) n
+    ON CONFLICT (workspace_id, day_of_week) DO UPDATE SET
+      enabled=true, open_time='08:00', close_time='18:00'`, [workspaceId]);
   await pool.query(`INSERT INTO services
     (workspace_id, name, description, price_text, duration_minutes, active)
     VALUES ($1, 'QA Consultation', 'Thirty-minute appointment.', '$120', 30, true)`, [workspaceId]);
