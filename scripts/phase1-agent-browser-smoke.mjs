@@ -186,6 +186,26 @@ try {
   assert(forbiddenBookings.rows[0].count === 0,
     "The real Web Chat channel persisted a booking disabled by the owner.");
 
+  // Re-enable booking and run the actual Web Chat -> AI -> in-app appointment
+  // path without any connected calendar. Keep the business's one agent/number.
+  const policy = await api(context, "GET", "/api/agent", undefined, "read stored permissions");
+  await api(context, "PATCH", "/api/agent/capabilities", {
+    ...policy.capabilities, BOOK_APPOINTMENT: true,
+  }, "enable native booking");
+  await composer.fill("Book the QA Consultation for tomorrow at 10 AM. My name is QA Visitor, qa.visitor@example.com");
+  await widgetFrame.getByRole("button", { name: "Send message" }).click();
+  await widgetFrame.getByText(/QA Consultation is booked for/).last().waitFor({ timeout: 15_000 });
+  const nativeBookings = await api(context, "GET", "/api/appointments", undefined,
+    "read native in-app appointment");
+  assert(nativeBookings.total === 1
+    && nativeBookings.items[0].appointment.status === "CONFIRMED"
+    && nativeBookings.items[0].appointment.integrationId === null,
+    "The approved Web Chat booking did not appear on the Appointments page data.");
+  await page.screenshot({ path: path.join(dir, "native-booking-webchat.png"), fullPage: true });
+  await api(context, "PATCH", "/api/agent/capabilities", {
+    ...policy.capabilities, BOOK_APPOINTMENT: false,
+  }, "restore disabled booking for status persistence checks");
+
   await page.goto(`${baseUrl}/ai-agent`, { waitUntil: "networkidle" });
   await page.reload({ waitUntil: "networkidle" });
   await page.getByText("Agent active", { exact: true }).waitFor();
