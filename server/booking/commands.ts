@@ -63,7 +63,7 @@ async function assertCustomerConfirmation(
     throw new AppError("BOOKING_CONFIRMATION_REQUIRED",
       "Please explicitly confirm the current appointment preview.", 409);
   }
-  if (context.channel === "PHONE" && latest.metadata.callId !== context.sessionKey) {
+  if (context.channel === "PHONE" && latest.metadata.voiceCallId !== context.sessionKey) {
     throw new AppError("BOOKING_CONFIRMATION_SESSION_MISMATCH", "This confirmation belongs to another call.", 409);
   }
 }
