@@ -488,6 +488,40 @@ describe("orchestrator response protocol", () => {
     expect(result.reply).not.toContain("10 AM appointment available");
   });
 
+  it("reports invalid saved calendar settings without failing the customer turn", async () => {
+    const executeTools = vi.fn()
+      .mockRejectedValueOnce(new AppError(
+        "CALENDAR_CONFIG_INVALID",
+        "The saved calendar availability settings are invalid. Please save them again.",
+        409,
+      ))
+      .mockResolvedValueOnce({ kind: "escalation" as const, data: { handlingMode: "HUMAN" } });
+    const orchestrator = createResponseOrchestrator({
+      buildContext: vi.fn(async () => ({
+        ...fakeContext(), source: "INBOUND_TURN" as const,
+        messages: [{ role: "user" as const, content: "Can you check September 23 at 10 AM?" }],
+        agent: { id: "agent-1", status: "ACTIVE" as const,
+          whenUnsure: "Escalate to a human", escalationMessage: null,
+          behaviorSettings: { capabilities: { ...defaultAgentCapabilities, ESCALATE: true } } },
+      })),
+      executeTools,
+      generate: vi.fn(async () => ({ text: JSON.stringify({
+        action: { type: "CHECK_AVAILABILITY",
+          startsAt: "2030-09-23T10:00:00Z", endsAt: "2030-09-23T11:00:00Z",
+          timezone: "UTC", durationMinutes: 30 },
+      }) })),
+    });
+
+    const result = await orchestrator.respond("workspace", "conversation");
+
+    expect(result.handlingMode).toBe("HUMAN");
+    expect(result.reply).toContain("couldn't check live availability");
+    expect(result.reply).toContain("saved calendar availability settings are invalid");
+    expect(result.reply).toContain("flagged your request for staff follow-up");
+    expect(executeTools).toHaveBeenCalledTimes(2);
+    expect(executeTools.mock.calls[1][3]).toMatchObject({ action: { type: "ESCALATE" } });
+  });
+
   it("explains disabled availability instead of silently escalating an appointment request", async () => {
     const executeTools = vi.fn();
     const orchestrator = createResponseOrchestrator({
