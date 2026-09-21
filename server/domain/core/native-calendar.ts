@@ -1,4 +1,4 @@
-import { and, eq, gt, inArray, lt, ne } from "drizzle-orm";
+import { and, eq, gt, inArray, lt } from "drizzle-orm";
 import { db } from "@/db";
 import { appointments } from "@/db/schema";
 import { getBusinessSetup } from "@/server/domain/onboarding/repository";
@@ -157,7 +157,6 @@ export async function nativeAvailability(workspaceId: string, input: Availabilit
 export async function validateNativeBooking(
   workspaceId: string,
   window: Window,
-  excludeAppointmentId?: string,
 ) {
   const schedule = await nativeHours(workspaceId);
   const { timezone, hours } = schedule;
@@ -167,28 +166,10 @@ export async function validateNativeBooking(
   if (!withinBusinessHours(window, timezone, hours)) {
     throw new AppError("APPOINTMENT_OUTSIDE_HOURS", "That appointment is outside the configured business hours.", 409);
   }
-  const candidateDay = localParts(window.startsAt, timezone).date;
-  const queryStart = new Date(window.startsAt.getTime() - 36 * 60 * 60_000);
-  const queryEnd = new Date(window.endsAt.getTime() + 36 * 60 * 60_000);
-  const conditions = [
-    eq(appointments.workspaceId, workspaceId),
-    inArray(appointments.status, ["PENDING", "CONFIRMED"]),
-    lt(appointments.startsAt, queryEnd),
-    gt(appointments.endsAt, queryStart),
-  ];
-  if (excludeAppointmentId) conditions.push(ne(appointments.id, excludeAppointmentId));
-  const existing = await db.select({ startsAt: appointments.startsAt, endsAt: appointments.endsAt })
-    .from(appointments).where(and(...conditions)).limit(1000);
-  if (existing.filter((row) => localParts(row.startsAt, timezone).date === candidateDay).length
-    >= schedule.maxBookingsPerDay) {
-    throw new AppError("APPOINTMENT_DAILY_LIMIT_REACHED",
-      "The maximum number of bookings has been reached for that day.", 409);
-  }
-  if (conflictsWithBuffer(window, existing,
-    schedule.bufferBeforeMinutes, schedule.bufferAfterMinutes)) {
-    throw new AppError("APPOINTMENT_SLOT_UNAVAILABLE",
-      "That time conflicts with another appointment or its required buffer.", 409);
-  }
+  // Availability, buffer, daily-limit and idempotency checks run together
+  // under the repository's workspace transaction lock. Repeating them here
+  // creates a race where one identical retry commits before the other reaches
+  // the lock and the second can no longer be recognized as idempotent.
   return {
     timezone,
     bufferBeforeMinutes: schedule.bufferBeforeMinutes,

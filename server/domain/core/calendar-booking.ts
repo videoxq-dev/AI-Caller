@@ -150,7 +150,7 @@ export function createCalendarBookingService(dependencies: BookingDependencies) 
         if (!dependencies.validateNativeBooking || !dependencies.updateNativeAppointmentAfterReschedule) {
           throw new AppError("NATIVE_BOOKING_UNAVAILABLE", "In-app scheduling is temporarily unavailable.", 503);
         }
-        const validated = await dependencies.validateNativeBooking(workspaceId, input, appointmentId);
+        const validated = await dependencies.validateNativeBooking(workspaceId, input);
         return dependencies.updateNativeAppointmentAfterReschedule(workspaceId, appointmentId, {
           ...input,
           timezone: validated.timezone,
