@@ -67,6 +67,8 @@ describe("durable native appointment command (disposable PostgreSQL)", () => {
       workspaceId, conversationId: ctx.conversationId!,
       channel: "WEBCHAT", direction: "OUTBOUND", senderType: "AI",
       contentType: "TEXT", body: "Office Cleaning Sep 23, 11 AM–3 PM Lagos. Shall I book it?",
+      metadata: { bookingPreviewId: preview.preview.id,
+        bookingDraftId: opened.draft.id, bookingVersion: selected.draft.version },
       createdAt: later(1000),
     }).returning();
     await recordBookingPreviewDelivery(ctx, {
