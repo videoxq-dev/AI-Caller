@@ -308,11 +308,89 @@ describe("orchestrator response protocol", () => {
     });
 
     const result = await orchestrator.respond("workspace", "conversation");
-    expect(result.reply).toBe("I have a 10:00 AM opening tomorrow.");
+    expect(result.reply).toContain("Sep 18, 2026");
+    expect(result.reply).toContain("10:00 AM");
     expect(result.toolResult.kind).toBe("availability");
-    expect(generate).toHaveBeenCalledTimes(2);
+    expect(generate).toHaveBeenCalledTimes(1);
     expect(executeTools).toHaveBeenCalledTimes(1);
-    expect(JSON.stringify(generate.mock.calls[1][2])).toContain("2026-09-18T10:00:00.000Z");
+  });
+
+  it("reports actual empty availability rather than inventing a slot", async () => {
+    const orchestrator = createResponseOrchestrator({
+      buildContext: vi.fn(async () => fakeContext("AI")),
+      executeTools: vi.fn(async () => ({ kind: "availability" as const, data: { slots: [] } })),
+      generate: vi.fn(async () => ({ text: JSON.stringify({
+        reply: "You have a 10 AM appointment available.",
+        action: { type: "CHECK_AVAILABILITY", startsAt: "2030-09-23T10:00:00Z",
+          endsAt: "2030-09-23T14:00:00Z", timezone: "UTC" },
+      }) })),
+    });
+    const result = await orchestrator.respond("workspace", "conversation");
+    expect(result.reply).toContain("no available slots");
+    expect(result.reply).not.toContain("10 AM appointment available");
+  });
+
+  it("explains disabled availability instead of silently escalating an appointment request", async () => {
+    const executeTools = vi.fn();
+    const orchestrator = createResponseOrchestrator({
+      buildContext: vi.fn(async () => ({
+        ...fakeContext(), source: "INBOUND_TURN" as const,
+        messages: [{ role: "user" as const, content: "Can you check available slots for Thursday?" }],
+        agent: { id: "agent-1", status: "ACTIVE" as const, escalationMessage: null,
+          behaviorSettings: { capabilities: {
+            ...defaultAgentCapabilities, CHECK_AVAILABILITY: false,
+          } } },
+      })),
+      executeTools,
+      generate: vi.fn(async () => ({ text: JSON.stringify({
+        reply: "I'll flag the team", action: { type: "ESCALATE", reason: "No calendar" },
+      }) })),
+    });
+    const result = await orchestrator.respond("workspace", "conversation");
+    expect(result.handlingMode).toBe("AI");
+    expect(result.reply).toContain("can't check live appointment availability");
+    expect(executeTools).not.toHaveBeenCalled();
+  });
+
+  it("does not invent staff notification when the model returns only a promise", async () => {
+    const orchestrator = createResponseOrchestrator({
+      buildContext: vi.fn(async () => fakeContext()),
+      executeTools: vi.fn(async () => ({ kind: "none" as const, data: {} })),
+      generate: vi.fn(async () => ({ text: JSON.stringify({
+        reply: "I'll flag this for the staff to follow up.",
+        action: { type: "NONE" },
+      }) })),
+    });
+    const result = await orchestrator.respond("workspace", "conversation");
+    expect(result.reply).toContain("please ask me to arrange it");
+    expect(result.reply).not.toContain("I'll flag");
+  });
+
+  it("acknowledges a persisted contact update by the fields that actually changed", async () => {
+    const orchestrator = createResponseOrchestrator({
+      buildContext: vi.fn(async () => fakeContext()),
+      executeTools: vi.fn(async () => ({ kind: "contact" as const,
+        data: { contactId: "person", updatedFields: ["phone"] } })),
+      generate: vi.fn(async () => ({ text: JSON.stringify({
+        reply: "Thanks", contact: { phone: "+13074453684" }, action: { type: "NONE" },
+      }) })),
+    });
+    const result = await orchestrator.respond("workspace", "conversation");
+    expect(result.reply).toContain("updated your contact details (phone)");
+  });
+
+  it("acknowledges only successful staff escalation, not model-only promises", async () => {
+    const orchestrator = createResponseOrchestrator({
+      buildContext: vi.fn(async () => fakeContext()),
+      executeTools: vi.fn(async () => ({ kind: "escalation" as const, data: { handlingMode: "HUMAN" } })),
+      generate: vi.fn(async () => ({ text: JSON.stringify({
+        reply: "I can connect you live.", action: { type: "ESCALATE", reason: "Requested" },
+      }) })),
+    });
+    const result = await orchestrator.respond("workspace", "conversation");
+    expect(result.handlingMode).toBe("HUMAN");
+    expect(result.reply).toContain("flagged your request for staff follow-up");
+    expect(result.reply).not.toContain("connect you live");
   });
 
   it("returns an authoritative confirmation if the AI finalizer fails after booking", async () => {
