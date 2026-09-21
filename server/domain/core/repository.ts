@@ -553,8 +553,11 @@ function assertNativePolicyAvailability(
   }
   const protectedStart = input.startsAt.getTime() - policy.bufferBeforeMinutes * 60_000;
   const protectedEnd = input.endsAt.getTime() + policy.bufferAfterMinutes * 60_000;
-  if (existing.some((row) => row.startsAt.getTime() < protectedEnd
-    && row.endsAt.getTime() > protectedStart)) {
+  if (existing.some((row) => {
+    const existingProtectedStart = row.startsAt.getTime() - policy.bufferBeforeMinutes * 60_000;
+    const existingProtectedEnd = row.endsAt.getTime() + policy.bufferAfterMinutes * 60_000;
+    return existingProtectedStart < protectedEnd && existingProtectedEnd > protectedStart;
+  })) {
     throw new AppError("APPOINTMENT_SLOT_UNAVAILABLE",
       "That time conflicts with another appointment or its required buffer.", 409);
   }
