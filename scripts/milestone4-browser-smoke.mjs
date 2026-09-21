@@ -128,6 +128,11 @@ try {
   await assertNoHorizontalOverflow(page, "Knowledge importer desktop");
   await page.screenshot({ path: path.join(outputDir, "business-knowledge-import.png"), fullPage: true });
   await page.goto(`${baseUrl}/ai-agent`, { waitUntil: "networkidle" });
+  await page.getByRole("button", { name: "Knowledge", exact: true }).click();
+  await page.getByRole("heading", { name: "Business knowledge" }).waitFor();
+  await page.getByText("qa-services.txt", { exact: true }).waitFor({ timeout: 10_000 });
+  await page.getByRole("button", { name: /Add service/i }).waitFor();
+  assert(page.url().endsWith("/ai-agent"), "AI Agent Knowledge redirected back into onboarding.");
   await page.getByRole("button", { name: "Test", exact: true }).click();
   await page.getByRole("heading", { name: "Test your AI" }).waitFor();
   await page.getByPlaceholder("Type a test message...").fill("How much is the QA Consultation?");
@@ -157,9 +162,19 @@ try {
   await widgetFrame.getByText("QA Assistant", { exact: true }).waitFor({ timeout: 15_000 });
 
   const composer = widgetFrame.getByPlaceholder("Type your message…");
+  let delayedWidgetRequest = false;
+  await page.route("**/api/widget/messages", async (route) => {
+    if (!delayedWidgetRequest) {
+      delayedWidgetRequest = true;
+      await new Promise((resolve) => setTimeout(resolve, 300));
+    }
+    await route.continue();
+  });
   await composer.fill("How much is the QA Consultation?");
   await composer.press("Enter");
+  await widgetFrame.getByLabel("AI is typing").waitFor({ timeout: 2_000 });
   await widgetFrame.getByText(/QA Consultation is \$120/).last().waitFor({ timeout: 15_000 });
+  await page.unroute("**/api/widget/messages");
 
   await composer.fill("What times are available tomorrow?");
   await composer.press("Enter");
