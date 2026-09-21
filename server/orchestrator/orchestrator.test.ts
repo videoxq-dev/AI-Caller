@@ -438,7 +438,12 @@ describe("orchestrator response protocol", () => {
 
   it("commits a stored staged action directly when the customer explicitly confirms it", async () => {
     const generate = vi.fn();
-    const executeTools = vi.fn(async () => ({
+    const executeTools = vi.fn(async (
+      _workspaceId: string,
+      _conversationId: string,
+      _contactId: string,
+      _envelope: { action: { type: string } },
+    ) => ({
       kind: "booking" as const,
       data: {
         appointmentId: "appointment-1",
