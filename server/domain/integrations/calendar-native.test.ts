@@ -3,7 +3,7 @@ import { and, eq } from "drizzle-orm";
 import { closeDatabase, db } from "@/db";
 import { capabilityBindings, workspaces } from "@/db/schema";
 import { saveBusinessSetup } from "@/server/domain/onboarding/repository";
-import { getCalendarSetup, saveCalendarSetup } from "./repository";
+import { bindCapability, getCalendarSetup, saveCalendarSetup } from "./repository";
 
 describe("native calendar onboarding", () => {
   let workspaceId = "";
@@ -28,6 +28,13 @@ describe("native calendar onboarding", () => {
         closeTime: dayOfWeek >= 1 && dayOfWeek <= 5 ? "18:00" : null,
       })),
     });
+
+    await bindCapability(workspaceId, "CALENDAR", "BYOP", "google");
+    const [staleBinding] = await db.select().from(capabilityBindings).where(and(
+      eq(capabilityBindings.workspaceId, workspaceId),
+      eq(capabilityBindings.capability, "CALENDAR"),
+    )).limit(1);
+    expect(staleBinding).toBeDefined();
 
     await expect(saveCalendarSetup(workspaceId, {
       provider: "google",
