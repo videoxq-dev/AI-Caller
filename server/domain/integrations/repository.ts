@@ -281,6 +281,14 @@ export async function saveCalendarSetup(workspaceId: string, input: CalendarSetu
   await db.insert(calendarSetupSettings).values({ workspaceId, settings, updatedAt: now }).onConflictDoUpdate({ target: calendarSetupSettings.workspaceId, set: { settings, updatedAt: now } });
   if (connected?.status === "CONNECTED") {
     await bindCapability(workspaceId, "CALENDAR", "BYOP", input.provider);
+  } else {
+    // Native scheduling is authoritative when no selected provider is connected.
+    // Remove any stale BYOP calendar route so runtime resolution cannot point at
+    // a disconnected provider and block the in-app fallback.
+    await db.delete(capabilityBindings).where(and(
+      eq(capabilityBindings.workspaceId, workspaceId),
+      eq(capabilityBindings.capability, "CALENDAR"),
+    ));
   }
   if (input.completeStep) await markSetupStep(workspaceId, "calendar", now);
   return settings;
