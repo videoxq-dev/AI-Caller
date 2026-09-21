@@ -3,7 +3,7 @@ import { assertAgentActionAllowed } from "@/server/agent/capabilities";
 import { requireActiveWorkspaceAgent } from "@/server/agent/service";
 import { and, desc, eq } from "drizzle-orm";
 import { db } from "@/db";
-import { messages } from "@/db/schema";
+import { messages, webchatSessions } from "@/db/schema";
 import { AppError } from "@/server/http/errors";
 import { logger } from "@/server/observability/logger";
 import {
@@ -323,6 +323,35 @@ export async function executeOrchestratorTools(
   if (!currentConversation) throw new AppError("CONVERSATION_NOT_FOUND", "Conversation not found.", 404);
   if (currentConversation.handlingMode === "HUMAN") {
     throw new AppError("CONVERSATION_HUMAN_HANDLING", "Staff now controls this conversation.", 409);
+  }
+  if (envelope.action.type === "BOOK_APPOINTMENT") {
+    // Never let a legacy pending proposal execute inside an opt-in v2 widget
+    // session. Booking engine selection is pinned to the server-owned session,
+    // not controlled by an LLM or the customer's submitted payload.
+    const [latestCustomer] = await db.select({
+      metadata: messages.metadata,
+      channel: messages.channel,
+    }).from(messages).where(and(
+      eq(messages.workspaceId, workspaceId),
+      eq(messages.conversationId, conversationId),
+      eq(messages.senderType, "CUSTOMER"),
+    )).orderBy(desc(messages.createdAt), desc(messages.id)).limit(1);
+    const sessionId = latestCustomer?.channel === "WEBCHAT"
+      ? latestCustomer.metadata?.sessionId : null;
+    if (typeof sessionId === "string") {
+      const [v2] = await db.select({ id: webchatSessions.id })
+        .from(webchatSessions).where(and(
+          eq(webchatSessions.id, sessionId),
+          eq(webchatSessions.workspaceId, workspaceId),
+          eq(webchatSessions.contactId, contactId),
+          eq(webchatSessions.conversationId, conversationId),
+          eq(webchatSessions.bookingEngineVersion, "v2"),
+        )).limit(1);
+      if (v2) {
+        throw new AppError("BOOKING_ENGINE_VERSION_CONFLICT",
+          "This chat uses the new booking confirmation. Please confirm the current appointment preview instead.", 409);
+      }
+    }
   }
   const channel = await getActiveConversationChannel(workspaceId, conversationId) ?? "WEBCHAT";
   const needsQualificationConfig = envelope.action.type === "QUALIFY_LEAD" || envelope.lead?.status === "QUALIFIED";
