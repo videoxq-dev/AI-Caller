@@ -197,6 +197,9 @@ export async function patchBookingDraft(
     const [updated] = await tx.update(bookingDrafts).set({
       ...patch,
       status: "COLLECTING",
+      currentSearchId: null,
+      selectedOfferId: null,
+      currentPreviewId: null,
       version: draft.version + 1,
       updatedAt: now,
     }).where(and(
