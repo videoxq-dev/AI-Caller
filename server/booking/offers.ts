@@ -8,7 +8,7 @@ import { getBusinessSetup } from "@/server/domain/onboarding/repository";
 import { getCalendarSetup } from "@/server/domain/integrations/repository";
 import { AppError } from "@/server/http/errors";
 import { resolveProviderRoute } from "@/server/providers/resolver";
-import { displayBookingInstant, resolveBookingLocalTime } from "./time";
+import { bookingSearchBounds, displayBookingInstant, resolveBookingLocalTime, type BookingSearchPeriod } from "./time";
 import { getBookingDraft, type BookingContext } from "./drafts";
 
 const idSchema = z.string().uuid();
@@ -130,6 +130,58 @@ export async function searchBookingAvailability(
       checkedAt: now, expiresAt: new Date(now.getTime() + OFFER_TTL_MS),
     }))).returning();
     return { state: "SLOTS_AVAILABLE", offers, version: updated.version };
+  });
+}
+
+export async function searchBookingRangeAvailability(
+  context: BookingContext,
+  input: { draftId: string; expectedVersion: number; period: BookingSearchPeriod },
+  now = new Date(),
+): Promise<{ state: "SLOTS_AVAILABLE" | "NO_SLOTS"; offers: BookingOffer[]; version: number }> {
+  const draftId = idSchema.parse(input.draftId), version = versionSchema.parse(input.expectedVersion);
+  const draft = await getBookingDraft(context, draftId);
+  if (draft.version !== version || draft.expiresAt <= now ||
+    !["COLLECTING", "AVAILABILITY_CHECKED", "AWAITING_CONFIRMATION"].includes(draft.status)) {
+    throw new AppError("BOOKING_STALE_VERSION", "The booking changed before availability could be checked.", 409);
+  }
+  if (!draft.localDate) {
+    throw new AppError("BOOKING_DETAILS_REQUIRED", "Please supply an appointment date.", 422);
+  }
+  const service = await requireBookingService(context.workspaceId, draft.serviceId);
+  const before = await currentBookingBinding(context.workspaceId, service);
+  const timezone = draft.customerTimezone ?? before.businessTimezone;
+  const bounds = bookingSearchBounds({
+    localDate: draft.localDate, timezone, period: input.period,
+  }, now);
+  const found = await calendarBookingService.getAvailability(context.workspaceId, {
+    ...bounds, durationMinutes: service.durationMinutes!,
+  });
+  const after = await currentBookingBinding(context.workspaceId, service);
+  if (before.fingerprint !== after.fingerprint) {
+    throw new AppError("BOOKING_BINDING_CHANGED", "Calendar settings changed. Please check availability again.", 409);
+  }
+  const candidates = found.slots
+    .filter((slot) => slot.startsAt > now && slot.endsAt > slot.startsAt)
+    .slice(0, 12);
+  const searchId = randomUUID();
+  return db.transaction(async (tx) => {
+    await lock(tx, context);
+    await currentDraft(tx, context, draftId, version, now);
+    const [updated] = await tx.update(bookingDrafts).set({
+      status: "AVAILABILITY_CHECKED", currentSearchId: searchId,
+      selectedOfferId: null, currentPreviewId: null, updatedAt: now,
+    }).where(and(owned(context, draftId), eq(bookingDrafts.version, version))).returning();
+    if (!updated) throw new AppError("BOOKING_STALE_VERSION", "The booking has changed.", 409);
+    if (!candidates.length) return { state: "NO_SLOTS" as const, offers: [], version: updated.version };
+    const stored = await tx.insert(bookingOffers).values(candidates.map((slot) => ({
+      workspaceId: context.workspaceId, draftId, draftVersion: version,
+      searchId, serviceId: service.id, durationMinutes: service.durationMinutes!,
+      provider: before.provider, integrationId: before.integrationId,
+      bindingFingerprint: before.fingerprint,
+      startsAt: slot.startsAt, endsAt: slot.endsAt, timezone,
+      checkedAt: now, expiresAt: new Date(now.getTime() + OFFER_TTL_MS),
+    }))).returning();
+    return { state: "SLOTS_AVAILABLE" as const, offers: stored, version: updated.version };
   });
 }
 

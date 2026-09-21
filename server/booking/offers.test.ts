@@ -7,7 +7,7 @@ import { saveBusinessSetup } from "@/server/domain/onboarding/repository";
 import { openBookingDraft, patchBookingDraft, type BookingContext } from "./drafts";
 import {
   prepareBookingPreview, recordBookingPreviewDelivery,
-  searchBookingAvailability, selectBookingOffer,
+  searchBookingAvailability, searchBookingRangeAvailability, selectBookingOffer,
 } from "./offers";
 
 const now = new Date("2030-09-21T12:00:00.000Z");
@@ -147,5 +147,26 @@ describe("stored exact booking offers and previews (disposable PostgreSQL)", () 
     await expect(searchBookingAvailability({ ...ctx, contactId: other.id }, {
       draftId: draft.id, expectedVersion: draft.version,
     }, now)).rejects.toMatchObject({ code: "BOOKING_NOT_FOUND" });
+  });
+
+  it("returns stored offers for a bounded day search instead of inventing a start time", async () => {
+    const started = await openBookingDraft(ctx, now);
+    if (started.state !== "OPENED") throw new Error("Expected a fresh draft");
+    const patched = await patchBookingDraft(ctx, {
+      draftId: started.draft.id, expectedVersion: 1, sourceEventId: "range-details",
+      patch: { serviceId, localDate: "2030-09-23", customerTimezone: "Africa/Lagos" },
+    }, now);
+    if (patched.state !== "UPDATED") throw new Error("Expected updated draft");
+    const range = await searchBookingRangeAvailability(ctx, {
+      draftId: started.draft.id, expectedVersion: patched.draft.version, period: "DAY",
+    }, now);
+    expect(range.state).toBe("SLOTS_AVAILABLE");
+    expect(range.offers.length).toBeGreaterThan(1);
+    expect(range.offers.length).toBeLessThanOrEqual(12);
+    for (const offer of range.offers) {
+      expect(offer.durationMinutes).toBe(240);
+      expect(offer.startsAt).toBeGreaterThan(now);
+      expect(offer.expiresAt).toBeGreaterThan(offer.checkedAt);
+    }
   });
 });

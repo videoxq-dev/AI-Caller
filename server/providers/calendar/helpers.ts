@@ -60,7 +60,11 @@ export function slotize(startsAt: Date, endsAt: Date, busy: BusyRange[], duratio
     .sort((a, b) => a.startsAt.getTime() - b.startsAt.getTime());
   const slots: Array<{ startsAt: Date; endsAt: Date }> = [];
 
-  for (let cursor = startsAt.getTime(); cursor + durationMs <= endsAt.getTime(); cursor += durationMs) {
+  // Availability search is a candidate-start grid, not back-to-back meeting
+  // packing. Stepping by service duration misses valid starts for long
+  // services (for example, a four-hour service at 11:00).
+  const candidateStepMs = 30 * 60_000;
+  for (let cursor = startsAt.getTime(); cursor + durationMs <= endsAt.getTime(); cursor += candidateStepMs) {
     const candidateStart = new Date(cursor);
     const candidateEnd = new Date(cursor + durationMs);
     const overlaps = sorted.some((item) => candidateStart < item.endsAt && candidateEnd > item.startsAt);

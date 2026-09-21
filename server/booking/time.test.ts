@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { displayBookingInstant, parseBookingDate, parseBookingTime, resolveBookingLocalTime } from "./time";
+import { bookingSearchBounds, displayBookingInstant, parseBookingDate, parseBookingTime, resolveBookingLocalTime } from "./time";
 
 const fixed = new Date("2026-09-21T12:00:00.000Z");
 
@@ -74,5 +74,18 @@ describe("server-owned booking date/time resolution", () => {
     expect(() => resolveBookingLocalTime({
       localDate: "2026-09-21", localTime: "10:00", timezone: "UTC", durationMinutes: 60,
     }, fixed)).toThrowError(expect.objectContaining({ code: "APPOINTMENT_IN_PAST" }));
+  });
+
+  it("builds bounded civil-time windows for morning and next-available searches", () => {
+    const morning = bookingSearchBounds({
+      localDate: "2026-09-23", timezone: "Africa/Lagos", period: "MORNING",
+    }, fixed);
+    expect(morning.startsAt.toISOString()).toBe("2026-09-22T23:00:00.000Z");
+    expect(morning.endsAt.toISOString()).toBe("2026-09-23T11:00:00.000Z");
+    const next = bookingSearchBounds({
+      localDate: "2026-09-21", timezone: "Asia/Kathmandu", period: "NEXT_AVAILABLE",
+    }, fixed);
+    expect(next.endsAt.getTime() - next.startsAt.getTime()).toBeLessThan(7 * 24 * 60 * 60_000);
+    expect(next.endsAt).toBeGreaterThan(next.startsAt);
   });
 });

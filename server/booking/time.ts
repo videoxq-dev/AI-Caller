@@ -174,3 +174,45 @@ export function displayBookingInstant(instant: Date, timezone: string) {
     localTime: String(parts.hour).padStart(2, "0") + ":" + String(parts.minute).padStart(2, "0"),
     timezone };
 }
+
+
+export type BookingSearchPeriod = "DAY" | "MORNING" | "AFTERNOON" | "EVENING" | "NEXT_AVAILABLE";
+
+function addLocalDays(localDate: string, days: number) {
+  const parsed = fromIsoDate(localDate);
+  if (!parsed) bookingError("BOOKING_DATE_INVALID", "Please provide a valid calendar date.");
+  const value = new Date(Date.UTC(parsed.year, parsed.month - 1, parsed.day));
+  value.setUTCDate(value.getUTCDate() + days);
+  return formatDate(value.getUTCFullYear(), value.getUTCMonth() + 1, value.getUTCDate());
+}
+
+function localBoundary(localDate: string, localTime: string, timezone: string) {
+  return resolveBookingLocalTime({
+    localDate, localTime, timezone, durationMinutes: 5,
+  }, new Date(0)).startsAt;
+}
+
+export function bookingSearchBounds(input: {
+  localDate: string;
+  timezone: string;
+  period: BookingSearchPeriod;
+}, now = new Date()) {
+  zoneFormatter(input.timezone);
+  const period = input.period;
+  let startsAt: Date;
+  let endsAt: Date;
+  if (period === "NEXT_AVAILABLE") {
+    startsAt = localBoundary(input.localDate, "00:00", input.timezone);
+    endsAt = localBoundary(addLocalDays(input.localDate, 6), "23:59", input.timezone);
+  } else {
+    const [startTime, endTime, endDate] =
+      period === "MORNING" ? ["00:00", "12:00", input.localDate] :
+      period === "AFTERNOON" ? ["12:00", "17:00", input.localDate] :
+      period === "EVENING" ? ["17:00", "22:00", input.localDate] :
+      ["00:00", "00:00", addLocalDays(input.localDate, 1)];
+    startsAt = localBoundary(input.localDate, startTime, input.timezone);
+    endsAt = localBoundary(endDate, endTime, input.timezone);
+  }
+  if (endsAt <= now) bookingError("APPOINTMENT_IN_PAST", "Please choose a future appointment date.");
+  return { startsAt, endsAt, timezone: input.timezone };
+}

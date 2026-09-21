@@ -10,8 +10,8 @@ import { generateAIWithUsage } from "@/server/orchestrator/usage";
 import { isExplicitActionConfirmation } from "@/server/orchestrator/pending-actions";
 import { confirmAndExecuteBooking, getBookingOutcome } from "./commands";
 import { getBookingDraft, openBookingDraft, patchBookingDraft, type BookingContext, type BookingPatch } from "./drafts";
-import { prepareBookingPreview, searchBookingAvailability, selectBookingOffer } from "./offers";
-import { parseBookingDate, parseBookingTime } from "./time";
+import { prepareBookingPreview, searchBookingAvailability, searchBookingRangeAvailability, selectBookingOffer } from "./offers";
+import { displayBookingInstant, parseBookingDate, parseBookingTime, type BookingSearchPeriod } from "./time";
 
 const intent = z.object({
   action: z.enum(["PATCH", "CANCEL", "QUESTION", "UNRELATED", "STATUS", "CHECK"]),
@@ -21,6 +21,7 @@ const intent = z.object({
   timezone: z.string().trim().min(1).max(100).optional(),
   location: z.string().trim().min(1).max(2000).nullable().optional(),
   question: z.string().trim().max(500).optional(),
+  range: z.enum(["DAY", "MORNING", "AFTERNOON", "EVENING", "NEXT_AVAILABLE"]).optional(),
 }).strict();
 
 export type BookingTurn = {
@@ -67,10 +68,11 @@ async function classifyBookingTurn(
       eq(services.active, true))).limit(30);
   const system = [
     "Extract the customer's latest booking intent. Output ONLY one JSON object; no markdown or extra keys.",
-    'Shape: {"action":"PATCH|CANCEL|QUESTION|UNRELATED|STATUS|CHECK"}. Add only present fields: serviceId, dateExpression, timeExpression, timezone, location, question.',
+    'Shape: {"action":"PATCH|CANCEL|QUESTION|UNRELATED|STATUS|CHECK"}. Add only present fields: serviceId, dateExpression, timeExpression, timezone, location, question, range.',
     "Omit fields not supplied. Never invent dates or timezones. Never turn a question or a yes-but-correction into booking consent.",
     "A bare yes after a question about checking is not a booking confirmation.",
     "Use PATCH for newly supplied service/date/time/location or corrections. CHECK if the customer requests availability of an unchanged draft.",
+    'When the customer asks for a whole day, morning, afternoon, evening, or next available without an exact time, set range to DAY, MORNING, AFTERNOON, EVENING, or NEXT_AVAILABLE. Do not invent a start time.',
     "Use QUESTION for a side question. Use UNRELATED when there is no booking intent and no booking field or question.",
     "Use STATUS for an inquiry about an existing booking outcome. CANCEL cancels only an unfinished draft.",
     "Return a serviceId only for one clearly identified service. Otherwise omit it and let the backend clarify.",
@@ -224,6 +226,10 @@ export async function handleBookingTurn(
     }
     if (decision.timezone) patch.customerTimezone = decision.timezone;
     if (decision.location !== undefined) patch.requiredLocation = decision.location;
+    if (decision.range === "NEXT_AVAILABLE" && !decision.dateExpression && !draft.localDate) {
+      patch.localDate = displayBookingInstant(now, tz).localDate;
+      patch.originalDateExpression = "next available";
+    }
     const updated = Object.keys(patch).length
       ? await patchBookingDraft(ctx, {
         draftId: draft.id, expectedVersion: draft.version,
@@ -234,6 +240,21 @@ export async function handleBookingTurn(
       ? updated.draft : await getBookingDraft(ctx, draft.id);
     if (!current.serviceId) return { reply: "Which service would you like to book?" };
     if (!current.localDate) return { reply: "What date would you prefer for the appointment?" };
+    if (!current.localTime && decision.range) {
+      const ranged = await searchBookingRangeAvailability(ctx, {
+        draftId: draft.id, expectedVersion: current.version,
+        period: decision.range as BookingSearchPeriod,
+      }, now);
+      if (!ranged.offers.length) {
+        return { reply: "I checked that time range and found no available appointment slots. Would you like another date or time range?" };
+      }
+      const shown = ranged.offers.slice(0, 5).map((offer) =>
+        new Intl.DateTimeFormat("en-US", {
+          timeZone: offer.timezone, dateStyle: "medium", timeStyle: "short",
+        }).format(offer.startsAt) + " (" + offer.timezone + ")").join("; ");
+      return { reply: "Available times include: " + shown +
+        ". Tell me the start time you prefer and I'll prepare the exact appointment for confirmation." };
+    }
     if (!current.localTime) return { reply: "What start time would you prefer?" };
     if (current.status === "AWAITING_CONFIRMATION" && current.currentPreviewId) {
       const [preview] = await db.select().from(bookingPreviews).where(and(
