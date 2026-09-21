@@ -7,7 +7,8 @@ import {
   hostedPhoneNumbers,
   integrations,
 } from "@/db/schema";
-import { markSetupStep } from "@/server/domain/onboarding/repository";
+import { getBusinessSetup, markSetupStep } from "@/server/domain/onboarding/repository";
+import { AppError } from "@/server/http/errors";
 import {
   decryptIntegrationCredentials,
   encryptIntegrationCredentials,
@@ -254,7 +255,14 @@ export async function getCalendarSetup(workspaceId: string) {
 }
 
 export async function saveCalendarSetup(workspaceId: string, input: CalendarSetupInput) {
-  if (input.completeStep) await requireConnectedProvider(workspaceId, input.provider, "Calendar");
+  const connected = await getPrivateIntegration(workspaceId, input.provider);
+  if (input.completeStep && connected?.status !== "CONNECTED") {
+    const business = await getBusinessSetup(workspaceId);
+    if (!business.profile || !business.hours.some(day => day.enabled)) {
+      throw new AppError("BUSINESS_HOURS_NOT_CONFIGURED",
+        "Configure your business hours to use the built-in calendar without an external integration.", 409);
+    }
+  }
   const settings = {
     provider: input.provider,
     meetingDurationMinutes: input.meetingDurationMinutes,
@@ -271,7 +279,17 @@ export async function saveCalendarSetup(workspaceId: string, input: CalendarSetu
   };
   const now = new Date();
   await db.insert(calendarSetupSettings).values({ workspaceId, settings, updatedAt: now }).onConflictDoUpdate({ target: calendarSetupSettings.workspaceId, set: { settings, updatedAt: now } });
-  await bindCapability(workspaceId, "CALENDAR", "BYOP", input.provider);
+  if (connected?.status === "CONNECTED") {
+    await bindCapability(workspaceId, "CALENDAR", "BYOP", input.provider);
+  } else {
+    // Native scheduling is authoritative when no selected provider is connected.
+    // Remove any stale BYOP calendar route so runtime resolution cannot point at
+    // a disconnected provider and block the in-app fallback.
+    await db.delete(capabilityBindings).where(and(
+      eq(capabilityBindings.workspaceId, workspaceId),
+      eq(capabilityBindings.capability, "CALENDAR"),
+    ));
+  }
   if (input.completeStep) await markSetupStep(workspaceId, "calendar", now);
   return settings;
 }

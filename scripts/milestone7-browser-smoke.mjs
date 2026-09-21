@@ -354,7 +354,8 @@ try {
   assert(availability.data?.processed === 1, "Voice availability turn failed.");
   await waitFor(
     pool,
-    `SELECT body FROM messages WHERE workspace_id = $1 AND channel = 'PHONE' AND sender_type = 'AI' AND body = 'I have a 10:00 AM opening tomorrow.' LIMIT 1`,
+    `SELECT body FROM messages WHERE workspace_id = $1 AND channel = 'PHONE' AND sender_type = 'AI'
+      AND body LIKE '%I checked the schedule. Available times include%10:00 AM%' LIMIT 1`,
     [workspaceId],
     (rows) => rows.rowCount === 1,
     "voice availability response",
@@ -362,7 +363,8 @@ try {
 
   const availabilityReplies = await pool.query(
     `SELECT count(*)::int AS count FROM messages WHERE workspace_id = $1
-      AND channel = 'PHONE' AND sender_type = 'AI' AND body = 'I have a 10:00 AM opening tomorrow.'`,
+      AND channel = 'PHONE' AND sender_type = 'AI'
+      AND body LIKE '%I checked the schedule. Available times include%10:00 AM%'`,
     [workspaceId],
   );
   assert(availabilityReplies.rows[0].count === 1, "Two STT final fragments generated duplicate AI replies.");

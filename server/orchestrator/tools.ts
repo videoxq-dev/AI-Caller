@@ -46,7 +46,7 @@ export const orchestratorActionSchema = z.discriminatedUnion("type", [
     startsAt: z.string().datetime({ offset: true }),
     endsAt: z.string().datetime({ offset: true }),
     timezone: timezoneSchema,
-    durationMinutes: z.number().int().min(5).max(480).optional(),
+    durationMinutes: z.number().int().min(5).max(1440).optional(),
   }),
   z.object({
     type: z.literal("BOOK_APPOINTMENT"),
@@ -87,12 +87,15 @@ export const orchestratorEnvelopeSchema = z.object({
     intent: optionalShortText,
     serviceRequested: z.string().trim().min(1).max(500).nullable().optional(),
   }).optional(),
+  unresolved: z.object({
+    reason: z.string().trim().min(1).max(1000),
+  }).optional(),
   action: orchestratorActionSchema.default({ type: "NONE" }),
 });
 
 export type OrchestratorEnvelope = z.infer<typeof orchestratorEnvelopeSchema>;
 export type OrchestratorToolResult = {
-  kind: "none" | "qualification" | "availability" | "booking" | "escalation" | "consent" | "sms";
+  kind: "none" | "contact" | "qualification" | "availability" | "booking" | "escalation" | "consent" | "sms";
   data: Record<string, unknown>;
 };
 
@@ -216,7 +219,8 @@ export async function executeOrchestratorTools(
   const channel = await getActiveConversationChannel(workspaceId, conversationId) ?? "WEBCHAT";
   const needsQualificationConfig = envelope.action.type === "QUALIFY_LEAD" || envelope.lead?.status === "QUALIFIED";
   const qualificationConfig = needsQualificationConfig ? await getQualificationConfig(workspaceId) : null;
-  if (envelope.contact) await updateContactProfile(workspaceId, contactId, envelope.contact);
+  const updatedContact = envelope.contact
+    ? await updateContactProfile(workspaceId, contactId, envelope.contact) : null;
   if (envelope.lead) {
     await updateLeadFromEnvelope(
       workspaceId,
@@ -226,7 +230,12 @@ export async function executeOrchestratorTools(
     );
   }
 
-  if (envelope.action.type === "NONE") return { kind: "none", data: {} };
+  if (envelope.action.type === "NONE") return updatedContact
+    ? { kind: "contact", data: {
+        contactId: updatedContact.id,
+        updatedFields: Object.keys(envelope.contact ?? {}),
+      } }
+    : { kind: "none", data: {} };
 
   if (envelope.action.type === "RECORD_SMS_CONSENT") {
     if (channel !== "PHONE") {

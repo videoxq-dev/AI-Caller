@@ -227,9 +227,12 @@ try {
   assert(invalid.response.status === 401, `Expected invalid WhatsApp signature to return 401, received ${invalid.response.status}.`);
 
   const turns = [
-    { id: "wamid.m6.1", text: "How much is the QA Consultation?", reply: "QA Consultation is $120. I can also check tomorrow's availability." },
-    { id: "wamid.m6.2", text: "What times are available tomorrow?", reply: "I have a 10:00 AM opening tomorrow." },
-    { id: "wamid.m6.3", text: "My name is WhatsApp Visitor, whatsapp.visitor@example.com. Book the 10:00 AM slot", reply: "Your QA Consultation is booked for 10:00 AM tomorrow." },
+    { id: "wamid.m6.1", text: "How much is the QA Consultation?",
+      replyPattern: "QA Consultation is $120. I can also check tomorrow's availability." },
+    { id: "wamid.m6.2", text: "What times are available tomorrow?",
+      replyPattern: "%I checked the schedule. Available times include%10:00 AM%" },
+    { id: "wamid.m6.3", text: "My name is WhatsApp Visitor, whatsapp.visitor@example.com. Book the 10:00 AM slot",
+      replyPattern: "%Your QA Consultation is booked for%10:00 AM%" },
   ];
 
   let conversationId;
@@ -243,9 +246,9 @@ try {
       pool,
       `SELECT c.id AS conversation_id, m.external_message_id, m.status
          FROM messages m JOIN conversations c ON c.id = m.conversation_id
-        WHERE m.workspace_id = $1 AND m.channel = 'WHATSAPP' AND m.direction = 'OUTBOUND' AND m.body = $2
+        WHERE m.workspace_id = $1 AND m.channel = 'WHATSAPP' AND m.direction = 'OUTBOUND' AND m.body LIKE $2
         ORDER BY m.created_at DESC LIMIT 1`,
-      [workspaceId, turn.reply],
+      [workspaceId, turn.replyPattern],
       (rows) => rows.rowCount === 1 && Boolean(rows.rows[0].external_message_id),
       `outbound WhatsApp reply for ${turn.id}`,
     );
@@ -303,7 +306,7 @@ try {
   await page.goto(`${baseUrl}/inbox`, { waitUntil: "networkidle" });
   await page.getByLabel("Channel filter").selectOption("WHATSAPP");
   await page.getByText("WhatsApp Visitor", { exact: true }).first().click();
-  await page.getByText(turns[2].reply, { exact: true }).waitFor({ timeout: 10_000 });
+  await page.getByText(/Your QA Consultation is booked for .*10:00 AM/).waitFor({ timeout: 10_000 });
   await assertNoHorizontalOverflow(page, "WhatsApp Inbox desktop");
   await page.screenshot({ path: path.join(outputDir, "whatsapp-inbox-desktop.png"), fullPage: true });
 
@@ -347,7 +350,7 @@ try {
 
   const aiReplyCountBeforeResume = await pool.query(
     `SELECT count(*)::int AS count FROM messages WHERE workspace_id = $1 AND conversation_id = $2 AND channel = 'WHATSAPP' AND direction = 'OUTBOUND' AND sender_type = 'AI' AND body = $3`,
-    [workspaceId, conversationId, turns[0].reply],
+    [workspaceId, conversationId, turns[0].replyPattern],
   );
   await page.getByRole("button", { name: "Return to AI" }).click();
   await page.getByRole("button", { name: "Human takeover" }).waitFor({ timeout: 10_000 });
@@ -356,7 +359,7 @@ try {
   await waitFor(
     pool,
     `SELECT count(*)::int AS count FROM messages WHERE workspace_id = $1 AND conversation_id = $2 AND channel = 'WHATSAPP' AND direction = 'OUTBOUND' AND sender_type = 'AI' AND body = $3`,
-    [workspaceId, conversationId, turns[0].reply],
+    [workspaceId, conversationId, turns[0].replyPattern],
     (rows) => rows.rows[0]?.count > aiReplyCountBeforeResume.rows[0].count,
     "new AI reply after return-to-AI",
   );

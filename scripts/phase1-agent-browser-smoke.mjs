@@ -77,6 +77,10 @@ try {
     (workspace_id, business_name, industry, timezone, summary)
     VALUES ($1, 'Phase One Auto Spa', 'Auto detailing', 'UTC', 'Bookings are available by appointment.')
     ON CONFLICT (workspace_id) DO UPDATE SET business_name = EXCLUDED.business_name`, [workspaceId]);
+  await pool.query(`INSERT INTO business_hours (workspace_id, day_of_week, enabled, open_time, close_time)
+    SELECT $1, n, true, '08:00', '18:00' FROM generate_series(0, 6) n
+    ON CONFLICT (workspace_id, day_of_week) DO UPDATE SET
+      enabled=true, open_time='08:00', close_time='18:00'`, [workspaceId]);
   await pool.query(`INSERT INTO services
     (workspace_id, name, description, price_text, duration_minutes, active)
     VALUES ($1, 'QA Consultation', 'Thirty-minute appointment.', '$120', 30, true)`, [workspaceId]);
@@ -154,7 +158,7 @@ try {
     message: "Book the QA Consultation, my name is QA Visitor, qa.visitor@example.com.",
     reset: true,
   }, "forged model booking when disabled");
-  assert(forged.reply?.includes("can't perform that action")
+  assert((forged.reply?.includes("can't book") || forged.reply?.includes("can't perform"))
     && !forged.reply?.includes("booked for"),
     "Mia claimed success when the model attempted a disabled booking.");
   const appointments = await pool.query(`SELECT count(*)::int AS count FROM appointments
@@ -176,11 +180,46 @@ try {
   await widgetFrame.getByText(/QA Consultation is \$120/).last().waitFor({ timeout: 15_000 });
   await composer.fill("Book the QA Consultation. My name is QA Visitor, qa.visitor@example.com");
   await widgetFrame.getByRole("button", { name: "Send message" }).click();
-  await widgetFrame.getByText(/can't perform that action/).last().waitFor({ timeout: 15_000 });
+  await widgetFrame.getByText(/can't book an appointment.*flagged your request for staff follow-up/i)
+    .last().waitFor({ timeout: 15_000 });
   const forbiddenBookings = await pool.query(`SELECT count(*)::int AS count FROM appointments
     WHERE workspace_id = $1`, [workspaceId]);
   assert(forbiddenBookings.rows[0].count === 0,
     "The real Web Chat channel persisted a booking disabled by the owner.");
+  const webchatSession = await pool.query(
+    `SELECT conversation_id FROM webchat_sessions WHERE workspace_id = $1 ORDER BY created_at DESC LIMIT 1`,
+    [workspaceId],
+  );
+  const liveConversationId = webchatSession.rows[0]?.conversation_id;
+  assert(liveConversationId, "Phase 1 Web Chat did not expose its conversation.");
+  const handoff = await pool.query(
+    `SELECT handling_mode FROM conversations WHERE workspace_id = $1 AND id = $2`,
+    [workspaceId, liveConversationId],
+  );
+  assert(handoff.rows[0]?.handling_mode === "HUMAN",
+    "When Unsure = Escalate to a human did not create a real human handoff after truthful refusal.");
+  await api(context, "PUT", `/api/conversations/${liveConversationId}/handling`,
+    { mode: "AI" }, "return owner-accepted Web Chat to AI after escalation");
+
+  // Re-enable booking and run the actual Web Chat -> AI -> in-app appointment
+  // path without any connected calendar. Keep the business's one agent/number.
+  const policy = await api(context, "GET", "/api/agent", undefined, "read stored permissions");
+  await api(context, "PATCH", "/api/agent/capabilities", {
+    ...policy.capabilities, BOOK_APPOINTMENT: true,
+  }, "enable native booking");
+  await composer.fill("Book the QA Consultation for tomorrow at 10 AM. My name is QA Visitor, qa.visitor@example.com");
+  await widgetFrame.getByRole("button", { name: "Send message" }).click();
+  await widgetFrame.getByText(/QA Consultation is booked for/).last().waitFor({ timeout: 15_000 });
+  const nativeBookings = await api(context, "GET", "/api/appointments", undefined,
+    "read native in-app appointment");
+  assert(nativeBookings.total === 1
+    && nativeBookings.items[0].appointment.status === "CONFIRMED"
+    && nativeBookings.items[0].appointment.integrationId === null,
+    "The approved Web Chat booking did not appear on the Appointments page data.");
+  await page.screenshot({ path: path.join(dir, "native-booking-webchat.png"), fullPage: true });
+  await api(context, "PATCH", "/api/agent/capabilities", {
+    ...policy.capabilities, BOOK_APPOINTMENT: false,
+  }, "restore disabled booking for status persistence checks");
 
   await page.goto(`${baseUrl}/ai-agent`, { waitUntil: "networkidle" });
   await page.reload({ waitUntil: "networkidle" });
@@ -241,6 +280,43 @@ try {
   await page.getByRole("button", { name: "Capabilities", exact: true }).click();
   await noOverflow(page, "Phase 1 capabilities mobile");
   await page.screenshot({ path: path.join(dir, "agent-capabilities-mobile.png"), fullPage: true });
+
+  // Open an existing Inbox conversation on mobile and land at its most recent
+  // message, not at the beginning of a long customer history.
+  await pool.query(`INSERT INTO messages
+    (workspace_id, conversation_id, direction, sender_type, channel, content_type, body, status, created_at)
+    SELECT $1, $2, 'OUTBOUND', 'AI', 'WEBCHAT', 'TEXT',
+      CASE WHEN seq = 30 THEN 'LATEST INBOX ACCEPTANCE MESSAGE'
+        ELSE 'Earlier conversation message ' || seq END,
+      'DELIVERED', now() + seq * interval '1 second'
+    FROM generate_series(1, 30) AS seq`,
+  [workspaceId, conversation.rows[0].id]);
+  await page.goto(`${baseUrl}/inbox`, { waitUntil: "networkidle" });
+  const selected = page.getByRole("button", { name: /Phase One Visitor/ }).first();
+  await selected.click();
+  const latest = page.getByText("LATEST INBOX ACCEPTANCE MESSAGE", { exact: true });
+  await latest.waitFor({ timeout: 10_000 });
+  const thread = page.locator(".threadBody");
+  assert(await thread.isVisible(), "Selecting a mobile conversation did not open the thread.");
+  const atBottom = await thread.evaluate(el =>
+    el.scrollHeight - el.scrollTop - el.clientHeight < 96);
+  assert(atBottom, "Mobile thread opened at the beginning instead of newest messages.");
+  await noOverflow(page, "Phase 1 mobile Inbox");
+  await page.screenshot({ path: path.join(dir, "inbox-mobile-newest.png"), fullPage: true });
+  await page.getByRole("button", { name: "Back to conversations" }).click();
+  assert(await selected.isVisible(), "Mobile Inbox back action did not show conversations.");
+
+  await page.setViewportSize({ width: 1440, height: 1000 });
+  await page.goto(`${baseUrl}/inbox`, { waitUntil: "networkidle" });
+  await selected.click();
+  await latest.waitFor({ timeout: 10_000 });
+  assert(await thread.evaluate(el => el.scrollHeight - el.scrollTop - el.clientHeight < 96),
+    "Desktop thread did not open at newest messages.");
+  await thread.evaluate(el => { el.scrollTop = 0; });
+  await page.waitForTimeout(350);
+  assert(await thread.evaluate(el => el.scrollTop === 0),
+    "Inbox hijacked manual scrolling to older messages.");
+  await page.screenshot({ path: path.join(dir, "inbox-desktop-history.png"), fullPage: true });
 
   assert(errors.length === 0, `Browser errors: ${errors.join("; ")}`);
   console.log("Phase 1 browser acceptance passed: persisted agent, activation/pause, capability revocation, settings preservation, real metrics, desktop/mobile layout.");

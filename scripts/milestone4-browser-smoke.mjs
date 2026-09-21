@@ -163,12 +163,12 @@ try {
 
   await composer.fill("What times are available tomorrow?");
   await composer.press("Enter");
-  await widgetFrame.getByText("I have a 10:00 AM opening tomorrow.", { exact: true }).waitFor({ timeout: 15_000 });
+  await widgetFrame.getByText(/I checked the schedule\. Available times include .*10:00 AM/).waitFor({ timeout: 15_000 });
 
   const bookingMessage = "My name is QA Visitor, qa.visitor@example.com. Book the 10:00 AM slot";
   await composer.fill(bookingMessage);
   await composer.press("Enter");
-  await widgetFrame.getByText("Your QA Consultation is booked for 10:00 AM tomorrow.", { exact: true }).waitFor({ timeout: 15_000 });
+  await widgetFrame.getByText(/Your QA Consultation is booked for .*10:00 AM/).waitFor({ timeout: 15_000 });
   await assertNoHorizontalOverflow(page, "Embedded Web Chat desktop");
   await page.screenshot({ path: path.join(outputDir, "webchat-desktop.png"), fullPage: true });
 
@@ -229,12 +229,12 @@ try {
   assert(messageRow.rows.filter((row) => row.sender_type === "AI" && row.content_type === "TEXT").length === 3, "Expected three persisted AI replies.");
 
   const balanceAfterWidget = (await pool.query(`SELECT balance FROM credit_wallets WHERE workspace_id = $1`, [workspaceId])).rows[0].balance;
-  assert(balanceAfterWidget === balanceAfterTest - 5, `Expected five hosted AI credit debits for the widget flow; balance moved from ${balanceAfterTest} to ${balanceAfterWidget}.`);
+  assert(balanceAfterWidget === balanceAfterTest - 3, `Expected three hosted AI credit debits for the widget flow (one planning call per turn); balance moved from ${balanceAfterTest} to ${balanceAfterWidget}.`);
   const usageCount = (await pool.query(
     `SELECT count(*)::int AS count FROM usage_events WHERE workspace_id = $1 AND capability = 'AI_TEXT'`,
     [workspaceId],
   )).rows[0].count;
-  assert(usageCount >= 6, `Expected at least six AI usage events including Test tab and widget flow; received ${usageCount}.`);
+  assert(usageCount >= 4, `Expected at least four AI usage events including Test tab and three widget planning turns; received ${usageCount}.`);
 
   await page.goto(`${baseUrl}/inbox`, { waitUntil: "networkidle" });
   await page.getByRole("heading", { name: "Inbox", level: 1 }).waitFor();

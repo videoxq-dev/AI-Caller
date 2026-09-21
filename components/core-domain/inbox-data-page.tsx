@@ -168,6 +168,9 @@ function displayTime(value: string | null) {
 export function InboxDataPage() {
   const [rows, setRows] = useState<ConversationRow[]>([]);
   const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [mobileThreadOpen, setMobileThreadOpen] = useState(false);
+  const threadBodyRef = useRef<HTMLDivElement>(null);
+  const scrollStateRef = useRef({ conversationId: null as string | null, nearBottom: true });
   const [timeline, setTimeline] = useState<Timeline | null>(null);
   const [channel, setChannel] = useState<"ALL" | Channel>("ALL");
   const [loading, setLoading] = useState(true);
@@ -222,9 +225,21 @@ export function InboxDataPage() {
 
   useEffect(() => {
     if (!selectedId) { setTimeline(null); return; }
+    setTimeline(null);
     setDraft("");
+    scrollStateRef.current = { conversationId: null, nearBottom: true };
     void loadTimeline(selectedId);
   }, [loadTimeline, selectedId]);
+
+  useEffect(() => {
+    if (!timeline || timeline.conversation.id !== selectedId) return;
+    const body = threadBodyRef.current;
+    if (!body) return;
+    const isNewThread = scrollStateRef.current.conversationId !== selectedId;
+    if (!isNewThread && !scrollStateRef.current.nearBottom) return;
+    body.scrollTop = body.scrollHeight;
+    scrollStateRef.current = { conversationId: selectedId, nearBottom: true };
+  }, [mobileThreadOpen, selectedId, timeline]);
 
   const visibleRows = useMemo(() => {
     if (channel === "ALL") return rows;
@@ -342,13 +357,13 @@ export function InboxDataPage() {
         <header className="inboxTopbar"><div className="globalSearch"><span>⌕</span><input placeholder="Search conversations, contacts or messages..." readOnly /></div><div className="inboxTopActions"><button type="button" className="agentOnline"><i />AI Agent Online</button></div></header>
 
         {error && <div style={{ padding: "10px 18px", color: "#b42318" }}>{error}</div>}
-        <div className="unifiedInboxGrid">
+        <div className={`unifiedInboxGrid ${mobileThreadOpen ? "mobileThreadOpen" : ""}`}>
           <section className="conversationColumn">
             <div className="conversationColumnHeader"><h1>Inbox</h1></div>
             <div className="conversationFilters"><label><select aria-label="Channel filter" value={channel} onChange={(event) => setChannel(event.target.value as "ALL" | Channel)}><option value="ALL">All channels</option><option value="WHATSAPP">WhatsApp</option><option value="SMS">SMS</option><option value="PHONE">Call</option><option value="WEBCHAT">Web Chat</option></select></label></div>
             <div className="conversationList">
               {visibleRows.map(({ conversation, contact, channels }) => (
-                <button key={conversation.id} type="button" className={`conversationItem ${selectedId === conversation.id ? "selected" : ""}`} onClick={() => setSelectedId(conversation.id)}>
+                <button key={conversation.id} type="button" className={`conversationItem ${selectedId === conversation.id ? "selected" : ""}`} onClick={() => { scrollStateRef.current = { conversationId: null, nearBottom: true }; setSelectedId(conversation.id); setMobileThreadOpen(true); }}>
                   <span className="contactAvatar">{initials(contact.name)}</span>
                   <span className="conversationInfo"><span className="conversationNameRow"><strong>{contact.name ?? "Unnamed contact"}</strong><time>{displayTime(conversation.lastMessageAt)}</time></span><span className="conversationPreview">{contact.phone ?? contact.email ?? "Customer conversation"}</span><span className="conversationTags"><span className={`handlingBadge ${conversation.handlingMode === "HUMAN" ? "human" : "ai"}`}>{conversation.handlingMode === "HUMAN" ? "Human" : "AI handled"}</span>{channels.slice(0, 3).map((item) => <span key={item} className="smallTag">{channelLabels[item]}</span>)}<span className="smallTag">{conversation.status}</span></span></span>
                 </button>
@@ -360,8 +375,8 @@ export function InboxDataPage() {
 
           <section className="threadColumn">
             {timeline ? <>
-              <header className="threadHeader"><div className="threadContact"><span className="threadAvatar">{initials(timeline.contact.name)}</span><div><strong>{timeline.contact.name ?? "Unnamed contact"}</strong><span>{timeline.contact.phone ?? timeline.contact.email ?? "No contact details"}</span></div></div><div className="threadActions"><button className={`takeoverTop ${timeline.conversation.handlingMode === "HUMAN" ? "active" : ""}`} type="button" disabled={switching} onClick={() => void toggleHandling()}>{timeline.conversation.handlingMode === "HUMAN" ? "Return to AI" : "Human takeover"}</button></div></header>
-              <div className="threadBody">
+              <header className="threadHeader"><button className="mobileInboxBack" type="button" onClick={() => setMobileThreadOpen(false)} aria-label="Back to conversations">← Inbox</button><div className="threadContact"><span className="threadAvatar">{initials(timeline.contact.name)}</span><div><strong>{timeline.contact.name ?? "Unnamed contact"}</strong><span>{timeline.contact.phone ?? timeline.contact.email ?? "No contact details"}</span></div></div><div className="threadActions"><button className={`takeoverTop ${timeline.conversation.handlingMode === "HUMAN" ? "active" : ""}`} type="button" disabled={switching} onClick={() => void toggleHandling()}>{timeline.conversation.handlingMode === "HUMAN" ? "Return to AI" : "Human takeover"}</button></div></header>
+              <div className="threadBody" ref={threadBodyRef} onScroll={(event) => { const el = event.currentTarget; scrollStateRef.current.nearBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 96; }}>
                 {!timeline.messages.length && <div className="dayDivider"><span>No messages yet</span></div>}
                 {timeline.messages.map((message) => {
                   if (message.contentType === "CALL_RECORDING") return <VoiceCallCard key={message.id} message={message} />;

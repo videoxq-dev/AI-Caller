@@ -7,10 +7,13 @@ import { assertAppointmentReferences } from "./references";
 import {
   getAppointment,
   insertAppointment,
+  insertNativeAppointment,
   setAppointmentStatus,
   updateAppointmentAfterReschedule,
+  updateNativeAppointmentAfterReschedule,
 } from "./repository";
 import type { AppointmentInput, AppointmentRescheduleInput } from "./schemas";
+import { nativeAvailability, validateNativeBooking } from "./native-calendar";
 
 type StoredAppointment = {
   id: string;
@@ -23,7 +26,11 @@ type StoredAppointment = {
 };
 
 type BookingDependencies = {
-  resolveCurrent: (workspaceId: string) => Promise<{ integrationId: string; provider: CalendarProvider }>;
+  resolveCurrent: (workspaceId: string) => Promise<{ integrationId: string; provider: CalendarProvider } | null>;
+  nativeAvailability?: typeof nativeAvailability;
+  validateNativeBooking?: typeof validateNativeBooking;
+  insertNativeAppointment?: typeof insertNativeAppointment;
+  updateNativeAppointmentAfterReschedule?: typeof updateNativeAppointmentAfterReschedule;
   resolveForIntegration: (workspaceId: string, integrationId: string) => Promise<CalendarProvider>;
   validateBooking?: (workspaceId: string, input: AppointmentInput) => Promise<void>;
   insertAppointment: (
@@ -48,7 +55,7 @@ type BookingDependencies = {
 async function defaultResolveCurrent(workspaceId: string) {
   const route = await resolveProviderRoute(workspaceId, "CALENDAR");
   if (!route || route.mode !== "BYOP" || !route.integrationId) {
-    throw new AppError("CALENDAR_NOT_CONFIGURED", "No connected calendar is configured for this workspace.", 409);
+    return null;
   }
   return {
     integrationId: route.integrationId,
@@ -58,6 +65,10 @@ async function defaultResolveCurrent(workspaceId: string) {
 
 const defaultDependencies: BookingDependencies = {
   resolveCurrent: defaultResolveCurrent,
+  nativeAvailability,
+  validateNativeBooking,
+  insertNativeAppointment,
+  updateNativeAppointmentAfterReschedule,
   resolveForIntegration: resolveCalendarProviderForIntegration,
   validateBooking: assertAppointmentReferences,
   insertAppointment,
@@ -72,13 +83,28 @@ export function createCalendarBookingService(dependencies: BookingDependencies) 
       workspaceId: string,
       input: Parameters<CalendarProvider["getAvailability"]>[0],
     ) {
-      const { provider } = await dependencies.resolveCurrent(workspaceId);
-      return provider.getAvailability(input);
+      const current = await dependencies.resolveCurrent(workspaceId);
+      if (!current) {
+        if (!dependencies.nativeAvailability) throw new AppError("NATIVE_BOOKING_UNAVAILABLE", "In-app scheduling is temporarily unavailable.", 503);
+        return dependencies.nativeAvailability(workspaceId, input);
+      }
+      return current.provider.getAvailability(input);
     },
 
     async book(workspaceId: string, input: AppointmentInput) {
       await dependencies.validateBooking?.(workspaceId, input);
-      const { integrationId, provider } = await dependencies.resolveCurrent(workspaceId);
+      const current = await dependencies.resolveCurrent(workspaceId);
+      if (!current) {
+        if (!dependencies.validateNativeBooking || !dependencies.insertNativeAppointment) {
+          throw new AppError("NATIVE_BOOKING_UNAVAILABLE", "In-app scheduling is temporarily unavailable.", 503);
+        }
+        const validated = await dependencies.validateNativeBooking(workspaceId, input);
+        return dependencies.insertNativeAppointment(workspaceId, {
+          ...input,
+          timezone: validated.timezone,
+        });
+      }
+      const { integrationId, provider } = current;
       const providerBooking = await provider.book({
         startsAt: input.startsAt,
         endsAt: input.endsAt,
@@ -117,8 +143,18 @@ export function createCalendarBookingService(dependencies: BookingDependencies) 
       if (appointment.status === "CANCELLED") {
         throw new AppError("APPOINTMENT_CANCELLED", "Cancelled appointments cannot be rescheduled.", 409);
       }
+      if (!appointment.integrationId && !appointment.externalEventId) {
+        if (!dependencies.validateNativeBooking || !dependencies.updateNativeAppointmentAfterReschedule) {
+          throw new AppError("NATIVE_BOOKING_UNAVAILABLE", "In-app scheduling is temporarily unavailable.", 503);
+        }
+        const validated = await dependencies.validateNativeBooking(workspaceId, input);
+        return dependencies.updateNativeAppointmentAfterReschedule(workspaceId, appointmentId, {
+          ...input,
+          timezone: validated.timezone,
+        });
+      }
       if (!appointment.integrationId || !appointment.externalEventId) {
-        throw new AppError("APPOINTMENT_NOT_SYNCED", "This appointment is not linked to a calendar event.", 409);
+        throw new AppError("APPOINTMENT_NOT_SYNCED", "This appointment has an incomplete external calendar link.", 409);
       }
 
       const provider = await dependencies.resolveForIntegration(workspaceId, appointment.integrationId);

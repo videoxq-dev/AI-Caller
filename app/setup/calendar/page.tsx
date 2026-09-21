@@ -128,8 +128,8 @@ export default function CalendarSetupPage() {
           <div className="calendarIntro">
             <span className="stepBadge">STEP 4 OF 6</span>
             <h1>Connect your calendar</h1>
-            <p>Choose the calendar your AI assistant will use for availability and appointments.</p>
-            <span className="introHelper">Your selection and scheduling rules are saved to your workspace and reused by the booking service.</span>
+            <p>AI Caller can check availability and book appointments in-app using your business hours. Connecting an external calendar is optional.</p>
+            <span className="introHelper">Native appointments appear on the Appointments page without Google, Outlook, Calendly or Cal.com. Connect an external provider if you want synced events.</span>
           </div>
 
           <div className="calendarProviderTabs" role="tablist" aria-label="Calendar providers">
