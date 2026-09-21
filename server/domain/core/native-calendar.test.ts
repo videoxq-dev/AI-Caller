@@ -72,6 +72,24 @@ describe("native in-app appointment booking without external calendar", () => {
     expect((await listAppointments(workspaceId)).total).toBe(1);
   });
 
+  it("reschedules a native appointment without requiring an external event id", async () => {
+    const first = await calendarBookingService.book(workspaceId, booking(contactId));
+    const changed = await calendarBookingService.reschedule(workspaceId, first.id, {
+      startsAt: new Date("2030-09-23T14:00:00Z"),
+      endsAt: new Date("2030-09-23T17:00:00Z"), timezone: "UTC",
+    });
+    expect(changed.id).toBe(first.id);
+    expect(changed.status).toBe("CONFIRMED");
+    expect(changed.startsAt.toISOString()).toBe("2030-09-23T14:00:00.000Z");
+    await expect(calendarBookingService.book(workspaceId, {
+      ...booking(contactId), startsAt: new Date("2030-09-23T15:00:00Z"),
+      endsAt: new Date("2030-09-23T16:00:00Z"),
+    })).rejects.toMatchObject({ code: "APPOINTMENT_SLOT_UNAVAILABLE" });
+    const events = await db.select().from(automationEvents)
+      .where(eq(automationEvents.workspaceId, workspaceId));
+    expect(events.filter(event => event.type === "APPOINTMENT_RESCHEDULED")).toHaveLength(1);
+  });
+
   it("does not book a past or out-of-hours appointment", async () => {
     await expect(calendarBookingService.book(workspaceId, {
       ...booking(contactId), startsAt: new Date("2030-09-23T19:00:00.000Z"),
