@@ -7,7 +7,7 @@ import { AppNav } from "./app-nav";
 type Channel = "PHONE" | "SMS" | "WHATSAPP" | "WEBCHAT";
 type Contact = { id: string; name: string | null; email: string | null; phone: string | null };
 type Conversation = { id: string; contactId: string; status: "OPEN" | "CLOSED"; handlingMode: "AI" | "HUMAN"; assignedUserId: string | null; lastMessageAt: string | null; createdAt: string };
-type ConversationRow = { conversation: Conversation; contact: Contact; channels: Channel[] };
+type ConversationRow = { conversation: Conversation; contact: Contact; channels: Channel[]; openHumanCaseCount: number };
 type Message = { id: string; channel: Channel; direction: "INBOUND" | "OUTBOUND" | "INTERNAL"; senderType: "CUSTOMER" | "AI" | "USER" | "SYSTEM"; contentType: string; body: string; createdAt: string; metadata: Record<string, unknown> };
 type HumanCase = { id: string; reason: string; status: string; createdAt: string; assignedUserId: string | null };
 type Timeline = { conversation: Conversation; contact: Contact; messages: Message[]; openHumanCases: HumanCase[] };
@@ -389,7 +389,7 @@ export function InboxDataPage() {
               {visibleRows.map(({ conversation, contact, channels }) => (
                 <button key={conversation.id} type="button" className={`conversationItem ${selectedId === conversation.id ? "selected" : ""}`} onClick={() => { scrollStateRef.current = { conversationId: null, nearBottom: true }; setSelectedId(conversation.id); setMobileThreadOpen(true); }}>
                   <span className="contactAvatar">{initials(contact.name)}</span>
-                  <span className="conversationInfo"><span className="conversationNameRow"><strong>{contact.name ?? "Unnamed contact"}</strong><time>{displayTime(conversation.lastMessageAt)}</time></span><span className="conversationPreview">{contact.phone ?? contact.email ?? "Customer conversation"}</span><span className="conversationTags"><span className={`handlingBadge ${conversation.handlingMode === "HUMAN" ? "human" : "ai"}`}>{conversation.handlingMode === "HUMAN" ? "Human" : "AI handled"}</span>{channels.slice(0, 3).map((item) => <span key={item} className="smallTag">{channelLabels[item]}</span>)}<span className="smallTag">{conversation.status}</span></span></span>
+                  <span className="conversationInfo"><span className="conversationNameRow"><strong>{contact.name ?? "Unnamed contact"}</strong><time>{displayTime(conversation.lastMessageAt)}</time></span><span className="conversationPreview">{contact.phone ?? contact.email ?? "Customer conversation"}</span><span className="conversationTags"><span className={`handlingBadge ${conversation.handlingMode === "HUMAN" ? "human" : "ai"}`}>{conversation.handlingMode === "HUMAN" ? "Human" : "AI handled"}</span>{row.openHumanCaseCount > 0 && <span className="smallTag staffIssueTag">{row.openHumanCaseCount} staff issue{row.openHumanCaseCount === 1 ? "" : "s"}</span>}{channels.slice(0, 3).map((item) => <span key={item} className="smallTag">{channelLabels[item]}</span>)}<span className="smallTag">{conversation.status}</span></span></span>
                 </button>
               ))}
               {loading && <div style={{ padding: 20 }}>Loading conversations…</div>}
