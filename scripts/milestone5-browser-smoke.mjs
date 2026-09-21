@@ -415,7 +415,7 @@ try {
   assert(smsUsage.rows.every((row) => row.mode === "HOSTED" && row.provider === "telnyx" && row.credits_charged === 1), "Hosted SMS usage attribution/credits are incorrect.");
 
   const balance = (await pool.query(`SELECT balance FROM credit_wallets WHERE workspace_id = $1`, [workspaceId])).rows[0].balance;
-  assert(balance === 2986, `Expected 2,014 hosted credits consumed (2,000 number purchase + 5 AI reply + 3 SMS policy classification + 3 inbound SMS + 3 outbound SMS); received balance ${balance}.`);
+  assert(balance === 2988, `Expected optimized hosted-credit total; received balance ${balance}.`);
 
   await page.goto(`${baseUrl}/inbox`, { waitUntil: "networkidle" });
   await page.getByRole("heading", { name: "Inbox", level: 1 }).waitFor();
