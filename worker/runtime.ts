@@ -1,4 +1,5 @@
 import { enqueueUniqueJob, ensureQueue, stopBoss } from "@/server/jobs";
+import { recoverBookingCommands } from "@/server/booking/execution";
 import {
   AUTH_PASSWORD_RESET_EMAIL,
   COMMERCE_WELCOME_EMAIL,
@@ -136,6 +137,24 @@ export async function startWorker() {
   const recoveryTimer = setInterval(() => void recoverAutomationEvents(), 15_000);
   recoveryTimer.unref();
 
+  let bookingRecoveryRunning = false;
+  const recoverBookings = async () => {
+    if (bookingRecoveryRunning) return;
+    bookingRecoveryRunning = true;
+    try {
+      const result = await recoverBookingCommands(50);
+      if (result.confirmed > 0) logger.info(result, "Recovered durable appointment bookings");
+      if (result.unresolved > 0) logger.warn(result, "Appointment booking commands need reconciliation");
+    } catch (error) {
+      logger.error({ err: error }, "Failed to recover durable appointment bookings");
+    } finally {
+      bookingRecoveryRunning = false;
+    }
+  };
+  await recoverBookings();
+  const bookingRecoveryTimer = setInterval(() => void recoverBookings(), 15_000);
+  bookingRecoveryTimer.unref();
+
   let provisioningRunning = false;
   const reconcileManagedNumberProvisioning = async () => {
     if (provisioningRunning) return;
@@ -194,6 +213,7 @@ export async function startWorker() {
   const shutdown = async (signal: string) => {
     logger.info({ signal }, "Stopping AI Caller worker");
     clearInterval(recoveryTimer);
+    clearInterval(bookingRecoveryTimer);
     clearInterval(provisioningTimer);
     clearInterval(registrationTimer);
     clearInterval(renewalTimer);
