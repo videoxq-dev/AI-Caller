@@ -356,6 +356,11 @@ export function createResponseOrchestrator(dependencies: OrchestratorDependencie
             toolResult: { kind: "none" as const, data: {} } };
         }
         if (error instanceof AppError && error.code === "AGENT_ACTION_DISABLED") {
+          if (first.action.type === "ESCALATE") {
+            return unresolvedWithoutHandoff(
+              "I can't arrange staff follow-up from this conversation right now. Please contact the business directly.",
+            );
+          }
           return resolveUncertainRequest(
             approvedToolFailure(first.action.type, error),
             `Requested ${first.action.type} is disabled; applying When Unsure policy.`,
