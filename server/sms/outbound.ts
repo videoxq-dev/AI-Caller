@@ -11,6 +11,7 @@ import {
 import { appendMessage } from "@/server/domain/core/repository";
 import { getEnv } from "@/server/env";
 import { AppError } from "@/server/http/errors";
+import { hasOpenConversationIssue } from "@/server/collaboration/service";
 import { logger } from "@/server/observability/logger";
 import { ProviderRequestError } from "@/server/providers/http";
 import { outboundSmsReady } from "@/server/phone-numbers/lifecycle";
@@ -202,8 +203,13 @@ export async function sendSmsConversationTextWithRuntime(
   }
 
   const conversation = await conversationState(workspaceId, conversationId);
-  if (input.senderType === "USER" && conversation.handlingMode !== "HUMAN") {
-    throw new AppError("HUMAN_TAKEOVER_REQUIRED", "Take over this conversation before sending a staff SMS reply.", 409);
+  if (input.senderType === "USER" && conversation.handlingMode !== "HUMAN"
+    && !(await hasOpenConversationIssue(workspaceId, conversationId))) {
+    throw new AppError(
+      "HUMAN_TAKEOVER_REQUIRED",
+      "Take over the conversation or open a staff issue before sending a staff SMS reply.",
+      409,
+    );
   }
 
   const text = smsText(input.text);

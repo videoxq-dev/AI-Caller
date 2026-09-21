@@ -71,11 +71,9 @@ export function attachRealtimeMedia({ telnyx, identity, streamId }: BridgeOption
   const outboundPackets: Buffer[] = [];
   let initialBytes = 0;
   let outputTail = Buffer.alloc(0);
-  let toolEscalated = false;
   let speechAllowed = false;
   let providerCloseRequested = false;
   let budgetHangupRequested = false;
-  let escalationResponseComplete = false;
   let toolSerial = Promise.resolve();
   const responseToolCounts = new Map<string, number>();
   const completedToolResponses = new Set<string>();
@@ -172,11 +170,6 @@ export function attachRealtimeMedia({ telnyx, identity, streamId }: BridgeOption
       void hangupForBudget("max-duration");
       return;
     }
-    if (escalationResponseComplete && outboundPackets.length === 0 && outputTail.length === 0) {
-      escalationResponseComplete = false;
-      setTimeout(() => void hangupForBudget("escalation"), 500).unref();
-      return;
-    }
     if (!speechAllowed || !outboundPackets.length) return;
     const packet = outboundPackets.shift();
     if (packet) sendTelnyx({
@@ -255,14 +248,10 @@ export function attachRealtimeMedia({ telnyx, identity, streamId }: BridgeOption
       || responseStatuses.get(responseId) !== "completed"
       || (responseToolCounts.get(responseId) ?? 0) !== 0) return;
     resumedToolResponses.add(responseId);
-    sendOpenAI({ type: "response.create", response: toolEscalated
-      ? { instructions: "Say only: I have flagged your request for staff follow-up. I cannot transfer this call live. Do not call more tools.", tool_choice: "none" }
-      : {} });
-    if (toolEscalated) {
-      sendOpenAI({ type: "session.update", session: { type: "realtime",
-        audio: { input: { turn_detection: { type: "semantic_vad",
-          create_response: false, interrupt_response: true } } } } });
-    }
+    // Tool results can include an authoritative spokenInstruction. Resume the
+    // same live session and let the assistant continue the conversation; an
+    // issue-scoped staff escalation is not a reason to end or freeze the call.
+    sendOpenAI({ type: "response.create", response: {} });
   }
 
   async function runTool(raw: RealtimeEvent, epoch: number) {
@@ -280,7 +269,6 @@ export function attachRealtimeMedia({ telnyx, identity, streamId }: BridgeOption
       isCurrentTurn: () => open && epoch === callerSpeechEpoch,
     });
     if (!open) return;
-    if (result.ok && result.kind === "escalation") toolEscalated = true;
     sendOpenAI({ type: "conversation.item.create", item: {
       type: "function_call_output", call_id: item.call_id, output: JSON.stringify(result),
     } });
@@ -445,10 +433,6 @@ export function attachRealtimeMedia({ telnyx, identity, streamId }: BridgeOption
       if (responseWithTools.has(responseId)) {
         completedToolResponses.add(responseId);
         if (epoch !== undefined) resumeAfterTools(responseId, epoch);
-      } else if (toolEscalated && !pendingResponses.size
-        && status === "completed") {
-        // Wait for the *spoken follow-up* response, not the tool-only turn.
-        escalationResponseComplete = true;
       }
       return;
     }

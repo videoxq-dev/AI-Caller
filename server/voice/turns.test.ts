@@ -108,19 +108,19 @@ describe("live voice response gating", () => {
     }));
   });
 
-  it("speaks a truthful human-follow-up acknowledgement even after escalation changes conversation ownership", async () => {
-    const reply = "I've flagged your request for our team to follow up. I can't transfer this call live.";
+  it("speaks a truthful staff-follow-up acknowledgement while issue escalation keeps AI ownership", async () => {
+    const reply = "I've flagged this issue for our team to follow up. I can't transfer this call live. I can keep helping with anything else.";
     vi.mocked(responseOrchestrator.respond).mockResolvedValue({
       reply,
-      handlingMode: "HUMAN",
+      handlingMode: "AI",
       action: { type: "ESCALATE", reason: "Caller requested a human during a phone call." },
-      toolResult: { kind: "escalation", data: { handlingMode: "HUMAN" } },
+      toolResult: { kind: "escalation", data: { handlingMode: "AI", scope: "ISSUE", issueCaseId: "issue-1" } },
     });
-    vi.mocked(getConversationById).mockResolvedValue({ handlingMode: "HUMAN" } as Awaited<ReturnType<typeof getConversationById>>);
+    vi.mocked(getConversationById).mockResolvedValue({ handlingMode: "AI" } as Awaited<ReturnType<typeof getConversationById>>);
     await expect(processVoiceTurn(ids)).resolves.toMatchObject({ status: "SPOKEN" });
     expect(speak).toHaveBeenCalledWith(expect.objectContaining({ text: reply }));
     expect(finishVoiceTurn).toHaveBeenCalledWith(
-      ids.workspaceId, ids.callId, ids.eventId, "AI_SPEAKING", "HUMAN",
+      ids.workspaceId, ids.callId, ids.eventId, "AI_SPEAKING", "ACTIVE",
     );
     expect(appendMessage).toHaveBeenCalledWith(
       ids.workspaceId, call.conversationId,

@@ -5,11 +5,16 @@ import { buildConversationContext, type OrchestratorContext } from "./context";
 import {
   executeOrchestratorTools,
   OrchestratorOutputError,
+  orchestratorActionSchema,
   parseOrchestratorEnvelope,
   type OrchestratorEnvelope,
   type OrchestratorToolResult,
 } from "./tools";
 import { generateAIWithUsage } from "./usage";
+import {
+  getAwaitingPendingAction,
+  isExplicitActionConfirmation,
+} from "./pending-actions";
 import type { AIProvider } from "@/server/providers/contracts";
 
 type AIMessage = Parameters<AIProvider["generate"]>[0]["messages"][number];
@@ -26,7 +31,7 @@ function isExplicitHumanRequest(message: string) {
     || /\b(?:speak|talk|connect|transfer|reach|want|need|like|get)\b[^.!?]{0,100}\b(?:human|operator|representative|real person|live person|staff member|team member|person)\b/.test(text);
 }
 
-const LIVE_PHONE_ESCALATION_REPLY = "I've flagged your request for our team to follow up. I can't transfer this call live.";
+const LIVE_PHONE_ESCALATION_REPLY = "I've flagged this issue for our team to follow up. I can't transfer this call live. I can keep helping with anything else.";
 
 
 function safeLivePhoneReply(reply: string) {
@@ -48,6 +53,7 @@ type OrchestratorDependencies = {
     envelope: OrchestratorEnvelope,
   ) => Promise<OrchestratorToolResult>;
   generate: (workspaceId: string, referenceId: string, messages: AIMessage[]) => Promise<{ text: string }>;
+  getAwaitingAction?: typeof getAwaitingPendingAction;
 };
 
 const ACTION_PROTOCOL = `
@@ -74,11 +80,11 @@ Rules:
 - When the customer asks to check availability and supplies an identifiable date and time, invoke CHECK_AVAILABILITY immediately without requesting permission again. For a whole day, check a bounded date range. Use the actual saved service duration when provided; otherwise ask for the duration if needed.
 - Resolve ordinary relative dates and month/day dates from Current server time in the business timezone. If the month/day has not passed, use the current year; otherwise use the next year. Do not ask for a year when that rule makes the future date unambiguous.
 - Never say a slot is available unless CHECK_AVAILABILITY returned it. Describe the returned slots and ask the customer to choose and approve one.
-- When the customer approves a particular service/date/time, invoke BOOK_APPOINTMENT with the agreed slot (including its service duration); do not ask repeatedly to proceed. Native booking checks business hours and conflicts without any third-party calendar.
-- Never say an appointment is booked unless BOOK_APPOINTMENT returned a confirmed booking.
+- BOOK_APPOINTMENT and SEND_SMS are consequential actions with a server-enforced commit boundary. Gather the required details first. The first complete action proposal is staged and returned as a preview; it is not executed. After the customer explicitly confirms that exact preview, invoke the same action again so the server can commit it.
+- Never say an appointment is booked unless BOOK_APPOINTMENT returned a confirmed booking. Never say a staged action has already happened.
 - Populate contact fields only when the customer explicitly provided them in the conversation. Never infer or invent contact details.
 - A verified customer conversation/contact is sufficient for an in-app appointment; email is optional. Never invent missing contact data.
-- Use ESCALATE for an explicit human request, or when the saved When Unsure policy is "Escalate to a human" and you cannot complete the request with the enabled capabilities. A disabled capability does not silently hand off by itself: explain the limitation truthfully, and request ESCALATE only when that policy requires it and ESCALATE is enabled. Never claim staff were notified without a successful ESCALATE result.
+- Use ESCALATE for an explicit human request, or when the saved When Unsure policy is "Escalate to a human" and you cannot complete the request with the enabled capabilities. ESCALATE creates an issue-specific staff case; it does not transfer ownership of the whole conversation. Continue helping with unrelated supported requests. A disabled capability does not silently hand off by itself: explain the limitation truthfully, and request ESCALATE only when that policy requires it and ESCALATE is enabled. Never claim staff were notified without a successful ESCALATE result.
 - If the current customer request cannot be completed with approved information and enabled capabilities, set "unresolved" with a concise reason. Do not use it merely because you need one normal missing detail that the customer can answer.
 - Lead updates are optional and must reflect only evidence from the conversation.
 - On phone calls, offer appointment confirmations and future reminder SMS only after stating the SMS program clearly and asking the customer whether they agree. Use RECORD_SMS_CONSENT only after their explicit answer, never infer consent from a booking or general interest.
@@ -153,7 +159,7 @@ function deterministicAvailabilityPlan(
   timezone: string,
   services: OrchestratorContext["services"] = [],
 ): OrchestratorEnvelope | null {
-  if (!/\b(?:availability|available|openings?|slots?)\b/i.test(message)) return null;
+  if (!/\b(?:availability|available|openings?|slots?|book|booking|reserve|reservation|schedule|appointment)\b/i.test(message)) return null;
 
   const monthNames = [...MONTHS.keys()].join("|");
   const dayFirst = new RegExp(
@@ -228,6 +234,42 @@ function deterministicAvailabilityPlan(
       ...(durationMinutes ? { durationMinutes } : {}),
     },
   };
+}
+
+function recentCustomerBookingText(context: OrchestratorContext) {
+  return context.messages
+    .filter((message) => message.role === "user")
+    .slice(-6)
+    .reverse()
+    .map((message) => message.content)
+    .join("\n");
+}
+
+function bookingMissingDetailReply(message: string) {
+  if (!/\b(?:book|booking|reserve|reservation|schedule|appointment)\b/i.test(message)) return null;
+  const hasDate = /\b(?:today|tomorrow|monday|tuesday|wednesday|thursday|friday|saturday|sunday|january|february|march|april|may|june|july|august|september|october|november|december|\d{4}-\d{2}-\d{2}|\d{1,2}[\/-]\d{1,2}(?:[\/-]\d{2,4})?)\b/i.test(message);
+  const hasTime = /\b(?:at|by)\s+(?:0?[1-9]|1[0-2])(?::[0-5]\d)?\s*(?:a\.?m\.?|p\.?m\.?)?\b|\b(?:[01]?\d|2[0-3]):[0-5]\d\b/i.test(message);
+  if (!hasDate && !hasTime) return "I can help with that. What date and time would you prefer?";
+  if (!hasDate) return "I have the time. What date would you like?";
+  if (!hasTime) return "I have the date. What time would you prefer?";
+  return null;
+}
+
+function pendingActionReply(toolResult: OrchestratorToolResult, fallbackTimezone: string) {
+  if (toolResult.data.type === "BOOK_APPOINTMENT") {
+    const title = typeof toolResult.data.title === "string" ? toolResult.data.title : "appointment";
+    const startsAt = typeof toolResult.data.startsAt === "string" ? new Date(toolResult.data.startsAt) : null;
+    const timezone = typeof toolResult.data.timezone === "string" ? toolResult.data.timezone : fallbackTimezone;
+    const when = startsAt && Number.isFinite(startsAt.getTime())
+      ? new Intl.DateTimeFormat("en-US", { dateStyle: "medium", timeStyle: "short", timeZone: timezone }).format(startsAt)
+      : "the selected time";
+    return `I have everything needed to book your ${title} for ${when} (${timezone}). Would you like me to book it?`;
+  }
+  if (toolResult.data.type === "SEND_SMS") {
+    const text = typeof toolResult.data.text === "string" ? toolResult.data.text : "the prepared message";
+    return `I'm ready to send this text: “${text}” Would you like me to send it?`;
+  }
+  return "I have the action ready. Would you like me to proceed?";
 }
 
 function plannerMessages(context: OrchestratorContext): AIMessage[] {
@@ -386,6 +428,7 @@ export function createResponseOrchestrator(dependencies: OrchestratorDependencie
       }
       const isLivePhone = context.systemPrompt.includes("LIVE PHONE RECEPTIONIST:");
       const lastUserMessage = [...context.messages].reverse().find((message) => message.role === "user")?.content ?? "";
+      const recentBookingText = recentCustomerBookingText(context);
       const allowed = context.agent
         ? capabilitiesFromBehaviorSettings(context.agent.behaviorSettings)
         : null;
@@ -426,10 +469,10 @@ export function createResponseOrchestrator(dependencies: OrchestratorDependencie
           }
           const receipt = isLivePhone
             ? LIVE_PHONE_ESCALATION_REPLY
-            : "I've flagged your request for staff follow-up. A team member can continue this conversation here when available.";
+            : "I've flagged this issue for staff follow-up. I can keep helping with anything else here.";
           return {
             reply: `${reply} ${receipt}`,
-            handlingMode: "HUMAN" as const,
+            handlingMode: "AI" as const,
             action: escalationAction,
             toolResult: escalation,
           };
@@ -445,6 +488,76 @@ export function createResponseOrchestrator(dependencies: OrchestratorDependencie
           throw error;
         }
       };
+      const awaitingAction = dependencies.getAwaitingAction
+        && isExplicitActionConfirmation(lastUserMessage)
+        ? await dependencies.getAwaitingAction(workspaceId, conversationId)
+        : null;
+      if (awaitingAction) {
+        const parsedAction = orchestratorActionSchema.safeParse({
+          type: awaitingAction.type,
+          ...awaitingAction.payload,
+        });
+        if (!parsedAction.success) {
+          logger.error(
+            { workspaceId, conversationId, pendingActionId: awaitingAction.id },
+            "Stored pending action could not be validated",
+          );
+          return unresolvedWithoutHandoff(
+            "I couldn't safely complete the prepared action. Please tell me what you'd like to do again.",
+          );
+        }
+        if (options.beforeTools && !(await options.beforeTools())) {
+          return unresolvedWithoutHandoff(
+            "I won't complete that action because your request changed. Please confirm the latest details.",
+          );
+        }
+        try {
+          const committed = await dependencies.executeTools(
+            workspaceId,
+            conversationId,
+            context.contact.id,
+            { action: parsedAction.data },
+          );
+          if (committed.kind === "booking") {
+            return {
+              reply: bookingFallback(committed),
+              handlingMode: "AI" as const,
+              action: parsedAction.data,
+              toolResult: committed,
+            };
+          }
+          if (committed.kind === "sms") {
+            return {
+              reply: committed.data.sent === true
+                ? "I have sent the requested text message."
+                : String(committed.data.reason ?? "I could not send that text message."),
+              handlingMode: "AI" as const,
+              action: parsedAction.data,
+              toolResult: committed,
+            };
+          }
+          if (committed.kind === "pending_action") {
+            return {
+              reply: pendingActionReply(committed, context.timezone ?? "UTC"),
+              handlingMode: "AI" as const,
+              action: parsedAction.data,
+              toolResult: committed,
+            };
+          }
+          logger.error(
+            { workspaceId, conversationId, pendingActionId: awaitingAction.id, kind: committed.kind },
+            "Confirmed pending action returned an unexpected tool result",
+          );
+          return unresolvedWithoutHandoff(
+            "I couldn't safely complete the prepared action. Please tell me what you'd like to do again.",
+          );
+        } catch (error) {
+          if (!(error instanceof AppError)) throw error;
+          const truthful = approvedToolFailure(parsedAction.data.type, error);
+          return resolveUncertainRequest(truthful, `${parsedAction.data.type} failed: ${error.code}`);
+        }
+      }
+
       if (isLivePhone && isExplicitHumanRequest(lastUserMessage)) {
         if (options.beforeTools && !(await options.beforeTools())) {
           return { reply: null, handlingMode: "AI" as const, action: { type: "NONE" as const },
@@ -462,7 +575,7 @@ export function createResponseOrchestrator(dependencies: OrchestratorDependencie
         }
         try {
           const toolResult = await dependencies.executeTools(workspaceId, conversationId, context.contact.id, { action });
-          return { reply: LIVE_PHONE_ESCALATION_REPLY, handlingMode: "HUMAN" as const, action, toolResult };
+          return { reply: LIVE_PHONE_ESCALATION_REPLY, handlingMode: "AI" as const, action, toolResult };
         } catch (error) {
           if (error instanceof AppError && error.code === "AGENT_ACTION_DISABLED") return noEscalation;
           if (error instanceof AppError && (
@@ -496,7 +609,7 @@ export function createResponseOrchestrator(dependencies: OrchestratorDependencie
             "AI provider returned invalid orchestration output after correction");
           const deterministic = (!allowed || allowed.CHECK_AVAILABILITY)
             ? deterministicAvailabilityPlan(
-              lastUserMessage, context.timezone ?? "UTC", context.services,
+              recentBookingText, context.timezone ?? "UTC", context.services,
             )
             : null;
           if (!deterministic) {
@@ -531,6 +644,32 @@ export function createResponseOrchestrator(dependencies: OrchestratorDependencie
         }
       }
 
+      // A normal missing booking detail is not uncertainty and must never trigger
+      // staff escalation. The server owns this distinction even if the model
+      // incorrectly labels the incomplete request as unresolved.
+      const plannedLooksUnresolved = planned.action.type === "ESCALATE"
+        || Boolean(planned.unresolved?.reason);
+      const bookingClarification = bookingMissingDetailReply(recentBookingText);
+      const bookingCanProceed = !allowed || allowed.BOOK_APPOINTMENT;
+      const bookingAvailabilityRecovery = plannedLooksUnresolved
+        && bookingCanProceed
+        && (!allowed || allowed.CHECK_AVAILABILITY)
+        ? deterministicAvailabilityPlan(
+            recentBookingText,
+            context.timezone ?? "UTC",
+            context.services,
+          )
+        : null;
+      if (bookingAvailabilityRecovery) {
+        logger.warn(
+          { workspaceId, conversationId, plannedAction: planned.action.type },
+          "Replacing unresolved booking plan with authoritative availability check",
+        );
+        planned = bookingAvailabilityRecovery;
+      } else if (bookingCanProceed && bookingClarification && plannedLooksUnresolved) {
+        return unresolvedWithoutHandoff(bookingClarification);
+      }
+
       // Capability denials are resolved together with the saved When Unsure policy.
       if (planned.action.type === "NONE" && planned.unresolved?.reason) {
         const reply = planned.reply
@@ -544,7 +683,7 @@ export function createResponseOrchestrator(dependencies: OrchestratorDependencie
       if (planned.action.type === "ESCALATE" && allowed
         && !isExplicitHumanRequest(lastUserMessage)) {
         const wantsAvailability = /\b(?:available|availability|open slots?|check times?)\b/i.test(lastUserMessage);
-        const wantsBooking = /\b(?:book|booking|reserve|appointment|schedule)\b/i.test(lastUserMessage);
+        const wantsBooking = /\b(?:book|booking|reserve|appointment|schedule)\b/i.test(recentBookingText);
         if ((wantsAvailability && !allowed.CHECK_AVAILABILITY)
           || (wantsBooking && !allowed.BOOK_APPOINTMENT)) {
           const reply = wantsAvailability
@@ -631,6 +770,15 @@ export function createResponseOrchestrator(dependencies: OrchestratorDependencie
         throw error;
       }
 
+      if (toolResult.kind === "pending_action") {
+        return {
+          reply: pendingActionReply(toolResult, context.timezone ?? "UTC"),
+          handlingMode: "AI" as const,
+          action: first.action,
+          toolResult,
+        };
+      }
+
       if (toolResult.kind === "availability") {
         // Present verified calendar slots directly, not a second model's
         // possible assertion that it never checked or an invented opening.
@@ -687,8 +835,8 @@ export function createResponseOrchestrator(dependencies: OrchestratorDependencie
       if (toolResult.kind === "escalation") {
         return {
           reply: isLivePhone ? LIVE_PHONE_ESCALATION_REPLY
-            : "I've flagged your request for staff follow-up. A team member can continue this conversation here when available.",
-          handlingMode: "HUMAN" as const,
+            : "I've flagged this issue for staff follow-up. I can keep helping with anything else here.",
+          handlingMode: "AI" as const,
           action: first.action,
           toolResult,
         };
@@ -720,4 +868,5 @@ export const responseOrchestrator = createResponseOrchestrator({
     const response = await generateAIWithUsage(workspaceId, referenceId, messages);
     return { text: response.text };
   },
+  getAwaitingAction: getAwaitingPendingAction,
 });

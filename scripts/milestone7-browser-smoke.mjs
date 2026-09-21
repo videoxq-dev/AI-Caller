@@ -381,16 +381,71 @@ try {
       transcription_data: { transcript: "My name is Voice Visitor, voice.visitor@example.com. Book the 10:00 AM slot", is_final: true, confidence: 0.98 },
     }),
   );
-  assert(booking.data?.processed === 1, "Voice booking turn failed.");
+  assert(booking.data?.processed === 1, "Voice booking proposal turn failed.");
+
+  await waitFor(
+    pool,
+    `SELECT body FROM messages WHERE workspace_id = $1 AND channel = 'PHONE'
+      AND direction = 'OUTBOUND' AND sender_type = 'AI'
+      AND body LIKE '%Would you like me to book it?%' LIMIT 1`,
+    [workspaceId],
+    (rows) => rows.rowCount === 1,
+    "voice booking confirmation prompt",
+  );
+  const preConfirmationBooking = await pool.query(
+    `SELECT count(*)::int AS count FROM appointments WHERE workspace_id = $1`,
+    [workspaceId],
+  );
+  assert(preConfirmationBooking.rows[0].count === 0,
+    "Voice booking executed before explicit caller confirmation.");
+  const stagedAction = await pool.query(
+    `SELECT status FROM pending_agent_actions
+      WHERE workspace_id = $1 AND type = 'BOOK_APPOINTMENT'
+      ORDER BY created_at DESC LIMIT 1`,
+    [workspaceId],
+  );
+  assert(stagedAction.rows[0]?.status === "AWAITING_CONFIRMATION",
+    "Voice booking proposal was not persisted as awaiting confirmation.");
+
+  const bookingPromptSpeakEnd = await sendWebhook(
+    workspaceId,
+    eventPayload("call.speak.ended", "m7-reply-3-ended", callSessionId, callControlId),
+  );
+  assert(bookingPromptSpeakEnd.data?.processed === 1,
+    "Voice booking confirmation prompt did not finish cleanly.");
+
+  const confirmation = await sendWebhook(
+    workspaceId,
+    eventPayload("call.transcription", "m7-turn-4", callSessionId, callControlId, {
+      transcription_data: { transcript: "Yes, please.", is_final: true, confidence: 0.99 },
+    }),
+  );
+  assert(confirmation.data?.processed === 1, "Voice booking confirmation turn failed.");
 
   const appointment = await waitFor(
     pool,
     `SELECT status, booking_source FROM appointments WHERE workspace_id = $1 LIMIT 1`,
     [workspaceId],
     (rows) => rows.rows[0]?.status === "CONFIRMED",
-    "voice appointment booking",
+    "voice appointment booking after explicit confirmation",
   );
   assert(appointment.rows[0].booking_source === "PHONE_AI", `Expected PHONE_AI booking source, got ${appointment.rows[0].booking_source}.`);
+
+  await waitFor(
+    pool,
+    `SELECT body FROM messages WHERE workspace_id = $1 AND channel = 'PHONE'
+      AND direction = 'OUTBOUND' AND sender_type = 'AI'
+      AND body LIKE '%QA Consultation is booked for%' LIMIT 1`,
+    [workspaceId],
+    (rows) => rows.rowCount === 1,
+    "voice booking confirmation response",
+  );
+  const bookingConfirmationSpeakEnd = await sendWebhook(
+    workspaceId,
+    eventPayload("call.speak.ended", "m7-reply-4-ended", callSessionId, callControlId),
+  );
+  assert(bookingConfirmationSpeakEnd.data?.processed === 1,
+    "Voice booking confirmation response did not finish cleanly.");
 
   const contact = await pool.query(
     `SELECT c.id, c.name, c.email, ci.normalized_value

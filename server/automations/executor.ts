@@ -6,6 +6,7 @@ import {
   businessProfiles,
   contacts,
   conversationHandlingEvents,
+  conversationHumanCases,
   conversations,
   leads,
   memberships,
@@ -377,6 +378,7 @@ async function executeEscalation(
   const setting = await getAutomationSetting(workspaceId, "HUMAN_ESCALATION");
   const conversationId = typeof event.payload.conversationId === "string" ? event.payload.conversationId : null;
   const contactId = typeof event.payload.contactId === "string" ? event.payload.contactId : null;
+  const issueCaseId = typeof event.payload.issueCaseId === "string" ? event.payload.issueCaseId : null;
   if (!conversationId) return { sent: 0, skipped: 1, failed: 0 };
 
   const assignedUserId = setting.config.assignedUserId;
@@ -387,23 +389,40 @@ async function executeEscalation(
     )).limit(1);
     if (!membership) throw new AppError("AUTOMATION_ASSIGNEE_INVALID", "Configured escalation assignee is no longer a workspace member.", 409);
 
-    await db.transaction(async (tx) => {
-      const [conversation] = await tx.select().from(conversations).where(and(
-        eq(conversations.workspaceId, workspaceId),
-        eq(conversations.id, conversationId),
-      )).limit(1);
-      if (conversation && conversation.assignedUserId !== assignedUserId) {
-        await tx.update(conversations).set({ assignedUserId, updatedAt: new Date() }).where(eq(conversations.id, conversationId));
-        await tx.insert(conversationHandlingEvents).values({
-          workspaceId,
-          conversationId,
-          type: "ASSIGNED",
-          actorUserId: null,
-          assignedUserId,
-          metadata: { automationRunId: runId },
-        });
+    if (issueCaseId) {
+      const [issue] = await db.update(conversationHumanCases).set({
+        assignedUserId,
+        status: "CLAIMED",
+        updatedAt: new Date(),
+      }).where(and(
+        eq(conversationHumanCases.workspaceId, workspaceId),
+        eq(conversationHumanCases.id, issueCaseId),
+        eq(conversationHumanCases.conversationId, conversationId),
+      )).returning({ id: conversationHumanCases.id });
+      if (!issue) {
+        throw new AppError("HUMAN_CASE_NOT_FOUND", "Escalated staff issue no longer exists.", 409);
       }
-    });
+    } else {
+      // Legacy escalation events represented whole-conversation ownership.
+      // Keep their assignment behavior for backwards compatibility.
+      await db.transaction(async (tx) => {
+        const [conversation] = await tx.select().from(conversations).where(and(
+          eq(conversations.workspaceId, workspaceId),
+          eq(conversations.id, conversationId),
+        )).limit(1);
+        if (conversation && conversation.assignedUserId !== assignedUserId) {
+          await tx.update(conversations).set({ assignedUserId, updatedAt: new Date() }).where(eq(conversations.id, conversationId));
+          await tx.insert(conversationHandlingEvents).values({
+            workspaceId,
+            conversationId,
+            type: "ASSIGNED",
+            actorUserId: null,
+            assignedUserId,
+            metadata: { automationRunId: runId },
+          });
+        }
+      });
+    }
   }
 
   if (!setting.config.notifyInApp) return { sent: 0, skipped: 1, failed: 0 };
@@ -412,10 +431,15 @@ async function executeEscalation(
     workspaceId,
     runId,
     userId: assignedUserId,
-    title: "Customer needs human help",
-    body: reason ? `AI escalated this conversation: ${reason}` : "AI escalated a customer conversation for human follow-up.",
+    title: issueCaseId ? "Customer issue needs human help" : "Customer needs human help",
+    body: reason
+      ? `AI flagged this issue for staff follow-up: ${reason}`
+      : issueCaseId
+        ? "AI flagged a customer issue for staff follow-up."
+        : "AI escalated a customer conversation for human follow-up.",
     conversationId,
     contactId,
+    metadata: issueCaseId ? { issueCaseId, scope: "ISSUE" } : undefined,
   });
 }
 

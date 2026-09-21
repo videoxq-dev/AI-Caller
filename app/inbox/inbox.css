@@ -41,3 +41,8 @@
   .messageBubble{max-width:calc(100% - 45px);overflow-wrap:anywhere}
   .composerWrap{margin:0 8px 8px}
 }
+
+
+.humanCaseList{display:grid;gap:8px;margin:12px 0}.humanCaseCard{display:grid;gap:8px;padding:10px;border:1px solid #f2c4c7;border-radius:8px;background:#fff8f8}.humanCaseCard p{margin:0;color:#5a2b32;font-size:10px;line-height:1.45}.humanCaseCard button{justify-self:start;border:1px solid #d9a8ad;border-radius:6px;padding:6px 9px;color:#9b2935;background:#fff;font-size:9px;font-weight:700;cursor:pointer}.humanCaseCard button:disabled{opacity:.55;cursor:not-allowed}
+
+.staffIssueTag{border-color:#f0b9bf!important;color:#a62c3a!important;background:#fff4f5!important}

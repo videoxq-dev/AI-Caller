@@ -1,10 +1,16 @@
-import { escalateConversation } from "@/server/collaboration/service";
+import { escalateConversationIssue } from "@/server/collaboration/service";
 import { assertAgentActionAllowed } from "@/server/agent/capabilities";
 import { requireActiveWorkspaceAgent } from "@/server/agent/service";
 import { and, desc, eq } from "drizzle-orm";
 import { db } from "@/db";
 import { messages } from "@/db/schema";
 import { AppError } from "@/server/http/errors";
+import { logger } from "@/server/observability/logger";
+import {
+  markPendingActionExecuted,
+  markPendingActionFailed,
+  stageOrConfirmPendingAction,
+} from "./pending-actions";
 import { recordSmsConsent } from "@/server/sms/consent";
 import { resolveSmsRuntimeForWorkspace } from "@/server/providers/sms/runtime";
 import { sendSmsConversationTextWithRuntime } from "@/server/sms/outbound";
@@ -144,7 +150,7 @@ export const orchestratorEnvelopeSchema = z.preprocess((value) => {
 
 export type OrchestratorEnvelope = z.infer<typeof orchestratorEnvelopeSchema>;
 export type OrchestratorToolResult = {
-  kind: "none" | "contact" | "qualification" | "availability" | "booking" | "escalation" | "consent" | "sms";
+  kind: "none" | "contact" | "qualification" | "availability" | "booking" | "pending_action" | "escalation" | "consent" | "sms";
   data: Record<string, unknown>;
 };
 
@@ -352,14 +358,47 @@ export async function executeOrchestratorTools(
     if (channel === "SMS") throw new AppError("SMS_TOOL_UNAVAILABLE_IN_SMS", "Reply normally to the inbound SMS instead.", 409);
     const detail = await getContactDetail(workspaceId, contactId);
     if (!detail?.phone) return { kind: "sms", data: { sent: false, reason: "Customer phone number is missing." } };
+
+    const payload = { text: envelope.action.text, to: detail.phone };
+    const gate = await stageOrConfirmPendingAction({
+      workspaceId,
+      conversationId,
+      contactId,
+      type: "SEND_SMS",
+      payload,
+    });
+    if (gate.state === "AWAITING_CONFIRMATION") {
+      return {
+        kind: "pending_action",
+        data: {
+          pendingActionId: gate.action.id,
+          type: "SEND_SMS",
+          text: envelope.action.text,
+        },
+      };
+    }
+    if (gate.state === "EXECUTED") {
+      return { kind: "sms", data: gate.result };
+    }
+
     const runtime = await resolveSmsRuntimeForWorkspace(workspaceId);
     try {
       const message = await sendSmsConversationTextWithRuntime(workspaceId, conversationId, runtime, {
-        senderType: "AI", text: envelope.action.text, to: detail.phone,
-        metadata: { source: "ORCHESTRATOR" },
+        senderType: "AI",
+        text: envelope.action.text,
+        to: detail.phone,
+        idempotencyKey: gate.action.id,
+        metadata: { source: "ORCHESTRATOR", pendingActionId: gate.action.id },
       });
-      return { kind: "sms", data: { sent: true, messageId: message.id, status: message.status } };
+      const result = { sent: true, messageId: message.id, status: message.status };
+      await markPendingActionExecuted(workspaceId, gate.action.id, result);
+      return { kind: "sms", data: result };
     } catch (error) {
+      await markPendingActionFailed(
+        workspaceId,
+        gate.action.id,
+        error instanceof AppError ? error.code : "SMS_SEND_FAILED",
+      );
       if (error instanceof AppError && error.status < 500) {
         return { kind: "sms", data: { sent: false, reason: error.message } };
       }
@@ -423,55 +462,106 @@ export async function executeOrchestratorTools(
   if (envelope.action.type === "BOOK_APPOINTMENT") {
     const detail = await getContactDetail(workspaceId, contactId);
     if (!detail) throw new Error("The conversation contact no longer exists.");
-    const appointment = await calendarBookingService.book(workspaceId, {
-      contactId,
-      conversationId,
-      serviceId: envelope.action.serviceId ?? null,
-      title: envelope.action.title,
-      startsAt: new Date(envelope.action.startsAt),
-      endsAt: new Date(envelope.action.endsAt),
+
+    const payload = {
+      startsAt: new Date(envelope.action.startsAt).toISOString(),
+      endsAt: new Date(envelope.action.endsAt).toISOString(),
       timezone: envelope.action.timezone,
-      bookingSource: `${channel}_AI`,
+      title: envelope.action.title,
+      serviceId: envelope.action.serviceId ?? null,
       notes: envelope.action.notes ?? null,
-      attendeeName: detail.name,
-      attendeeEmail: detail.email,
-    });
-
-    const existingLead = detail.lead;
-    await upsertLead(workspaceId, contactId, {
-      status: "BOOKED",
-      intent: existingLead?.intent ?? "Appointment booking",
-      serviceRequested: existingLead?.serviceRequested ?? envelope.action.title,
-      source: existingLead?.source ?? channel,
-      estimatedValue: existingLead?.estimatedValue ?? null,
-      assignedUserId: existingLead?.assignedUserId ?? null,
-    });
-    await appendMessage(workspaceId, conversationId, {
-      channel,
-      direction: "INTERNAL",
-      senderType: "SYSTEM",
-      contentType: "APPOINTMENT_EVENT",
-      body: `Appointment booked: ${envelope.action.title}`,
-      provider: null,
-      externalMessageId: null,
-      status: "CONFIRMED",
-      metadata: { appointmentId: appointment.id, startsAt: appointment.startsAt.toISOString() },
-    });
-
-    return {
-      kind: "booking",
-      data: {
-        appointmentId: appointment.id,
-        title: envelope.action.title,
-        startsAt: appointment.startsAt.toISOString(),
-        endsAt: appointment.endsAt.toISOString(),
-        timezone: appointment.timezone,
-        status: appointment.status,
-      },
     };
+    const gate = await stageOrConfirmPendingAction({
+      workspaceId,
+      conversationId,
+      contactId,
+      type: "BOOK_APPOINTMENT",
+      payload,
+    });
+    if (gate.state === "AWAITING_CONFIRMATION") {
+      return {
+        kind: "pending_action",
+        data: {
+          pendingActionId: gate.action.id,
+          type: "BOOK_APPOINTMENT",
+          ...payload,
+        },
+      };
+    }
+    if (gate.state === "EXECUTED") {
+      return { kind: "booking", data: gate.result };
+    }
+
+    let appointment;
+    try {
+      appointment = await calendarBookingService.book(workspaceId, {
+        contactId,
+        conversationId,
+        serviceId: envelope.action.serviceId ?? null,
+        title: envelope.action.title,
+        startsAt: new Date(envelope.action.startsAt),
+        endsAt: new Date(envelope.action.endsAt),
+        timezone: envelope.action.timezone,
+        bookingSource: `${channel}_AI`,
+        notes: envelope.action.notes ?? null,
+        attendeeName: detail.name,
+        attendeeEmail: detail.email,
+      });
+    } catch (error) {
+      await markPendingActionFailed(
+        workspaceId,
+        gate.action.id,
+        error instanceof AppError ? error.code : "BOOKING_FAILED",
+      );
+      throw error;
+    }
+
+    const result = {
+      appointmentId: appointment.id,
+      title: envelope.action.title,
+      startsAt: appointment.startsAt.toISOString(),
+      endsAt: appointment.endsAt.toISOString(),
+      timezone: appointment.timezone,
+      status: appointment.status,
+    };
+    await markPendingActionExecuted(workspaceId, gate.action.id, result);
+
+    try {
+      const existingLead = detail.lead;
+      await upsertLead(workspaceId, contactId, {
+        status: "BOOKED",
+        intent: existingLead?.intent ?? "Appointment booking",
+        serviceRequested: existingLead?.serviceRequested ?? envelope.action.title,
+        source: existingLead?.source ?? channel,
+        estimatedValue: existingLead?.estimatedValue ?? null,
+        assignedUserId: existingLead?.assignedUserId ?? null,
+      });
+      await appendMessage(workspaceId, conversationId, {
+        channel,
+        direction: "INTERNAL",
+        senderType: "SYSTEM",
+        contentType: "APPOINTMENT_EVENT",
+        body: `Appointment booked: ${envelope.action.title}`,
+        provider: null,
+        externalMessageId: null,
+        status: "CONFIRMED",
+        metadata: {
+          appointmentId: appointment.id,
+          startsAt: appointment.startsAt.toISOString(),
+          pendingActionId: gate.action.id,
+        },
+      });
+    } catch (error) {
+      logger.error(
+        { err: error, workspaceId, conversationId, appointmentId: appointment.id },
+        "Appointment persisted but ancillary lead/timeline update failed",
+      );
+    }
+
+    return { kind: "booking", data: result };
   }
 
-  const conversation = await escalateConversation({
+  const escalation = await escalateConversationIssue({
     workspaceId,
     conversationId,
     reason: envelope.action.reason ?? null,
@@ -481,11 +571,25 @@ export async function executeOrchestratorTools(
     direction: "INTERNAL",
     senderType: "SYSTEM",
     contentType: "SYSTEM_EVENT",
-    body: envelope.action.reason ? `AI escalated to a human: ${envelope.action.reason}` : "AI escalated to a human.",
+    body: envelope.action.reason
+      ? `AI flagged an issue for staff follow-up: ${envelope.action.reason}`
+      : "AI flagged an issue for staff follow-up.",
     provider: null,
     externalMessageId: null,
     status: null,
-    metadata: { handlingMode: conversation.handlingMode },
+    metadata: {
+      handlingMode: escalation.conversation.handlingMode,
+      issueCaseId: escalation.issue.id,
+      escalationScope: "ISSUE",
+    },
   });
-  return { kind: "escalation", data: { handlingMode: "HUMAN", reason: envelope.action.reason ?? null } };
+  return {
+    kind: "escalation",
+    data: {
+      handlingMode: escalation.conversation.handlingMode,
+      issueCaseId: escalation.issue.id,
+      reason: envelope.action.reason ?? null,
+      scope: "ISSUE",
+    },
+  };
 }
