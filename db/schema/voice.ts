@@ -49,6 +49,7 @@ export const voiceCalls = pgTable(
     recordingDisclosureVersion: text("recording_disclosure_version"),
     recordingDisclosedAt: timestamp("recording_disclosed_at", { withTimezone: true, mode: "date" }),
     transcriptStatus: voiceTranscriptStatus("transcript_status").default("PENDING").notNull(),
+    bookingEngineVersion: text("booking_engine_version").$type<"v1" | "v2">().default("v1").notNull(),
     metadata: jsonb("metadata").$type<Record<string, unknown>>().default({}).notNull(),
     createdAt: timestamp("created_at", { withTimezone: true, mode: "date" }).defaultNow().notNull(),
     updatedAt: timestamp("updated_at", { withTimezone: true, mode: "date" }).defaultNow().notNull(),
