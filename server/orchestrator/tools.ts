@@ -46,7 +46,7 @@ export const orchestratorActionSchema = z.discriminatedUnion("type", [
     startsAt: z.string().datetime({ offset: true }),
     endsAt: z.string().datetime({ offset: true }),
     timezone: timezoneSchema,
-    durationMinutes: z.number().int().min(5).max(480).optional(),
+    durationMinutes: z.number().int().min(5).max(1440).optional(),
   }),
   z.object({
     type: z.literal("BOOK_APPOINTMENT"),
