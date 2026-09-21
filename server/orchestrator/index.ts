@@ -69,11 +69,13 @@ Allowed action objects:
 - { "type": "ESCALATE", "reason": "..." }
 
 Rules:
-- Never say a slot is available unless CHECK_AVAILABILITY returned it.
+- When the customer asks to check availability and supplies an identifiable date and time, invoke CHECK_AVAILABILITY immediately without requesting permission again. For a whole day, check a bounded date range. Use the actual saved service duration when provided; otherwise ask for the duration if needed.
+- Never say a slot is available unless CHECK_AVAILABILITY returned it. Describe the returned slots and ask the customer to choose and approve one.
+- When the customer approves a particular service/date/time, invoke BOOK_APPOINTMENT with the agreed slot (including its service duration); do not ask repeatedly to proceed. Native booking checks business hours and conflicts without any third-party calendar.
 - Never say an appointment is booked unless BOOK_APPOINTMENT returned a confirmed booking.
 - Populate contact fields only when the customer explicitly provided them in the conversation. Never infer or invent contact details.
-- Before BOOK_APPOINTMENT, make sure the customer email is known in CUSTOMER STATE or explicitly supplied in the current message; otherwise ask for it with action NONE.
-- Use ESCALATE when the configured behavior requires a human or the request needs information/actions outside approved capabilities.
+- A verified customer conversation/contact is sufficient for an in-app appointment; email is optional. Never invent missing contact data.
+- Use ESCALATE for an explicit human request, or when a human handoff is required AND the ESCALATE capability is enabled. A disabled capability alone never authorizes human handoff; explain what you can and cannot do, offer staff follow-up only as an option, and never claim staff were notified without a successful ESCALATE result.
 - Lead updates are optional and must reflect only evidence from the conversation.
 - On phone calls, offer appointment confirmations and future reminder SMS only after stating the SMS program clearly and asking the customer whether they agree. Use RECORD_SMS_CONSENT only after their explicit answer, never infer consent from a booking or general interest.
 - For a general opt-out or "stop all texts" request, invoke RECORD_SMS_CONSENT with category ALL and status OPTED_OUT so both categories are revoked.
@@ -129,6 +131,32 @@ function finalizerMessages(
       content: `SERVER TOOL RESULT (authoritative): ${JSON.stringify(toolResult)}\nReturn a final JSON envelope with a customer-facing reply and action {"type":"NONE"}. Do not request another tool action in this response.`,
     },
   ];
+}
+
+function approvedToolFailure(action: OrchestratorEnvelope["action"]["type"], error: AppError) {
+  if (action === "CHECK_AVAILABILITY") {
+    return error.code === "AGENT_ACTION_DISABLED"
+      ? "I can't check appointment availability at the moment. You can ask for staff follow-up if you prefer."
+      : `I couldn't check live availability: ${error.message} I haven't reserved a time.`;
+  }
+  if (action === "BOOK_APPOINTMENT") {
+    return error.code === "AGENT_ACTION_DISABLED"
+      ? "I can discuss appointment options, but I can't book an appointment right now. Nothing has been booked."
+      : `I couldn't book that appointment: ${error.message} Nothing has been booked.`;
+  }
+  if (action === "ESCALATE") return "I couldn't arrange staff follow-up. Please contact the business directly.";
+  return error.code === "AGENT_ACTION_DISABLED"
+    ? "I can't perform that action at the moment. No changes were made."
+    : `I couldn't complete that action: ${error.message}`;
+}
+function safeUnverifiedReply(reply: string) {
+  if (/\b(?:i(?:['’]ve| have|['’]ll| will)|we(?:['’]ve| have|['’]ll| will))\s+(?:already\s+)?(?:flagged|notified|alerted|asked|contacted|forwarded|passed|sent|flag|notify|alert|ask|contact|forward|pass|send)\b[^.!?]{0,90}\b(?:team|staff|manager|human|representative)\b/i.test(reply)) {
+    return "I can answer questions here. If you'd like staff follow-up, please ask me to arrange it.";
+  }
+  if (/\b(?:your\s+)?appointment\s+(?:is|has been|was)\s+(?:booked|confirmed|scheduled|reserved)\b|\bi(?:['’]ve| have)\s+(?:booked|confirmed|scheduled|reserved)\s+(?:your|the)\s+appointment\b/i.test(reply)) {
+    return "I haven't confirmed an appointment yet. Would you like me to check the requested time?";
+  }
+  return reply;
 }
 
 function bookingFallback(toolResult: OrchestratorToolResult) {
@@ -241,8 +269,11 @@ export function createResponseOrchestrator(dependencies: OrchestratorDependencie
             action: { type: "NONE" as const },
             toolResult: { kind: "none" as const, data: {} } };
         }
-        if (error instanceof AppError && error.code === "AGENT_ACTION_DISABLED") {
-          return { reply: "I can't perform that action. I can answer other questions or you can ask for staff follow-up.",
+        if (error instanceof AppError && (error.code === "AGENT_ACTION_DISABLED"
+          || ["APPOINTMENT_SLOT_UNAVAILABLE", "APPOINTMENT_OUTSIDE_HOURS",
+              "APPOINTMENT_IN_PAST", "BUSINESS_HOURS_NOT_CONFIGURED",
+              "AVAILABILITY_RANGE_INVALID", "CALENDAR_NOT_CONFIGURED"].includes(error.code))) {
+          return { reply: approvedToolFailure(first.action.type, error),
             handlingMode: "AI" as const, action: { type: "NONE" as const },
             toolResult: { kind: "none" as const, data: {} } };
         }
@@ -299,16 +330,22 @@ export function createResponseOrchestrator(dependencies: OrchestratorDependencie
 
       if (toolResult.kind === "escalation") {
         return {
-          reply: isLivePhone ? LIVE_PHONE_ESCALATION_REPLY : first.reply ?? "I’m handing this over to a member of the team.",
+          reply: isLivePhone ? LIVE_PHONE_ESCALATION_REPLY
+            : "I've flagged your request for staff follow-up. A team member can continue this conversation here when available.",
           handlingMode: "HUMAN" as const,
           action: first.action,
           toolResult,
         };
       }
 
-      if (!first.reply) throw new Error("AI provider did not return a customer-facing response.");
+      if (!first.reply && toolResult.kind !== "contact") throw new Error("AI provider did not return a customer-facing response.");
+      const contactReceipt = toolResult.kind === "contact"
+        ? `I’ve updated your contact details (${Array.isArray(toolResult.data.updatedFields)
+            ? toolResult.data.updatedFields.join(", ") : "provided fields"}).`
+        : null;
+      const customerReply = contactReceipt ?? safeUnverifiedReply(first.reply ?? "");
       return {
-        reply: isLivePhone ? safeLivePhoneReply(first.reply) : first.reply,
+        reply: isLivePhone ? safeLivePhoneReply(customerReply) : customerReply,
         handlingMode: "AI" as const,
         action: first.action,
         toolResult,
