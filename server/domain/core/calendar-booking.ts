@@ -118,10 +118,12 @@ export function createCalendarBookingService(dependencies: BookingDependencies) 
         // Recheck provider and local capacity immediately before external creation.
         // This does not yet reserve capacity: the durable command layer will close
         // concurrent external-create windows before the new engine is enabled.
-        const checked = await this.getAvailability(workspaceId, {
+        const requested = {
           startsAt: input.startsAt, endsAt: input.endsAt,
           timezone: input.timezone, durationMinutes,
-        });
+        };
+        const offers = await provider.getAvailability(requested);
+        const checked = await dependencies.filterAvailability(workspaceId, requested, offers);
         if (!checked.slots.some((slot) =>
           slot.startsAt.getTime() === input.startsAt.getTime() &&
           slot.endsAt.getTime() === input.endsAt.getTime())) {
