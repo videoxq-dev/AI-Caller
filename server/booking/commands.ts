@@ -116,6 +116,19 @@ export async function confirmBookingPreview(
   });
   if (!checked.slots.some((slot) => slot.startsAt.getTime() === offer.startsAt.getTime() &&
     slot.endsAt.getTime() === offer.endsAt.getTime())) {
+    // A duplicate confirmation can race the original command's reservation or
+    // confirmed appointment. Resolve the original result before reporting the
+    // original customer's own time as unavailable.
+    const refreshed = await getBookingDraft(context, draftId);
+    if (refreshed.bookingCommandId) {
+      const [existing] = await db.select().from(bookingCommands).where(and(
+        eq(bookingCommands.id, refreshed.bookingCommandId),
+        eq(bookingCommands.workspaceId, context.workspaceId),
+        eq(bookingCommands.draftId, draftId),
+        eq(bookingCommands.previewId, previewId),
+      )).limit(1);
+      if (existing) return { state: existing.state, command: existing };
+    }
     throw new AppError("APPOINTMENT_SLOT_UNAVAILABLE", "This time is no longer available.", 409);
   }
   return db.transaction(async (tx) => {
