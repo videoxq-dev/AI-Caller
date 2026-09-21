@@ -350,7 +350,7 @@ try {
 
   const aiReplyCountBeforeResume = await pool.query(
     `SELECT count(*)::int AS count FROM messages WHERE workspace_id = $1 AND conversation_id = $2 AND channel = 'WHATSAPP' AND direction = 'OUTBOUND' AND sender_type = 'AI' AND body = $3`,
-    [workspaceId, conversationId, turns[0].reply],
+    [workspaceId, conversationId, turns[0].replyPattern],
   );
   await page.getByRole("button", { name: "Return to AI" }).click();
   await page.getByRole("button", { name: "Human takeover" }).waitFor({ timeout: 10_000 });
@@ -359,7 +359,7 @@ try {
   await waitFor(
     pool,
     `SELECT count(*)::int AS count FROM messages WHERE workspace_id = $1 AND conversation_id = $2 AND channel = 'WHATSAPP' AND direction = 'OUTBOUND' AND sender_type = 'AI' AND body = $3`,
-    [workspaceId, conversationId, turns[0].reply],
+    [workspaceId, conversationId, turns[0].replyPattern],
     (rows) => rows.rows[0]?.count > aiReplyCountBeforeResume.rows[0].count,
     "new AI reply after return-to-AI",
   );
