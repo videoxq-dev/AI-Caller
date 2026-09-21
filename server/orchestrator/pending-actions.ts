@@ -49,6 +49,66 @@ async function latestCustomerText(
   return message?.body ?? "";
 }
 
+export async function stagePendingActionProposal(input: {
+  workspaceId: string;
+  conversationId: string;
+  contactId: string;
+  type: PendingActionType;
+  payload: Record<string, unknown>;
+}): Promise<PendingActionState> {
+  return db.transaction(async (tx) => {
+    const locked = await tx.execute(sql`
+      select id from conversations
+      where workspace_id = ${input.workspaceId} and id = ${input.conversationId}
+      for update
+    `);
+    if (!locked.rowCount) {
+      throw new AppError("CONVERSATION_NOT_FOUND", "Conversation not found.", 404);
+    }
+
+    const hash = payloadHash(input.payload);
+    const [completed] = await tx.select().from(pendingAgentActions).where(and(
+      eq(pendingAgentActions.workspaceId, input.workspaceId),
+      eq(pendingAgentActions.conversationId, input.conversationId),
+      eq(pendingAgentActions.type, input.type),
+      eq(pendingAgentActions.payloadHash, hash),
+      eq(pendingAgentActions.status, "EXECUTED"),
+    )).orderBy(desc(pendingAgentActions.executedAt), desc(pendingAgentActions.createdAt)).limit(1);
+    if (completed?.result && typeof completed.result === "object") {
+      return { state: "EXECUTED", action: completed, result: completed.result };
+    }
+
+    const [awaiting] = await tx.select().from(pendingAgentActions).where(and(
+      eq(pendingAgentActions.workspaceId, input.workspaceId),
+      eq(pendingAgentActions.conversationId, input.conversationId),
+      eq(pendingAgentActions.type, input.type),
+      eq(pendingAgentActions.status, "AWAITING_CONFIRMATION"),
+    )).orderBy(desc(pendingAgentActions.createdAt)).limit(1);
+    if (awaiting?.payloadHash === hash) {
+      return { state: "AWAITING_CONFIRMATION", action: awaiting };
+    }
+
+    const now = new Date();
+    if (awaiting) {
+      await tx.update(pendingAgentActions).set({
+        status: "SUPERSEDED",
+        updatedAt: now,
+      }).where(eq(pendingAgentActions.id, awaiting.id));
+    }
+
+    const [created] = await tx.insert(pendingAgentActions).values({
+      workspaceId: input.workspaceId,
+      conversationId: input.conversationId,
+      contactId: input.contactId,
+      type: input.type,
+      payload: input.payload,
+      payloadHash: hash,
+      status: "AWAITING_CONFIRMATION",
+    }).returning();
+    return { state: "AWAITING_CONFIRMATION", action: created };
+  });
+}
+
 export async function stageOrConfirmPendingAction(input: {
   workspaceId: string;
   conversationId: string;
