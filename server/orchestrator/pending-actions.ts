@@ -78,12 +78,12 @@ export async function stagePendingActionProposal(input: {
   payload: Record<string, unknown>;
 }): Promise<PendingActionState> {
   return db.transaction(async (tx) => {
-    const locked = await tx.execute(sql`
-      select id from conversations
-      where workspace_id = ${input.workspaceId} and id = ${input.conversationId}
-      for update
-    `);
-    if (!locked.rowCount) {
+    await tx.execute(sql`SELECT pg_advisory_xact_lock(hashtext(${`${input.workspaceId}:${input.conversationId}`}))`);
+    const [conversation] = await tx.select({ id: conversations.id }).from(conversations).where(and(
+      eq(conversations.workspaceId, input.workspaceId),
+      eq(conversations.id, input.conversationId),
+    )).limit(1);
+    if (!conversation) {
       throw new AppError("CONVERSATION_NOT_FOUND", "Conversation not found.", 404);
     }
 
@@ -145,12 +145,12 @@ export async function stageOrConfirmPendingAction(input: {
   payload: Record<string, unknown>;
 }): Promise<PendingActionState> {
   return db.transaction(async (tx) => {
-    const locked = await tx.execute(sql`
-      select id from conversations
-      where workspace_id = ${input.workspaceId} and id = ${input.conversationId}
-      for update
-    `);
-    if (!locked.rowCount) {
+    await tx.execute(sql`SELECT pg_advisory_xact_lock(hashtext(${`${input.workspaceId}:${input.conversationId}`}))`);
+    const [conversation] = await tx.select({ id: conversations.id }).from(conversations).where(and(
+      eq(conversations.workspaceId, input.workspaceId),
+      eq(conversations.id, input.conversationId),
+    )).limit(1);
+    if (!conversation) {
       throw new AppError("CONVERSATION_NOT_FOUND", "Conversation not found.", 404);
     }
 
