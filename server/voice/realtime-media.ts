@@ -479,9 +479,10 @@ export function attachRealtimeMedia({ telnyx, identity, streamId }: BridgeOption
 
   async function start() {
     try {
-      // Preconnect the model while Telnyx speaks the consented opening message.
-      // No media is forwarded until the greeting ends; this removes model
-      // handshake latency from the caller's first conversational response.
+      // Preconnect while the carrier finishes the required recording disclosure.
+      // No caller media is forwarded until disclosure/consent completes. For
+      // Realtime calls the assistant greeting is then spoken by this same
+      // Realtime session, so the configured persona remains consistent.
       const call = await waitUntilGreetingEnds(true);
       if (!open) return;
       openingMessage = typeof call.metadata.openingMessage === "string" && call.metadata.openingMessage.trim()
