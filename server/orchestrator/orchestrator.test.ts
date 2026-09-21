@@ -163,13 +163,18 @@ describe("orchestrator response protocol", () => {
     expect(executeTools).not.toHaveBeenCalled();
   });
 
-  it("does not re-escalate a returned-to-AI conversation from an unverified planner handoff", async () => {
-    const executeTools = vi.fn();
-    const generate = vi.fn(async () => ({ text: JSON.stringify({
-      reply: "I'll connect you to the team.",
-      unresolved: { reason: "A previous message asked for a person." },
-      action: { type: "ESCALATE", reason: "A previous message asked for a person." },
-    }) }));
+  it("replans a returned-to-AI conversation around the latest legitimate request", async () => {
+    const executeTools = vi.fn(async () => ({ kind: "none" as const, data: {} }));
+    const generate = vi.fn()
+      .mockResolvedValueOnce({ text: JSON.stringify({
+        reply: "I'll connect you to the team.",
+        unresolved: { reason: "A previous message asked for a person." },
+        action: { type: "ESCALATE", reason: "A previous message asked for a person." },
+      }) })
+      .mockResolvedValueOnce({ text: JSON.stringify({
+        reply: "We offer office cleaning and industrial equipment cleaning.",
+        action: { type: "NONE" },
+      }) });
     const orchestrator = createResponseOrchestrator({
       buildContext: vi.fn(async () => ({
         ...fakeContext("AI"),
@@ -190,10 +195,52 @@ describe("orchestrator response protocol", () => {
     const result = await orchestrator.respond("workspace", "conversation");
 
     expect(result).toMatchObject({ handlingMode: "AI" });
-    expect(result.reply).toContain("still handling this conversation");
-    expect(result.reply).toContain("can't transfer this call live");
+    expect(result.reply).toContain("office cleaning");
     expect(result.reply).not.toContain("connect you");
-    expect(executeTools).not.toHaveBeenCalled();
+    expect(generate).toHaveBeenCalledTimes(2);
+    expect(executeTools).toHaveBeenCalledOnce();
+    expect(executeTools.mock.calls[0][3]).toMatchObject({ action: { type: "NONE" } });
+  });
+
+  it("still applies When Unsure when the resumed current request is genuinely unresolved", async () => {
+    const executeTools = vi.fn(async (_workspaceId, _conversationId, _contactId, envelope) => {
+      expect(envelope.action.type).toBe("ESCALATE");
+      return { kind: "escalation" as const, data: { handlingMode: "HUMAN" } };
+    });
+    const generate = vi.fn()
+      .mockResolvedValueOnce({ text: JSON.stringify({
+        reply: "I'll connect you because this thread was handed off before.",
+        action: { type: "ESCALATE", reason: "Previous handoff" },
+      }) })
+      .mockResolvedValueOnce({ text: JSON.stringify({
+        reply: "I can't verify that warranty exception from the approved business information.",
+        unresolved: { reason: "The current warranty exception needs staff review." },
+        action: { type: "NONE" },
+      }) });
+    const orchestrator = createResponseOrchestrator({
+      buildContext: vi.fn(async () => ({
+        ...fakeContext("AI"),
+        source: "INBOUND_TURN" as const,
+        resumedAfterHumanHandoff: true,
+        messages: [
+          { role: "user" as const, content: "I need a human." },
+          { role: "assistant" as const, content: "Staff will follow up." },
+          { role: "user" as const, content: "Can you approve this warranty exception?" },
+        ],
+        agent: { id: "agent-1", status: "ACTIVE" as const,
+          whenUnsure: "Escalate to a human", escalationMessage: null,
+          behaviorSettings: { capabilities: { ...defaultAgentCapabilities, ESCALATE: true } } },
+      })),
+      executeTools, generate,
+    });
+
+    const result = await orchestrator.respond("workspace", "conversation");
+
+    expect(result.handlingMode).toBe("HUMAN");
+    expect(result.reply).toContain("warranty exception");
+    expect(result.reply).toContain("flagged your request for staff follow-up");
+    expect(generate).toHaveBeenCalledTimes(2);
+    expect(executeTools).toHaveBeenCalledOnce();
   });
 
   it("responds truthfully when a configured capability is revoked during model planning", async () => {
