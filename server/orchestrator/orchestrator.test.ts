@@ -499,6 +499,30 @@ describe("orchestrator response protocol", () => {
     expect(executeTools).not.toHaveBeenCalled();
   });
 
+  it("does not apply When Unsure escalation after a realtime turn is superseded", async () => {
+    const executeTools = vi.fn();
+    const beforeTools = vi.fn(async () => false);
+    const orchestrator = createResponseOrchestrator({
+      buildContext: vi.fn(async () => ({
+        ...fakeContext(), source: "INBOUND_TURN" as const,
+        agent: { id: "agent-1", status: "ACTIVE" as const,
+          whenUnsure: "Escalate to a human", escalationMessage: null,
+          behaviorSettings: { capabilities: { ...defaultAgentCapabilities, ESCALATE: true } } },
+      })),
+      executeTools,
+      generate: vi.fn(async () => ({ text: JSON.stringify({
+        reply: "I can't complete that request.",
+        unresolved: { reason: "Need staff review." },
+        action: { type: "NONE" },
+      }) })),
+    });
+    const result = await orchestrator.respond("workspace", "conversation", { beforeTools });
+    expect(result.reply).toBeNull();
+    expect(result.handlingMode).toBe("AI");
+    expect(beforeTools).toHaveBeenCalledTimes(1);
+    expect(executeTools).not.toHaveBeenCalled();
+  });
+
   it("does not invent staff notification when the model returns only a promise", async () => {
     const orchestrator = createResponseOrchestrator({
       buildContext: vi.fn(async () => fakeContext()),
