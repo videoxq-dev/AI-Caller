@@ -12,6 +12,8 @@ type AvailabilityInput = Window & { timezone: string; durationMinutes?: number }
 type NativeSchedule = {
   timezone: string;
   hours: Hours[];
+  businessTimezone: string;
+  businessHours: Hours[];
   defaultDurationMinutes: number;
   bufferBeforeMinutes: number;
   bufferAfterMinutes: number;
@@ -50,6 +52,11 @@ export function withinBusinessHours(window: Window, timezone: string, hours: Hou
     && begin.minute >= opening && end.minute < closing;
 }
 
+function withinNativeSchedule(window: Window, schedule: NativeSchedule) {
+  return withinBusinessHours(window, schedule.timezone, schedule.hours)
+    && withinBusinessHours(window, schedule.businessTimezone, schedule.businessHours);
+}
+
 export async function nativeHours(workspaceId: string) {
   const [business, rawCalendar] = await Promise.all([
     getBusinessSetup(workspaceId),
@@ -71,6 +78,8 @@ export async function nativeHours(workspaceId: string) {
     return {
       timezone: business.profile.timezone,
       hours: business.hours,
+      businessTimezone: business.profile.timezone,
+      businessHours: business.hours,
       defaultDurationMinutes: 30,
       bufferBeforeMinutes: 0,
       bufferAfterMinutes: 0,
@@ -81,29 +90,23 @@ export async function nativeHours(workspaceId: string) {
   const available = new Set(calendar.availableDays);
   const calendarStart = timeMinute(calendar.startTime);
   const calendarEnd = timeMinute(calendar.endTime);
-  const hours = business.hours.map((row) => {
-    const businessStart = timeMinute(row.openTime);
-    const businessEnd = timeMinute(row.closeTime);
-    const enabled = row.enabled && available.has(weekDays[row.dayOfWeek])
-      && businessStart !== null && businessEnd !== null
-      && calendarStart !== null && calendarEnd !== null;
-    const start = enabled ? Math.max(businessStart, calendarStart) : 0;
-    const end = enabled ? Math.min(businessEnd, calendarEnd) : 0;
-    const value = (minutes: number) => `${String(Math.floor(minutes / 60)).padStart(2, "0")}:${String(minutes % 60).padStart(2, "0")}`;
-    return {
-      ...row,
-      enabled: enabled && start < end,
-      openTime: enabled && start < end ? value(start) : null,
-      closeTime: enabled && start < end ? value(end) : null,
-    };
-  });
+  const validCalendarWindow = calendarStart !== null && calendarEnd !== null
+    && calendarStart < calendarEnd;
+  const hours = Array.from({ length: 7 }, (_, dayOfWeek) => ({
+    dayOfWeek,
+    enabled: validCalendarWindow && available.has(weekDays[dayOfWeek]),
+    openTime: validCalendarWindow ? calendar.startTime : null,
+    closeTime: validCalendarWindow ? calendar.endTime : null,
+  }));
   if (!hours.some((row) => row.enabled)) {
     throw new AppError("BUSINESS_HOURS_NOT_CONFIGURED",
-      "Calendar availability does not overlap the configured business hours.", 409);
+      "Calendar availability does not include a valid booking window.", 409);
   }
   return {
     timezone: calendar.timezone,
     hours,
+    businessTimezone: business.profile.timezone,
+    businessHours: business.hours,
     defaultDurationMinutes: calendar.meetingDurationMinutes,
     bufferBeforeMinutes: calendar.bufferBeforeMinutes,
     bufferAfterMinutes: calendar.bufferAfterMinutes,
@@ -120,7 +123,7 @@ function conflictsWithBuffer(window: Window, existing: Window[], beforeMinutes: 
 
 export async function nativeAvailability(workspaceId: string, input: AvailabilityInput) {
   const schedule = await nativeHours(workspaceId);
-  const { timezone, hours } = schedule;
+  const { timezone } = schedule;
   const durationMinutes = input.durationMinutes ?? schedule.defaultDurationMinutes;
   const duration = durationMinutes * 60_000;
   const start = input.startsAt.getTime(), end = input.endsAt.getTime();
@@ -146,7 +149,7 @@ export async function nativeAvailability(workspaceId: string, input: Availabilit
     const slot = { startsAt: new Date(at), endsAt: new Date(at + duration) };
     const localStart = localParts(slot.startsAt, timezone);
     const dayBookings = existing.filter((row) => localParts(row.startsAt, timezone).date === localStart.date).length;
-    if (localStart.minute % 30 === 0 && withinBusinessHours(slot, timezone, hours)
+    if (localStart.minute % 30 === 0 && withinNativeSchedule(slot, schedule)
       && dayBookings < schedule.maxBookingsPerDay
       && !conflictsWithBuffer(slot, existing,
         schedule.bufferBeforeMinutes, schedule.bufferAfterMinutes)) slots.push(slot);
@@ -159,11 +162,11 @@ export async function validateNativeBooking(
   window: Window,
 ) {
   const schedule = await nativeHours(workspaceId);
-  const { timezone, hours } = schedule;
+  const { timezone } = schedule;
   if (window.startsAt.getTime() < Date.now()) {
     throw new AppError("APPOINTMENT_IN_PAST", "Please choose a future appointment time.", 422);
   }
-  if (!withinBusinessHours(window, timezone, hours)) {
+  if (!withinNativeSchedule(window, schedule)) {
     throw new AppError("APPOINTMENT_OUTSIDE_HOURS", "That appointment is outside the configured business hours.", 409);
   }
   // Availability, buffer, daily-limit and idempotency checks run together
