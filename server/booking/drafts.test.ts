@@ -95,6 +95,8 @@ describe("durable booking draft boundaries (disposable PostgreSQL only)", () => 
     await patchBookingDraft(context, input, now);
     expect(await patchBookingDraft(context, input, now)).toEqual({ state: "REPLAY", version: 2 });
     expect((await db.select().from(bookingSourceEvents))).toHaveLength(1);
+    await expect(patchBookingDraft({ ...context, contactId: otherContact }, input, now))
+      .rejects.toMatchObject({ code: "BOOKING_NOT_FOUND" });
     await expect(cancelBookingDraft(context, {
       draftId: first.id, expectedVersion: 2, sourceEventId: "turn-1",
     }, now)).rejects.toMatchObject({ code: "BOOKING_SOURCE_EVENT_CONFLICT" });
