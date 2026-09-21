@@ -1,4 +1,5 @@
 import { resolveWorkspaceContext } from "@/server/auth/workspace-context";
+import { countOpenConversationIssues } from "@/server/collaboration/service";
 import { listConversationChannels } from "@/server/domain/core/conversation-channels";
 import { getOrCreateOpenConversation, listConversations } from "@/server/domain/core/repository";
 import { conversationListQuerySchema, conversationOpenInputSchema } from "@/server/domain/core/schemas";
@@ -11,15 +12,17 @@ export async function GET(request: Request) {
     const query = Object.fromEntries(new URL(request.url).searchParams.entries());
     const input = parseInput(conversationListQuerySchema, query);
     const result = await listConversations(context.workspace.id, input);
-    const channelsByConversation = await listConversationChannels(
-      context.workspace.id,
-      result.items.map((row) => row.conversation.id),
-    );
+    const conversationIds = result.items.map((row) => row.conversation.id);
+    const [channelsByConversation, issueCounts] = await Promise.all([
+      listConversationChannels(context.workspace.id, conversationIds),
+      countOpenConversationIssues(context.workspace.id, conversationIds),
+    ]);
     return Response.json({
       ...result,
       items: result.items.map((row) => ({
         ...row,
         channels: channelsByConversation.get(row.conversation.id) ?? [],
+        openHumanCaseCount: issueCounts.get(row.conversation.id) ?? 0,
       })),
     });
   } catch (error) {
