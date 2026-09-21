@@ -98,9 +98,19 @@ try {
      ON CONFLICT (workspace_id) DO UPDATE SET balance = 100, updated_at = now()`,
     [workspaceId],
   );
+  for (let day = 0; day < 7; day += 1) {
+    await pool.query(
+      `INSERT INTO business_hours (workspace_id, day_of_week, enabled, open_time, close_time)
+       VALUES ($1, $2, true, '08:00', '18:00')
+       ON CONFLICT (workspace_id, day_of_week) DO UPDATE
+       SET enabled = true, open_time = '08:00', close_time = '18:00', updated_at = now()`,
+      [workspaceId, day],
+    );
+  }
+
   const integration = await pool.query(
     `INSERT INTO integrations (workspace_id, category, provider, mode, status, settings)
-     VALUES ($1, 'CALENDAR', 'calcom', 'BYOP', 'CONNECTED', '{}'::jsonb)
+     VALUES ($1, 'CALENDAR', 'google', 'BYOP', 'ERROR', '{}'::jsonb)
      RETURNING id`,
     [workspaceId],
   );
@@ -110,6 +120,16 @@ try {
      ON CONFLICT (workspace_id, capability) DO UPDATE SET integration_id = EXCLUDED.integration_id, mode = EXCLUDED.mode, updated_at = now()`,
     [workspaceId, integration.rows[0].id],
   );
+  const staleCalendarBinding = await pool.query(
+    `SELECT cb.integration_id, i.status
+       FROM capability_bindings cb
+       LEFT JOIN integrations i ON i.id = cb.integration_id
+      WHERE cb.workspace_id = $1 AND cb.capability = 'CALENDAR'`,
+    [workspaceId],
+  );
+  assert(staleCalendarBinding.rows[0]?.status === "ERROR",
+    "Milestone 4 did not create the stale external calendar route used to verify native fallback.");
+
 
   const upload = await parseResponse(await context.request.post(`${baseUrl}/api/knowledge/files`, {
     multipart: { file: {
