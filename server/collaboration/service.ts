@@ -1,6 +1,15 @@
+import { createHash } from "node:crypto";
 import { and, desc, eq, isNull, or } from "drizzle-orm";
 import { db } from "@/db";
-import { automationEvents, conversationHandlingEvents, conversations, memberships, notifications } from "@/db/schema";
+import {
+  automationEvents,
+  conversationHandlingEvents,
+  conversationHumanCases,
+  conversations,
+  memberships,
+  messages,
+  notifications,
+} from "@/db/schema";
 import { AppError } from "@/server/http/errors";
 
 async function conversationInWorkspace(
@@ -79,47 +88,149 @@ export async function takeOverConversation(input: {
   });
 }
 
-export async function escalateConversation(input: {
+function issueFingerprint(reason: string) {
+  return createHash("sha256").update(reason.trim().toLowerCase().replace(/\s+/g, " ")).digest("hex");
+}
+
+async function latestCustomerMessage(
+  tx: Parameters<Parameters<typeof db.transaction>[0]>[0],
+  workspaceId: string,
+  conversationId: string,
+) {
+  const [message] = await tx.select({ id: messages.id }).from(messages).where(and(
+    eq(messages.workspaceId, workspaceId),
+    eq(messages.conversationId, conversationId),
+    eq(messages.senderType, "CUSTOMER"),
+  )).orderBy(desc(messages.createdAt), desc(messages.id)).limit(1);
+  return message?.id ?? null;
+}
+
+export async function escalateConversationIssue(input: {
   workspaceId: string;
   conversationId: string;
   reason?: string | null;
 }) {
   return db.transaction(async (tx) => {
     const current = await conversationInWorkspace(tx, input.workspaceId, input.conversationId);
-    const now = new Date();
-    const [conversation] = await tx.update(conversations).set({
-      handlingMode: "HUMAN",
-      assignedUserId: null,
-      aiPausedAt: current.aiPausedAt ?? now,
-      updatedAt: now,
-    }).where(and(
-      eq(conversations.workspaceId, input.workspaceId),
-      eq(conversations.id, input.conversationId),
-    )).returning();
+    const reason = input.reason?.trim() || "Customer issue needs staff follow-up.";
+    const fingerprint = issueFingerprint(reason);
+    const sourceMessageId = await latestCustomerMessage(tx, input.workspaceId, input.conversationId);
 
-    const [handlingEvent] = await tx.insert(conversationHandlingEvents).values({
+    const duplicateWhere = sourceMessageId
+      ? and(
+          eq(conversationHumanCases.workspaceId, input.workspaceId),
+          eq(conversationHumanCases.conversationId, input.conversationId),
+          eq(conversationHumanCases.sourceMessageId, sourceMessageId),
+          eq(conversationHumanCases.fingerprint, fingerprint),
+          or(eq(conversationHumanCases.status, "OPEN"), eq(conversationHumanCases.status, "CLAIMED")),
+        )
+      : and(
+          eq(conversationHumanCases.workspaceId, input.workspaceId),
+          eq(conversationHumanCases.conversationId, input.conversationId),
+          eq(conversationHumanCases.fingerprint, fingerprint),
+          or(eq(conversationHumanCases.status, "OPEN"), eq(conversationHumanCases.status, "CLAIMED")),
+        );
+    const [existing] = await tx.select().from(conversationHumanCases)
+      .where(duplicateWhere).orderBy(desc(conversationHumanCases.createdAt)).limit(1);
+    if (existing) return { conversation: current, issue: existing, created: false };
+
+    const now = new Date();
+    const [issue] = await tx.insert(conversationHumanCases).values({
+      workspaceId: input.workspaceId,
+      conversationId: input.conversationId,
+      contactId: current.contactId,
+      sourceMessageId,
+      fingerprint,
+      reason,
+      status: "OPEN",
+      metadata: { handlingMode: current.handlingMode },
+      createdAt: now,
+      updatedAt: now,
+    }).returning();
+
+    await tx.insert(conversationHandlingEvents).values({
       workspaceId: input.workspaceId,
       conversationId: input.conversationId,
       type: "ESCALATED",
       actorUserId: null,
       assignedUserId: null,
-      reason: input.reason?.trim() || null,
-    }).returning({ id: conversationHandlingEvents.id });
+      reason,
+      metadata: { issueCaseId: issue.id, scope: "ISSUE" },
+    });
+
+    await tx.insert(notifications).values({
+      workspaceId: input.workspaceId,
+      userId: null,
+      type: "HUMAN_CASE_OPENED",
+      title: "Customer issue needs follow-up",
+      body: reason,
+      conversationId: input.conversationId,
+      contactId: current.contactId,
+      metadata: { issueCaseId: issue.id, scope: "ISSUE" },
+    });
 
     await tx.insert(automationEvents).values({
       workspaceId: input.workspaceId,
       type: "CONVERSATION_ESCALATED",
-      aggregateType: "HANDLING_EVENT",
-      aggregateId: handlingEvent.id,
+      aggregateType: "HUMAN_CASE",
+      aggregateId: issue.id,
       payload: {
         conversationId: input.conversationId,
         contactId: current.contactId,
-        reason: input.reason?.trim() || null,
+        issueCaseId: issue.id,
+        reason,
+        scope: "ISSUE",
       },
       occurredAt: now,
     }).onConflictDoNothing();
 
-    return conversation;
+    return { conversation: current, issue, created: true };
+  });
+}
+
+// Backwards-compatible name for call sites that mean automated escalation.
+// Manual full-conversation ownership remains takeOverConversation().
+export const escalateConversation = escalateConversationIssue;
+
+export async function hasOpenConversationIssue(workspaceId: string, conversationId: string) {
+  const [issue] = await db.select({ id: conversationHumanCases.id }).from(conversationHumanCases).where(and(
+    eq(conversationHumanCases.workspaceId, workspaceId),
+    eq(conversationHumanCases.conversationId, conversationId),
+    or(eq(conversationHumanCases.status, "OPEN"), eq(conversationHumanCases.status, "CLAIMED")),
+  )).limit(1);
+  return Boolean(issue);
+}
+
+export async function listOpenConversationIssues(workspaceId: string, conversationId: string, limit = 20) {
+  return db.select().from(conversationHumanCases).where(and(
+    eq(conversationHumanCases.workspaceId, workspaceId),
+    eq(conversationHumanCases.conversationId, conversationId),
+    or(eq(conversationHumanCases.status, "OPEN"), eq(conversationHumanCases.status, "CLAIMED")),
+  )).orderBy(desc(conversationHumanCases.createdAt)).limit(Math.min(Math.max(limit, 1), 100));
+}
+
+export async function resolveConversationIssue(input: {
+  workspaceId: string;
+  conversationId: string;
+  issueId: string;
+  actorUserId: string;
+}) {
+  return db.transaction(async (tx) => {
+    await conversationInWorkspace(tx, input.workspaceId, input.conversationId);
+    const now = new Date();
+    const [issue] = await tx.update(conversationHumanCases).set({
+      status: "RESOLVED",
+      resolvedAt: now,
+      updatedAt: now,
+      metadata: { resolvedByUserId: input.actorUserId },
+    }).where(and(
+      eq(conversationHumanCases.workspaceId, input.workspaceId),
+      eq(conversationHumanCases.conversationId, input.conversationId),
+      eq(conversationHumanCases.id, input.issueId),
+      or(eq(conversationHumanCases.status, "OPEN"), eq(conversationHumanCases.status, "CLAIMED")),
+    )).returning();
+    if (!issue) throw new AppError("HUMAN_CASE_NOT_FOUND", "Open staff issue not found.", 404);
+    return issue;
   });
 }
 
