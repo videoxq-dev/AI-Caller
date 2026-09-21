@@ -1,6 +1,6 @@
 import { and, eq, gt, inArray, lt } from "drizzle-orm";
 import { db } from "@/db";
-import { appointments } from "@/db/schema";
+import { appointments, bookingReservations } from "@/db/schema";
 import { getBusinessSetup } from "@/server/domain/onboarding/repository";
 import { getCalendarSetup } from "@/server/domain/integrations/repository";
 import { calendarSetupSchema } from "@/server/domain/integrations/schemas";
@@ -140,14 +140,24 @@ export async function filterSlotsThroughLocalPolicy(
     offered.length > 10_000) {
     throw new AppError("AVAILABILITY_RANGE_INVALID", "Cannot safely check this calendar range.", 422);
   }
-  const existing = await db.select({ startsAt: appointments.startsAt, endsAt: appointments.endsAt })
+  const [existingBookings, reservations] = await Promise.all([
+    db.select({ startsAt: appointments.startsAt, endsAt: appointments.endsAt })
     .from(appointments).where(and(
       eq(appointments.workspaceId, workspaceId),
       inArray(appointments.status, ["PENDING", "CONFIRMED"]),
       lt(appointments.startsAt, new Date(input.endsAt.getTime() + 36 * 60 * 60_000)),
       gt(appointments.endsAt, new Date(input.startsAt.getTime() - 36 * 60 * 60_000)),
-    )).limit(1001);
-  if (existing.length > 1000) {
+    )).limit(1001),
+    db.select({ startsAt: bookingReservations.startsAt, endsAt: bookingReservations.endsAt })
+      .from(bookingReservations).where(and(
+        eq(bookingReservations.workspaceId, workspaceId),
+        eq(bookingReservations.state, "ACTIVE"),
+        lt(bookingReservations.startsAt, new Date(input.endsAt.getTime() + 36 * 60 * 60_000)),
+        gt(bookingReservations.endsAt, new Date(input.startsAt.getTime() - 36 * 60 * 60_000)),
+      )).limit(1001),
+  ]);
+  const existing = [...existingBookings, ...reservations];
+  if (existingBookings.length > 1000 || reservations.length > 1000) {
     throw new AppError("AVAILABILITY_INCOMPLETE", "There are too many appointments to check availability safely.", 503);
   }
   const duration = input.durationMinutes;
@@ -177,7 +187,8 @@ export async function nativeAvailability(workspaceId: string, input: Availabilit
   if (end <= start || end - start > 7 * 24 * 60 * 60_000 || durationMinutes < 5 || durationMinutes > 1440) {
     throw new AppError("AVAILABILITY_RANGE_INVALID", "Check a date range of at most seven days and a valid appointment duration.", 422);
   }
-  const existing = await db.select({ startsAt: appointments.startsAt, endsAt: appointments.endsAt })
+  const [existingBookings, reservations] = await Promise.all([
+    db.select({ startsAt: appointments.startsAt, endsAt: appointments.endsAt })
     .from(appointments).where(and(
       eq(appointments.workspaceId, workspaceId),
       inArray(appointments.status, ["PENDING", "CONFIRMED"]),
@@ -185,8 +196,17 @@ export async function nativeAvailability(workspaceId: string, input: Availabilit
       // immediately outside the requested window are still authoritative.
       lt(appointments.startsAt, new Date(input.endsAt.getTime() + 36 * 60 * 60_000)),
       gt(appointments.endsAt, new Date(input.startsAt.getTime() - 36 * 60 * 60_000)),
-    )).limit(1001);
-  if (existing.length > 1000) {
+    )).limit(1001),
+    db.select({ startsAt: bookingReservations.startsAt, endsAt: bookingReservations.endsAt })
+      .from(bookingReservations).where(and(
+        eq(bookingReservations.workspaceId, workspaceId),
+        eq(bookingReservations.state, "ACTIVE"),
+        lt(bookingReservations.startsAt, new Date(input.endsAt.getTime() + 36 * 60 * 60_000)),
+        gt(bookingReservations.endsAt, new Date(input.startsAt.getTime() - 36 * 60 * 60_000)),
+      )).limit(1001),
+  ]);
+  const existing = [...existingBookings, ...reservations];
+  if (existingBookings.length > 1000 || reservations.length > 1000) {
     throw new AppError("AVAILABILITY_INCOMPLETE", "There are too many appointments to check availability safely.", 503);
   }
   const slots: Window[] = [];
