@@ -2,6 +2,8 @@ import { afterAll, beforeEach, describe, expect, it } from "vitest";
 import { and, eq } from "drizzle-orm";
 import { closeDatabase, db } from "@/db";
 import { aiAgents, contacts, leads, workspaces } from "@/db/schema";
+import { listAppointments } from "@/server/domain/core/repository";
+import { saveBusinessSetup } from "@/server/domain/onboarding/repository";
 import { appendMessage, getOrCreateOpenConversation } from "@/server/domain/core/repository";
 import { executeOrchestratorTools } from "./tools";
 import { setWorkspaceAgentCapabilities } from "@/server/agent/service";
@@ -132,6 +134,29 @@ describe("orchestrator lead updates", () => {
     expect(lead.qualificationData).toEqual({ service: "Commercial HVAC repair", urgency: "Today" });
     expect(lead.qualificationCompletedAt).toBeInstanceOf(Date);
   });
+  it("executes availability and a confirmed in-app booking with no connected calendar", async () => {
+    await saveBusinessSetup(workspaceId, {
+      businessName: "Office Cleaning", timezone: "UTC", completeStep: true,
+      hours: Array.from({ length: 7 }, (_, dayOfWeek) => ({
+        dayOfWeek, enabled: true, openTime: "08:00", closeTime: "18:00",
+      })),
+    });
+    const availability = await executeOrchestratorTools(workspaceId, conversationId, contactId, {
+      action: { type: "CHECK_AVAILABILITY", startsAt: "2030-09-23T08:00:00Z",
+        endsAt: "2030-09-23T18:00:00Z", timezone: "UTC", durationMinutes: 240 },
+    });
+    expect(availability.kind).toBe("availability");
+    expect(availability.data.slots).toEqual(expect.arrayContaining([
+      expect.objectContaining({ startsAt: "2030-09-23T10:00:00.000Z" }),
+    ]));
+    const booked = await executeOrchestratorTools(workspaceId, conversationId, contactId, {
+      action: { type: "BOOK_APPOINTMENT", startsAt: "2030-09-23T10:00:00Z",
+        endsAt: "2030-09-23T14:00:00Z", timezone: "UTC", title: "Office Cleaning" },
+    });
+    expect(booked).toMatchObject({ kind: "booking", data: { status: "CONFIRMED" } });
+    expect((await listAppointments(workspaceId)).total).toBe(1);
+  });
+
   it("denies a forged booking before touching the calendar or customer record", async () => {
     await setWorkspaceAgentCapabilities(workspaceId, { ...defaultAgentCapabilities, BOOK_APPOINTMENT: false });
     await expect(executeOrchestratorTools(workspaceId, conversationId, contactId, {
