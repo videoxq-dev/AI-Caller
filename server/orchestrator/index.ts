@@ -31,7 +31,7 @@ function isExplicitHumanRequest(message: string) {
     || /\b(?:speak|talk|connect|transfer|reach|want|need|like|get)\b[^.!?]{0,100}\b(?:human|operator|representative|real person|live person|staff member|team member|person)\b/.test(text);
 }
 
-const LIVE_PHONE_ESCALATION_REPLY = "I've flagged this issue for our team to follow up. I can't transfer this call live, but I can keep helping with anything else.";
+const LIVE_PHONE_ESCALATION_REPLY = "I've flagged this issue for our team to follow up. I can't transfer this call live. I can keep helping with anything else.";
 
 
 function safeLivePhoneReply(reply: string) {
@@ -248,7 +248,7 @@ function recentCustomerBookingText(context: OrchestratorContext) {
 function bookingMissingDetailReply(message: string) {
   if (!/\b(?:book|booking|reserve|reservation|schedule|appointment)\b/i.test(message)) return null;
   const hasDate = /\b(?:today|tomorrow|monday|tuesday|wednesday|thursday|friday|saturday|sunday|january|february|march|april|may|june|july|august|september|october|november|december|\d{4}-\d{2}-\d{2}|\d{1,2}[\/-]\d{1,2}(?:[\/-]\d{2,4})?)\b/i.test(message);
-  const hasTime = /\b(?:at|by)\s+\d{1,2}(?::\d{2})?\s*(?:a\.?m\.?|p\.?m\.?)?\b|\b(?:[01]?\d|2[0-3]):[0-5]\d\b/i.test(message);
+  const hasTime = /\b(?:at|by)\s+(?:0?[1-9]|1[0-2])(?::[0-5]\d)?\s*(?:a\.?m\.?|p\.?m\.?)?\b|\b(?:[01]?\d|2[0-3]):[0-5]\d\b/i.test(message);
   if (!hasDate && !hasTime) return "I can help with that. What date and time would you prefer?";
   if (!hasDate) return "I have the time. What date would you like?";
   if (!hasTime) return "I have the date. What time would you prefer?";
