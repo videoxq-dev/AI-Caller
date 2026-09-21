@@ -57,6 +57,7 @@ export const webchatSessions = pgTable(
     conversationId: uuid("conversation_id").notNull().references(() => conversations.id, { onDelete: "cascade" }),
     visitorId: text("visitor_id").notNull(),
     tokenHash: text("token_hash").notNull(),
+    bookingEngineVersion: text("booking_engine_version").default("v1").notNull(),
     expiresAt: timestamp("expires_at", { withTimezone: true, mode: "date" }).notNull(),
     lastSeenAt: timestamp("last_seen_at", { withTimezone: true, mode: "date" }).defaultNow().notNull(),
     createdAt: timestamp("created_at", { withTimezone: true, mode: "date" }).defaultNow().notNull(),
