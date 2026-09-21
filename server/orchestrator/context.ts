@@ -21,6 +21,7 @@ export type OrchestratorContext = {
   resumedAfterHumanHandoff?: boolean;
   systemPrompt: string;
   timezone?: string;
+  services?: Array<{ id: string; name: string; durationMinutes: number | null }>;
   messages: OrchestratorMessage[];
 };
 
@@ -247,6 +248,11 @@ export async function buildConversationContext(workspaceId: string, conversation
     source: "INBOUND_TURN" as const,
     resumedAfterHumanHandoff,
     timezone: businessSetup.profile?.timezone ?? "UTC",
+    services: agentSetup.services.map((service) => ({
+      id: service.id,
+      name: service.name,
+      durationMinutes: service.durationMinutes,
+    })),
     systemPrompt,
     messages,
   };
@@ -264,6 +270,11 @@ export async function buildAgentTestContext(workspaceId: string, messages: Orche
     agent: agentSetup.agent,
     source: "AGENT_TEST" as const,
     timezone: businessSetup.profile?.timezone ?? "UTC",
+    services: agentSetup.services.map((service) => ({
+      id: service.id,
+      name: service.name,
+      durationMinutes: service.durationMinutes,
+    })),
     systemPrompt: buildSystemPrompt(businessSetup, agentSetup, {
       name: "Test customer",
       leadStatus: "NEW",
