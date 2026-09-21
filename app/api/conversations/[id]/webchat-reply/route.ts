@@ -21,7 +21,7 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
     if (conversation.handlingMode !== "HUMAN"
       && !(await hasOpenConversationIssue(context.workspace.id, id))) {
       throw new AppError(
-        "STAFF_REPLY_SCOPE_REQUIRED",
+        "HUMAN_TAKEOVER_REQUIRED",
         "Take over the conversation or open a staff issue before sending a staff Web Chat reply.",
         409,
       );
