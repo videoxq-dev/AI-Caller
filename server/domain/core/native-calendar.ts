@@ -49,7 +49,7 @@ export async function nativeAvailability(workspaceId: string, input: Availabilit
   const durationMinutes = input.durationMinutes ?? 30;
   const duration = durationMinutes * 60_000;
   const start = input.startsAt.getTime(), end = input.endsAt.getTime();
-  if (end <= start || end - start > 7 * 24 * 60 * 60_000 || durationMinutes < 5 || durationMinutes > 480) {
+  if (end <= start || end - start > 7 * 24 * 60 * 60_000 || durationMinutes < 5 || durationMinutes > 1440) {
     throw new AppError("AVAILABILITY_RANGE_INVALID", "Check a date range of at most seven days and a valid appointment duration.", 422);
   }
   const existing = await db.select({ startsAt: appointments.startsAt, endsAt: appointments.endsAt })
@@ -62,7 +62,8 @@ export async function nativeAvailability(workspaceId: string, input: Availabilit
   const first = Math.ceil(Math.max(start, Date.now()) / (30 * 60_000)) * 30 * 60_000;
   for (let at = first; at + duration <= end && slots.length < 12; at += 30 * 60_000) {
     const slot = { startsAt: new Date(at), endsAt: new Date(at + duration) };
-    if (withinBusinessHours(slot, timezone, hours)
+    const localStart = localParts(slot.startsAt, timezone);
+    if (localStart.minute % 30 === 0 && withinBusinessHours(slot, timezone, hours)
       && !existing.some(row => row.startsAt < slot.endsAt && row.endsAt > slot.startsAt)) slots.push(slot);
   }
   return slots;
