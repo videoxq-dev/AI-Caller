@@ -1,3 +1,4 @@
+import { and, eq } from "drizzle-orm";
 import { afterAll, beforeEach, describe, expect, it } from "vitest";
 import { closeDatabase, db } from "@/db";
 import { capabilityBindings, integrations, workspaces } from "@/db/schema";
