@@ -70,13 +70,23 @@ describe("native in-app appointment booking without external calendar", () => {
     expect(result.timezone).toBe("UTC");
   });
 
-  it("serializes competing requests for the same slot and prevents double booking", async () => {
-    const result = await Promise.allSettled([
+  it("treats concurrent retries of the same booking as one idempotent appointment", async () => {
+    const [first, second] = await Promise.all([
       calendarBookingService.book(workspaceId, booking(contactId)),
       calendarBookingService.book(workspaceId, booking(contactId)),
     ]);
-    expect(result.filter(row => row.status === "fulfilled")).toHaveLength(1);
-    expect(result.filter(row => row.status === "rejected")).toHaveLength(1);
+    expect(second.id).toBe(first.id);
+    expect((await listAppointments(workspaceId)).total).toBe(1);
+  });
+
+  it("serializes true competing customers and rejects the overlapping booking", async () => {
+    const other = await createContact(workspaceId, {
+      name: "Second caller", email: null, phone: "+13074453685",
+      notes: null, tags: [], identities: [],
+    });
+    await calendarBookingService.book(workspaceId, booking(contactId));
+    await expect(calendarBookingService.book(workspaceId, booking(other.id)))
+      .rejects.toMatchObject({ code: "APPOINTMENT_SLOT_UNAVAILABLE" });
     expect((await listAppointments(workspaceId)).total).toBe(1);
   });
 
