@@ -48,17 +48,48 @@ export class OutlookCalendarProvider implements CalendarProvider {
       endDateTime: input.endsAt.toISOString(),
       "$select": "start,end,isCancelled,showAs",
     });
-    const response = await providerJson<{ value?: Array<{ isCancelled?: boolean; showAs?: string; start?: { dateTime?: string }; end?: { dateTime?: string } }> }>(
-      `https://graph.microsoft.com/v1.0${this.calendarViewPath()}?${query.toString()}`,
-      { headers: { authorization: `Bearer ${token}`, Prefer: 'outlook.timezone="UTC"' } },
-      this.fetcher,
-    );
-    const busy = (response.value ?? [])
-      .filter((event) => !event.isCancelled && event.showAs !== "free")
-      .map((event) => ({
-        startsAt: parseDate(event.start?.dateTime, input.startsAt),
-        endsAt: parseDate(event.end?.dateTime, input.endsAt),
-      }));
+    type OutlookEvent = {
+      isCancelled?: boolean;
+      showAs?: string;
+      start?: { dateTime?: string };
+      end?: { dateTime?: string };
+    };
+    type OutlookPage = { value?: OutlookEvent[]; "@odata.nextLink"?: string };
+    let url: string | null = `https://graph.microsoft.com/v1.0${this.calendarViewPath()}?${query.toString()}`;
+    const busy: Array<{ startsAt: Date; endsAt: Date }> = [];
+    const visited = new Set<string>();
+    for (let page = 0; url !== null; page++) {
+      if (page >= 30 || visited.has(url)) throw new Error("Microsoft Calendar availability response was incomplete.");
+      visited.add(url);
+      const response: OutlookPage = await providerJson<OutlookPage>(
+        url,
+        { headers: { authorization: `Bearer ${token}`, Prefer: 'outlook.timezone="UTC"' } },
+        this.fetcher,
+      );
+      if (!Array.isArray(response.value)) throw new Error("Microsoft Calendar did not return a complete availability response.");
+      for (const event of response.value) {
+        if (event.isCancelled || event.showAs === "free") continue;
+        const start = event.start?.dateTime, end = event.end?.dateTime;
+        if (!start || !end) throw new Error("Microsoft Calendar returned an event without a valid time range.");
+        const startsAt = parseDate(start, new Date(NaN));
+        const endsAt = parseDate(end, new Date(NaN));
+        if (!Number.isFinite(startsAt.getTime()) || !Number.isFinite(endsAt.getTime()) || endsAt <= startsAt) {
+          throw new Error("Microsoft Calendar returned an invalid event interval.");
+        }
+        busy.push({ startsAt, endsAt });
+        if (busy.length > 10_000) throw new Error("Microsoft Calendar returned too many events to check availability safely.");
+      }
+      if (!response["@odata.nextLink"]) {
+        url = null;
+      } else {
+        const next = new URL(response["@odata.nextLink"]);
+        if (next.origin !== "https://graph.microsoft.com" ||
+          !next.pathname.startsWith("/v1.0/me/")) {
+          throw new Error("Microsoft Calendar returned an invalid pagination URL.");
+        }
+        url = next.toString();
+      }
+    }
     return slotize(input.startsAt, input.endsAt, busy, input.durationMinutes ?? numberSetting(this.settings, "meetingDurationMinutes", 30));
   }
 
