@@ -79,6 +79,7 @@ export const webchatTurns = pgTable(
     clientMessageId: uuid("client_message_id").notNull(),
     status: text("status").default("PROCESSING").notNull(),
     responseText: text("response_text"),
+    responseMetadata: jsonb("response_metadata").$type<Record<string, unknown>>().default({}).notNull(),
     error: text("error"),
     createdAt: timestamp("created_at", { withTimezone: true, mode: "date" }).defaultNow().notNull(),
     updatedAt: timestamp("updated_at", { withTimezone: true, mode: "date" }).defaultNow().notNull(),
