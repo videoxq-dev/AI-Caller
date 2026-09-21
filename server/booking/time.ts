@@ -93,7 +93,7 @@ export function parseBookingDate(
     calendarToday.setUTCDate(calendarToday.getUTCDate() + days);
     return formatDate(calendarToday.getUTCFullYear(), calendarToday.getUTCMonth() + 1, calendarToday.getUTCDate());
   }
-  const named = /^(jan(?:uary)?|feb(?:ruary)?|mar(?:ch)?|apr(?:il)?|may|jun(?:e)?|jul(?:y)?|aug(?:ust)?|sep(?:t(?:ember)?|tember)|oct(?:ober)?|nov(?:ember)?|dec(?:ember)?)\s+(\d{1,2})(?:st|nd|rd|th)?(?:,?\s+(\d{4}))?$/.exec(normalized);
+  const named = /^(jan(?:uary)?|feb(?:ruary)?|mar(?:ch)?|apr(?:il)?|may|jun(?:e)?|jul(?:y)?|aug(?:ust)?|sep(?:t(?:ember)?|tember)?|oct(?:ober)?|nov(?:ember)?|dec(?:ember)?)\s+(\d{1,2})(?:st|nd|rd|th)?(?:,?\s+(\d{4}))?$/.exec(normalized);
   if (!named) bookingError("BOOKING_DATE_UNRECOGNIZED", "Please specify a date, for example September 23, 2026.");
   const month = months[named[1]], day = Number(named[2]);
   let year = named[3] ? Number(named[3]) : today.year;
