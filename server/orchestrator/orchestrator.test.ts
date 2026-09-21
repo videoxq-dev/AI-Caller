@@ -170,7 +170,7 @@ describe("orchestrator response protocol", () => {
         },
       }) });
     const executeTools = vi.fn(async () => ({ kind: "availability" as const, data: {
-      slots: [{ startsAt: "2037-09-23T10:00:00.000Z", endsAt: "2037-09-23T10:30:00.000Z" }],
+      slots: [{ startsAt: "2030-09-23T10:00:00.000Z", endsAt: "2030-09-23T10:30:00.000Z" }],
     } }));
     const orchestrator = createResponseOrchestrator({
       buildContext: vi.fn(async () => fakeContext()), executeTools, generate,
