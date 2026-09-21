@@ -2,7 +2,7 @@ import { createHash, randomUUID } from "node:crypto";
 import { and, eq, sql } from "drizzle-orm";
 import { z } from "zod";
 import { db } from "@/db";
-import { bookingDrafts, bookingOffers, bookingPreviews, services } from "@/db/schema";
+import { bookingDrafts, bookingOffers, bookingPreviews, messages, services } from "@/db/schema";
 import { calendarBookingService } from "@/server/domain/core/calendar-booking";
 import { getBusinessSetup } from "@/server/domain/onboarding/repository";
 import { getCalendarSetup } from "@/server/domain/integrations/repository";
@@ -237,6 +237,20 @@ export async function recordBookingPreviewDelivery(
     }
     if (input.deliveryChannel !== context.channel) {
       throw new AppError("BOOKING_CHANNEL_MISMATCH", "Confirmation must use the originating booking channel.", 409);
+    }
+    if (context.channel === "WEBCHAT") {
+      const [outbound] = await tx.select().from(messages).where(and(
+        eq(messages.id, reference), eq(messages.workspaceId, context.workspaceId),
+        eq(messages.conversationId, context.conversationId!),
+        eq(messages.channel, "WEBCHAT"), eq(messages.direction, "OUTBOUND"),
+        eq(messages.senderType, "AI"),
+      )).limit(1);
+      if (!outbound || outbound.metadata.bookingPreviewId !== previewId ||
+        outbound.metadata.bookingDraftId !== draftId ||
+        outbound.metadata.bookingVersion !== version) {
+        throw new AppError("BOOKING_DELIVERY_NOT_VERIFIED",
+          "The current appointment preview was not delivered in this conversation.", 409);
+      }
     }
     if (preview.deliveredAt) {
       if (preview.deliveryChannel !== input.deliveryChannel ||
