@@ -5,11 +5,16 @@ import { buildConversationContext, type OrchestratorContext } from "./context";
 import {
   executeOrchestratorTools,
   OrchestratorOutputError,
+  orchestratorActionSchema,
   parseOrchestratorEnvelope,
   type OrchestratorEnvelope,
   type OrchestratorToolResult,
 } from "./tools";
 import { generateAIWithUsage } from "./usage";
+import {
+  getAwaitingPendingAction,
+  isExplicitActionConfirmation,
+} from "./pending-actions";
 import type { AIProvider } from "@/server/providers/contracts";
 
 type AIMessage = Parameters<AIProvider["generate"]>[0]["messages"][number];
@@ -48,6 +53,7 @@ type OrchestratorDependencies = {
     envelope: OrchestratorEnvelope,
   ) => Promise<OrchestratorToolResult>;
   generate: (workspaceId: string, referenceId: string, messages: AIMessage[]) => Promise<{ text: string }>;
+  getAwaitingAction?: typeof getAwaitingPendingAction;
 };
 
 const ACTION_PROTOCOL = `
@@ -472,6 +478,76 @@ export function createResponseOrchestrator(dependencies: OrchestratorDependencie
           throw error;
         }
       };
+      const awaitingAction = dependencies.getAwaitingAction
+        && isExplicitActionConfirmation(lastUserMessage)
+        ? await dependencies.getAwaitingAction(workspaceId, conversationId)
+        : null;
+      if (awaitingAction) {
+        const parsedAction = orchestratorActionSchema.safeParse({
+          type: awaitingAction.type,
+          ...awaitingAction.payload,
+        });
+        if (!parsedAction.success) {
+          logger.error(
+            { workspaceId, conversationId, pendingActionId: awaitingAction.id },
+            "Stored pending action could not be validated",
+          );
+          return unresolvedWithoutHandoff(
+            "I couldn't safely complete the prepared action. Please tell me what you'd like to do again.",
+          );
+        }
+        if (options.beforeTools && !(await options.beforeTools())) {
+          return unresolvedWithoutHandoff(
+            "I won't complete that action because your request changed. Please confirm the latest details.",
+          );
+        }
+        try {
+          const committed = await dependencies.executeTools(
+            workspaceId,
+            conversationId,
+            context.contact.id,
+            { action: parsedAction.data },
+          );
+          if (committed.kind === "booking") {
+            return {
+              reply: bookingFallback(committed),
+              handlingMode: "AI" as const,
+              action: parsedAction.data,
+              toolResult: committed,
+            };
+          }
+          if (committed.kind === "sms") {
+            return {
+              reply: committed.data.sent === true
+                ? "I have sent the requested text message."
+                : String(committed.data.reason ?? "I could not send that text message."),
+              handlingMode: "AI" as const,
+              action: parsedAction.data,
+              toolResult: committed,
+            };
+          }
+          if (committed.kind === "pending_action") {
+            return {
+              reply: pendingActionReply(committed, context.timezone ?? "UTC"),
+              handlingMode: "AI" as const,
+              action: parsedAction.data,
+              toolResult: committed,
+            };
+          }
+          logger.error(
+            { workspaceId, conversationId, pendingActionId: awaitingAction.id, kind: committed.kind },
+            "Confirmed pending action returned an unexpected tool result",
+          );
+          return unresolvedWithoutHandoff(
+            "I couldn't safely complete the prepared action. Please tell me what you'd like to do again.",
+          );
+        } catch (error) {
+          if (!(error instanceof AppError)) throw error;
+          const truthful = approvedToolFailure(parsedAction.data.type, error);
+          return resolveUncertainRequest(truthful, `${parsedAction.data.type} failed: ${error.code}`);
+        }
+      }
+
       if (isLivePhone && isExplicitHumanRequest(lastUserMessage)) {
         if (options.beforeTools && !(await options.beforeTools())) {
           return { reply: null, handlingMode: "AI" as const, action: { type: "NONE" as const },
@@ -765,4 +841,5 @@ export const responseOrchestrator = createResponseOrchestrator({
     const response = await generateAIWithUsage(workspaceId, referenceId, messages);
     return { text: response.text };
   },
+  getAwaitingAction: getAwaitingPendingAction,
 });
