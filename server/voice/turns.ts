@@ -66,9 +66,9 @@ export async function processVoiceTurn(input: { workspaceId: string; callId: str
     }
 
     const conversation = await getConversationById(workspaceId, call.conversationId);
-    const escalatedByThisTurn = result.toolResult.kind === "escalation"
-      && result.handlingMode === "HUMAN";
-    if (!conversation || (conversation.handlingMode !== "AI" && !escalatedByThisTurn)) {
+    // Issue-scoped escalation does not change conversation ownership. A
+    // separate manual takeover may still race this turn and suppress speech.
+    if (!conversation || conversation.handlingMode !== "AI") {
       await finishVoiceTurn(workspaceId, callId, eventId, "HUMAN");
       return { status: "HANDOFF" as const };
     }
@@ -82,7 +82,7 @@ export async function processVoiceTurn(input: { workspaceId: string; callId: str
       ? call.metadata.speakingRate : voice.config.speakingRate;
     const runtime = await resolveVoiceRuntime(workspaceId, call.provider as "telnyx");
     const ready = await finishVoiceTurn(
-      workspaceId, callId, eventId, "AI_SPEAKING", escalatedByThisTurn ? "HUMAN" : "ACTIVE",
+      workspaceId, callId, eventId, "AI_SPEAKING", "ACTIVE",
     );
     if (!ready) {
       const newer = await yieldSupersededVoiceTurn(workspaceId, callId, eventId);
