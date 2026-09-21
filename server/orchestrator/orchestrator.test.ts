@@ -103,7 +103,12 @@ describe("orchestrator response protocol", () => {
   it("uses default agent behavior without a configured workflow", async () => {
     const generate = vi.fn(async () => ({ text: JSON.stringify({ action: { type: "NONE" },
       reply: "We offer the services in our approved business profile." }) }));
-    const executeTools = vi.fn(async () => ({ kind: "none" as const, data: {} }));
+    const executeTools = vi.fn(async (
+      _workspaceId: string,
+      _conversationId: string,
+      _contactId: string,
+      _envelope: { action: { type: string } },
+    ) => ({ kind: "none" as const, data: {} }));
     const orchestrator = createResponseOrchestrator({
       buildContext: vi.fn(async () => ({
         ...fakeContext(), source: "INBOUND_TURN" as const,
