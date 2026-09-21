@@ -199,7 +199,7 @@ try {
   await widgetFrame.getByText(/QA Consultation is \$120/).last().waitFor({ timeout: 15_000 });
   await composer.fill("Book the QA Consultation. My name is QA Visitor, qa.visitor@example.com");
   await widgetFrame.getByRole("button", { name: "Send message" }).click();
-  await widgetFrame.getByText(/can't book an appointment.*flagged your request for staff follow-up/i)
+  await widgetFrame.getByText(/can't book an appointment.*flagged this issue for staff follow-up/i)
     .last().waitFor({ timeout: 15_000 });
   const forbiddenBookings = await pool.query(`SELECT count(*)::int AS count FROM appointments
     WHERE workspace_id = $1`, [workspaceId]);
@@ -211,26 +211,42 @@ try {
   );
   const liveConversationId = webchatSession.rows[0]?.conversation_id;
   assert(liveConversationId, "Phase 1 Web Chat did not expose its conversation.");
-  const handoff = await pool.query(
-    `SELECT handling_mode FROM conversations WHERE workspace_id = $1 AND id = $2`,
-    [workspaceId, liveConversationId],
-  );
-  assert(handoff.rows[0]?.handling_mode === "HUMAN",
-    "When Unsure = Escalate to a human did not create a real human handoff after truthful refusal.");
-  await api(context, "PUT", `/api/conversations/${liveConversationId}/handling`,
-    { mode: "AI" }, "return owner-accepted Web Chat to AI after escalation");
+  const [ownership, issueCase] = await Promise.all([
+    pool.query(`SELECT handling_mode FROM conversations WHERE workspace_id = $1 AND id = $2`,
+      [workspaceId, liveConversationId]),
+    pool.query(`SELECT status FROM conversation_human_cases
+      WHERE workspace_id = $1 AND conversation_id = $2 ORDER BY created_at DESC LIMIT 1`,
+      [workspaceId, liveConversationId]),
+  ]);
+  assert(ownership.rows[0]?.handling_mode === "AI",
+    "Issue-scoped staff follow-up incorrectly locked the whole conversation away from AI.");
+  assert(["OPEN", "CLAIMED"].includes(issueCase.rows[0]?.status),
+    "When Unsure = Escalate to a human did not create an open issue-specific staff case.");
 
-  // Re-enable booking and run the actual Web Chat -> AI -> in-app appointment
-  // path without any connected calendar. Keep the business's one agent/number.
+  // Re-enable booking and prove the same conversation can continue with AI
+  // while the unrelated staff issue remains open.
   const policy = await api(context, "GET", "/api/agent", undefined, "read stored permissions");
   await api(context, "PATCH", "/api/agent/capabilities", {
     ...policy.capabilities, BOOK_APPOINTMENT: true,
   }, "enable native booking");
   await composer.fill("Book the QA Consultation for tomorrow at 10 AM. My name is QA Visitor, qa.visitor@example.com");
   await widgetFrame.getByRole("button", { name: "Send message" }).click();
+  await widgetFrame.getByText(/Would you like me to book it\?/i).last().waitFor({ timeout: 15_000 });
+  const beforeConfirmation = await api(context, "GET", "/api/appointments", undefined,
+    "verify staged booking has not executed");
+  assert(beforeConfirmation.total === 0,
+    "A staged Web Chat booking executed before explicit customer confirmation.");
+  const pendingBooking = await pool.query(`SELECT status FROM pending_agent_actions
+    WHERE workspace_id = $1 AND conversation_id = $2 AND type = 'BOOK_APPOINTMENT'
+    ORDER BY created_at DESC LIMIT 1`, [workspaceId, liveConversationId]);
+  assert(pendingBooking.rows[0]?.status === "AWAITING_CONFIRMATION",
+    "The booking was not persisted as an awaiting-confirmation action.");
+
+  await composer.fill("Yes, please.");
+  await widgetFrame.getByRole("button", { name: "Send message" }).click();
   await widgetFrame.getByText(/QA Consultation is booked for/).last().waitFor({ timeout: 15_000 });
   const nativeBookings = await api(context, "GET", "/api/appointments", undefined,
-    "read native in-app appointment");
+    "read native in-app appointment after explicit confirmation");
   assert(nativeBookings.total === 1
     && nativeBookings.items[0].appointment.status === "CONFIRMED"
     && nativeBookings.items[0].appointment.integrationId === null,
