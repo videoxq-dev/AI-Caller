@@ -18,7 +18,10 @@ export async function resolveProviderRoute(workspaceId: string, capability: Capa
     return { workspaceId, capability, mode: "HOSTED", provider: capability === "AI_TEXT" ? "credits" : "hosted", integrationId: null, settings: {} };
   }
 
-  if (!binding.integrationId) throw new Error(`No integration is bound to ${capability}.`);
+  if (!binding.integrationId) {
+    if (capability === "CALENDAR") return null;
+    throw new Error(`No integration is bound to ${capability}.`);
+  }
   const [integration] = await db.select().from(integrations).where(and(eq(integrations.workspaceId, workspaceId), eq(integrations.id, binding.integrationId))).limit(1);
   if (!integration) {
     // Calendar has an authoritative native fallback. A stale BYOP binding must
