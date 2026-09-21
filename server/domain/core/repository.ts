@@ -9,6 +9,7 @@ import {
   lte,
   lt,
   gt,
+  ne,
   or,
   sql,
   type SQL,
@@ -548,6 +549,43 @@ export async function insertNativeAppointment(workspaceId: string, input: Appoin
     await tx.insert(automationEvents).values({
       workspaceId, type: "APPOINTMENT_CONFIRMED",
       aggregateType: "APPOINTMENT", aggregateId: appointment.id,
+      payload: {
+        appointmentId: appointment.id, contactId: appointment.contactId,
+        conversationId: appointment.conversationId,
+        startsAt: appointment.startsAt.toISOString(),
+      },
+    }).onConflictDoNothing();
+    return appointment;
+  });
+}
+
+export async function updateNativeAppointmentAfterReschedule(
+  workspaceId: string, appointmentId: string, input: AppointmentRescheduleInput,
+) {
+  return db.transaction(async tx => {
+    await tx.execute(sql`SELECT pg_advisory_xact_lock(hashtext(${workspaceId}))`);
+    const [previous] = await tx.select().from(appointments).where(and(
+      eq(appointments.workspaceId, workspaceId), eq(appointments.id, appointmentId),
+    )).limit(1);
+    if (!previous) throw new AppError("APPOINTMENT_NOT_FOUND", "Appointment not found.", 404);
+    if (previous.status === "CANCELLED") {
+      throw new AppError("APPOINTMENT_CANCELLED", "Cancelled appointments cannot be rescheduled.", 409);
+    }
+    const [conflict] = await tx.select({ id: appointments.id }).from(appointments).where(and(
+      eq(appointments.workspaceId, workspaceId), ne(appointments.id, appointmentId),
+      inArray(appointments.status, ["PENDING", "CONFIRMED"]),
+      lt(appointments.startsAt, input.endsAt), gt(appointments.endsAt, input.startsAt),
+    )).limit(1);
+    if (conflict) throw new AppError("APPOINTMENT_SLOT_UNAVAILABLE",
+      "That time is already booked. Please choose another available slot.", 409);
+    const [appointment] = await tx.update(appointments).set({
+      startsAt: input.startsAt, endsAt: input.endsAt, timezone: input.timezone,
+      status: "CONFIRMED", updatedAt: new Date(),
+    }).where(and(eq(appointments.workspaceId, workspaceId), eq(appointments.id, appointmentId))).returning();
+    await tx.insert(automationEvents).values({
+      workspaceId, type: "APPOINTMENT_RESCHEDULED",
+      aggregateType: "APPOINTMENT", aggregateId: appointment.id,
+      occurrenceKey: appointment.startsAt.toISOString(),
       payload: {
         appointmentId: appointment.id, contactId: appointment.contactId,
         conversationId: appointment.conversationId,
