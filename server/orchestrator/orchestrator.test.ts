@@ -205,6 +205,7 @@ describe("orchestrator response protocol", () => {
         type: "CHECK_AVAILABILITY",
         startsAt: "2037-09-23T10:00:00.000Z",
         timezone: "UTC",
+        durationMinutes: 60,
       });
       return { kind: "availability" as const, data: {
         timezone: "UTC",
@@ -215,6 +216,7 @@ describe("orchestrator response protocol", () => {
       buildContext: vi.fn(async () => ({
         ...fakeContext(),
         timezone: "UTC",
+        services: [{ id: "service-office", name: "Office Cleaning", durationMinutes: 60 }],
         messages: [{ role: "user" as const,
           content: "I want to book my office cleaning appointment but first I want to check availability for Wednesday 23 September 2037 at 10:00 AM" }],
         agent: { id: "agent-1", status: "ACTIVE" as const,
