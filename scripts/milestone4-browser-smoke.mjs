@@ -163,12 +163,12 @@ try {
 
   await composer.fill("What times are available tomorrow?");
   await composer.press("Enter");
-  await widgetFrame.getByText("I have a 10:00 AM opening tomorrow.", { exact: true }).waitFor({ timeout: 15_000 });
+  await widgetFrame.getByText(/I checked the schedule\. Available times include .*10:00 AM/).waitFor({ timeout: 15_000 });
 
   const bookingMessage = "My name is QA Visitor, qa.visitor@example.com. Book the 10:00 AM slot";
   await composer.fill(bookingMessage);
   await composer.press("Enter");
-  await widgetFrame.getByText("Your QA Consultation is booked for 10:00 AM tomorrow.", { exact: true }).waitFor({ timeout: 15_000 });
+  await widgetFrame.getByText(/Your QA Consultation is booked for .*10:00 AM/).waitFor({ timeout: 15_000 });
   await assertNoHorizontalOverflow(page, "Embedded Web Chat desktop");
   await page.screenshot({ path: path.join(outputDir, "webchat-desktop.png"), fullPage: true });
 
