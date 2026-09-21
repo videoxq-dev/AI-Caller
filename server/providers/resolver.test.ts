@@ -121,6 +121,31 @@ describe("provider capability routing", () => {
     await expect(resolveProviderRoute(workspaceId, "CALENDAR")).resolves.toBeNull();
   });
 
+  it("releases the calendar route when a saved provider connection test fails", async () => {
+    await saveIntegration(workspaceId, {
+      provider: "calcom",
+      category: "CALENDAR",
+      mode: "BYOP",
+      credentials: { apiKey: "bad-calendar-key" },
+      settings: {},
+    });
+    await bindCapability(workspaceId, "CALENDAR", "BYOP", "calcom");
+
+    const fetcher = (async () => new Response(
+      JSON.stringify({ error: { message: "Unauthorized" } }),
+      { status: 401, headers: { "content-type": "application/json" } },
+    )) as typeof fetch;
+    const tested = await testSavedIntegration(workspaceId, "calcom", fetcher);
+
+    expect(tested.ok).toBe(false);
+    const [binding] = await db.select().from(capabilityBindings).where(and(
+      eq(capabilityBindings.workspaceId, workspaceId),
+      eq(capabilityBindings.capability, "CALENDAR"),
+    )).limit(1);
+    expect(binding).toBeUndefined();
+    await expect(resolveProviderRoute(workspaceId, "CALENDAR")).resolves.toBeNull();
+  });
+
   it("clears stale capability bindings when an integration is explicitly disconnected", async () => {
     await saveVerifiedIntegration(workspaceId, {
       provider: "openai",
