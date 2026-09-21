@@ -320,15 +320,6 @@ export function createResponseOrchestrator(dependencies: OrchestratorDependencie
         return resolveUncertainRequest(reply, planned.unresolved.reason);
       }
 
-      if (planned.action.type === "ESCALATE"
-        && !isExplicitHumanRequest(lastUserMessage)
-        && whenUnsure !== "Escalate to a human") {
-        const reply = whenUnsure === "Ask a clarifying question"
-          ? "I’m not certain I can complete that request yet. Could you clarify what you need?"
-          : "I can collect the details needed for follow-up. What name and contact information should I record?";
-        return unresolvedWithoutHandoff(reply);
-      }
-
       // If the model recognizes that an owner-disabled capability blocks the
       // request, the server—not the model—decides whether When Unsure authorizes
       // a real handoff. This keeps refusal text and ownership state consistent.
@@ -345,6 +336,15 @@ export function createResponseOrchestrator(dependencies: OrchestratorDependencie
             `Requested ${wantsAvailability ? "availability check" : "appointment booking"} is disabled; applying When Unsure policy.`);
         }
       }
+      if (planned.action.type === "ESCALATE"
+        && !isExplicitHumanRequest(lastUserMessage)
+        && whenUnsure !== "Escalate to a human") {
+        const reply = whenUnsure === "Ask a clarifying question"
+          ? "I’m not certain I can complete that request yet. Could you clarify what you need?"
+          : "I can collect the details needed for follow-up. What name and contact information should I record?";
+        return unresolvedWithoutHandoff(reply);
+      }
+
       // Treat the model's metadata as optional hints. A disabled metadata
       // capability cannot fail an otherwise valid answer or cause side effects.
       // The executor still rechecks permissions on current DB state, including
