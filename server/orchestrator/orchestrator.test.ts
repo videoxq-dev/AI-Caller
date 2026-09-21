@@ -170,7 +170,7 @@ describe("orchestrator response protocol", () => {
         },
       }) });
     const executeTools = vi.fn(async () => ({ kind: "availability" as const, data: {
-      slots: [{ startsAt: "2030-09-23T10:00:00.000Z", endsAt: "2030-09-23T10:30:00.000Z" }],
+      slots: [{ startsAt: "2037-09-23T10:00:00.000Z", endsAt: "2037-09-23T10:30:00.000Z" }],
     } }));
     const orchestrator = createResponseOrchestrator({
       buildContext: vi.fn(async () => fakeContext()), executeTools, generate,
@@ -203,12 +203,12 @@ describe("orchestrator response protocol", () => {
     const executeTools = vi.fn(async (_workspaceId, _conversationId, _contactId, envelope) => {
       expect(envelope.action).toMatchObject({
         type: "CHECK_AVAILABILITY",
-        startsAt: "2030-09-23T10:00:00.000Z",
+        startsAt: "2037-09-23T10:00:00.000Z",
         timezone: "UTC",
       });
       return { kind: "availability" as const, data: {
         timezone: "UTC",
-        slots: [{ startsAt: "2030-09-23T10:00:00.000Z", endsAt: "2030-09-23T10:30:00.000Z" }],
+        slots: [{ startsAt: "2037-09-23T10:00:00.000Z", endsAt: "2037-09-23T10:30:00.000Z" }],
       } };
     });
     const orchestrator = createResponseOrchestrator({
@@ -216,7 +216,7 @@ describe("orchestrator response protocol", () => {
         ...fakeContext(),
         timezone: "UTC",
         messages: [{ role: "user" as const,
-          content: "I want to book my office cleaning appointment but first I want to check availability for Wednesday 23 September 2030 at 10:00 AM" }],
+          content: "I want to book my office cleaning appointment but first I want to check availability for Wednesday 23 September 2037 at 10:00 AM" }],
         agent: { id: "agent-1", status: "ACTIVE" as const,
           whenUnsure: "Escalate to a human", escalationMessage: null,
           behaviorSettings: { capabilities: { ...defaultAgentCapabilities } } },
