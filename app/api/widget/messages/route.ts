@@ -114,7 +114,11 @@ export async function POST(request: Request) {
           }
 
           const latestConversation = await getConversationById(workspaceId, resolved.session.conversationId);
-          if (!latestConversation || latestConversation.handlingMode !== "AI") {
+          // A successful ESCALATE intentionally changes handling to HUMAN.
+          // Deliver the verified acknowledgment before ending AI ownership;
+          // suppress any other AI reply when staff independently took over.
+          if (!latestConversation || (latestConversation.handlingMode !== "AI"
+            && !(result.handlingMode === "HUMAN" && result.toolResult.kind === "escalation"))) {
             await completeWebchatTurn(workspaceId, claim.turnId, null);
             controller.enqueue(event("handoff", { message: "A team member is handling this conversation." }));
             controller.enqueue(event("done", { handlingMode: "HUMAN" }));
