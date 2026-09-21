@@ -74,6 +74,12 @@ export async function processVoiceTurn(input: { workspaceId: string; callId: str
     }
 
     const voice = await getVoiceConfig(workspaceId);
+    const profileKey = typeof call.metadata.voiceProfile === "string"
+      ? call.metadata.voiceProfile : voice.config.profileKey;
+    const language = typeof call.metadata.language === "string"
+      ? call.metadata.language : voice.config.language;
+    const speakingRate = typeof call.metadata.speakingRate === "number"
+      ? call.metadata.speakingRate : voice.config.speakingRate;
     const runtime = await resolveVoiceRuntime(workspaceId, call.provider as "telnyx");
     const ready = await finishVoiceTurn(
       workspaceId, callId, eventId, "AI_SPEAKING", escalatedByThisTurn ? "HUMAN" : "ACTIVE",
@@ -90,14 +96,14 @@ export async function processVoiceTurn(input: { workspaceId: string; callId: str
     await runtime.provider.speak({
       callControlId: call.callControlId,
       text: result.reply,
-      voice: resolveVoiceProfile(voice.config.profileKey).providerVoiceId,
-      language: voice.config.language,
-      speakingRate: voice.config.speakingRate,
+      voice: resolveVoiceProfile(profileKey).providerVoiceId,
+      language,
+      speakingRate,
       commandId: commandId(`${eventId}:reply`),
     });
 
     const startedMs = Math.max(0, Date.now() - call.startedAt.getTime());
-    const endedMs = startedMs + estimateSpeechDurationMs(result.reply, voice.config.speakingRate);
+    const endedMs = startedMs + estimateSpeechDurationMs(result.reply, speakingRate);
     const segment = await appendVoiceTranscriptSegment(workspaceId, call.id, {
       speaker: "AI",
       text: result.reply,
