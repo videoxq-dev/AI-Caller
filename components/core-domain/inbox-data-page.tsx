@@ -239,7 +239,7 @@ export function InboxDataPage() {
     if (!isNewThread && !scrollStateRef.current.nearBottom) return;
     body.scrollTop = body.scrollHeight;
     scrollStateRef.current = { conversationId: selectedId, nearBottom: true };
-  }, [selectedId, timeline]);
+  }, [mobileThreadOpen, selectedId, timeline]);
 
   const visibleRows = useMemo(() => {
     if (channel === "ALL") return rows;
@@ -363,7 +363,7 @@ export function InboxDataPage() {
             <div className="conversationFilters"><label><select aria-label="Channel filter" value={channel} onChange={(event) => setChannel(event.target.value as "ALL" | Channel)}><option value="ALL">All channels</option><option value="WHATSAPP">WhatsApp</option><option value="SMS">SMS</option><option value="PHONE">Call</option><option value="WEBCHAT">Web Chat</option></select></label></div>
             <div className="conversationList">
               {visibleRows.map(({ conversation, contact, channels }) => (
-                <button key={conversation.id} type="button" className={`conversationItem ${selectedId === conversation.id ? "selected" : ""}`} onClick={() => { setSelectedId(conversation.id); setMobileThreadOpen(true); }}>
+                <button key={conversation.id} type="button" className={`conversationItem ${selectedId === conversation.id ? "selected" : ""}`} onClick={() => { scrollStateRef.current = { conversationId: null, nearBottom: true }; setSelectedId(conversation.id); setMobileThreadOpen(true); }}>
                   <span className="contactAvatar">{initials(contact.name)}</span>
                   <span className="conversationInfo"><span className="conversationNameRow"><strong>{contact.name ?? "Unnamed contact"}</strong><time>{displayTime(conversation.lastMessageAt)}</time></span><span className="conversationPreview">{contact.phone ?? contact.email ?? "Customer conversation"}</span><span className="conversationTags"><span className={`handlingBadge ${conversation.handlingMode === "HUMAN" ? "human" : "ai"}`}>{conversation.handlingMode === "HUMAN" ? "Human" : "AI handled"}</span>{channels.slice(0, 3).map((item) => <span key={item} className="smallTag">{channelLabels[item]}</span>)}<span className="smallTag">{conversation.status}</span></span></span>
                 </button>
