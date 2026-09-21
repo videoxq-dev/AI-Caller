@@ -348,6 +348,56 @@ describe("orchestrator response protocol", () => {
     expect(executeTools).not.toHaveBeenCalled();
   });
 
+  it("turns a complete multi-turn booking into an availability check instead of escalating", async () => {
+    const executeTools = vi.fn(async (_workspaceId, _conversationId, _contactId, envelope) => {
+      expect(envelope.action).toMatchObject({
+        type: "CHECK_AVAILABILITY",
+        startsAt: "2037-09-23T10:00:00.000Z",
+      });
+      return {
+        kind: "availability" as const,
+        data: {
+          timezone: "UTC",
+          slots: [{
+            startsAt: "2037-09-23T10:00:00.000Z",
+            endsAt: "2037-09-23T10:30:00.000Z",
+          }],
+        },
+      };
+    });
+    const orchestrator = createResponseOrchestrator({
+      buildContext: vi.fn(async () => ({
+        ...fakeContext(),
+        timezone: "UTC",
+        services: [{ id: "service-1", name: "Office Cleaning", description: null,
+          priceText: null, durationMinutes: 30 }],
+        messages: [
+          { role: "user" as const,
+            content: "I would like to book an appointment for my Office Cleaning at 30 North Gould Street." },
+          { role: "assistant" as const, content: "What date and time would you prefer?" },
+          { role: "user" as const, content: "Wednesday 23rd September 2037 by 10 AM." },
+        ],
+        agent: { id: "agent-1", status: "ACTIVE" as const,
+          whenUnsure: "Escalate to a human", escalationMessage: null,
+          behaviorSettings: { capabilities: { ...defaultAgentCapabilities, ESCALATE: true } } },
+      })),
+      executeTools,
+      generate: vi.fn(async () => ({ text: JSON.stringify({
+        reply: "I'll ask a person to handle that.",
+        unresolved: { reason: "The booking request is incomplete." },
+        action: { type: "ESCALATE", reason: "The booking request is incomplete." },
+      }) })),
+    });
+
+    const result = await orchestrator.respond("workspace", "conversation");
+
+    expect(result.handlingMode).toBe("AI");
+    expect(result.toolResult.kind).toBe("availability");
+    expect(result.reply).toContain("Available times include");
+    expect(result.reply).not.toContain("staff follow-up");
+    expect(executeTools).toHaveBeenCalledOnce();
+  });
+
   it("returns an authoritative preview instead of executing a staged booking immediately", async () => {
     const executeTools = vi.fn(async () => ({
       kind: "pending_action" as const,
