@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { and, desc, eq, isNull, or, sql } from "drizzle-orm";
+import { and, desc, eq, inArray, isNull, or, sql } from "drizzle-orm";
 import { db } from "@/db";
 import {
   automationEvents,
@@ -200,6 +200,19 @@ export async function hasOpenConversationIssue(workspaceId: string, conversation
     or(eq(conversationHumanCases.status, "OPEN"), eq(conversationHumanCases.status, "CLAIMED")),
   )).limit(1);
   return Boolean(issue);
+}
+
+export async function countOpenConversationIssues(workspaceId: string, conversationIds: string[]) {
+  if (!conversationIds.length) return new Map<string, number>();
+  const rows = await db.select({
+    conversationId: conversationHumanCases.conversationId,
+    count: sql<number>`count(*)::int`,
+  }).from(conversationHumanCases).where(and(
+    eq(conversationHumanCases.workspaceId, workspaceId),
+    inArray(conversationHumanCases.conversationId, conversationIds),
+    or(eq(conversationHumanCases.status, "OPEN"), eq(conversationHumanCases.status, "CLAIMED")),
+  )).groupBy(conversationHumanCases.conversationId);
+  return new Map(rows.map((row) => [row.conversationId, row.count]));
 }
 
 export async function listOpenConversationIssues(workspaceId: string, conversationId: string, limit = 20) {
