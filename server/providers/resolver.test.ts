@@ -97,6 +97,22 @@ describe("provider capability routing", () => {
     expect(decrypted).toEqual({ sid: "AC123", authToken: "original-secret", phone: "+15550002222" });
   });
 
+  it("keeps a connected external calendar route authoritative", async () => {
+    await saveVerifiedIntegration(workspaceId, {
+      provider: "calcom",
+      category: "CALENDAR",
+      mode: "BYOP",
+      credentials: { apiKey: "connected-calendar-key" },
+      settings: {},
+    });
+    await bindCapability(workspaceId, "CALENDAR", "BYOP", "calcom");
+
+    await expect(resolveProviderRoute(workspaceId, "CALENDAR")).resolves.toMatchObject({
+      mode: "BYOP",
+      provider: "calcom",
+    });
+  });
+
   it("treats a stale disconnected calendar binding as no external route", async () => {
     await bindCapability(workspaceId, "CALENDAR", "BYOP", "google");
 
