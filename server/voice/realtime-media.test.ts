@@ -398,6 +398,58 @@ describe("Realtime Telnyx/OpenAI media contract", () => {
     expect(telnyx.readyState).toBe(3);
   });
 
+  it("keeps the call active after an issue-scoped staff escalation", async () => {
+    vi.mocked(runRealtimeBusinessTool).mockResolvedValueOnce({
+      ok: true,
+      kind: "escalation",
+      data: { handlingMode: "AI", scope: "ISSUE", issueCaseId: "issue-1" },
+      spokenInstruction: "Tell the caller this issue was flagged and continue helping.",
+    });
+    const telnyx = telnyxSocket();
+    const bridge = attachRealtimeMedia({
+      telnyx: telnyx as unknown as WebSocket,
+      identity: { workspaceId: "ws", callId: "call-id", externalCallId: "telnyx-call" },
+      streamId: "stream",
+    });
+    await vi.waitFor(() => expect(shared.client).not.toBeNull());
+    const openai = currentOpenai();
+    openai.emit("open");
+    openai.emit("message", Buffer.from(JSON.stringify({ type: "session.updated" })));
+
+    openai.emit("message", Buffer.from(JSON.stringify({
+      type: "response.created", response: { id: "escalation-tool" },
+    })));
+    openai.emit("message", Buffer.from(JSON.stringify({
+      type: "response.output_item.done",
+      response_id: "escalation-tool",
+      item: {
+        type: "function_call",
+        call_id: "escalate-1",
+        name: "escalate_to_staff",
+        arguments: JSON.stringify({ reason: "Billing exception needs review." }),
+      },
+    })));
+    await vi.waitFor(() => expect(runRealtimeBusinessTool).toHaveBeenCalledOnce());
+    const usage = { input_tokens: 1, output_tokens: 1,
+      input_token_details: { text_tokens: 1 }, output_token_details: { audio_tokens: 1 } };
+    openai.emit("message", Buffer.from(JSON.stringify({
+      type: "response.done", response: { id: "escalation-tool", status: "completed", usage },
+    })));
+    await vi.waitFor(() => expect(openai.sent.some(v => v.type === "response.create")).toBe(true));
+
+    openai.emit("message", Buffer.from(JSON.stringify({
+      type: "response.created", response: { id: "escalation-spoken" },
+    })));
+    openai.emit("message", Buffer.from(JSON.stringify({
+      type: "response.done", response: { id: "escalation-spoken", status: "completed", usage },
+    })));
+
+    await new Promise(resolve => setTimeout(resolve, 650));
+    expect(telnyx.readyState).toBe(1);
+
+    await bridge.stop();
+  });
+
   it("keeps the call open when a tool-only response omits usage or the business tool fails", async () => {
     vi.mocked(runRealtimeBusinessTool).mockRejectedValueOnce(new Error("calendar unavailable"));
     const telnyx = telnyxSocket();
