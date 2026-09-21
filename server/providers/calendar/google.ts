@@ -1,5 +1,5 @@
 import type { CalendarProvider } from "../contracts";
-import { providerJson } from "../http";
+import { ProviderRequestError, providerJson } from "../http";
 import {
   decryptCredentials,
   googleAccessToken,
@@ -66,7 +66,10 @@ export class GoogleCalendarProvider implements CalendarProvider {
     return slotize(input.startsAt, input.endsAt, busy, input.durationMinutes ?? numberSetting(this.settings, "meetingDurationMinutes", 30));
   }
 
-  async book(input: { startsAt: Date; endsAt: Date; timezone: string; title: string; attendeeName?: string; attendeeEmail?: string }) {
+  async book(input: { startsAt: Date; endsAt: Date; timezone: string; title: string; attendeeName?: string; attendeeEmail?: string; location?: string; idempotencyKey?: string }) {
+    if (input.idempotencyKey && !/^[0-9a-v]{5,1024}$/.test(input.idempotencyKey)) {
+      throw new Error("Invalid stable Google Calendar event ID.");
+    }
     const token = await this.token();
     const response = await providerJson<{ id?: string; start?: { dateTime?: string }; end?: { dateTime?: string } }>(
       `https://www.googleapis.com/calendar/v3/calendars/${encodeURIComponent(this.calendarId())}/events`,
@@ -75,6 +78,8 @@ export class GoogleCalendarProvider implements CalendarProvider {
         headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
         body: JSON.stringify({
           summary: input.title,
+          ...(input.idempotencyKey ? { id: input.idempotencyKey } : {}),
+          ...(input.location ? { location: input.location } : {}),
           start: { dateTime: input.startsAt.toISOString(), timeZone: input.timezone },
           end: { dateTime: input.endsAt.toISOString(), timeZone: input.timezone },
           ...(input.attendeeEmail ? { attendees: [{ email: input.attendeeEmail, displayName: input.attendeeName }] } : {}),
@@ -83,11 +88,34 @@ export class GoogleCalendarProvider implements CalendarProvider {
       this.fetcher,
     );
     if (!response.id) throw new Error("Google Calendar did not return an event ID.");
-    return {
-      externalId: response.id,
-      startsAt: parseDate(response.start?.dateTime, input.startsAt),
-      endsAt: parseDate(response.end?.dateTime, input.endsAt),
-    };
+    const startsAt = parseDate(response.start?.dateTime, new Date(NaN));
+    const endsAt = parseDate(response.end?.dateTime, new Date(NaN));
+    if (!Number.isFinite(startsAt.getTime()) || !Number.isFinite(endsAt.getTime()) || endsAt <= startsAt) {
+      throw new Error("Google Calendar did not return valid confirmed event times.");
+    }
+    return { externalId: response.id, startsAt, endsAt };
+  }
+
+  async lookupByKey(input: { idempotencyKey: string }) {
+    if (!/^[0-9a-v]{5,1024}$/.test(input.idempotencyKey)) throw new Error("Invalid stable Google event ID.");
+    const token = await this.token();
+    try {
+      const event = await providerJson<{ id?: string; status?: string; start?: { dateTime?: string }; end?: { dateTime?: string } }>(
+        `https://www.googleapis.com/calendar/v3/calendars/${encodeURIComponent(this.calendarId())}/events/${encodeURIComponent(input.idempotencyKey)}`,
+        { headers: { authorization: `Bearer ${token}` } },
+        this.fetcher,
+      );
+      if (!event.id || event.status === "cancelled") throw new Error("Google Calendar did not return a confirmed event.");
+      const startsAt = parseDate(event.start?.dateTime, new Date(NaN));
+      const endsAt = parseDate(event.end?.dateTime, new Date(NaN));
+      if (!Number.isFinite(startsAt.getTime()) || !Number.isFinite(endsAt.getTime()) || endsAt <= startsAt) {
+        throw new Error("Google Calendar returned an invalid event interval.");
+      }
+      return { externalId: event.id, startsAt, endsAt };
+    } catch (error) {
+      if (error instanceof ProviderRequestError && error.status === 404) return null;
+      throw error;
+    }
   }
 
   async reschedule(input: { externalId: string; startsAt: Date; endsAt: Date; timezone: string }) {
