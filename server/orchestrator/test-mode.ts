@@ -32,7 +32,7 @@ async function executeTestTools(
   }
 
   if (envelope.action.type === "CHECK_AVAILABILITY") {
-    const slots = await calendarBookingService.getAvailability(workspaceId, {
+    const availability = await calendarBookingService.getAvailability(workspaceId, {
       startsAt: new Date(envelope.action.startsAt),
       endsAt: new Date(envelope.action.endsAt),
       timezone: envelope.action.timezone,
@@ -42,7 +42,8 @@ async function executeTestTools(
       kind: "availability",
       data: {
         ...captured,
-        slots: slots.slice(0, 12).map((slot) => ({
+        timezone: availability.timezone,
+        slots: availability.slots.slice(0, 12).map((slot) => ({
           startsAt: slot.startsAt.toISOString(),
           endsAt: slot.endsAt.toISOString(),
         })),

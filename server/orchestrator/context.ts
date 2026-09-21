@@ -1,6 +1,6 @@
 import { and, asc, desc, eq, sql } from "drizzle-orm";
 import { db } from "@/db";
-import { faqs, hostedPhoneNumbers, knowledgeSources, policies, services, smsRegistrations } from "@/db/schema";
+import { conversationHandlingEvents, faqs, hostedPhoneNumbers, knowledgeSources, policies, services, smsRegistrations } from "@/db/schema";
 import { getConversationTimelinePage } from "@/server/domain/core/conversation-timeline";
 import { getContactDetail } from "@/server/domain/core/repository";
 import { getSmsConsentStatus } from "@/server/sms/consent";
@@ -18,6 +18,7 @@ export type OrchestratorContext = {
   contact: { id: string };
   agent: { id: string; status: "DRAFT" | "ACTIVE" | "PAUSED"; whenUnsure?: string; escalationMessage: string | null; behaviorSettings: Record<string, unknown> } | null;
   source?: "INBOUND_TURN" | "AGENT_TEST";
+  resumedAfterHumanHandoff?: boolean;
   systemPrompt: string;
   timezone?: string;
   messages: OrchestratorMessage[];
@@ -183,10 +184,16 @@ export async function buildConversationContext(workspaceId: string, conversation
   const timeline = await getConversationTimelinePage(workspaceId, conversationId, { limit: 30, offset: 0 });
   if (!timeline) return null;
 
-  const [businessSetup, agentSetup, contact] = await Promise.all([
+  const [businessSetup, agentSetup, contact, latestHandlingEvent] = await Promise.all([
     getBusinessSetup(workspaceId),
     getOrchestrationAgentSetup(workspaceId),
     getContactDetail(workspaceId, timeline.contact.id),
+    db.select({ type: conversationHandlingEvents.type, createdAt: conversationHandlingEvents.createdAt })
+      .from(conversationHandlingEvents).where(and(
+        eq(conversationHandlingEvents.workspaceId, workspaceId),
+        eq(conversationHandlingEvents.conversationId, conversationId),
+      )).orderBy(desc(conversationHandlingEvents.createdAt)).limit(1)
+      .then((rows) => rows[0] ?? null),
   ]);
   if (!contact) return null;
 
@@ -227,6 +234,9 @@ export async function buildConversationContext(workspaceId: string, conversation
       return null;
     })
     .filter((message): message is NonNullable<typeof message> => Boolean(message?.content));
+  const resumedAfterHumanHandoff = latestHandlingEvent?.type === "RETURN_TO_AI"
+    && !timeline.messages.some((message) => message.senderType === "AI"
+      && message.createdAt >= latestHandlingEvent.createdAt);
 
   return {
     workspaceId,
@@ -235,6 +245,7 @@ export async function buildConversationContext(workspaceId: string, conversation
     business: businessSetup.profile,
     agent: agentSetup.agent,
     source: "INBOUND_TURN" as const,
+    resumedAfterHumanHandoff,
     timezone: businessSetup.profile?.timezone ?? "UTC",
     systemPrompt,
     messages,

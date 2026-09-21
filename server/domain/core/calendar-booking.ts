@@ -88,7 +88,10 @@ export function createCalendarBookingService(dependencies: BookingDependencies) 
         if (!dependencies.nativeAvailability) throw new AppError("NATIVE_BOOKING_UNAVAILABLE", "In-app scheduling is temporarily unavailable.", 503);
         return dependencies.nativeAvailability(workspaceId, input);
       }
-      return current.provider.getAvailability(input);
+      return {
+        slots: await current.provider.getAvailability(input),
+        timezone: input.timezone,
+      };
     },
 
     async book(workspaceId: string, input: AppointmentInput) {
@@ -102,7 +105,7 @@ export function createCalendarBookingService(dependencies: BookingDependencies) 
         return dependencies.insertNativeAppointment(workspaceId, {
           ...input,
           timezone: validated.timezone,
-        });
+        }, validated);
       }
       const { integrationId, provider } = current;
       const providerBooking = await provider.book({
@@ -147,11 +150,11 @@ export function createCalendarBookingService(dependencies: BookingDependencies) 
         if (!dependencies.validateNativeBooking || !dependencies.updateNativeAppointmentAfterReschedule) {
           throw new AppError("NATIVE_BOOKING_UNAVAILABLE", "In-app scheduling is temporarily unavailable.", 503);
         }
-        const validated = await dependencies.validateNativeBooking(workspaceId, input);
+        const validated = await dependencies.validateNativeBooking(workspaceId, input, appointmentId);
         return dependencies.updateNativeAppointmentAfterReschedule(workspaceId, appointmentId, {
           ...input,
           timezone: validated.timezone,
-        });
+        }, validated);
       }
       if (!appointment.integrationId || !appointment.externalEventId) {
         throw new AppError("APPOINTMENT_NOT_SYNCED", "This appointment has an incomplete external calendar link.", 409);

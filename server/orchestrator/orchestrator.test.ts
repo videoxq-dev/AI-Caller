@@ -23,6 +23,29 @@ describe("orchestrator response protocol", () => {
     });
   });
 
+  it("normalizes null optional fields commonly emitted by JSON planners", () => {
+    expect(parseOrchestratorEnvelope(JSON.stringify({
+      reply: null,
+      contact: null,
+      lead: null,
+      unresolved: null,
+      action: {
+        type: "CHECK_AVAILABILITY",
+        startsAt: "2030-09-23T08:00:00Z",
+        endsAt: "2030-09-23T18:00:00Z",
+        timezone: "UTC",
+        durationMinutes: null,
+      },
+    }))).toEqual({
+      action: {
+        type: "CHECK_AVAILABILITY",
+        startsAt: "2030-09-23T08:00:00Z",
+        endsAt: "2030-09-23T18:00:00Z",
+        timezone: "UTC",
+      },
+    });
+  });
+
   it("rejects malformed or invalid structured actions instead of exposing raw JSON", () => {
     expect(() => parseOrchestratorEnvelope('{"action":{"type":"BOOK_APPOINTMENT"}}')).toThrow("invalid orchestration action");
     expect(() => parseOrchestratorEnvelope(JSON.stringify({
@@ -93,6 +116,84 @@ describe("orchestrator response protocol", () => {
       .toContain("approved business profile");
     expect(executeTools).toHaveBeenCalledOnce();
     expect(generate).toHaveBeenCalledOnce();
+  });
+
+  it("repairs one invalid structured response instead of failing the customer turn", async () => {
+    const generate = vi.fn()
+      .mockResolvedValueOnce({ text: JSON.stringify({
+        reply: null,
+        action: { type: "CHECK_AVAILABILITY", startsAt: "not-a-date" },
+      }) })
+      .mockResolvedValueOnce({ text: JSON.stringify({
+        reply: null,
+        action: {
+          type: "CHECK_AVAILABILITY",
+          startsAt: "2030-09-23T08:00:00Z",
+          endsAt: "2030-09-23T18:00:00Z",
+          timezone: "UTC",
+          durationMinutes: 30,
+        },
+      }) });
+    const executeTools = vi.fn(async () => ({ kind: "availability" as const, data: {
+      slots: [{ startsAt: "2030-09-23T10:00:00.000Z", endsAt: "2030-09-23T10:30:00.000Z" }],
+    } }));
+    const orchestrator = createResponseOrchestrator({
+      buildContext: vi.fn(async () => fakeContext()), executeTools, generate,
+    });
+
+    const result = await orchestrator.respond("workspace", "conversation");
+
+    expect(result.reply).toContain("Available times include");
+    expect(generate).toHaveBeenCalledTimes(2);
+    expect(executeTools).toHaveBeenCalledOnce();
+  });
+
+  it("keeps the turn alive with a safe clarification when structured repair also fails", async () => {
+    const generate = vi.fn(async () => ({ text: '{"action":}' }));
+    const executeTools = vi.fn();
+    const orchestrator = createResponseOrchestrator({
+      buildContext: vi.fn(async () => fakeContext()), executeTools, generate,
+    });
+
+    const result = await orchestrator.respond("workspace", "conversation");
+
+    expect(result.handlingMode).toBe("AI");
+    expect(result.reply).toContain("restate your request");
+    expect(generate).toHaveBeenCalledTimes(2);
+    expect(executeTools).not.toHaveBeenCalled();
+  });
+
+  it("does not re-escalate a returned-to-AI conversation from an unverified planner handoff", async () => {
+    const executeTools = vi.fn();
+    const generate = vi.fn(async () => ({ text: JSON.stringify({
+      reply: "I'll connect you to the team.",
+      unresolved: { reason: "A previous message asked for a person." },
+      action: { type: "ESCALATE", reason: "A previous message asked for a person." },
+    }) }));
+    const orchestrator = createResponseOrchestrator({
+      buildContext: vi.fn(async () => ({
+        ...fakeContext("AI"),
+        source: "INBOUND_TURN" as const,
+        resumedAfterHumanHandoff: true,
+        messages: [
+          { role: "user" as const, content: "I need a human." },
+          { role: "assistant" as const, content: "Staff will follow up." },
+          { role: "user" as const, content: "What services do you offer?" },
+        ],
+        agent: { id: "agent-1", status: "ACTIVE" as const,
+          whenUnsure: "Escalate to a human", escalationMessage: null,
+          behaviorSettings: { capabilities: { ...defaultAgentCapabilities } } },
+      })),
+      executeTools, generate,
+    });
+
+    const result = await orchestrator.respond("workspace", "conversation");
+
+    expect(result).toMatchObject({ handlingMode: "AI" });
+    expect(result.reply).toContain("still handling this conversation");
+    expect(result.reply).toContain("can't transfer this call live");
+    expect(result.reply).not.toContain("connect you");
+    expect(executeTools).not.toHaveBeenCalled();
   });
 
   it("responds truthfully when a configured capability is revoked during model planning", async () => {
@@ -553,11 +654,15 @@ describe("orchestrator response protocol", () => {
     });
     const result = await orchestrator.respond("workspace", "conversation");
     expect(result.reply).toContain("updated your contact details (phone)");
+    expect(result.reply).toContain("Thanks");
   });
 
   it("acknowledges only successful staff escalation, not model-only promises", async () => {
     const orchestrator = createResponseOrchestrator({
-      buildContext: vi.fn(async () => fakeContext()),
+      buildContext: vi.fn(async () => ({
+        ...fakeContext(),
+        messages: [{ role: "user" as const, content: "I want to speak to a human." }],
+      })),
       executeTools: vi.fn(async () => ({ kind: "escalation" as const, data: { handlingMode: "HUMAN" } })),
       generate: vi.fn(async () => ({ text: JSON.stringify({
         reply: "I can connect you live.", action: { type: "ESCALATE", reason: "Requested" },

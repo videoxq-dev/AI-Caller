@@ -4,6 +4,7 @@ import { logger } from "@/server/observability/logger";
 import { buildConversationContext, type OrchestratorContext } from "./context";
 import {
   executeOrchestratorTools,
+  OrchestratorOutputError,
   parseOrchestratorEnvelope,
   type OrchestratorEnvelope,
   type OrchestratorToolResult,
@@ -71,6 +72,7 @@ Allowed action objects:
 
 Rules:
 - When the customer asks to check availability and supplies an identifiable date and time, invoke CHECK_AVAILABILITY immediately without requesting permission again. For a whole day, check a bounded date range. Use the actual saved service duration when provided; otherwise ask for the duration if needed.
+- Resolve ordinary relative dates and month/day dates from Current server time in the business timezone. If the month/day has not passed, use the current year; otherwise use the next year. Do not ask for a year when that rule makes the future date unambiguous.
 - Never say a slot is available unless CHECK_AVAILABILITY returned it. Describe the returned slots and ask the customer to choose and approve one.
 - When the customer approves a particular service/date/time, invoke BOOK_APPOINTMENT with the agreed slot (including its service duration); do not ask repeatedly to proceed. Native booking checks business hours and conflicts without any third-party calendar.
 - Never say an appointment is booked unless BOOK_APPOINTMENT returned a confirmed booking.
@@ -135,6 +137,24 @@ function finalizerMessages(
   ];
 }
 
+function repairMessages(
+  context: OrchestratorContext,
+  invalidText: string,
+  error: OrchestratorOutputError,
+): AIMessage[] {
+  const validation = error.validationIssues.length
+    ? error.validationIssues.join("; ")
+    : error.message;
+  return [
+    ...plannerMessages(context),
+    { role: "assistant", content: invalidText.slice(0, 12_000) },
+    {
+      role: "system",
+      content: `Your preceding response could not be validated (${validation}). Return the same intended answer as one corrected JSON object matching the protocol. Use null only where the protocol explicitly permits it. Do not add prose outside the JSON object.`,
+    },
+  ];
+}
+
 function approvedToolFailure(action: OrchestratorEnvelope["action"]["type"], error: AppError) {
   if (action === "CHECK_AVAILABILITY") {
     return error.code === "AGENT_ACTION_DISABLED"
@@ -152,6 +172,9 @@ function approvedToolFailure(action: OrchestratorEnvelope["action"]["type"], err
     : `I couldn't complete that action: ${error.message}`;
 }
 function safeUnverifiedReply(reply: string) {
+  if (/\b(?:i(?:['’]ll| will| can)|we(?:['’]ll| will| can)|let me)\s+[^.!?]{0,55}\b(?:connect|transfer|put you through|patch you through)\b[^.!?]{0,75}\b(?:team|staff|human|operator|person|representative|someone|you)\b/i.test(reply)) {
+    return "I can't transfer this call live. I'm still handling this conversation and can continue helping here.";
+  }
   if (/\b(?:i(?:['’]ve| have|['’]ll| will)|we(?:['’]ve| have|['’]ll| will))\s+(?:already\s+)?(?:flagged|notified|alerted|asked|contacted|forwarded|passed|sent|flag|notify|alert|ask|contact|forward|pass|send)\b[^.!?]{0,90}\b(?:team|staff|manager|human|representative)\b/i.test(reply)) {
     return "I can answer questions here. If you'd like staff follow-up, please ask me to arrange it.";
   }
@@ -312,11 +335,34 @@ export function createResponseOrchestrator(dependencies: OrchestratorDependencie
       }
 
       const firstResponse = await dependencies.generate(workspaceId, conversationId, plannerMessages(context));
-      const planned = parseOrchestratorEnvelope(firstResponse.text);
+      let planned: OrchestratorEnvelope;
+      try {
+        planned = parseOrchestratorEnvelope(firstResponse.text);
+      } catch (error) {
+        if (!(error instanceof OrchestratorOutputError)) throw error;
+        logger.warn({ workspaceId, conversationId, validationIssues: error.validationIssues },
+          "AI provider returned invalid orchestration output; requesting one correction");
+        try {
+          const repaired = await dependencies.generate(
+            workspaceId, conversationId, repairMessages(context, firstResponse.text, error),
+          );
+          planned = parseOrchestratorEnvelope(repaired.text);
+        } catch (repairError) {
+          if (!(repairError instanceof OrchestratorOutputError)) throw repairError;
+          logger.error({ workspaceId, conversationId, validationIssues: repairError.validationIssues },
+            "AI provider returned invalid orchestration output after correction");
+          return unresolvedWithoutHandoff(
+            "I couldn't safely interpret that. Please restate your request, including any service, date, or time details that matter.",
+          );
+        }
+      }
       // Capability denials are resolved together with the saved When Unsure policy.
       if (planned.action.type === "NONE" && planned.unresolved?.reason) {
         const reply = planned.reply
           ?? "I can't complete that request with the information and capabilities available right now.";
+        if (context.resumedAfterHumanHandoff) {
+          return unresolvedWithoutHandoff(safeUnverifiedReply(reply));
+        }
         return resolveUncertainRequest(reply, planned.unresolved.reason);
       }
 
@@ -336,12 +382,25 @@ export function createResponseOrchestrator(dependencies: OrchestratorDependencie
             `Requested ${wantsAvailability ? "availability check" : "appointment booking"} is disabled; applying When Unsure policy.`);
         }
       }
-      if (planned.action.type === "ESCALATE"
-        && !isExplicitHumanRequest(lastUserMessage)
-        && whenUnsure !== "Escalate to a human") {
+      if (planned.action.type === "ESCALATE" && !isExplicitHumanRequest(lastUserMessage)) {
+        if (context.resumedAfterHumanHandoff) {
+          return unresolvedWithoutHandoff(safeUnverifiedReply(
+            planned.reply ?? "I'm handling this conversation again. How can I help with your current request?",
+          ));
+        }
+        if (planned.unresolved?.reason) {
+          const reply = planned.reply
+            ?? "I can't complete that request with the information and capabilities available right now.";
+          return resolveUncertainRequest(reply, planned.unresolved.reason);
+        }
+        // A model-proposed handoff is not authority by itself. In particular,
+        // prior human requests in the transcript must not re-escalate a thread
+        // after an owner explicitly returns it to AI.
         const reply = whenUnsure === "Ask a clarifying question"
           ? "I’m not certain I can complete that request yet. Could you clarify what you need?"
-          : "I can collect the details needed for follow-up. What name and contact information should I record?";
+          : whenUnsure === "Collect details for follow-up"
+            ? "I can collect the details needed for follow-up. What name and contact information should I record?"
+            : safeUnverifiedReply(planned.reply ?? "How can I help with your current request?");
         return unresolvedWithoutHandoff(reply);
       }
 
@@ -398,7 +457,7 @@ export function createResponseOrchestrator(dependencies: OrchestratorDependencie
         }
         if (error instanceof AppError && [
           "APPOINTMENT_SLOT_UNAVAILABLE", "APPOINTMENT_OUTSIDE_HOURS",
-          "APPOINTMENT_IN_PAST", "AVAILABILITY_RANGE_INVALID",
+          "APPOINTMENT_IN_PAST", "APPOINTMENT_DAILY_LIMIT_REACHED", "AVAILABILITY_RANGE_INVALID",
         ].includes(error.code)) {
           return unresolvedWithoutHandoff(approvedToolFailure(first.action.type, error));
         }
@@ -408,7 +467,9 @@ export function createResponseOrchestrator(dependencies: OrchestratorDependencie
       if (toolResult.kind === "availability") {
         // Present verified calendar slots directly, not a second model's
         // possible assertion that it never checked or an invented opening.
-        return { reply: availabilityReply(toolResult, context.timezone ?? "UTC"),
+        const availabilityTimezone = typeof toolResult.data.timezone === "string"
+          ? toolResult.data.timezone : context.timezone ?? "UTC";
+        return { reply: availabilityReply(toolResult, availabilityTimezone),
           handlingMode: "AI" as const, action: first.action, toolResult };
       }
 
@@ -471,7 +532,10 @@ export function createResponseOrchestrator(dependencies: OrchestratorDependencie
         ? `I’ve updated your contact details (${Array.isArray(toolResult.data.updatedFields)
             ? toolResult.data.updatedFields.join(", ") : "provided fields"}).`
         : null;
-      const customerReply = contactReceipt ?? safeUnverifiedReply(first.reply ?? "");
+      const substantiveReply = safeUnverifiedReply(first.reply ?? "");
+      const customerReply = contactReceipt
+        ? [contactReceipt, substantiveReply].filter(Boolean).join(" ")
+        : substantiveReply;
       return {
         reply: isLivePhone ? safeLivePhoneReply(customerReply) : customerReply,
         handlingMode: "AI" as const,

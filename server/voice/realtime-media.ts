@@ -360,15 +360,23 @@ export function attachRealtimeMedia({ telnyx, identity, streamId }: BridgeOption
       toolSerial = toolSerial.then(async () => {
         try {
           await runTool(event, epoch);
+        } catch (err) {
+          // A transient business-tool failure must be reported truthfully to
+          // the model, not tear down an otherwise healthy telephone call.
+          // Keep usage certification failed for reconciliation, while allowing
+          // the assistant to tell the caller that the action did not complete.
+          error = true;
+          logger.error({ err, workspaceId, callId }, "Realtime business tool failed");
+          sendOpenAI({ type: "conversation.item.create", item: {
+            type: "function_call_output", call_id: callKey,
+            output: JSON.stringify({ ok: false,
+              reason: "The requested action is temporarily unavailable. No booking or change was completed." }),
+          } });
         } finally {
           responseToolCounts.set(responseId,
             Math.max(0, (responseToolCounts.get(responseId) ?? 1) - 1));
           resumeAfterTools(responseId, epoch);
         }
-      }).catch(err => {
-        logger.error({ err, workspaceId, callId }, "Realtime business tool failed");
-        error = true;
-        fail("realtime-tool-failure");
       });
       track(toolSerial);
       return;
@@ -401,9 +409,17 @@ export function attachRealtimeMedia({ telnyx, identity, streamId }: BridgeOption
       } else {
         // Cancelled generation can still have billable tokens. Without a
         // provider usage object the final invoice cannot be reconstructed.
-        logger.warn({ workspaceId, callId, responseId, status },
-          "Realtime response completed without authoritative token usage");
-        fail("realtime-usage-missing");
+        logger.warn({ workspaceId, callId, responseId, status,
+          toolResponse: responseWithTools.has(responseId) },
+        "Realtime response completed without authoritative token usage");
+        if (responseWithTools.has(responseId)) {
+          // Function-call-only responses can omit usage even though the
+          // follow-up spoken response is still valid. Continue the call, but
+          // fail final usage certification so provider billing is reconciled.
+          error = true;
+        } else {
+          fail("realtime-usage-missing");
+        }
       }
       pendingResponses.delete(responseId);
       responseStatuses.set(responseId, status);

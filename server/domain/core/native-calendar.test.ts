@@ -3,6 +3,7 @@ import { eq } from "drizzle-orm";
 import { closeDatabase, db } from "@/db";
 import { appointments, automationEvents, workspaces } from "@/db/schema";
 import { saveBusinessSetup } from "@/server/domain/onboarding/repository";
+import { saveCalendarSetup } from "@/server/domain/integrations/repository";
 import { createContact, getContactDetail, listAppointments } from "./repository";
 import { calendarBookingService } from "./calendar-booking";
 import { withinBusinessHours } from "./native-calendar";
@@ -44,7 +45,7 @@ describe("native in-app appointment booking without external calendar", () => {
       endsAt: new Date("2030-09-23T18:00:00.000Z"),
       timezone: "UTC", durationMinutes: 240,
     });
-    expect(available.some(slot => slot.startsAt.getTime() === start.getTime())).toBe(true);
+    expect(available.slots.some(slot => slot.startsAt.getTime() === start.getTime())).toBe(true);
     const result = await calendarBookingService.book(workspaceId, booking(contactId));
     expect(result).toMatchObject({
       status: "CONFIRMED", externalEventId: null, integrationId: null, title: "Office Cleaning",
@@ -59,7 +60,7 @@ describe("native in-app appointment booking without external calendar", () => {
     const after = await calendarBookingService.getAvailability(workspaceId, {
       startsAt: start, endsAt: end, timezone: "UTC", durationMinutes: 240,
     });
-    expect(after).toHaveLength(0);
+    expect(after.slots).toHaveLength(0);
   });
 
   it("stores the configured business timezone instead of untrusted model timezone metadata", async () => {
@@ -114,8 +115,89 @@ describe("native in-app appointment booking without external calendar", () => {
       endsAt: new Date("2030-09-23T18:00:00Z"),
       timezone: "UTC", durationMinutes: 600,
     });
-    expect(slots).toEqual([{ startsAt: new Date("2030-09-23T08:00:00Z"),
+    expect(slots.slots).toEqual([{ startsAt: new Date("2030-09-23T08:00:00Z"),
       endsAt: new Date("2030-09-23T18:00:00Z") }]);
+  });
+
+  it("enforces native calendar days, booking window, buffers and daily limit", async () => {
+    await saveCalendarSetup(workspaceId, {
+      provider: "google",
+      meetingDurationMinutes: 30,
+      bufferBeforeMinutes: 15,
+      bufferAfterMinutes: 15,
+      availableDays: ["Mon"],
+      startTime: "09:00",
+      endTime: "17:00",
+      timezone: "UTC",
+      suggestAlternatives: true,
+      eventType: null,
+      meetingLocation: null,
+      maxBookingsPerDay: 1,
+      completeStep: true,
+    });
+    const monday = new Date("2030-09-23T10:00:00.000Z");
+    expect(monday.toLocaleDateString("en-US", { timeZone: "UTC", weekday: "short" })).toBe("Mon");
+    const beforeWindow = await calendarBookingService.getAvailability(workspaceId, {
+      startsAt: new Date("2030-09-23T08:00:00.000Z"),
+      endsAt: new Date("2030-09-23T10:00:00.000Z"),
+      timezone: "UTC",
+    });
+    expect(beforeWindow.slots.map((slot) => slot.startsAt.toISOString())).toEqual([
+      "2030-09-23T09:00:00.000Z",
+      "2030-09-23T09:30:00.000Z",
+    ]);
+
+    await calendarBookingService.book(workspaceId, {
+      ...booking(contactId), startsAt: monday, endsAt: new Date("2030-09-23T10:30:00.000Z"),
+    });
+    const afterDailyLimit = await calendarBookingService.getAvailability(workspaceId, {
+      startsAt: new Date("2030-09-23T09:00:00.000Z"),
+      endsAt: new Date("2030-09-23T17:00:00.000Z"),
+      timezone: "UTC",
+    });
+    expect(afterDailyLimit.slots).toHaveLength(0);
+    await expect(calendarBookingService.book(workspaceId, {
+      ...booking(contactId), title: "Second service",
+      startsAt: new Date("2030-09-23T14:00:00.000Z"),
+      endsAt: new Date("2030-09-23T14:30:00.000Z"),
+    })).rejects.toMatchObject({ code: "APPOINTMENT_DAILY_LIMIT_REACHED" });
+  });
+
+  it("atomically enforces a native daily limit across competing callers", async () => {
+    await saveCalendarSetup(workspaceId, {
+      provider: "google",
+      meetingDurationMinutes: 30,
+      bufferBeforeMinutes: 0,
+      bufferAfterMinutes: 0,
+      availableDays: ["Mon"],
+      startTime: "08:00",
+      endTime: "18:00",
+      timezone: "UTC",
+      suggestAlternatives: true,
+      eventType: null,
+      meetingLocation: null,
+      maxBookingsPerDay: 1,
+      completeStep: true,
+    });
+    const other = await createContact(workspaceId, {
+      name: "Concurrent caller", email: null, phone: "+13074453686",
+      notes: null, tags: [], identities: [],
+    });
+    const results = await Promise.allSettled([
+      calendarBookingService.book(workspaceId, {
+        ...booking(contactId),
+        startsAt: new Date("2030-09-23T10:00:00.000Z"),
+        endsAt: new Date("2030-09-23T10:30:00.000Z"),
+      }),
+      calendarBookingService.book(workspaceId, {
+        ...booking(other.id),
+        startsAt: new Date("2030-09-23T14:00:00.000Z"),
+        endsAt: new Date("2030-09-23T14:30:00.000Z"),
+      }),
+    ]);
+    expect(results.filter((result) => result.status === "fulfilled")).toHaveLength(1);
+    expect(results.filter((result) => result.status === "rejected")).toHaveLength(1);
+    expect((await listAppointments(workspaceId)).total).toBe(1);
   });
 
   it("does not book a past or out-of-hours appointment", async () => {

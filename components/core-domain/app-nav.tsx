@@ -40,6 +40,10 @@ export function AppNav({ active, className = "appSidebar" }: { active: string; c
   const [notifications, setNotifications] = useState<NotificationItem[]>([]);
   const [notificationsOpen, setNotificationsOpen] = useState(false);
   const [switching, setSwitching] = useState(false);
+  const [creating, setCreating] = useState(false);
+  const [createOpen, setCreateOpen] = useState(false);
+  const [workspaceName, setWorkspaceName] = useState("");
+  const [workspaceError, setWorkspaceError] = useState<string | null>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -74,6 +78,30 @@ export function AppNav({ active, className = "appSidebar" }: { active: string; c
     }
   }
 
+  async function createWorkspace(event: React.FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    const name = workspaceName.trim();
+    if (name.length < 2 || creating) return;
+    setCreating(true);
+    setWorkspaceError(null);
+    try {
+      const response = await fetch("/api/workspaces", {
+        method: "PUT",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ name }),
+      });
+      if (!response.ok) {
+        const data = await response.json().catch(() => null) as { error?: { message?: string } } | null;
+        throw new Error(data?.error?.message ?? "Unable to create workspace.");
+      }
+      window.location.assign("/setup/business");
+    } catch (error) {
+      setWorkspaceError(error instanceof Error ? error.message : "Unable to create workspace.");
+    } finally {
+      setCreating(false);
+    }
+  }
+
   async function openNotification(item: NotificationItem) {
     if (!item.readAt) {
       const response = await fetch(`/api/notifications/${item.id}/read`, { method: "POST" });
@@ -105,6 +133,13 @@ export function AppNav({ active, className = "appSidebar" }: { active: string; c
         {activeWorkspace && <small>{activeWorkspace.role}</small>}
         <button
           type="button"
+          className="navCreateWorkspaceButton"
+          aria-label="Create workspace"
+          aria-expanded={createOpen}
+          onClick={() => { setCreateOpen((value) => !value); setWorkspaceError(null); }}
+        >+ New</button>
+        <button
+          type="button"
           className="navNotificationButton"
           aria-label="Notifications"
           aria-expanded={notificationsOpen}
@@ -113,6 +148,21 @@ export function AppNav({ active, className = "appSidebar" }: { active: string; c
           <span aria-hidden>♧</span>
           {unread > 0 && <b>{Math.min(unread, 99)}</b>}
         </button>
+        {createOpen && (
+          <form className="navWorkspaceCreatePanel" onSubmit={(event) => void createWorkspace(event)}>
+            <label htmlFor="new-workspace-name">Workspace name</label>
+            <input
+              id="new-workspace-name"
+              value={workspaceName}
+              maxLength={120}
+              autoFocus
+              onChange={(event) => setWorkspaceName(event.target.value)}
+              placeholder="Business name"
+            />
+            {workspaceError && <p>{workspaceError}</p>}
+            <div><button type="button" onClick={() => setCreateOpen(false)} disabled={creating}>Cancel</button><button type="submit" disabled={creating || workspaceName.trim().length < 2}>{creating ? "Creating…" : "Create"}</button></div>
+          </form>
+        )}
         {notificationsOpen && (
           <div className="navNotificationPanel">
             <div className="navNotificationHeading"><strong>Notifications</strong><span>{unread} unread</span></div>

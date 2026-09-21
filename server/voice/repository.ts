@@ -105,7 +105,11 @@ export async function getVoiceCallWithTranscript(workspaceId: string, callId: st
   const transcript = await db.select().from(voiceTranscriptSegments).where(and(
     eq(voiceTranscriptSegments.workspaceId, workspaceId),
     eq(voiceTranscriptSegments.voiceCallId, callId),
-  )).orderBy(asc(voiceTranscriptSegments.startedMs), asc(voiceTranscriptSegments.sequence)).limit(2000);
+  // Sequence is assigned under a per-call advisory lock and is the only clock
+  // shared by carrier caller transcripts and Realtime assistant transcripts.
+  // Realtime assistant segments may not have audio timestamps, so sorting by
+  // startedMs first incorrectly groups every caller utterance above all AI turns.
+  )).orderBy(asc(voiceTranscriptSegments.sequence)).limit(2000);
   return { call, transcript };
 }
 
