@@ -311,7 +311,10 @@ try {
     { sid: "SM-m5-2", body: "What times are available tomorrow?",
       expectedPattern: "%I checked the schedule. Available times include%10:00 AM%",
       expectedContains: "I checked the schedule. Available times include" },
-    { sid: "SM-m5-3", body: "My name is SMS Visitor, sms.visitor@example.com. Book the 10:00 AM slot",
+    { sid: "SM-m5-4", body: "My name is SMS Visitor, sms.visitor@example.com. Book the 10:00 AM slot",
+      expectedPattern: "%Would you like me to book it?%",
+      expectedContains: "Would you like me to book it?" },
+    { sid: "SM-m5-4", body: "Yes, please.",
       expectedPattern: "%Your QA Consultation is booked for%10:00 AM%",
       expectedContains: "Your QA Consultation is booked for" },
   ];
@@ -339,14 +342,31 @@ try {
       `outbound SMS for ${turn.sid}`,
     );
     conversationId = result.rows[0].conversation_id;
+
+    if (turn.sid === "SM-m5-3") {
+      const preConfirmationBooking = await pool.query(
+        `SELECT count(*)::int AS count FROM appointments WHERE workspace_id = $1`,
+        [workspaceId],
+      );
+      assert(preConfirmationBooking.rows[0].count === 0,
+        "SMS booking executed before explicit customer confirmation.");
+      const stagedAction = await pool.query(
+        `SELECT status FROM pending_agent_actions
+          WHERE workspace_id = $1 AND conversation_id = $2 AND type = 'BOOK_APPOINTMENT'
+          ORDER BY created_at DESC LIMIT 1`,
+        [workspaceId, conversationId],
+      );
+      assert(stagedAction.rows[0]?.status === "AWAITING_CONFIRMATION",
+        "SMS booking proposal was not persisted as awaiting confirmation.");
+    }
   }
   assert(conversationId, "SMS flow did not create a conversation.");
 
-  const duplicate = await sendTelnyxWebhook(workspaceId, telnyxEvent("message.received", "evt-SM-m5-3-received", {
-    id: "SM-m5-3",
+  const duplicate = await sendTelnyxWebhook(workspaceId, telnyxEvent("message.received", "evt-SM-m5-4-received", {
+    id: "SM-m5-4",
     from: { phone_number: "+12025550100" },
     to: [{ phone_number: "+12025550200" }],
-    text: turns[2].body,
+    text: turns[3].body,
   }));
   assert(duplicate.response.status === 202, "Duplicate SMS webhook was not safely acknowledged.");
   assert(duplicate.payload?.duplicates === 1, "Duplicate SMS webhook was not identified as a duplicate.");
@@ -411,11 +431,11 @@ try {
   );
 
   const smsUsage = await pool.query(`SELECT mode, provider, credits_charged FROM usage_events WHERE workspace_id = $1 AND capability = 'SMS' ORDER BY created_at`, [workspaceId]);
-  assert(smsUsage.rowCount === 6, `Expected 6 hosted SMS usage events (3 inbound + 3 outbound), received ${smsUsage.rowCount}.`);
+  assert(smsUsage.rowCount === 8, `Expected 8 hosted SMS usage events (4 inbound + 4 outbound), received ${smsUsage.rowCount}.`);
   assert(smsUsage.rows.every((row) => row.mode === "HOSTED" && row.provider === "telnyx" && row.credits_charged === 1), "Hosted SMS usage attribution/credits are incorrect.");
 
   const balance = (await pool.query(`SELECT balance FROM credit_wallets WHERE workspace_id = $1`, [workspaceId])).rows[0].balance;
-  assert(balance === 2988, `Expected optimized hosted-credit total; received balance ${balance}.`);
+  assert(balance === 2986, `Expected optimized hosted-credit total with confirmation SMS round-trip; received balance ${balance}.`);
 
   await page.goto(`${baseUrl}/inbox`, { waitUntil: "networkidle" });
   await page.getByRole("heading", { name: "Inbox", level: 1 }).waitFor();
