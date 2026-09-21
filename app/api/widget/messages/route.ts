@@ -141,7 +141,7 @@ export async function POST(request: Request) {
           await completeWebchatTurn(workspaceId, claim.turnId, saved.body);
           enqueueReply(controller, saved.body);
           if (result.handlingMode === "HUMAN") {
-            controller.enqueue(event("handoff", { message: "A team member will continue from here." }));
+            controller.enqueue(event("handoff", { message: null }));
           }
           controller.enqueue(event("done", { handlingMode: result.handlingMode }));
           controller.close();
