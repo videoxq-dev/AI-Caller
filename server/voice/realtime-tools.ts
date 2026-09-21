@@ -11,6 +11,8 @@ import { getConversationById } from "@/server/domain/core/repository";
 import { confirmAndExecuteBooking, getBookingOutcome } from "@/server/booking/commands";
 import { getBookingDraft, openBookingDraft, patchBookingDraft, type BookingContext, type BookingPatch } from "@/server/booking/drafts";
 import { prepareBookingPreview, searchBookingAvailability, selectBookingOffer } from "@/server/booking/offers";
+import { parseBookingDate, parseBookingTime } from "@/server/booking/time";
+import { getBusinessSetup } from "@/server/domain/onboarding/repository";
 import { assertRealtimeBookingReady, captureRealtimeBookingDetails, getRealtimeBookingDetails, realtimeBookingDetailsSchema, saveRealtimeAvailability, sameBookingInstant } from "./realtime-booking";
 import { getVoiceCall, updateVoiceCall } from "./repository";
 
@@ -20,9 +22,11 @@ export const realtimeTools = [
     description: "Record only booking details the caller has clearly provided. Call again when they correct details. Never invent missing values.",
     parameters: { type: "object", properties: {
       serviceName: { type: "string" }, location: { type: "string" },
-      date: { type: "string", description: "YYYY-MM-DD; resolve month/day from the supplied current server time, using this year if still upcoming and next year if already passed" },
-      time: { type: "string", description: "HH:MM in business local time" },
-      timezone: { type: "string", description: "IANA time zone" },
+      dateExpression: { type: "string", description: "The caller's date words exactly as provided, for example Sep 23, 2026 or tomorrow. Do not calculate a date." },
+      timeExpression: { type: "string", description: "The caller's time words exactly as provided, for example 11 AM or 10 AM UTC. Do not calculate UTC." },
+      date: { type: "string", description: "Backward-compatible exact YYYY-MM-DD only when the caller literally supplied that form." },
+      time: { type: "string", description: "Backward-compatible exact HH:MM only when the caller literally supplied that form." },
+      timezone: { type: "string", description: "IANA time zone only when explicitly supplied by the caller." },
     } },
   },
   {
@@ -154,19 +158,33 @@ async function runRealtimeBookingV2(input: {
   if (!input.isCurrentTurn()) return { ok: false as const, reason: "The caller corrected the request." };
 
   if (input.name === "capture_booking_details") {
-    const detail = realtimeBookingDetailsSchema.parse(input.args);
+    const raw = z.object({
+      serviceName: z.string().trim().min(1).max(160).optional(),
+      location: z.string().trim().min(1).max(250).optional(),
+      dateExpression: z.string().trim().min(1).max(200).optional(),
+      timeExpression: z.string().trim().min(1).max(100).optional(),
+      date: z.string().trim().min(1).max(100).optional(),
+      time: z.string().trim().min(1).max(100).optional(),
+      timezone: z.string().trim().min(1).max(100).optional(),
+    }).strict().refine(value => Object.keys(value).length > 0).parse(input.args);
     const opened = await openBookingDraft(context);
     if (!("draft" in opened)) throw new AppError("BOOKING_STATE_UNAVAILABLE", "Booking state is unavailable.", 503);
     const draft = opened.draft;
     const patch: BookingPatch = {};
-    if (detail.serviceName) patch.serviceId = (await resolveRealtimeService(input.workspaceId, detail.serviceName)).id;
-    if (detail.location) patch.requiredLocation = detail.location;
-    if (detail.date) {
-      patch.localDate = detail.date;
-      patch.originalDateExpression = detail.date;
+    if (raw.serviceName) patch.serviceId = (await resolveRealtimeService(input.workspaceId, raw.serviceName)).id;
+    if (raw.location) patch.requiredLocation = raw.location;
+    const business = await getBusinessSetup(input.workspaceId);
+    const requestedTime = raw.timeExpression ?? raw.time;
+    const parsedTime = requestedTime ? parseBookingTime(requestedTime) : null;
+    const requestedZone = raw.timezone ?? parsedTime?.timezone ?? draft.customerTimezone ??
+      business.profile?.timezone ?? "UTC";
+    const requestedDate = raw.dateExpression ?? raw.date;
+    if (requestedDate) {
+      patch.localDate = parseBookingDate(requestedDate, requestedZone);
+      patch.originalDateExpression = requestedDate;
     }
-    if (detail.time) patch.localTime = detail.time;
-    if (detail.timezone) patch.customerTimezone = detail.timezone;
+    if (parsedTime) patch.localTime = parsedTime.localTime;
+    if (raw.timezone || parsedTime?.timezone) patch.customerTimezone = requestedZone;
     const changed = Object.keys(patch).length
       ? await patchBookingDraft(context, {
         draftId: draft.id, expectedVersion: draft.version,
@@ -352,7 +370,24 @@ export async function runRealtimeBusinessTool(input: {
   if (input.name === "capture_booking_details") {
     try {
       if (!input.isCurrentTurn()) return { ok: false, reason: "The caller corrected the request." };
-      const saved = await captureRealtimeBookingDetails(input.workspaceId, input.callId, args);
+      // Legacy calls keep their old state table, but date/time normalization is
+      // still server-owned so a model cannot decide whether a date is past or
+      // calculate a trusted UTC instant.
+      const legacy = { ...args };
+      const business = await getBusinessSetup(input.workspaceId);
+      const timeExpression = typeof legacy.timeExpression === "string"
+        ? legacy.timeExpression : typeof legacy.time === "string" ? legacy.time : null;
+      const parsedTime = timeExpression ? parseBookingTime(timeExpression) : null;
+      const zone = typeof legacy.timezone === "string" ? legacy.timezone
+        : parsedTime?.timezone ?? business.profile?.timezone ?? "UTC";
+      const dateExpression = typeof legacy.dateExpression === "string"
+        ? legacy.dateExpression : typeof legacy.date === "string" ? legacy.date : null;
+      if (dateExpression) legacy.date = parseBookingDate(dateExpression, zone);
+      if (parsedTime) legacy.time = parsedTime.localTime;
+      legacy.timezone = zone;
+      delete legacy.dateExpression;
+      delete legacy.timeExpression;
+      const saved = await captureRealtimeBookingDetails(input.workspaceId, input.callId, legacy);
       return { ok: true as const, kind: "booking_state" as const, data: saved };
     } catch (error) {
       if (error instanceof Error && error.name === "ZodError") {
@@ -488,10 +523,12 @@ Listen through natural pauses; consider the latest correction authoritative. Kee
 known service, location, date, time and timezone in working memory. Ask ONLY for
 missing details; when the caller supplies a date, ask for time rather than both.
 BOOKING TOOL SEQUENCE:
-1. Call capture_booking_details with the service, date, time and timezone supplied
-in THIS call; call it again on every correction. Use the business timezone unless
-the caller specifies another one, and state that timezone in the preview.
-Never substitute a date or an unconfirmed preview from an earlier chat or call.
+1. Call capture_booking_details with the service and the caller's original
+dateExpression/timeExpression words from THIS call; call it again on every
+correction. Do NOT calculate a calendar date, UTC offset, end time, or year in
+the model. Supply timezone only when the caller explicitly gives one; the server
+uses the configured business timezone otherwise. Never substitute a date or an
+unconfirmed preview from an earlier chat or call.
 2. Call check_availability after saving the requested date and time. Use the saved
 service duration below and a search window long enough for the full service.
 Do not ask permission to run this read-only check. If a tool asks for missing
