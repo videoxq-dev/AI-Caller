@@ -206,7 +206,7 @@ export async function sendSmsConversationTextWithRuntime(
   if (input.senderType === "USER" && conversation.handlingMode !== "HUMAN"
     && !(await hasOpenConversationIssue(workspaceId, conversationId))) {
     throw new AppError(
-      "STAFF_REPLY_SCOPE_REQUIRED",
+      "HUMAN_TAKEOVER_REQUIRED",
       "Take over the conversation or open a staff issue before sending a staff SMS reply.",
       409,
     );
