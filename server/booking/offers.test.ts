@@ -1,7 +1,7 @@
 import { afterAll, beforeEach, describe, expect, it } from "vitest";
 import { eq } from "drizzle-orm";
 import { closeDatabase, db } from "@/db";
-import { bookingDrafts, bookingOffers, bookingPreviews, contacts, services, workspaces } from "@/db/schema";
+import { bookingDrafts, bookingOffers, bookingPreviews, contacts, messages, services, workspaces } from "@/db/schema";
 import { getOrCreateOpenConversation } from "@/server/domain/core/repository";
 import { saveBusinessSetup } from "@/server/domain/onboarding/repository";
 import { openBookingDraft, patchBookingDraft, type BookingContext } from "./drafts";
@@ -77,9 +77,15 @@ describe("stored exact booking offers and previews (disposable PostgreSQL)", () 
       displayEnd: { localDate: "2030-09-23", localTime: "15:00", timezone: "Africa/Lagos" },
     });
     expect(prepared.preview.deliveredAt).toBeNull();
+    const [outbound] = await db.insert(messages).values({
+      workspaceId: ctx.workspaceId, conversationId: ctx.conversationId!,
+      channel: "WEBCHAT", direction: "OUTBOUND", senderType: "AI",
+      contentType: "TEXT", body: "Your saved Office Cleaning preview",
+      metadata: { bookingPreviewId: prepared.preview.id, bookingDraftId: draft.id, bookingVersion: 3 },
+    }).returning();
     const delivered = await recordBookingPreviewDelivery(ctx, {
       draftId: draft.id, expectedVersion: 3, previewId: prepared.preview.id,
-      deliveryChannel: "WEBCHAT", deliveryReference: "assistant-message-123",
+      deliveryChannel: "WEBCHAT", deliveryReference: outbound.id,
     }, later(1000));
     expect(delivered.deliveredAt).toEqual(later(1000));
     expect((await db.select().from(bookingPreviews))).toHaveLength(1);
