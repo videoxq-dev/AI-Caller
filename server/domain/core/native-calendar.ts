@@ -117,8 +117,11 @@ export async function nativeHours(workspaceId: string) {
 function conflictsWithBuffer(window: Window, existing: Window[], beforeMinutes: number, afterMinutes: number) {
   const protectedStart = window.startsAt.getTime() - beforeMinutes * 60_000;
   const protectedEnd = window.endsAt.getTime() + afterMinutes * 60_000;
-  return existing.some((row) => row.startsAt.getTime() < protectedEnd
-    && row.endsAt.getTime() > protectedStart);
+  return existing.some((row) => {
+    const existingProtectedStart = row.startsAt.getTime() - beforeMinutes * 60_000;
+    const existingProtectedEnd = row.endsAt.getTime() + afterMinutes * 60_000;
+    return existingProtectedStart < protectedEnd && existingProtectedEnd > protectedStart;
+  });
 }
 
 export async function nativeAvailability(workspaceId: string, input: AvailabilityInput) {
