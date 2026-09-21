@@ -18,6 +18,7 @@ import { db } from "@/db";
 import {
   appointments,
   automationEvents,
+  bookingReservations,
   contactIdentities,
   contacts,
   contactTags,
@@ -567,6 +568,7 @@ export async function insertNativeAppointment(
   workspaceId: string,
   input: AppointmentInput,
   policy: NativeBookingPolicy,
+  bookingCommandId?: string,
 ) {
   await ensureContactInWorkspace(workspaceId, input.contactId);
   return db.transaction(async tx => {
@@ -576,17 +578,31 @@ export async function insertNativeAppointment(
         inArray(appointments.status, ["PENDING", "CONFIRMED"]),
         lt(appointments.startsAt, new Date(input.endsAt.getTime() + 36 * 60 * 60_000)),
         gt(appointments.endsAt, new Date(input.startsAt.getTime() - 36 * 60 * 60_000))))
-      .limit(1000);
-    const sameRequest = existing.find((row) => row.contactId === input.contactId
+      .limit(1001);
+    const reservations = await tx.select({
+      startsAt: bookingReservations.startsAt, endsAt: bookingReservations.endsAt,
+    }).from(bookingReservations).where(and(
+      eq(bookingReservations.workspaceId, workspaceId),
+      eq(bookingReservations.state, "ACTIVE"),
+      ...(bookingCommandId ? [ne(bookingReservations.commandId, bookingCommandId)] : []),
+      lt(bookingReservations.startsAt, new Date(input.endsAt.getTime() + 36 * 60 * 60_000)),
+      gt(bookingReservations.endsAt, new Date(input.startsAt.getTime() - 36 * 60 * 60_000)),
+    )).limit(1001);
+    if (existing.length > 1000 || reservations.length > 1000) {
+      throw new AppError("AVAILABILITY_INCOMPLETE", "The calendar is too busy to verify this appointment safely.", 503);
+    }
+    const sameRequest = existing.find((row) => bookingCommandId
+      ? row.bookingCommandId === bookingCommandId
+      : row.contactId === input.contactId
       && row.title === input.title
       && row.startsAt.getTime() === input.startsAt.getTime()
       && row.endsAt.getTime() === input.endsAt.getTime());
     if (sameRequest) return sameRequest;
-    assertNativePolicyAvailability(input, existing, policy);
+    assertNativePolicyAvailability(input, [...existing, ...reservations], policy);
     const [appointment] = await tx.insert(appointments).values({
       workspaceId, contactId: input.contactId,
       conversationId: input.conversationId ?? null, integrationId: null,
-      externalEventId: null, serviceId: input.serviceId ?? null,
+      externalEventId: null, bookingCommandId: bookingCommandId ?? null, serviceId: input.serviceId ?? null,
       title: input.title, startsAt: input.startsAt, endsAt: input.endsAt,
       timezone: input.timezone, status: "CONFIRMED",
       bookingSource: input.bookingSource ?? null, notes: input.notes ?? null,
@@ -627,8 +643,19 @@ export async function updateNativeAppointmentAfterReschedule(
       inArray(appointments.status, ["PENDING", "CONFIRMED"]),
       lt(appointments.startsAt, new Date(input.endsAt.getTime() + 36 * 60 * 60_000)),
       gt(appointments.endsAt, new Date(input.startsAt.getTime() - 36 * 60 * 60_000)),
-    )).limit(1000);
-    assertNativePolicyAvailability(input, existing, policy);
+    )).limit(1001);
+    const reservations = await tx.select({
+      startsAt: bookingReservations.startsAt, endsAt: bookingReservations.endsAt,
+    }).from(bookingReservations).where(and(
+      eq(bookingReservations.workspaceId, workspaceId),
+      eq(bookingReservations.state, "ACTIVE"),
+      lt(bookingReservations.startsAt, new Date(input.endsAt.getTime() + 36 * 60 * 60_000)),
+      gt(bookingReservations.endsAt, new Date(input.startsAt.getTime() - 36 * 60 * 60_000)),
+    )).limit(1001);
+    if (existing.length > 1000 || reservations.length > 1000) {
+      throw new AppError("AVAILABILITY_INCOMPLETE", "The calendar is too busy to verify this appointment safely.", 503);
+    }
+    assertNativePolicyAvailability(input, [...existing, ...reservations], policy);
     const [appointment] = await tx.update(appointments).set({
       startsAt: input.startsAt, endsAt: input.endsAt, timezone: input.timezone,
       status: "CONFIRMED", updatedAt: new Date(),
