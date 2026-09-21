@@ -114,13 +114,16 @@ export async function handleBookingTurn(
   ctx: BookingContext,
   message: { id: string; body: string },
   now = new Date(),
+  isCurrentTurn?: () => Promise<boolean>,
 ): Promise<BookingTurn | null> {
+  if (isCurrentTurn && !await isCurrentTurn()) return { reply: "I heard a correction; let me use your latest request." };
   const active = await activeDraft(ctx);
   const existing = active && active.expiresAt > now ? active : null;
   const isBookingRequest = /\b(?:book(?:ing)?|appointment|schedule|availability|available|reserve|reschedule)\b/i.test(message.body);
   if (!existing && !isBookingRequest) return null;
   // A no/yes answer to unrelated questions is not authority to commit.
   if (existing?.currentPreviewId && isExplicitActionConfirmation(message.body)) {
+    if (isCurrentTurn && !await isCurrentTurn()) return { reply: "The booking changed; I haven't confirmed it." };
     const [preview] = await db.select().from(bookingPreviews).where(and(
       eq(bookingPreviews.id, existing.currentPreviewId),
       eq(bookingPreviews.workspaceId, ctx.workspaceId),
@@ -170,6 +173,7 @@ export async function handleBookingTurn(
     return { reply: errorReply(error) };
   }
   const decision = parsed.intent;
+  if (isCurrentTurn && !await isCurrentTurn()) return { reply: "I heard a correction; let me use your latest request." };
   if (decision.action === "UNRELATED" || decision.action === "QUESTION") {
     const service = parsed.services.find((item) => item.id === existing?.serviceId);
     if (service && /\b(?:how long|duration)\b/i.test(message.body)) {
@@ -244,6 +248,7 @@ export async function handleBookingTurn(
     if (!found.offers.length) {
       return { reply: "I checked the calendar and that exact time is unavailable. Would you like to try another date or time?" };
     }
+    if (isCurrentTurn && !await isCurrentTurn()) return { reply: "I heard a correction; let me check the latest time." };
     const selected = await selectBookingOffer(ctx, {
       draftId: draft.id, expectedVersion: found.version, offerId: found.offers[0].id,
     }, now);
