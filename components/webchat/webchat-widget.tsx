@@ -35,6 +35,7 @@ export function WebchatWidget({ widgetKey, config }: { widgetKey: string; config
   const [marketingAllowed, setMarketingAllowed] = useState(false);
   const [loading, setLoading] = useState(true);
   const [sending, setSending] = useState(false);
+  const [assistantTyping, setAssistantTyping] = useState(false);
   const [status, setStatus] = useState("AI online");
   const scrollerRef = useRef<HTMLDivElement>(null);
   const sessionStorageKey = useMemo(() => `ai-caller:session:${widgetKey}`, [widgetKey]);
@@ -77,7 +78,7 @@ export function WebchatWidget({ widgetKey, config }: { widgetKey: string; config
 
   useEffect(() => {
     scrollerRef.current?.scrollTo({ top: scrollerRef.current.scrollHeight, behavior: "smooth" });
-  }, [messages]);
+  }, [messages, assistantTyping]);
 
   useEffect(() => {
     if (!sessionToken) return;
@@ -129,6 +130,7 @@ export function WebchatWidget({ widgetKey, config }: { widgetKey: string; config
   }
 
   function appendAssistantDelta(id: string, delta: string) {
+    setAssistantTyping(false);
     setMessages((current) => {
       const existing = current.find((message) => message.id === id);
       if (!existing) return [...current, { id, role: "assistant", text: delta }];
@@ -143,6 +145,7 @@ export function WebchatWidget({ widgetKey, config }: { widgetKey: string; config
     const replyId = `reply_${clientMessageId}`;
     setInput("");
     setSending(true);
+    setAssistantTyping(true);
     setStatus("Thinking…");
     setMessages((current) => [...current, { id: clientMessageId, role: "customer", text: value }]);
 
@@ -178,16 +181,23 @@ export function WebchatWidget({ widgetKey, config }: { widgetKey: string; config
             const data = JSON.parse(dataLine) as { delta?: string; message?: string; handlingMode?: string; agentAvailable?: boolean };
             if (eventName === "message" && data.delta) appendAssistantDelta(replyId, data.delta);
             if (eventName === "handoff") {
+              setAssistantTyping(false);
               setStatus("Human handoff");
               if (data.message) appendAssistantDelta(replyId, data.message);
             }
             if (eventName === "unavailable" || eventName === "notice") {
+              setAssistantTyping(false);
               setStatus(eventName === "unavailable" ? "AI unavailable" : "No AI reply");
               if (data.message) appendAssistantDelta(`notice_${clientMessageId}`, data.message);
             }
-            if (eventName === "error") throw new Error(data.message ?? "Unable to process message.");
-            if (eventName === "done" && data.agentAvailable !== false
-              && data.handlingMode === "AI") setStatus("AI online");
+            if (eventName === "error") {
+              setAssistantTyping(false);
+              throw new Error(data.message ?? "Unable to process message.");
+            }
+            if (eventName === "done") {
+              setAssistantTyping(false);
+              if (data.agentAvailable !== false && data.handlingMode === "AI") setStatus("AI online");
+            }
           }
           boundary = buffer.indexOf("\n\n");
         }
@@ -198,6 +208,7 @@ export function WebchatWidget({ widgetKey, config }: { widgetKey: string; config
       setStatus("Try again");
     } finally {
       setSending(false);
+      setAssistantTyping(false);
       setStatus((current) => current === "Thinking…" ? "AI online" : current);
     }
   }
@@ -230,6 +241,9 @@ export function WebchatWidget({ widgetKey, config }: { widgetKey: string; config
         {messages.map((message) => (
           <div key={message.id} className={`webchatMessage ${message.role}`}><span>{message.text}</span></div>
         ))}
+        {assistantTyping && <div className="webchatMessage assistant webchatTyping" aria-label="AI is typing" role="status">
+          <span aria-hidden="true"><i /><i /><i /></span>
+        </div>}
       </div>
 
       <div className="webchatComposer">
