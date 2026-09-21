@@ -11,7 +11,7 @@ import { getConversationById } from "@/server/domain/core/repository";
 import { confirmAndExecuteBooking, getBookingOutcome } from "@/server/booking/commands";
 import { getBookingDraft, openBookingDraft, patchBookingDraft, type BookingContext, type BookingPatch } from "@/server/booking/drafts";
 import { prepareBookingPreview, searchBookingAvailability, selectBookingOffer } from "@/server/booking/offers";
-import { assertRealtimeBookingReady, captureRealtimeBookingDetails, getRealtimeBookingDetails, saveRealtimeAvailability, sameBookingInstant } from "./realtime-booking";
+import { assertRealtimeBookingReady, captureRealtimeBookingDetails, getRealtimeBookingDetails, realtimeBookingDetailsSchema, saveRealtimeAvailability, sameBookingInstant } from "./realtime-booking";
 import { getVoiceCall, updateVoiceCall } from "./repository";
 
 export const realtimeTools = [
