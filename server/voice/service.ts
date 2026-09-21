@@ -486,7 +486,7 @@ export function createVoiceWebhookService(dependencies: VoiceServiceDependencies
           recordingConsentStatus: "ANNOUNCED",
           recordingDisclosedAt: event.occurredAt ?? new Date(),
           transcriptStatus: "ACTIVE",
-        }, { phase: "ACTIVE" });
+        }, { phase: "ACTIVE", realtimeOpeningPending: true });
         return;
       }
       await runtime.provider.speak({
@@ -537,6 +537,7 @@ export function createVoiceWebhookService(dependencies: VoiceServiceDependencies
             transcriptStatus: "ACTIVE",
           }, {
             phase: "ACTIVE",
+            realtimeOpeningPending: true,
             consentEvidence: "DTMF_1",
             consentEventId: event.externalEventId,
           });
