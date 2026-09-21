@@ -829,6 +829,7 @@ describe("orchestrator response protocol", () => {
     const orchestrator = createResponseOrchestrator({
       buildContext: vi.fn(async () => ({
         ...fakeContext(), source: "INBOUND_TURN" as const,
+        messages: [{ role: "user" as const, content: "Can you verify whether this warranty exception is covered?" }],
         agent: { id: "agent-1", status: "ACTIVE" as const,
           whenUnsure: "Escalate to a human", escalationMessage: null,
           behaviorSettings: { capabilities: { ...defaultAgentCapabilities, ESCALATE: true } } },
@@ -908,6 +909,7 @@ describe("orchestrator response protocol", () => {
     const orchestrator = createResponseOrchestrator({
       buildContext: vi.fn(async () => ({
         ...fakeContext(), source: "INBOUND_TURN" as const,
+        messages: [{ role: "user" as const, content: "Which location handles this request?" }],
         agent: { id: "agent-1", status: "ACTIVE" as const,
           whenUnsure: "Ask a clarifying question", escalationMessage: null,
           behaviorSettings: { capabilities: { ...defaultAgentCapabilities } } },
@@ -952,6 +954,7 @@ describe("orchestrator response protocol", () => {
     const orchestrator = createResponseOrchestrator({
       buildContext: vi.fn(async () => ({
         ...fakeContext(), source: "INBOUND_TURN" as const,
+        messages: [{ role: "user" as const, content: "Please review this warranty exception." }],
         agent: { id: "agent-1", status: "ACTIVE" as const,
           whenUnsure: "Escalate to a human", escalationMessage: null,
           behaviorSettings: { capabilities: { ...defaultAgentCapabilities, ESCALATE: true } } },
