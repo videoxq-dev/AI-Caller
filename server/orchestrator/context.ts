@@ -19,6 +19,7 @@ export type OrchestratorContext = {
   agent: { id: string; status: "DRAFT" | "ACTIVE" | "PAUSED"; escalationMessage: string | null; behaviorSettings: Record<string, unknown> } | null;
   source?: "INBOUND_TURN" | "AGENT_TEST";
   systemPrompt: string;
+  timezone?: string;
   messages: OrchestratorMessage[];
 };
 
@@ -251,6 +252,7 @@ export async function buildAgentTestContext(workspaceId: string, messages: Orche
     contact: { id: "agent-test" },
     agent: agentSetup.agent,
     source: "AGENT_TEST" as const,
+    timezone: businessSetup.profile?.timezone ?? "UTC",
     systemPrompt: buildSystemPrompt(businessSetup, agentSetup, {
       name: "Test customer",
       leadStatus: "NEW",
