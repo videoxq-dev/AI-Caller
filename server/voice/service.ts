@@ -306,6 +306,8 @@ export function createVoiceWebhookService(dependencies: VoiceServiceDependencies
           language: voice.config.language,
           speakingRate: voice.config.speakingRate,
           recordingPolicy: voice.config.recordingPolicy,
+          assistantName: voice.assistantName,
+          openingMessage: openingText(voice.openingMessage),
         },
       });
 
@@ -364,16 +366,27 @@ export function createVoiceWebhookService(dependencies: VoiceServiceDependencies
       const voice = await getVoiceConfig(workspaceId);
       const business = await getBusinessSetup(workspaceId);
       const businessName = business.profile?.businessName?.trim() || "this business";
-      const text = disclosureText(voice.config.recordingPolicy, voice.assistantName, businessName);
+      const profileKey = typeof call.metadata.voiceProfile === "string"
+        ? call.metadata.voiceProfile : voice.config.profileKey;
+      const language = typeof call.metadata.language === "string"
+        ? call.metadata.language : voice.config.language;
+      const speakingRate = typeof call.metadata.speakingRate === "number"
+        ? call.metadata.speakingRate : voice.config.speakingRate;
+      const recordingPolicy = call.metadata.recordingPolicy === "EXPLICIT_CONSENT"
+        ? "EXPLICIT_CONSENT" : call.metadata.recordingPolicy === "ANNOUNCE"
+          ? "ANNOUNCE" : voice.config.recordingPolicy;
+      const assistantName = typeof call.metadata.assistantName === "string"
+        ? call.metadata.assistantName : voice.assistantName;
+      const text = disclosureText(recordingPolicy, assistantName, businessName);
 
       if (phase(call.metadata) !== "AWAITING_ANSWER") return;
 
-      if (voice.config.recordingPolicy === "EXPLICIT_CONSENT") {
+      if (recordingPolicy === "EXPLICIT_CONSENT") {
         await runtime.provider.gatherConsent({
           callControlId: event.callControlId,
           text,
-          voice: resolveVoiceProfile(voice.config.profileKey).providerVoiceId,
-          language: voice.config.language,
+          voice: resolveVoiceProfile(profileKey).providerVoiceId,
+          language,
           commandId: deterministicCommandId(`${event.externalEventId}:consent-gather`),
         });
         await updateVoiceCall(workspaceId, call.id, {
@@ -391,9 +404,9 @@ export function createVoiceWebhookService(dependencies: VoiceServiceDependencies
       await runtime.provider.speak({
         callControlId: event.callControlId,
         text,
-        voice: resolveVoiceProfile(voice.config.profileKey).providerVoiceId,
-        language: voice.config.language,
-        speakingRate: voice.config.speakingRate,
+        voice: resolveVoiceProfile(profileKey).providerVoiceId,
+        language,
+        speakingRate,
         commandId: deterministicCommandId(`${event.externalEventId}:disclosure`),
       });
       await updateVoiceCall(workspaceId, call.id, {
@@ -447,21 +460,41 @@ export function createVoiceWebhookService(dependencies: VoiceServiceDependencies
       if (currentPhase !== "AWAITING_DISCLOSURE_END") return;
 
       const voice = await getVoiceConfig(workspaceId);
+      const profileKey = typeof call.metadata.voiceProfile === "string"
+        ? call.metadata.voiceProfile : voice.config.profileKey;
+      const language = typeof call.metadata.language === "string"
+        ? call.metadata.language : voice.config.language;
+      const speakingRate = typeof call.metadata.speakingRate === "number"
+        ? call.metadata.speakingRate : voice.config.speakingRate;
+      const opening = typeof call.metadata.openingMessage === "string" && call.metadata.openingMessage.trim()
+        ? call.metadata.openingMessage.trim() : openingText(voice.openingMessage);
       await runtime.provider.startRecording({
         callControlId: event.callControlId,
         commandId: deterministicCommandId(`${event.externalEventId}:record`),
       });
       await runtime.provider.startTranscription({
         callControlId: event.callControlId,
-        language: voice.config.language,
+        language,
         commandId: deterministicCommandId(`${event.externalEventId}:transcription`),
       });
+      if (call.metadata.voiceTechnology === "REALTIME") {
+        // The legal disclosure is carrier TTS. The assistant greeting and all
+        // subsequent assistant speech belong to one Realtime voice session so
+        // the configured persona does not switch after the greeting.
+        await updateVoiceCall(workspaceId, call.id, {
+          recordingStatus: "RECORDING",
+          recordingConsentStatus: "ANNOUNCED",
+          recordingDisclosedAt: event.occurredAt ?? new Date(),
+          transcriptStatus: "ACTIVE",
+        }, { phase: "ACTIVE" });
+        return;
+      }
       await runtime.provider.speak({
         callControlId: event.callControlId,
-        text: openingText(voice.openingMessage),
-        voice: resolveVoiceProfile(voice.config.profileKey).providerVoiceId,
-        language: voice.config.language,
-        speakingRate: voice.config.speakingRate,
+        text: opening,
+        voice: resolveVoiceProfile(profileKey).providerVoiceId,
+        language,
+        speakingRate,
         commandId: deterministicCommandId(`${event.externalEventId}:opening`),
       });
       await updateVoiceCall(workspaceId, call.id, {
@@ -469,19 +502,22 @@ export function createVoiceWebhookService(dependencies: VoiceServiceDependencies
         recordingConsentStatus: "ANNOUNCED",
         recordingDisclosedAt: event.occurredAt ?? new Date(),
         transcriptStatus: "ACTIVE",
-      }, { phase: "OPENING_SPEAKING",
-        ...(call.metadata.voiceTechnology === "REALTIME"
-          ? { voiceTelnyxTtsCharacters:
-            Number(call.metadata.voiceTelnyxTtsCharacters ?? 0) + openingText(voice.openingMessage).length }
-          : {}),
-      });
+      }, { phase: "OPENING_SPEAKING" });
       return;
     }
 
     if (event.type === "DTMF_GATHERED") {
       if (phase(call.metadata) !== "AWAITING_RECORDING_CONSENT") return;
       const voice = await getVoiceConfig(workspaceId);
-      const profile = resolveVoiceProfile(voice.config.profileKey);
+      const profileKey = typeof call.metadata.voiceProfile === "string"
+        ? call.metadata.voiceProfile : voice.config.profileKey;
+      const profile = resolveVoiceProfile(profileKey);
+      const language = typeof call.metadata.language === "string"
+        ? call.metadata.language : voice.config.language;
+      const speakingRate = typeof call.metadata.speakingRate === "number"
+        ? call.metadata.speakingRate : voice.config.speakingRate;
+      const opening = typeof call.metadata.openingMessage === "string" && call.metadata.openingMessage.trim()
+        ? call.metadata.openingMessage.trim() : openingText(voice.openingMessage);
       const consentGranted = event.digits === "1" && event.status === "valid";
 
       if (consentGranted) {
@@ -491,15 +527,27 @@ export function createVoiceWebhookService(dependencies: VoiceServiceDependencies
         });
         await runtime.provider.startTranscription({
           callControlId: event.callControlId,
-          language: voice.config.language,
+          language,
           commandId: deterministicCommandId(`${event.externalEventId}:transcription-after-consent`),
         });
+        if (call.metadata.voiceTechnology === "REALTIME") {
+          await updateVoiceCall(workspaceId, call.id, {
+            recordingStatus: "RECORDING",
+            recordingConsentStatus: "GRANTED",
+            transcriptStatus: "ACTIVE",
+          }, {
+            phase: "ACTIVE",
+            consentEvidence: "DTMF_1",
+            consentEventId: event.externalEventId,
+          });
+          return;
+        }
         await runtime.provider.speak({
           callControlId: event.callControlId,
-          text: openingText(voice.openingMessage),
+          text: opening,
           voice: profile.providerVoiceId,
-          language: voice.config.language,
-          speakingRate: voice.config.speakingRate,
+          language,
+          speakingRate,
           commandId: deterministicCommandId(`${event.externalEventId}:opening-after-consent`),
         });
         await updateVoiceCall(workspaceId, call.id, {
@@ -510,10 +558,6 @@ export function createVoiceWebhookService(dependencies: VoiceServiceDependencies
           phase: "OPENING_SPEAKING",
           consentEvidence: "DTMF_1",
           consentEventId: event.externalEventId,
-          ...(call.metadata.voiceTechnology === "REALTIME"
-            ? { voiceTelnyxTtsCharacters:
-              Number(call.metadata.voiceTelnyxTtsCharacters ?? 0) + openingText(voice.openingMessage).length }
-            : {}),
         });
         return;
       }
@@ -524,8 +568,8 @@ export function createVoiceWebhookService(dependencies: VoiceServiceDependencies
           ? "No problem. I won't record or transcribe this call. Please contact the business by text or WhatsApp for assistance."
           : "I couldn't confirm permission to record and transcribe the call, so I'll end this call now. Please contact the business by text or WhatsApp for assistance.",
         voice: profile.providerVoiceId,
-        language: voice.config.language,
-        speakingRate: voice.config.speakingRate,
+        language,
+        speakingRate,
         commandId: deterministicCommandId(`${event.externalEventId}:declined-notice`),
       });
       await updateVoiceCall(workspaceId, call.id, {
