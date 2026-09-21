@@ -267,14 +267,17 @@ try {
   assert(leadRow.rows[0]?.service_requested === "QA Consultation", "Lead service request was not persisted.");
 
   const appointmentRow = await pool.query(
-    `SELECT status, title, booking_source, external_event_id FROM appointments
+    `SELECT status, title, booking_source, integration_id, external_event_id FROM appointments
       WHERE workspace_id = $1 AND contact_id = $2 ORDER BY created_at DESC LIMIT 1`,
     [workspaceId, contactId],
   );
   assert(appointmentRow.rows[0]?.status === "CONFIRMED", "Widget booking did not persist a confirmed appointment.");
   assert(appointmentRow.rows[0]?.title === "QA Consultation", "Widget booking persisted the wrong appointment title.");
   assert(appointmentRow.rows[0]?.booking_source === "WEBCHAT_AI", "Widget booking source was not WEBCHAT_AI.");
-  assert(Boolean(appointmentRow.rows[0]?.external_event_id), "Widget booking did not persist the provider event id.");
+  assert(appointmentRow.rows[0]?.integration_id === null,
+    "Widget booking incorrectly attached the native fallback appointment to the stale external calendar.");
+  assert(appointmentRow.rows[0]?.external_event_id === null,
+    "Widget booking incorrectly persisted an external event id while using native scheduling.");
 
   const messageRow = await pool.query(
     `SELECT sender_type, content_type, body FROM messages
