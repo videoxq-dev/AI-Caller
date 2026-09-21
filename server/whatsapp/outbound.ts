@@ -3,6 +3,7 @@ import { db } from "@/db";
 import { conversations, messages, usageEvents } from "@/db/schema";
 import { appendMessage } from "@/server/domain/core/repository";
 import { AppError } from "@/server/http/errors";
+import { hasOpenConversationIssue } from "@/server/collaboration/service";
 import { logger } from "@/server/observability/logger";
 import { ProviderRequestError } from "@/server/providers/http";
 import { resolveWhatsAppRuntimeForWorkspace, type WhatsAppRuntime } from "@/server/providers/whatsapp/runtime";
@@ -92,8 +93,13 @@ export function createWhatsAppOutboundService(dependencies: OutboundDependencies
       input: { senderType: "AI" | "USER" | "SYSTEM"; text: string },
     ) {
       const conversation = await conversationState(workspaceId, conversationId);
-      if (input.senderType === "USER" && conversation.handlingMode !== "HUMAN") {
-        throw new AppError("HUMAN_TAKEOVER_REQUIRED", "Take over this conversation before sending a staff WhatsApp reply.", 409);
+      if (input.senderType === "USER" && conversation.handlingMode !== "HUMAN"
+        && !(await hasOpenConversationIssue(workspaceId, conversationId))) {
+        throw new AppError(
+          "STAFF_REPLY_SCOPE_REQUIRED",
+          "Take over the conversation or open a staff issue before sending a staff WhatsApp reply.",
+          409,
+        );
       }
       if (!(await isWhatsAppCustomerWindowOpen(workspaceId, conversationId))) {
         throw new AppError("WHATSAPP_TEMPLATE_REQUIRED", "The 24-hour WhatsApp customer service window has closed. Send an approved template instead.", 409);
@@ -150,8 +156,13 @@ export function createWhatsAppOutboundService(dependencies: OutboundDependencies
       },
     ) {
       const conversation = await conversationState(workspaceId, conversationId);
-      if (input.senderType === "USER" && conversation.handlingMode !== "HUMAN") {
-        throw new AppError("HUMAN_TAKEOVER_REQUIRED", "Take over this conversation before sending a staff WhatsApp template.", 409);
+      if (input.senderType === "USER" && conversation.handlingMode !== "HUMAN"
+        && !(await hasOpenConversationIssue(workspaceId, conversationId))) {
+        throw new AppError(
+          "STAFF_REPLY_SCOPE_REQUIRED",
+          "Take over the conversation or open a staff issue before sending a staff WhatsApp template.",
+          409,
+        );
       }
 
       const runtime = await dependencies.resolveRuntime(workspaceId);
