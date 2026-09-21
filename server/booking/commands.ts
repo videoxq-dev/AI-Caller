@@ -18,7 +18,7 @@ import { currentBookingBinding, requireBookingService } from "./offers";
 
 const idSchema = z.string().uuid();
 const versionSchema = z.number().int().positive();
-const ACTIVE_STATES = ["PENDING", "COMMITTING", "RECONCILING", "CONFIRMED"] as const;
+const ACTIVE_STATES = ["PENDING", "COMMITTING", "RECONCILING", "CONFIRMED", "FAILED"] as const;
 
 function owned(context: BookingContext, id: string) {
   return and(eq(bookingDrafts.id, id), eq(bookingDrafts.workspaceId, context.workspaceId),
@@ -76,7 +76,17 @@ export async function confirmBookingPreview(
   const draftId = idSchema.parse(input.draftId), previewId = idSchema.parse(input.previewId);
   const version = versionSchema.parse(input.expectedVersion);
   const sourceEventId = idSchema.parse(input.sourceEventId);
-  await getBookingDraft(context, draftId);
+  const priorDraft = await getBookingDraft(context, draftId);
+  if (priorDraft.bookingCommandId) {
+    const [priorCommand] = await db.select().from(bookingCommands).where(and(
+      eq(bookingCommands.id, priorDraft.bookingCommandId),
+      eq(bookingCommands.workspaceId, context.workspaceId),
+      eq(bookingCommands.draftId, draftId),
+      eq(bookingCommands.previewId, previewId),
+    )).limit(1);
+    if (priorCommand) return { state: priorCommand.state, command: priorCommand };
+    throw new AppError("BOOKING_PREVIEW_STALE", "This preview is no longer available.", 409);
+  }
   const [preview] = await db.select().from(bookingPreviews).where(and(
     eq(bookingPreviews.id, previewId), eq(bookingPreviews.workspaceId, context.workspaceId),
     eq(bookingPreviews.draftId, draftId), eq(bookingPreviews.draftVersion, version),
@@ -213,4 +223,14 @@ export async function getBookingOutcome(context: BookingContext, draftId: string
     eq(appointments.bookingCommandId, command.id),
   )).limit(1) : [];
   return { state: command.state, appointment: appointment ?? null, commandId: command.id };
+}
+
+export async function confirmAndExecuteBooking(
+  context: BookingContext,
+  input: Parameters<typeof confirmBookingPreview>[1],
+  now = new Date(),
+) {
+  const accepted = await confirmBookingPreview(context, input, now);
+  const { executeBookingCommand } = await import("./execution");
+  return executeBookingCommand(context.workspaceId, accepted.command.id);
 }
