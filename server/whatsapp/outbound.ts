@@ -90,7 +90,7 @@ export function createWhatsAppOutboundService(dependencies: OutboundDependencies
     async sendText(
       workspaceId: string,
       conversationId: string,
-      input: { senderType: "AI" | "USER" | "SYSTEM"; text: string },
+      input: { senderType: "AI" | "USER" | "SYSTEM"; text: string; metadata?: Record<string, unknown> },
     ) {
       const conversation = await conversationState(workspaceId, conversationId);
       if (input.senderType === "USER" && conversation.handlingMode !== "HUMAN"
@@ -117,7 +117,7 @@ export function createWhatsAppOutboundService(dependencies: OutboundDependencies
         provider: "whatsapp",
         externalMessageId: null,
         status: "SENDING",
-        metadata: { mode: runtime.mode },
+        metadata: { ...input.metadata, mode: runtime.mode },
       });
 
       if (input.senderType === "AI") {
@@ -206,7 +206,7 @@ export const whatsAppOutboundService = createWhatsAppOutboundService({ resolveRu
 export function sendWhatsAppConversationText(
   workspaceId: string,
   conversationId: string,
-  input: { senderType: "AI" | "USER" | "SYSTEM"; text: string },
+  input: { senderType: "AI" | "USER" | "SYSTEM"; text: string; metadata?: Record<string, unknown> },
 ) {
   return whatsAppOutboundService.sendText(workspaceId, conversationId, input);
 }

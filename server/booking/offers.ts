@@ -268,6 +268,22 @@ export async function recordBookingPreviewDelivery(
           "The booking preview was not fully played back to this caller.", 409);
       }
     }
+    if (context.channel === "SMS" || context.channel === "WHATSAPP") {
+      const [outbound] = await tx.select().from(messages).where(and(
+        eq(messages.id, reference), eq(messages.workspaceId, context.workspaceId),
+        eq(messages.conversationId, context.conversationId!),
+        eq(messages.channel, context.channel), eq(messages.direction, "OUTBOUND"),
+        eq(messages.senderType, "AI"),
+      )).limit(1);
+      if (!outbound || !outbound.externalMessageId ||
+        !["QUEUED", "SENT", "DELIVERED", "READ"].includes(outbound.status ?? "") ||
+        outbound.metadata.bookingPreviewId !== previewId ||
+        outbound.metadata.bookingDraftId !== draftId ||
+        outbound.metadata.bookingVersion !== version) {
+        throw new AppError("BOOKING_DELIVERY_NOT_VERIFIED",
+          "The booking preview was not accepted for delivery in this conversation.", 409);
+      }
+    }
     if (preview.deliveredAt) {
       if (preview.deliveryChannel !== input.deliveryChannel ||
         preview.deliveryReference !== reference) {
