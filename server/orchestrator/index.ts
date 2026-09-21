@@ -650,7 +650,9 @@ export function createResponseOrchestrator(dependencies: OrchestratorDependencie
       const plannedLooksUnresolved = planned.action.type === "ESCALATE"
         || Boolean(planned.unresolved?.reason);
       const bookingClarification = bookingMissingDetailReply(recentBookingText);
+      const bookingCanProceed = !allowed || allowed.BOOK_APPOINTMENT;
       const bookingAvailabilityRecovery = plannedLooksUnresolved
+        && bookingCanProceed
         && (!allowed || allowed.CHECK_AVAILABILITY)
         ? deterministicAvailabilityPlan(
             recentBookingText,
@@ -664,7 +666,7 @@ export function createResponseOrchestrator(dependencies: OrchestratorDependencie
           "Replacing unresolved booking plan with authoritative availability check",
         );
         planned = bookingAvailabilityRecovery;
-      } else if (bookingClarification && plannedLooksUnresolved) {
+      } else if (bookingCanProceed && bookingClarification && plannedLooksUnresolved) {
         return unresolvedWithoutHandoff(bookingClarification);
       }
 
