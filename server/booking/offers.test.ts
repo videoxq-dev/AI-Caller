@@ -169,4 +169,58 @@ describe("stored exact booking offers and previews (disposable PostgreSQL)", () 
       expect(offer.expiresAt).toBeGreaterThan(offer.checkedAt);
     }
   });
+
+  it("requires a carrier-accepted outbound receipt before SMS can authorize confirmation", async () => {
+    const smsContext: BookingContext = {
+      ...ctx, channel: "SMS", sessionKey: "SMS:" + conversationId,
+    };
+    const started = await openBookingDraft(smsContext, now);
+    if (started.state !== "OPENED") throw new Error("Expected a fresh SMS draft");
+    const patched = await patchBookingDraft(smsContext, {
+      draftId: started.draft.id, expectedVersion: 1, sourceEventId: "sms-details",
+      patch: { serviceId, localDate: "2030-09-23", localTime: "11:00",
+        customerTimezone: "Africa/Lagos" },
+    }, now);
+    if (patched.state !== "UPDATED") throw new Error("Expected updated SMS draft");
+    const found = await searchBookingAvailability(smsContext, {
+      draftId: started.draft.id, expectedVersion: patched.draft.version,
+    }, now);
+    if (!found.offers.length) throw new Error("Expected SMS availability");
+    const selected = await selectBookingOffer(smsContext, {
+      draftId: started.draft.id, expectedVersion: patched.draft.version,
+      offerId: found.offers[0].id,
+    }, now);
+    const prepared = await prepareBookingPreview(smsContext, {
+      draftId: started.draft.id, expectedVersion: selected.draft.version,
+    }, now);
+    const [notAccepted] = await db.insert(messages).values({
+      workspaceId, conversationId, channel: "SMS", direction: "OUTBOUND",
+      senderType: "AI", contentType: "TEXT", body: "Confirm this appointment?",
+      status: "SENDING", metadata: {
+        bookingPreviewId: prepared.preview.id, bookingDraftId: started.draft.id,
+        bookingVersion: selected.draft.version,
+      },
+    }).returning();
+    await expect(recordBookingPreviewDelivery(smsContext, {
+      draftId: started.draft.id, previewId: prepared.preview.id,
+      expectedVersion: selected.draft.version, deliveryChannel: "SMS",
+      deliveryReference: notAccepted.id,
+    }, now)).rejects.toMatchObject({ code: "BOOKING_DELIVERY_NOT_VERIFIED" });
+
+    const [accepted] = await db.insert(messages).values({
+      workspaceId, conversationId, channel: "SMS", direction: "OUTBOUND",
+      senderType: "AI", contentType: "TEXT", body: "Confirm this appointment?",
+      provider: "telnyx", externalMessageId: "sms-preview-1", status: "SENT",
+      metadata: {
+        bookingPreviewId: prepared.preview.id, bookingDraftId: started.draft.id,
+        bookingVersion: selected.draft.version,
+      },
+    }).returning();
+    const delivered = await recordBookingPreviewDelivery(smsContext, {
+      draftId: started.draft.id, previewId: prepared.preview.id,
+      expectedVersion: selected.draft.version, deliveryChannel: "SMS",
+      deliveryReference: accepted.id,
+    }, now);
+    expect(delivered.deliveryReference).toBe(accepted.id);
+  });
 });

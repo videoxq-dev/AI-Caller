@@ -12,7 +12,8 @@ import {
   prepareBookingPreview, recordBookingPreviewDelivery,
   searchBookingAvailability, selectBookingOffer,
 } from "./offers";
-import { confirmAndExecuteBooking, getBookingOutcome } from "./commands";
+import { confirmAndExecuteBooking, confirmBookingPreview, getBookingOutcome } from "./commands";
+import { recoverBookingCommands } from "./execution";
 
 const now = new Date("2030-09-21T12:00:00.000Z");
 const later = (milliseconds: number) => new Date(now.getTime() + milliseconds);
@@ -179,5 +180,46 @@ describe("durable native appointment command (disposable PostgreSQL)", () => {
       ...preview, expectedVersion: preview.version, sourceEventId,
     }, later(2000))).rejects.toMatchObject({ code: "AGENT_ACTION_DISABLED" });
     expect(await db.select().from(appointments)).toHaveLength(0);
+  });
+
+  it("recovers a command persisted before dispatch after a process crash", async () => {
+    const preview = await previewFor();
+    const sourceEventId = await confirmMessage();
+    const accepted = await confirmBookingPreview(context, {
+      ...preview, expectedVersion: preview.version, sourceEventId,
+    }, later(2000));
+    expect(accepted.state).toBe("PENDING");
+    expect(await db.select().from(appointments)).toHaveLength(0);
+
+    const recovered = await recoverBookingCommands();
+    expect(recovered.confirmed).toBe(1);
+    expect(await db.select().from(appointments)).toHaveLength(1);
+    expect((await db.select().from(bookingCommands))[0].state).toBe("CONFIRMED");
+    expect((await db.select().from(bookingReservations))[0].state).toBe("RELEASED");
+  });
+
+  it("does not reissue an uncertain external create merely because an execution lease expired", async () => {
+    const preview = await previewFor();
+    const sourceEventId = await confirmMessage();
+    const accepted = await confirmBookingPreview(context, {
+      ...preview, expectedVersion: preview.version, sourceEventId,
+    }, later(2000));
+    const commandId = accepted.command.id;
+    await db.update(bookingCommands).set({
+      provider: "calendly",
+      state: "COMMITTING",
+      providerAttemptedAt: later(2100),
+      leaseOwner: "abandoned-worker",
+      leaseExpiresAt: new Date(now.getTime() - 1000),
+      attemptCount: 1,
+    }).where(eq(bookingCommands.id, commandId));
+
+    const recovered = await recoverBookingCommands();
+    expect(recovered.unresolved).toBe(1);
+    const [command] = await db.select().from(bookingCommands).where(eq(bookingCommands.id, commandId));
+    expect(command.state).toBe("RECONCILING");
+    expect(command.attemptCount).toBe(1);
+    expect((await db.select().from(appointments))).toHaveLength(0);
+    expect((await db.select().from(bookingReservations))[0].state).toBe("ACTIVE");
   });
 });
