@@ -163,6 +163,44 @@ describe("native in-app appointment booking without external calendar", () => {
     })).rejects.toMatchObject({ code: "APPOINTMENT_DAILY_LIMIT_REACHED" });
   });
 
+  it("enforces asymmetric buffers around both existing and candidate appointments", async () => {
+    await saveCalendarSetup(workspaceId, {
+      provider: "google",
+      meetingDurationMinutes: 30,
+      bufferBeforeMinutes: 0,
+      bufferAfterMinutes: 30,
+      availableDays: ["Mon"],
+      startTime: "08:00",
+      endTime: "18:00",
+      timezone: "UTC",
+      suggestAlternatives: true,
+      eventType: null,
+      meetingLocation: null,
+      maxBookingsPerDay: 8,
+      completeStep: true,
+    });
+    await calendarBookingService.book(workspaceId, {
+      ...booking(contactId),
+      startsAt: new Date("2030-09-23T10:00:00.000Z"),
+      endsAt: new Date("2030-09-23T10:30:00.000Z"),
+    });
+
+    const available = await calendarBookingService.getAvailability(workspaceId, {
+      startsAt: new Date("2030-09-23T10:30:00.000Z"),
+      endsAt: new Date("2030-09-23T12:00:00.000Z"),
+      timezone: "UTC",
+      durationMinutes: 30,
+    });
+    expect(available.slots[0]?.startsAt.toISOString()).toBe("2030-09-23T11:00:00.000Z");
+
+    await expect(calendarBookingService.book(workspaceId, {
+      ...booking(contactId),
+      title: "Buffered service",
+      startsAt: new Date("2030-09-23T10:30:00.000Z"),
+      endsAt: new Date("2030-09-23T11:00:00.000Z"),
+    })).rejects.toMatchObject({ code: "APPOINTMENT_SLOT_UNAVAILABLE" });
+  });
+
   it("atomically enforces a native daily limit across competing callers", async () => {
     await saveCalendarSetup(workspaceId, {
       provider: "google",
