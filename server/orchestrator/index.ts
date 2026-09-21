@@ -260,8 +260,8 @@ export function createResponseOrchestrator(dependencies: OrchestratorDependencie
       // independently justified escalation, not just a missing tool.
       if (planned.action.type === "ESCALATE" && allowed
         && !isExplicitHumanRequest(lastUserMessage)) {
-        const wantsAvailability = /\\b(?:available|availability|open slots?|check times?)\\b/i.test(lastUserMessage);
-        const wantsBooking = /\\b(?:book|booking|reserve|appointment|schedule)\\b/i.test(lastUserMessage);
+        const wantsAvailability = /\b(?:available|availability|open slots?|check times?)\b/i.test(lastUserMessage);
+        const wantsBooking = /\b(?:book|booking|reserve|appointment|schedule)\b/i.test(lastUserMessage);
         if ((wantsAvailability && !allowed.CHECK_AVAILABILITY)
           || (wantsBooking && !allowed.BOOK_APPOINTMENT && !allowed.CHECK_AVAILABILITY)) {
           return {
