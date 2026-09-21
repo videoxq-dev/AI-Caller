@@ -114,11 +114,9 @@ export async function POST(request: Request) {
           }
 
           const latestConversation = await getConversationById(workspaceId, resolved.session.conversationId);
-          // A successful ESCALATE intentionally changes handling to HUMAN.
-          // Deliver the verified acknowledgment before ending AI ownership;
-          // suppress any other AI reply when staff independently took over.
-          if (!latestConversation || (latestConversation.handlingMode !== "AI"
-            && !(result.handlingMode === "HUMAN" && result.toolResult.kind === "escalation"))) {
+          // Issue-scoped escalation leaves AI ownership intact. Only a separate
+          // manual takeover may suppress the AI reply between planning and send.
+          if (!latestConversation || latestConversation.handlingMode !== "AI") {
             await completeWebchatTurn(workspaceId, claim.turnId, null);
             controller.enqueue(event("handoff", { message: "A team member is handling this conversation." }));
             controller.enqueue(event("done", { handlingMode: "HUMAN" }));
@@ -140,10 +138,7 @@ export async function POST(request: Request) {
 
           await completeWebchatTurn(workspaceId, claim.turnId, saved.body);
           enqueueReply(controller, saved.body);
-          if (result.handlingMode === "HUMAN") {
-            controller.enqueue(event("handoff", { message: null }));
-          }
-          controller.enqueue(event("done", { handlingMode: result.handlingMode }));
+          controller.enqueue(event("done", { handlingMode: "AI" }));
           controller.close();
         } catch (error) {
           await failWebchatTurn(workspaceId, claim.turnId, error).catch(() => undefined);
