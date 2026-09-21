@@ -59,8 +59,12 @@ export async function nativeAvailability(workspaceId: string, input: Availabilit
       lt(appointments.startsAt, input.endsAt), gt(appointments.endsAt, input.startsAt),
     )).limit(1000);
   const slots: Window[] = [];
-  const first = Math.ceil(Math.max(start, Date.now()) / (30 * 60_000)) * 30 * 60_000;
-  for (let at = first; at + duration <= end && slots.length < 12; at += 30 * 60_000) {
+  // Scan on the smallest civil-time offset used by IANA zones, then accept
+  // local :00/:30 boundaries. UTC-only 30-minute stepping would never produce
+  // a local half-hour in zones such as Asia/Kathmandu (UTC+05:45).
+  const scanStep = 15 * 60_000;
+  const first = Math.ceil(Math.max(start, Date.now()) / scanStep) * scanStep;
+  for (let at = first; at + duration <= end && slots.length < 12; at += scanStep) {
     const slot = { startsAt: new Date(at), endsAt: new Date(at + duration) };
     const localStart = localParts(slot.startsAt, timezone);
     if (localStart.minute % 30 === 0 && withinBusinessHours(slot, timezone, hours)
