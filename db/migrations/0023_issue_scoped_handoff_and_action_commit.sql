@@ -35,7 +35,8 @@ CREATE TABLE "pending_agent_actions" (
   "updated_at" timestamptz NOT NULL DEFAULT now(),
   "confirmed_at" timestamptz,
   "executed_at" timestamptz,
-  "failure_code" text
+  "failure_code" text,
+  "result" jsonb
 );
 
 CREATE INDEX "pending_agent_actions_conversation_status_idx"
