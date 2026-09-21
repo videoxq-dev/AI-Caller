@@ -159,7 +159,7 @@ function deterministicAvailabilityPlan(
   timezone: string,
   services: OrchestratorContext["services"] = [],
 ): OrchestratorEnvelope | null {
-  if (!/\b(?:availability|available|openings?|slots?)\b/i.test(message)) return null;
+  if (!/\b(?:availability|available|openings?|slots?|book|booking|reserve|reservation|schedule|appointment)\b/i.test(message)) return null;
 
   const monthNames = [...MONTHS.keys()].join("|");
   const dayFirst = new RegExp(
@@ -234,6 +234,15 @@ function deterministicAvailabilityPlan(
       ...(durationMinutes ? { durationMinutes } : {}),
     },
   };
+}
+
+function recentCustomerBookingText(context: OrchestratorContext) {
+  return context.messages
+    .filter((message) => message.role === "user")
+    .slice(-6)
+    .reverse()
+    .map((message) => message.content)
+    .join("\n");
 }
 
 function bookingMissingDetailReply(message: string) {
@@ -419,6 +428,7 @@ export function createResponseOrchestrator(dependencies: OrchestratorDependencie
       }
       const isLivePhone = context.systemPrompt.includes("LIVE PHONE RECEPTIONIST:");
       const lastUserMessage = [...context.messages].reverse().find((message) => message.role === "user")?.content ?? "";
+      const recentBookingText = recentCustomerBookingText(context);
       const allowed = context.agent
         ? capabilitiesFromBehaviorSettings(context.agent.behaviorSettings)
         : null;
@@ -599,7 +609,7 @@ export function createResponseOrchestrator(dependencies: OrchestratorDependencie
             "AI provider returned invalid orchestration output after correction");
           const deterministic = (!allowed || allowed.CHECK_AVAILABILITY)
             ? deterministicAvailabilityPlan(
-              lastUserMessage, context.timezone ?? "UTC", context.services,
+              recentBookingText, context.timezone ?? "UTC", context.services,
             )
             : null;
           if (!deterministic) {
@@ -637,7 +647,7 @@ export function createResponseOrchestrator(dependencies: OrchestratorDependencie
       // A normal missing booking detail is not uncertainty and must never trigger
       // staff escalation. The server owns this distinction even if the model
       // incorrectly labels the incomplete request as unresolved.
-      const bookingClarification = bookingMissingDetailReply(lastUserMessage);
+      const bookingClarification = bookingMissingDetailReply(recentBookingText);
       if (bookingClarification
         && (planned.action.type === "ESCALATE" || Boolean(planned.unresolved?.reason))) {
         return unresolvedWithoutHandoff(bookingClarification);
@@ -656,7 +666,7 @@ export function createResponseOrchestrator(dependencies: OrchestratorDependencie
       if (planned.action.type === "ESCALATE" && allowed
         && !isExplicitHumanRequest(lastUserMessage)) {
         const wantsAvailability = /\b(?:available|availability|open slots?|check times?)\b/i.test(lastUserMessage);
-        const wantsBooking = /\b(?:book|booking|reserve|appointment|schedule)\b/i.test(lastUserMessage);
+        const wantsBooking = /\b(?:book|booking|reserve|appointment|schedule)\b/i.test(recentBookingText);
         if ((wantsAvailability && !allowed.CHECK_AVAILABILITY)
           || (wantsBooking && !allowed.BOOK_APPOINTMENT)) {
           const reply = wantsAvailability
