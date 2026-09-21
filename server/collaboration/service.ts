@@ -217,12 +217,20 @@ export async function resolveConversationIssue(input: {
 }) {
   return db.transaction(async (tx) => {
     await conversationInWorkspace(tx, input.workspaceId, input.conversationId);
+    const [currentIssue] = await tx.select().from(conversationHumanCases).where(and(
+      eq(conversationHumanCases.workspaceId, input.workspaceId),
+      eq(conversationHumanCases.conversationId, input.conversationId),
+      eq(conversationHumanCases.id, input.issueId),
+      or(eq(conversationHumanCases.status, "OPEN"), eq(conversationHumanCases.status, "CLAIMED")),
+    )).limit(1);
+    if (!currentIssue) throw new AppError("HUMAN_CASE_NOT_FOUND", "Open staff issue not found.", 404);
+
     const now = new Date();
     const [issue] = await tx.update(conversationHumanCases).set({
       status: "RESOLVED",
       resolvedAt: now,
       updatedAt: now,
-      metadata: { resolvedByUserId: input.actorUserId },
+      metadata: { ...currentIssue.metadata, resolvedByUserId: input.actorUserId },
     }).where(and(
       eq(conversationHumanCases.workspaceId, input.workspaceId),
       eq(conversationHumanCases.conversationId, input.conversationId),
