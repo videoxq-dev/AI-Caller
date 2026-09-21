@@ -200,6 +200,42 @@ describe("native in-app appointment booking without external calendar", () => {
     expect((await listAppointments(workspaceId)).total).toBe(1);
   });
 
+  it("intersects business and calendar windows in their own timezones", async () => {
+    await saveBusinessSetup(workspaceId, {
+      businessName: "Office Cleaning", timezone: "America/New_York", completeStep: true,
+      hours: Array.from({ length: 7 }, (_, dayOfWeek) => ({
+        dayOfWeek, enabled: true, openTime: "09:00", closeTime: "17:00",
+      })),
+    });
+    await saveCalendarSetup(workspaceId, {
+      provider: "google",
+      meetingDurationMinutes: 30,
+      bufferBeforeMinutes: 0,
+      bufferAfterMinutes: 0,
+      availableDays: ["Mon"],
+      startTime: "09:00",
+      endTime: "17:00",
+      timezone: "Africa/Lagos",
+      suggestAlternatives: true,
+      eventType: null,
+      meetingLocation: null,
+      maxBookingsPerDay: 8,
+      completeStep: true,
+    });
+
+    const available = await calendarBookingService.getAvailability(workspaceId, {
+      startsAt: new Date("2030-09-23T08:00:00.000Z"),
+      endsAt: new Date("2030-09-23T18:00:00.000Z"),
+      timezone: "Africa/Lagos",
+      durationMinutes: 30,
+    });
+
+    expect(available.timezone).toBe("Africa/Lagos");
+    expect(available.slots[0]?.startsAt.toISOString()).toBe("2030-09-23T13:00:00.000Z");
+    expect(available.slots.some((slot) =>
+      slot.startsAt.toISOString() === "2030-09-23T08:00:00.000Z")).toBe(false);
+  });
+
   it("does not book a past or out-of-hours appointment", async () => {
     await expect(calendarBookingService.book(workspaceId, {
       ...booking(contactId), startsAt: new Date("2030-09-23T19:00:00.000Z"),
