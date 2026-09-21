@@ -28,6 +28,7 @@ type WebchatHistoryMessage = {
   id: string;
   role: "customer" | "assistant";
   text: string;
+  booking?: Record<string, unknown>;
 };
 
 function tokenHash(token: string) {
@@ -162,6 +163,7 @@ export async function sessionHistory(workspaceId: string, conversationId: string
     id: messages.id,
     senderType: messages.senderType,
     body: messages.body,
+    metadata: messages.metadata,
   }).from(messages).where(and(
     eq(messages.workspaceId, workspaceId),
     eq(messages.conversationId, conversationId),
@@ -173,7 +175,9 @@ export async function sessionHistory(workspaceId: string, conversationId: string
     if (message.senderType === "CUSTOMER") {
       history.push({ id: message.id, role: "customer", text: message.body });
     } else if (message.senderType === "AI" || message.senderType === "USER") {
-      history.push({ id: message.id, role: "assistant", text: message.body });
+      history.push({ id: message.id, role: "assistant", text: message.body,
+        ...(message.metadata?.bookingCard ? { booking: message.metadata.bookingCard as Record<string, unknown> } : {}),
+      });
     }
   }
   return history;
@@ -233,7 +237,7 @@ export async function createOrResumeWebchatSession(input: WebchatSessionInput) {
 
 export type WebchatTurnClaim =
   | { state: "claimed"; turnId: string }
-  | { state: "completed"; turnId: string; responseText: string | null }
+  | { state: "completed"; turnId: string; responseText: string | null; responseMetadata: Record<string, unknown> }
   | { state: "failed"; turnId: string }
   | { state: "in_progress"; turnId: string };
 
@@ -248,7 +252,8 @@ async function findWebchatTurn(workspaceId: string, sessionId: string, clientMes
 
 async function claimExistingTurn(workspaceId: string, existing: NonNullable<Awaited<ReturnType<typeof findWebchatTurn>>>): Promise<WebchatTurnClaim> {
   if (existing.status === "COMPLETED") {
-    return { state: "completed", turnId: existing.id, responseText: existing.responseText };
+    return { state: "completed", turnId: existing.id, responseText: existing.responseText,
+      responseMetadata: existing.responseMetadata };
   }
   if (existing.status === "FAILED") {
     return { state: "failed", turnId: existing.id };
@@ -289,10 +294,14 @@ export async function claimWebchatTurn(workspaceId: string, sessionId: string, c
   return claimExistingTurn(workspaceId, raced);
 }
 
-export async function completeWebchatTurn(workspaceId: string, turnId: string, responseText: string | null) {
+export async function completeWebchatTurn(
+  workspaceId: string, turnId: string, responseText: string | null,
+  responseMetadata: Record<string, unknown> = {},
+) {
   await db.update(webchatTurns).set({
     status: "COMPLETED",
     responseText,
+    responseMetadata,
     error: null,
     updatedAt: new Date(),
   }).where(and(eq(webchatTurns.workspaceId, workspaceId), eq(webchatTurns.id, turnId)));
