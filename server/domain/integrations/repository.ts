@@ -142,10 +142,25 @@ export async function saveIntegration(workspaceId: string, input: IntegrationSav
   return publicIntegration(row);
 }
 
+async function clearCalendarBindingForIntegration(workspaceId: string, integrationId: string) {
+  await db.delete(capabilityBindings).where(and(
+    eq(capabilityBindings.workspaceId, workspaceId),
+    eq(capabilityBindings.capability, "CALENDAR"),
+    eq(capabilityBindings.integrationId, integrationId),
+  ));
+}
+
 export async function setIntegrationStatus(workspaceId: string, provider: string, status: "CONNECTED" | "ERROR" | "DISCONNECTED", lastError: string | null = null) {
   const [row] = await db.update(integrations).set({ status, lastError, updatedAt: new Date() }).where(and(eq(integrations.workspaceId, workspaceId), eq(integrations.provider, provider))).returning();
   if (row && status === "DISCONNECTED") {
-    await db.delete(capabilityBindings).where(and(eq(capabilityBindings.workspaceId, workspaceId), eq(capabilityBindings.integrationId, row.id)));
+    await db.delete(capabilityBindings).where(and(
+      eq(capabilityBindings.workspaceId, workspaceId),
+      eq(capabilityBindings.integrationId, row.id),
+    ));
+  } else if (row?.category === "CALENDAR" && status === "ERROR") {
+    // A failed calendar connection must not keep owning the CALENDAR
+    // capability. Removing the route lets runtime use native scheduling.
+    await clearCalendarBindingForIntegration(workspaceId, row.id);
   }
   return row ? publicIntegration(row) : null;
 }
@@ -163,6 +178,9 @@ export async function testSavedIntegration(workspaceId: string, provider: string
     const rawMessage = error instanceof Error ? error.message : "Provider connection failed.";
     const message = providerErrorMessage(rawMessage, row.encryptedCredentials);
     const [updated] = await db.update(integrations).set({ status: "ERROR", lastTestedAt: testedAt, lastError: message, updatedAt: testedAt }).where(and(eq(integrations.workspaceId, workspaceId), eq(integrations.provider, provider))).returning();
+    if (updated?.category === "CALENDAR") {
+      await clearCalendarBindingForIntegration(workspaceId, updated.id);
+    }
     return { ok: false as const, error: message, integration: publicIntegration(updated) };
   }
 }

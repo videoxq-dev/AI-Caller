@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import type { CalendarProvider } from "@/server/providers/contracts";
 import { createCalendarBookingService } from "./calendar-booking";
+import type { AppointmentInput } from "./schemas";
 
 function provider(): CalendarProvider {
   return {
@@ -47,6 +48,80 @@ function storedAppointment(overrides: Partial<{
 }
 
 describe("calendar booking service", () => {
+  it("uses native availability when no usable external calendar route exists", async () => {
+    const nativeAvailability = vi.fn(async () => ({
+      timezone: "America/New_York",
+      slots: [{
+        startsAt: new Date("2026-09-21T14:00:00.000Z"),
+        endsAt: new Date("2026-09-21T14:30:00.000Z"),
+      }],
+    }));
+    const service = createCalendarBookingService({
+      resolveCurrent: vi.fn(async () => null),
+      nativeAvailability,
+      resolveForIntegration: vi.fn(),
+      insertAppointment: vi.fn(),
+      getAppointment: vi.fn(),
+      updateAfterReschedule: vi.fn(),
+      setStatus: vi.fn(),
+    });
+
+    const result = await service.getAvailability("workspace-1", {
+      startsAt: new Date("2026-09-21T13:00:00.000Z"),
+      endsAt: new Date("2026-09-21T17:00:00.000Z"),
+      timezone: "America/New_York",
+      durationMinutes: 30,
+    });
+
+    expect(nativeAvailability).toHaveBeenCalledOnce();
+    expect(result.slots).toHaveLength(1);
+    expect(result.timezone).toBe("America/New_York");
+  });
+
+  it("uses native booking when no usable external calendar route exists", async () => {
+    const validateNativeBooking = vi.fn(async () => ({
+      timezone: "America/New_York",
+      bufferBeforeMinutes: 0,
+      bufferAfterMinutes: 0,
+      maxBookingsPerDay: 8,
+    }));
+    const insertNativeAppointment = vi.fn(async (_workspaceId: string, booking: AppointmentInput) => ({
+      id: "appointment-native",
+      workspaceId: "workspace-1",
+      contactId: booking.contactId,
+      conversationId: booking.conversationId ?? null,
+      integrationId: null,
+      externalEventId: null,
+      serviceId: booking.serviceId ?? null,
+      title: booking.title,
+      startsAt: booking.startsAt,
+      endsAt: booking.endsAt,
+      timezone: booking.timezone,
+      status: "CONFIRMED" as const,
+      bookingSource: booking.bookingSource ?? null,
+      notes: booking.notes ?? null,
+      createdAt: new Date("2026-09-20T12:00:00.000Z"),
+      updatedAt: new Date("2026-09-20T12:00:00.000Z"),
+    }));
+    const service = createCalendarBookingService({
+      resolveCurrent: vi.fn(async () => null),
+      validateNativeBooking,
+      insertNativeAppointment,
+      resolveForIntegration: vi.fn(),
+      insertAppointment: vi.fn(),
+      getAppointment: vi.fn(),
+      updateAfterReschedule: vi.fn(),
+      setStatus: vi.fn(),
+    });
+
+    const result = await service.book("workspace-1", input);
+
+    expect(validateNativeBooking).toHaveBeenCalledWith("workspace-1", input);
+    expect(insertNativeAppointment).toHaveBeenCalledOnce();
+    expect(result.integrationId).toBeNull();
+    expect(result.externalEventId).toBeNull();
+  });
+
   it("persists a normalized provider booking against the bound integration", async () => {
     const calendar = provider();
     const insertAppointment = vi.fn(async (_workspaceId, booking, external) => storedAppointment({

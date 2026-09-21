@@ -1,3 +1,4 @@
+import { and, eq } from "drizzle-orm";
 import { afterAll, beforeEach, describe, expect, it } from "vitest";
 import { closeDatabase, db } from "@/db";
 import { capabilityBindings, integrations, workspaces } from "@/db/schema";
@@ -95,6 +96,71 @@ describe("provider capability routing", () => {
       privateIntegration!.encryptedCredentials as EncryptedSecretEnvelope,
     );
     expect(decrypted).toEqual({ sid: "AC123", authToken: "original-secret", phone: "+15550002222" });
+  });
+
+  it("keeps a connected external calendar route authoritative", async () => {
+    await saveVerifiedIntegration(workspaceId, {
+      provider: "calcom",
+      category: "CALENDAR",
+      mode: "BYOP",
+      credentials: { apiKey: "connected-calendar-key" },
+      settings: {},
+    });
+    await bindCapability(workspaceId, "CALENDAR", "BYOP", "calcom");
+
+    await expect(resolveProviderRoute(workspaceId, "CALENDAR")).resolves.toMatchObject({
+      mode: "BYOP",
+      provider: "calcom",
+    });
+  });
+
+  it("treats a stale disconnected calendar binding as no external route", async () => {
+    await bindCapability(workspaceId, "CALENDAR", "BYOP", "google");
+
+    const [binding] = await db.select().from(capabilityBindings).where(and(
+      eq(capabilityBindings.workspaceId, workspaceId),
+      eq(capabilityBindings.capability, "CALENDAR"),
+    )).limit(1);
+    expect(binding).toBeDefined();
+
+    await expect(resolveProviderRoute(workspaceId, "CALENDAR")).resolves.toBeNull();
+  });
+
+  it("removes a calendar binding when its provider enters error state", async () => {
+    await bindCapability(workspaceId, "CALENDAR", "BYOP", "google");
+    await setIntegrationStatus(workspaceId, "google", "ERROR", "expired token");
+
+    const [binding] = await db.select().from(capabilityBindings).where(and(
+      eq(capabilityBindings.workspaceId, workspaceId),
+      eq(capabilityBindings.capability, "CALENDAR"),
+    )).limit(1);
+    expect(binding).toBeUndefined();
+    await expect(resolveProviderRoute(workspaceId, "CALENDAR")).resolves.toBeNull();
+  });
+
+  it("releases the calendar route when a saved provider connection test fails", async () => {
+    await saveIntegration(workspaceId, {
+      provider: "calcom",
+      category: "CALENDAR",
+      mode: "BYOP",
+      credentials: { apiKey: "bad-calendar-key" },
+      settings: {},
+    });
+    await bindCapability(workspaceId, "CALENDAR", "BYOP", "calcom");
+
+    const fetcher = (async () => new Response(
+      JSON.stringify({ error: { message: "Unauthorized" } }),
+      { status: 401, headers: { "content-type": "application/json" } },
+    )) as typeof fetch;
+    const tested = await testSavedIntegration(workspaceId, "calcom", fetcher);
+
+    expect(tested.ok).toBe(false);
+    const [binding] = await db.select().from(capabilityBindings).where(and(
+      eq(capabilityBindings.workspaceId, workspaceId),
+      eq(capabilityBindings.capability, "CALENDAR"),
+    )).limit(1);
+    expect(binding).toBeUndefined();
+    await expect(resolveProviderRoute(workspaceId, "CALENDAR")).resolves.toBeNull();
   });
 
   it("clears stale capability bindings when an integration is explicitly disconnected", async () => {

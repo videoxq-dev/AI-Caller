@@ -98,9 +98,19 @@ try {
      ON CONFLICT (workspace_id) DO UPDATE SET balance = 100, updated_at = now()`,
     [workspaceId],
   );
+  for (let day = 0; day < 7; day += 1) {
+    await pool.query(
+      `INSERT INTO business_hours (workspace_id, day_of_week, enabled, open_time, close_time)
+       VALUES ($1, $2, true, '08:00', '18:00')
+       ON CONFLICT (workspace_id, day_of_week) DO UPDATE
+       SET enabled = true, open_time = '08:00', close_time = '18:00', updated_at = now()`,
+      [workspaceId, day],
+    );
+  }
+
   const integration = await pool.query(
     `INSERT INTO integrations (workspace_id, category, provider, mode, status, settings)
-     VALUES ($1, 'CALENDAR', 'calcom', 'BYOP', 'CONNECTED', '{}'::jsonb)
+     VALUES ($1, 'CALENDAR', 'google', 'BYOP', 'ERROR', '{}'::jsonb)
      RETURNING id`,
     [workspaceId],
   );
@@ -110,6 +120,16 @@ try {
      ON CONFLICT (workspace_id, capability) DO UPDATE SET integration_id = EXCLUDED.integration_id, mode = EXCLUDED.mode, updated_at = now()`,
     [workspaceId, integration.rows[0].id],
   );
+  const staleCalendarBinding = await pool.query(
+    `SELECT cb.integration_id, i.status
+       FROM capability_bindings cb
+       LEFT JOIN integrations i ON i.id = cb.integration_id
+      WHERE cb.workspace_id = $1 AND cb.capability = 'CALENDAR'`,
+    [workspaceId],
+  );
+  assert(staleCalendarBinding.rows[0]?.status === "ERROR",
+    "Milestone 4 did not create the stale external calendar route used to verify native fallback.");
+
 
   const upload = await parseResponse(await context.request.post(`${baseUrl}/api/knowledge/files`, {
     multipart: { file: {
@@ -247,14 +267,17 @@ try {
   assert(leadRow.rows[0]?.service_requested === "QA Consultation", "Lead service request was not persisted.");
 
   const appointmentRow = await pool.query(
-    `SELECT status, title, booking_source, external_event_id FROM appointments
+    `SELECT status, title, booking_source, integration_id, external_event_id FROM appointments
       WHERE workspace_id = $1 AND contact_id = $2 ORDER BY created_at DESC LIMIT 1`,
     [workspaceId, contactId],
   );
   assert(appointmentRow.rows[0]?.status === "CONFIRMED", "Widget booking did not persist a confirmed appointment.");
   assert(appointmentRow.rows[0]?.title === "QA Consultation", "Widget booking persisted the wrong appointment title.");
   assert(appointmentRow.rows[0]?.booking_source === "WEBCHAT_AI", "Widget booking source was not WEBCHAT_AI.");
-  assert(Boolean(appointmentRow.rows[0]?.external_event_id), "Widget booking did not persist the provider event id.");
+  assert(appointmentRow.rows[0]?.integration_id === null,
+    "Widget booking incorrectly attached the native fallback appointment to the stale external calendar.");
+  assert(appointmentRow.rows[0]?.external_event_id === null,
+    "Widget booking incorrectly persisted an external event id while using native scheduling.");
 
   const messageRow = await pool.query(
     `SELECT sender_type, content_type, body FROM messages
