@@ -163,6 +163,36 @@ export default function AIAgentPage() {
     return () => { cancelled = true; };
   }, []);
 
+  useEffect(() => {
+    if (tab !== "knowledge") return;
+    let cancelled = false;
+    void Promise.all([
+      fetch("/api/agent", { cache: "no-store" }),
+      fetch("/api/business", { cache: "no-store" }),
+    ]).then(async ([agentResponse, businessResponse]) => {
+      if (!agentResponse.ok || !businessResponse.ok) {
+        throw new Error("Unable to refresh business knowledge.");
+      }
+      const agentData = await agentResponse.json() as {
+        services: ServiceRow[]; faqs: FAQRow[]; policies: PolicyRow[]; canManage: boolean;
+      };
+      const businessData = await businessResponse.json() as {
+        profile?: { websiteUrl?: string | null } | null;
+      };
+      if (cancelled) return;
+      setKnowledgeServices(agentData.services);
+      setKnowledgeFaqs(agentData.faqs);
+      setKnowledgePolicies(agentData.policies);
+      setKnowledgeWebsite(businessData.profile?.websiteUrl ?? "");
+      setCanManage(agentData.canManage);
+    }).catch((err) => {
+      if (!cancelled) setSettingsError(
+        err instanceof Error ? err.message : "Unable to refresh business knowledge.",
+      );
+    });
+    return () => { cancelled = true; };
+  }, [tab]);
+
   const updateStatus = async (selected?: AgentStatus) => {
     const next: AgentStatus = selected ?? (agentStatus === "ACTIVE" ? "PAUSED" : "ACTIVE");
     setSavingSettings(true);
