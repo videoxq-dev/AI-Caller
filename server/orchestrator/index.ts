@@ -56,6 +56,7 @@ Shape:
   "reply": "short customer-facing response when no server result is required",
   "contact": { "name": "explicitly provided name", "email": "explicitly provided email", "phone": "explicitly provided phone" },
   "lead": { "status": "NEW|QUALIFIED", "intent": "...", "serviceRequested": "..." },
+  "unresolved": { "reason": "why the current request cannot be completed with approved information and enabled capabilities" },
   "action": { "type": "NONE" }
 }
 
@@ -76,6 +77,7 @@ Rules:
 - Populate contact fields only when the customer explicitly provided them in the conversation. Never infer or invent contact details.
 - A verified customer conversation/contact is sufficient for an in-app appointment; email is optional. Never invent missing contact data.
 - Use ESCALATE for an explicit human request, or when the saved When Unsure policy is "Escalate to a human" and you cannot complete the request with the enabled capabilities. A disabled capability does not silently hand off by itself: explain the limitation truthfully, and request ESCALATE only when that policy requires it and ESCALATE is enabled. Never claim staff were notified without a successful ESCALATE result.
+- If the current customer request cannot be completed with approved information and enabled capabilities, set "unresolved" with a concise reason. Do not use it merely because you need one normal missing detail that the customer can answer.
 - Lead updates are optional and must reflect only evidence from the conversation.
 - On phone calls, offer appointment confirmations and future reminder SMS only after stating the SMS program clearly and asking the customer whether they agree. Use RECORD_SMS_CONSENT only after their explicit answer, never infer consent from a booking or general interest.
 - For a general opt-out or "stop all texts" request, invoke RECORD_SMS_CONSENT with category ALL and status OPTED_OUT so both categories are revoked.
@@ -307,6 +309,12 @@ export function createResponseOrchestrator(dependencies: OrchestratorDependencie
       const firstResponse = await dependencies.generate(workspaceId, conversationId, plannerMessages(context));
       const planned = parseOrchestratorEnvelope(firstResponse.text);
       // Capability denials are resolved together with the saved When Unsure policy.
+      if (planned.action.type === "NONE" && planned.unresolved?.reason) {
+        const reply = planned.reply
+          ?? "I can't complete that request with the information and capabilities available right now.";
+        return resolveUncertainRequest(reply, planned.unresolved.reason);
+      }
+
       // If the model recognizes that an owner-disabled capability blocks the
       // request, the server—not the model—decides whether When Unsure authorizes
       // a real handoff. This keeps refusal text and ownership state consistent.
