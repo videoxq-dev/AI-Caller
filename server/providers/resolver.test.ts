@@ -97,6 +97,30 @@ describe("provider capability routing", () => {
     expect(decrypted).toEqual({ sid: "AC123", authToken: "original-secret", phone: "+15550002222" });
   });
 
+  it("treats a stale disconnected calendar binding as no external route", async () => {
+    await bindCapability(workspaceId, "CALENDAR", "BYOP", "google");
+
+    const [binding] = await db.select().from(capabilityBindings).where(and(
+      eq(capabilityBindings.workspaceId, workspaceId),
+      eq(capabilityBindings.capability, "CALENDAR"),
+    )).limit(1);
+    expect(binding).toBeDefined();
+
+    await expect(resolveProviderRoute(workspaceId, "CALENDAR")).resolves.toBeNull();
+  });
+
+  it("removes a calendar binding when its provider enters error state", async () => {
+    await bindCapability(workspaceId, "CALENDAR", "BYOP", "google");
+    await setIntegrationStatus(workspaceId, "google", "ERROR", "expired token");
+
+    const [binding] = await db.select().from(capabilityBindings).where(and(
+      eq(capabilityBindings.workspaceId, workspaceId),
+      eq(capabilityBindings.capability, "CALENDAR"),
+    )).limit(1);
+    expect(binding).toBeUndefined();
+    await expect(resolveProviderRoute(workspaceId, "CALENDAR")).resolves.toBeNull();
+  });
+
   it("clears stale capability bindings when an integration is explicitly disconnected", async () => {
     await saveVerifiedIntegration(workspaceId, {
       provider: "openai",
