@@ -298,7 +298,7 @@ export function createVoiceWebhookService(dependencies: VoiceServiceDependencies
         toNumber: normalizePhone(event.to),
         mode,
         recordingDisclosureVersion: DISCLOSURE_VERSION,
-        bookingEngineVersion: (preference?.technology ?? "STANDARD") === "STANDARD" && await isBookingV2Enabled(workspaceId) ? "v2" : "v1",
+        bookingEngineVersion: await isBookingV2Enabled(workspaceId) ? "v2" : "v1",
         metadata: {
           phase: answeringEnabled ? "AWAITING_ANSWER" : "AWAITING_UNAVAILABLE_ANSWER",
           voiceTechnology: preference?.technology ?? "STANDARD",
