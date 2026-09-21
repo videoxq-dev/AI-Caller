@@ -62,6 +62,14 @@ describe("native in-app appointment booking without external calendar", () => {
     expect(after).toHaveLength(0);
   });
 
+  it("stores the configured business timezone instead of untrusted model timezone metadata", async () => {
+    const result = await calendarBookingService.book(workspaceId, {
+      ...booking(contactId),
+      timezone: "America/New_York",
+    });
+    expect(result.timezone).toBe("UTC");
+  });
+
   it("serializes competing requests for the same slot and prevents double booking", async () => {
     const result = await Promise.allSettled([
       calendarBookingService.book(workspaceId, booking(contactId)),
