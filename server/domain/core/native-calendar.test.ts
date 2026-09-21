@@ -90,6 +90,16 @@ describe("native in-app appointment booking without external calendar", () => {
     expect(events.filter(event => event.type === "APPOINTMENT_RESCHEDULED")).toHaveLength(1);
   });
 
+  it("supports long in-app services such as a ten-hour industrial cleaning", async () => {
+    const slots = await calendarBookingService.getAvailability(workspaceId, {
+      startsAt: new Date("2030-09-23T08:00:00Z"),
+      endsAt: new Date("2030-09-23T18:00:00Z"),
+      timezone: "UTC", durationMinutes: 600,
+    });
+    expect(slots).toEqual([{ startsAt: new Date("2030-09-23T08:00:00Z"),
+      endsAt: new Date("2030-09-23T18:00:00Z") }]);
+  });
+
   it("does not book a past or out-of-hours appointment", async () => {
     await expect(calendarBookingService.book(workspaceId, {
       ...booking(contactId), startsAt: new Date("2030-09-23T19:00:00.000Z"),
