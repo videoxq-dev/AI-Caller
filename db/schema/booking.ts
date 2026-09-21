@@ -2,7 +2,7 @@ import { sql } from "drizzle-orm";
 import { index, integer, jsonb, pgTable, text, timestamp, uniqueIndex, uuid } from "drizzle-orm/pg-core";
 import { services, workspaces } from "./core";
 import { integrations } from "./integrations";
-import { contactChannel, contacts, conversations } from "./core-domain";
+import { appointments, contactChannel, contacts, conversations } from "./core-domain";
 
 export const bookingDrafts = pgTable("booking_drafts", {
   id: uuid("id").defaultRandom().primaryKey(),
@@ -23,6 +23,7 @@ export const bookingDrafts = pgTable("booking_drafts", {
   currentSearchId: uuid("current_search_id"),
   selectedOfferId: uuid("selected_offer_id"),
   currentPreviewId: uuid("current_preview_id"),
+  bookingCommandId: uuid("booking_command_id"),
   expiresAt: timestamp("expires_at", { withTimezone: true, mode: "date" }).notNull(),
   createdAt: timestamp("created_at", { withTimezone: true, mode: "date" }).defaultNow().notNull(),
   updatedAt: timestamp("updated_at", { withTimezone: true, mode: "date" }).defaultNow().notNull(),
@@ -86,4 +87,53 @@ export const bookingPreviews = pgTable("booking_previews", {
 }, (table) => [
   uniqueIndex("booking_previews_draft_version_uq").on(table.draftId, table.draftVersion),
   uniqueIndex("booking_previews_offer_uq").on(table.offerId),
+]);
+
+
+export const bookingCommands = pgTable("booking_commands", {
+  id: uuid("id").defaultRandom().primaryKey(),
+  workspaceId: uuid("workspace_id").notNull().references(() => workspaces.id, { onDelete: "cascade" }),
+  draftId: uuid("draft_id").notNull().references(() => bookingDrafts.id, { onDelete: "cascade" }),
+  draftVersion: integer("draft_version").notNull(),
+  previewId: uuid("preview_id").notNull().references(() => bookingPreviews.id),
+  offerId: uuid("offer_id").notNull().references(() => bookingOffers.id),
+  state: text("state").default("PENDING").notNull(),
+  snapshot: jsonb("snapshot").$type<Record<string, unknown>>().notNull(),
+  provider: text("provider").notNull(),
+  integrationId: uuid("integration_id").references(() => integrations.id, { onDelete: "set null" }),
+  providerEventKey: text("provider_event_key"),
+  providerExternalId: text("provider_external_id"),
+  appointmentId: uuid("appointment_id").references(() => appointments.id, { onDelete: "set null" }),
+  leaseOwner: uuid("lease_owner"),
+  leaseExpiresAt: timestamp("lease_expires_at", { withTimezone: true, mode: "date" }),
+  attemptCount: integer("attempt_count").default(0).notNull(),
+  lastErrorCode: text("last_error_code"),
+  nextAttemptAt: timestamp("next_attempt_at", { withTimezone: true, mode: "date" }),
+  providerAttemptedAt: timestamp("provider_attempted_at", { withTimezone: true, mode: "date" }),
+  confirmedAt: timestamp("confirmed_at", { withTimezone: true, mode: "date" }),
+  createdAt: timestamp("created_at", { withTimezone: true, mode: "date" }).defaultNow().notNull(),
+  updatedAt: timestamp("updated_at", { withTimezone: true, mode: "date" }).defaultNow().notNull(),
+}, (table) => [
+  uniqueIndex("booking_commands_preview_uq").on(table.previewId),
+  uniqueIndex("booking_commands_draft_version_uq").on(table.draftId, table.draftVersion),
+  uniqueIndex("booking_commands_provider_key_uq").on(table.integrationId, table.providerEventKey)
+    .where(sql`${table.providerEventKey} IS NOT NULL`),
+  index("booking_commands_recovery_idx").on(table.state, table.nextAttemptAt, table.createdAt),
+]);
+
+export const bookingReservations = pgTable("booking_reservations", {
+  id: uuid("id").defaultRandom().primaryKey(),
+  workspaceId: uuid("workspace_id").notNull().references(() => workspaces.id, { onDelete: "cascade" }),
+  commandId: uuid("command_id").notNull().references(() => bookingCommands.id, { onDelete: "cascade" }),
+  resourceKey: text("resource_key").default("workspace").notNull(),
+  startsAt: timestamp("starts_at", { withTimezone: true, mode: "date" }).notNull(),
+  endsAt: timestamp("ends_at", { withTimezone: true, mode: "date" }).notNull(),
+  timezone: text("timezone").notNull(),
+  state: text("state").default("ACTIVE").notNull(),
+  releasedAt: timestamp("released_at", { withTimezone: true, mode: "date" }),
+  createdAt: timestamp("created_at", { withTimezone: true, mode: "date" }).defaultNow().notNull(),
+}, (table) => [
+  uniqueIndex("booking_reservations_command_uq").on(table.commandId),
+  index("booking_reservations_capacity_idx").on(table.workspaceId, table.resourceKey,
+    table.startsAt, table.endsAt).where(sql`${table.state} = 'ACTIVE'`),
 ]);
