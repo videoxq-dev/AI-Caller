@@ -1,4 +1,5 @@
-import { index, jsonb, pgEnum, pgTable, text, timestamp, uuid } from "drizzle-orm/pg-core";
+import { sql } from "drizzle-orm";
+import { index, jsonb, pgEnum, pgTable, text, timestamp, uniqueIndex, uuid } from "drizzle-orm/pg-core";
 import { user } from "./auth";
 import { contacts, conversations, messages } from "./core-domain";
 import { workspaces } from "./core";
@@ -49,6 +50,9 @@ export const conversationHumanCases = pgTable(
   (table) => [
     index("conversation_human_cases_conversation_status_idx").on(table.conversationId, table.status, table.createdAt),
     index("conversation_human_cases_workspace_status_idx").on(table.workspaceId, table.status, table.createdAt),
+    uniqueIndex("conversation_human_cases_source_fingerprint_uq")
+      .on(table.workspaceId, table.conversationId, table.sourceMessageId, table.fingerprint)
+      .where(sql`${table.sourceMessageId} is not null`),
   ],
 );
 
