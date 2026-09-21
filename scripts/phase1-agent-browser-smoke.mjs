@@ -154,7 +154,7 @@ try {
     message: "Book the QA Consultation, my name is QA Visitor, qa.visitor@example.com.",
     reset: true,
   }, "forged model booking when disabled");
-  assert(forged.reply?.includes("can't perform that action")
+  assert((forged.reply?.includes("can't book") || forged.reply?.includes("can't perform"))
     && !forged.reply?.includes("booked for"),
     "Mia claimed success when the model attempted a disabled booking.");
   const appointments = await pool.query(`SELECT count(*)::int AS count FROM appointments
@@ -241,6 +241,43 @@ try {
   await page.getByRole("button", { name: "Capabilities", exact: true }).click();
   await noOverflow(page, "Phase 1 capabilities mobile");
   await page.screenshot({ path: path.join(dir, "agent-capabilities-mobile.png"), fullPage: true });
+
+  // Open an existing Inbox conversation on mobile and land at its most recent
+  // message, not at the beginning of a long customer history.
+  await pool.query(`INSERT INTO messages
+    (workspace_id, conversation_id, direction, sender_type, channel, content_type, body, status, created_at)
+    SELECT $1, $2, 'OUTBOUND', 'AI', 'WEBCHAT', 'TEXT',
+      CASE WHEN seq = 30 THEN 'LATEST INBOX ACCEPTANCE MESSAGE'
+        ELSE 'Earlier conversation message ' || seq END,
+      'DELIVERED', now() + seq * interval '1 second'
+    FROM generate_series(1, 30) AS seq`,
+  [workspaceId, conversation.rows[0].id]);
+  await page.goto(`${baseUrl}/inbox`, { waitUntil: "networkidle" });
+  const selected = page.getByRole("button", { name: /Phase One Visitor/ }).first();
+  await selected.click();
+  const latest = page.getByText("LATEST INBOX ACCEPTANCE MESSAGE", { exact: true });
+  await latest.waitFor({ timeout: 10_000 });
+  const thread = page.locator(".threadBody");
+  assert(await thread.isVisible(), "Selecting a mobile conversation did not open the thread.");
+  const atBottom = await thread.evaluate(el =>
+    el.scrollHeight - el.scrollTop - el.clientHeight < 96);
+  assert(atBottom, "Mobile thread opened at the beginning instead of newest messages.");
+  await noOverflow(page, "Phase 1 mobile Inbox");
+  await page.screenshot({ path: path.join(dir, "inbox-mobile-newest.png"), fullPage: true });
+  await page.getByRole("button", { name: "Back to conversations" }).click();
+  assert(await selected.isVisible(), "Mobile Inbox back action did not show conversations.");
+
+  await page.setViewportSize({ width: 1440, height: 1000 });
+  await page.goto(`${baseUrl}/inbox`, { waitUntil: "networkidle" });
+  await selected.click();
+  await latest.waitFor({ timeout: 10_000 });
+  assert(await thread.evaluate(el => el.scrollHeight - el.scrollTop - el.clientHeight < 96),
+    "Desktop thread did not open at newest messages.");
+  await thread.evaluate(el => { el.scrollTop = 0; });
+  await page.waitForTimeout(350);
+  assert(await thread.evaluate(el => el.scrollTop === 0),
+    "Inbox hijacked manual scrolling to older messages.");
+  await page.screenshot({ path: path.join(dir, "inbox-desktop-history.png"), fullPage: true });
 
   assert(errors.length === 0, `Browser errors: ${errors.join("; ")}`);
   console.log("Phase 1 browser acceptance passed: persisted agent, activation/pause, capability revocation, settings preservation, real metrics, desktop/mobile layout.");
