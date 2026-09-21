@@ -480,7 +480,7 @@ export function createResponseOrchestrator(dependencies: OrchestratorDependencie
           );
         }
         if (error instanceof AppError && [
-          "BUSINESS_HOURS_NOT_CONFIGURED", "CALENDAR_NOT_CONFIGURED", "NATIVE_BOOKING_UNAVAILABLE",
+          "BUSINESS_HOURS_NOT_CONFIGURED", "CALENDAR_CONFIG_INVALID", "CALENDAR_NOT_CONFIGURED", "NATIVE_BOOKING_UNAVAILABLE",
         ].includes(error.code)) {
           return resolveUncertainRequest(
             approvedToolFailure(first.action.type, error),
