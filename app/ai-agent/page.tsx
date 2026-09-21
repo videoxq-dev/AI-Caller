@@ -289,6 +289,7 @@ export default function AIAgentPage() {
             faqs={knowledgeFaqs}
             policies={knowledgePolicies}
             website={knowledgeWebsite}
+            canManage={canManage}
           />}
           {tab === "behavior" && <BehaviorTab tone={tone} setTone={setTone} goal={goal} setGoal={setGoal} whenUnsure={whenUnsure} setWhenUnsure={setWhenUnsure} guardrails={guardrails} setGuardrails={setGuardrails} assistantName={assistantName} setAssistantName={setAssistantName} openingMessage={openingMessage} setOpeningMessage={setOpeningMessage} escalationMessage={escalationMessage} setEscalationMessage={setEscalationMessage} voiceProfile={voiceProfile} setVoiceProfile={setVoiceProfile} voiceLanguage={voiceLanguage} setVoiceLanguage={setVoiceLanguage} voiceSpeed={voiceSpeed} setVoiceSpeed={setVoiceSpeed} recordingPolicy={recordingPolicy} setRecordingPolicy={setRecordingPolicy} afterHoursEnabled={afterHoursEnabled} setAfterHoursEnabled={setAfterHoursEnabled} qualificationEnabled={qualificationEnabled} setQualificationEnabled={setQualificationEnabled} qualificationCriteria={qualificationCriteria} setQualificationCriteria={setQualificationCriteria} />}
           {tab === "capabilities" && <CapabilitiesTab catalog={capabilityCatalog} capabilities={capabilities} setCapabilities={(value) => { setCapabilitiesSaved(false); setCapabilities(value); }} saved={capabilitiesSaved} onSave={saveCapabilities} loading={loadingSettings || savingSettings} canManage={canManage} />}
@@ -384,11 +385,12 @@ function OverviewTab({ agentName, status, configured, onStatusChange, canManage,
   </div>;
 }
 
-function KnowledgeTab({ services, faqs, policies, website }: {
+function KnowledgeTab({ services, faqs, policies, website, canManage }: {
   services: ServiceRow[];
   faqs: FAQRow[];
   policies: PolicyRow[];
   website: string;
+  canManage: boolean;
 }) {
   return <div className="agentTabContent knowledgeManagement">
     <section className="agentCard knowledgeMainCard">
@@ -396,18 +398,19 @@ function KnowledgeTab({ services, faqs, policies, website }: {
         <h2>Business knowledge</h2>
         <p>Manage the approved services, FAQs and policies Mia can use across every channel.</p>
       </div></div>
-      <KnowledgeEditor
+      {canManage ? <KnowledgeEditor
         initialServices={services}
         initialFaqs={faqs}
         initialPolicies={policies}
-      />
+      /> : <p className="knowledgeReadOnly">Owner or admin access is required to change business knowledge.</p>}
     </section>
     <section className="agentCard knowledgeImportCard">
       <div className="sectionTitle"><div>
         <h2>Imported knowledge</h2>
         <p>Import website content or text documents without leaving the AI Agent workspace.</p>
       </div></div>
-      <KnowledgeImportEditor initialWebsite={website} />
+      {canManage ? <KnowledgeImportEditor initialWebsite={website} />
+        : <p className="knowledgeReadOnly">Imported knowledge is read-only for staff members.</p>}
     </section>
   </div>;
 }
