@@ -14,6 +14,7 @@ export type CreateVoiceCallInput = {
   toNumber: string;
   mode: "AI_FIRST" | "AFTER_HOURS" | "OVERFLOW";
   recordingDisclosureVersion?: string | null;
+  bookingEngineVersion?: "v1" | "v2";
   metadata?: Record<string, unknown>;
 };
 
@@ -57,6 +58,7 @@ export async function createVoiceCall(workspaceId: string, input: CreateVoiceCal
     mode: input.mode,
     recordingDisclosureVersion: input.recordingDisclosureVersion ?? null,
     metadata: input.metadata ?? {},
+    bookingEngineVersion: input.bookingEngineVersion ?? "v1",
   }).onConflictDoNothing().returning();
 
   if (created) return created;
