@@ -647,9 +647,24 @@ export function createResponseOrchestrator(dependencies: OrchestratorDependencie
       // A normal missing booking detail is not uncertainty and must never trigger
       // staff escalation. The server owns this distinction even if the model
       // incorrectly labels the incomplete request as unresolved.
+      const plannedLooksUnresolved = planned.action.type === "ESCALATE"
+        || Boolean(planned.unresolved?.reason);
       const bookingClarification = bookingMissingDetailReply(recentBookingText);
-      if (bookingClarification
-        && (planned.action.type === "ESCALATE" || Boolean(planned.unresolved?.reason))) {
+      const bookingAvailabilityRecovery = plannedLooksUnresolved
+        && (!allowed || allowed.CHECK_AVAILABILITY)
+        ? deterministicAvailabilityPlan(
+            recentBookingText,
+            context.timezone ?? "UTC",
+            context.services,
+          )
+        : null;
+      if (bookingAvailabilityRecovery) {
+        logger.warn(
+          { workspaceId, conversationId, plannedAction: planned.action.type },
+          "Replacing unresolved booking plan with authoritative availability check",
+        );
+        planned = bookingAvailabilityRecovery;
+      } else if (bookingClarification && plannedLooksUnresolved) {
         return unresolvedWithoutHandoff(bookingClarification);
       }
 
