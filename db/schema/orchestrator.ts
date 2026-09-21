@@ -110,6 +110,9 @@ export const pendingAgentActions = pgTable(
   (table) => [
     index("pending_agent_actions_conversation_status_idx").on(table.conversationId, table.status, table.createdAt),
     index("pending_agent_actions_workspace_status_idx").on(table.workspaceId, table.status, table.createdAt),
+    uniqueIndex("pending_agent_actions_one_awaiting_type_uq")
+      .on(table.workspaceId, table.conversationId, table.type)
+      .where(sql`${table.status} = 'AWAITING_CONFIRMATION'`),
   ],
 );
 
