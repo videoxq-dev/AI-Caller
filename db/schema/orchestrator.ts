@@ -99,7 +99,7 @@ export const pendingAgentActions = pgTable(
     type: text("type").notNull(),
     payload: jsonb("payload").$type<Record<string, unknown>>().notNull(),
     payloadHash: text("payload_hash").notNull(),
-    status: text("status").default("AWAITING_CONFIRMIRMATION").notNull(),
+    status: text("status").default("AWAITING_CONFIRMATION").notNull(),
     createdAt: timestamp("created_at", { withTimezone: true, mode: "date" }).defaultNow().notNull(),
     updatedAt: timestamp("updated_at", { withTimezone: true, mode: "date" }).defaultNow().notNull(),
     confirmedAt: timestamp("confirmed_at", { withTimezone: true, mode: "date" }),
