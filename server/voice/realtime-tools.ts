@@ -1,6 +1,6 @@
 import { and, desc, eq, sql } from "drizzle-orm";
 import { db } from "@/db";
-import { messages } from "@/db/schema";
+import { bookingDrafts, bookingOffers, bookingPreviews, messages, services } from "@/db/schema";
 import { AppError } from "@/server/http/errors";
 import { requireActiveWorkspaceAgent } from "@/server/agent/service";
 import { assertAgentActionAllowed, type AgentCapabilities } from "@/server/agent/capabilities";
@@ -8,8 +8,11 @@ import { buildConversationContext } from "@/server/orchestrator/context";
 import { executeOrchestratorTools, orchestratorActionSchema } from "@/server/orchestrator/tools";
 import { isExplicitActionConfirmation, stagePendingActionProposal } from "@/server/orchestrator/pending-actions";
 import { getConversationById } from "@/server/domain/core/repository";
+import { confirmAndExecuteBooking, getBookingOutcome } from "@/server/booking/commands";
+import { getBookingDraft, openBookingDraft, patchBookingDraft, type BookingContext, type BookingPatch } from "@/server/booking/drafts";
+import { prepareBookingPreview, searchBookingAvailability, selectBookingOffer } from "@/server/booking/offers";
 import { assertRealtimeBookingReady, captureRealtimeBookingDetails, getRealtimeBookingDetails, saveRealtimeAvailability, sameBookingInstant } from "./realtime-booking";
-import { getVoiceCall } from "./repository";
+import { getVoiceCall, updateVoiceCall } from "./repository";
 
 export const realtimeTools = [
   {
@@ -75,10 +78,226 @@ function record(v: unknown): Record<string, unknown> {
   return v && typeof v === "object" && !Array.isArray(v) ? v as Record<string, unknown> : {};
 }
 
+
+function bookingContext(input: {
+  workspaceId: string; conversationId: string; contactId: string; callId: string;
+}): BookingContext {
+  return {
+    workspaceId: input.workspaceId,
+    conversationId: input.conversationId,
+    contactId: input.contactId,
+    channel: "PHONE",
+    sessionKey: input.callId,
+  };
+}
+
+async function activeRealtimeDraft(context: BookingContext) {
+  const [draft] = await db.select().from(bookingDrafts).where(and(
+    eq(bookingDrafts.workspaceId, context.workspaceId),
+    eq(bookingDrafts.contactId, context.contactId),
+    eq(bookingDrafts.sessionKey, context.sessionKey),
+    eq(bookingDrafts.channel, "PHONE"),
+  )).orderBy(desc(bookingDrafts.createdAt)).limit(1);
+  return draft ?? null;
+}
+
+async function resolveRealtimeService(workspaceId: string, serviceName: string) {
+  const available = await db.select().from(services).where(and(
+    eq(services.workspaceId, workspaceId), eq(services.active, true),
+  )).limit(30);
+  const key = serviceName.trim().toLocaleLowerCase();
+  const exact = available.filter((service) => service.name.trim().toLocaleLowerCase() === key);
+  if (exact.length !== 1) {
+    throw new AppError("BOOKING_SERVICE_UNCLEAR",
+      exact.length ? "Please identify one service to book." : "That service is not available for booking.", 422);
+  }
+  return exact[0];
+}
+
+async function latestRealtimeConfirmation(
+  context: BookingContext, deliveredAt: Date,
+) {
+  const rows = await db.select({
+    id: messages.id, body: messages.body, createdAt: messages.createdAt,
+    metadata: messages.metadata,
+  }).from(messages).where(and(
+    eq(messages.workspaceId, context.workspaceId),
+    eq(messages.conversationId, context.conversationId!),
+    eq(messages.channel, "PHONE"),
+    eq(messages.senderType, "CUSTOMER"),
+    eq(messages.contentType, "CALL_TRANSCRIPT"),
+    sql`${messages.metadata}->>'voiceCallId' = ${context.sessionKey}`,
+  )).orderBy(desc(messages.createdAt), desc(messages.id)).limit(6);
+  return rows.find((message) =>
+    message.createdAt >= deliveredAt && isExplicitActionConfirmation(message.body)) ?? null;
+}
+
+function previewSpokenInstruction(preview: typeof bookingPreviews.$inferSelect) {
+  const content = preview.content;
+  return [
+    "Read back this exact verified appointment and ask for explicit confirmation.",
+    "Service: " + String(content.serviceName),
+    "Start: " + String(content.startsAt),
+    "End: " + String(content.endsAt),
+    "Timezone: " + String(content.timezone),
+    typeof content.requiredLocation === "string" ? "Location: " + content.requiredLocation : "",
+    "Do not say it is booked yet.",
+  ].filter(Boolean).join(" ");
+}
+
+async function runRealtimeBookingV2(input: {
+  workspaceId: string; conversationId: string; contactId: string;
+  callId: string; name: string; args: Record<string, unknown>;
+  sourceEventId: string; isCurrentTurn: () => boolean;
+}) {
+  const context = bookingContext(input);
+  if (!input.isCurrentTurn()) return { ok: false as const, reason: "The caller corrected the request." };
+
+  if (input.name === "capture_booking_details") {
+    const detail = realtimeBookingDetailsSchema.parse(input.args);
+    const opened = await openBookingDraft(context);
+    if (!("draft" in opened)) throw new AppError("BOOKING_STATE_UNAVAILABLE", "Booking state is unavailable.", 503);
+    const draft = opened.draft;
+    const patch: BookingPatch = {};
+    if (detail.serviceName) patch.serviceId = (await resolveRealtimeService(input.workspaceId, detail.serviceName)).id;
+    if (detail.location) patch.requiredLocation = detail.location;
+    if (detail.date) {
+      patch.localDate = detail.date;
+      patch.originalDateExpression = detail.date;
+    }
+    if (detail.time) patch.localTime = detail.time;
+    if (detail.timezone) patch.customerTimezone = detail.timezone;
+    const changed = Object.keys(patch).length
+      ? await patchBookingDraft(context, {
+        draftId: draft.id, expectedVersion: draft.version,
+        patch, sourceEventId: "realtime:" + input.sourceEventId,
+      })
+      : null;
+    const current = changed && "draft" in changed ? changed.draft : await getBookingDraft(context, draft.id);
+    return {
+      ok: true as const,
+      kind: "booking_state" as const,
+      data: {
+        draftId: current.id, version: current.version,
+        serviceId: current.serviceId, date: current.localDate,
+        time: current.localTime, timezone: current.customerTimezone,
+        location: current.requiredLocation,
+      },
+    };
+  }
+
+  const draft = await activeRealtimeDraft(context);
+  if (!draft) {
+    return { ok: false as const, code: "BOOKING_DETAILS_REQUIRED",
+      reason: "Record the caller's booking details before checking the calendar." };
+  }
+
+  if (input.name === "check_availability") {
+    const result = await searchBookingAvailability(context, {
+      draftId: draft.id, expectedVersion: draft.version,
+    });
+    if (!input.isCurrentTurn()) {
+      return { ok: false as const, reason: "The caller corrected the request; recheck the latest details." };
+    }
+    return {
+      ok: true as const,
+      kind: "availability" as const,
+      data: {
+        available: result.state === "SLOTS_AVAILABLE",
+        slots: result.offers.map((offer) => ({
+          offerId: offer.id,
+          startsAt: offer.startsAt.toISOString(),
+          endsAt: offer.endsAt.toISOString(),
+          timezone: offer.timezone,
+        })),
+      },
+      spokenInstruction: result.offers.length
+        ? "Use only these verified times. Do not change or convert the appointment yourself."
+        : "Tell the caller the exact requested time is unavailable and ask for another date or time.",
+    };
+  }
+
+  if (input.name === "book_appointment") {
+    const current = await getBookingDraft(context, draft.id);
+    if (current.currentPreviewId) {
+      const [preview] = await db.select().from(bookingPreviews).where(and(
+        eq(bookingPreviews.id, current.currentPreviewId),
+        eq(bookingPreviews.workspaceId, context.workspaceId),
+        eq(bookingPreviews.draftId, current.id),
+      )).limit(1);
+      if (!preview?.deliveredAt) {
+        return { ok: true as const, kind: "pending_action" as const,
+          data: { draftId: current.id, previewId: current.currentPreviewId, version: current.version },
+          spokenInstruction: preview
+            ? previewSpokenInstruction(preview)
+            : "Repeat the current booking preview and ask the caller to confirm it." };
+      }
+      const confirmation = await latestRealtimeConfirmation(context, preview.deliveredAt);
+      if (!confirmation) {
+        return { ok: true as const, kind: "pending_action" as const,
+          data: { draftId: current.id, previewId: preview.id, version: current.version },
+          spokenInstruction: "The persisted call transcript does not yet contain an explicit confirmation after the preview. Ask the caller to say yes or confirm the exact appointment." };
+      }
+      const result = await confirmAndExecuteBooking(context, {
+        draftId: current.id, expectedVersion: current.version,
+        previewId: preview.id, sourceEventId: confirmation.id,
+      });
+      const outcome = await getBookingOutcome(context, current.id);
+      return result.state === "CONFIRMED" && outcome.appointment
+        ? { ok: true as const, kind: "booking" as const,
+            data: { appointmentId: outcome.appointment.id, status: "CONFIRMED",
+              startsAt: outcome.appointment.startsAt.toISOString(),
+              endsAt: outcome.appointment.endsAt.toISOString(),
+              timezone: outcome.appointment.timezone },
+            spokenInstruction: "The appointment is confirmed. State only the persisted receipt details." }
+        : { ok: true as const, kind: "booking_pending" as const,
+            data: { state: result.state },
+            spokenInstruction: "The booking is still being verified. Do not claim it is confirmed and do not create another booking." };
+    }
+
+    if (current.status !== "AVAILABILITY_CHECKED" || !current.currentSearchId) {
+      return { ok: false as const, code: "BOOKING_AVAILABILITY_REQUIRED",
+        reason: "Check the latest requested appointment time before preparing a booking." };
+    }
+    const [offer] = await db.select().from(bookingOffers).where(and(
+      eq(bookingOffers.workspaceId, context.workspaceId),
+      eq(bookingOffers.draftId, current.id),
+      eq(bookingOffers.draftVersion, current.version),
+      eq(bookingOffers.searchId, current.currentSearchId),
+    )).orderBy(bookingOffers.startsAt).limit(1);
+    if (!offer) return { ok: false as const, code: "BOOKING_OFFER_STALE",
+      reason: "The verified appointment time expired. Check availability again." };
+    const selected = await selectBookingOffer(context, {
+      draftId: current.id, expectedVersion: current.version, offerId: offer.id,
+    });
+    const prepared = await prepareBookingPreview(context, {
+      draftId: current.id, expectedVersion: selected.draft.version,
+    });
+    await updateVoiceCall(context.workspaceId, context.sessionKey, {}, {
+      bookingAwaitingRealtimeDelivery: {
+        draftId: current.id, previewId: prepared.preview.id,
+        version: selected.draft.version,
+      },
+    });
+    return {
+      ok: true as const,
+      kind: "pending_action" as const,
+      data: {
+        draftId: current.id, previewId: prepared.preview.id,
+        version: selected.draft.version,
+      },
+      spokenInstruction: previewSpokenInstruction(prepared.preview),
+    };
+  }
+
+  return null;
+}
+
 export async function runRealtimeBusinessTool(input: {
   workspaceId: string; conversationId: string; contactId: string;
   callId: string; streamId: string;
   name: string; arguments: string;
+  sourceEventId?: string;
   isCurrentTurn: () => boolean;
 }) {
   if (!input.isCurrentTurn()) return { ok: false, reason: "The caller corrected the request." };
@@ -109,6 +328,27 @@ export async function runRealtimeBusinessTool(input: {
   let args: Record<string, unknown>;
   try { args = record(JSON.parse(input.arguments)); }
   catch { return { ok: false, reason: "The tool arguments were invalid." }; }
+
+  if (call.bookingEngineVersion === "v2" &&
+      ["capture_booking_details", "check_availability", "book_appointment"].includes(input.name)) {
+    try {
+      return await runRealtimeBookingV2({
+        workspaceId: input.workspaceId, conversationId: input.conversationId,
+        contactId: input.contactId, callId: input.callId, name: input.name,
+        args, sourceEventId: input.sourceEventId ?? input.name + ":" + Date.now(),
+        isCurrentTurn: input.isCurrentTurn,
+      });
+    } catch (error) {
+      if (error instanceof AppError && error.status < 500) {
+        return { ok: false as const, code: error.code, reason: error.message };
+      }
+      if (error instanceof Error && error.name === "ZodError") {
+        return { ok: false as const, reason: "Please collect valid booking details before storing them." };
+      }
+      throw error;
+    }
+  }
+
   if (input.name === "capture_booking_details") {
     try {
       if (!input.isCurrentTurn()) return { ok: false, reason: "The caller corrected the request." };
