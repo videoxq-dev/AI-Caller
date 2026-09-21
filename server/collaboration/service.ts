@@ -111,14 +111,7 @@ export async function escalateConversationIssue(input: {
   reason?: string | null;
 }) {
   return db.transaction(async (tx) => {
-    const locked = await tx.execute(sql`
-      select id from conversations
-      where workspace_id = ${input.workspaceId} and id = ${input.conversationId}
-      for update
-    `);
-    if (!locked.rowCount) {
-      throw new AppError("CONVERSATION_NOT_FOUND", "Conversation not found.", 404);
-    }
+    await tx.execute(sql`SELECT pg_advisory_xact_lock(hashtext(${`${input.workspaceId}:${input.conversationId}`}))`);
     const current = await conversationInWorkspace(tx, input.workspaceId, input.conversationId);
     const reason = input.reason?.trim() || "Customer issue needs staff follow-up.";
     const fingerprint = issueFingerprint(reason);
