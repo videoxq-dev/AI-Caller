@@ -108,7 +108,7 @@ describe("orchestrator response protocol", () => {
       buildContext: vi.fn(async () => fakeContext()), executeTools, generate,
     });
     const result = await orchestrator.respond("workspace", "conversation");
-    expect(result.reply).toContain("can't perform that action");
+    expect(result.reply).toContain("can't book an appointment");
     expect(result.reply).not.toContain("confirmed");
     expect(generate).toHaveBeenCalledOnce();
     expect(executeTools).toHaveBeenCalledOnce();
