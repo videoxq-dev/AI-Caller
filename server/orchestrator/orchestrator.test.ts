@@ -169,7 +169,12 @@ describe("orchestrator response protocol", () => {
   });
 
   it("replans a returned-to-AI conversation around the latest legitimate request", async () => {
-    const executeTools = vi.fn(async () => ({ kind: "none" as const, data: {} }));
+    const executeTools = vi.fn(async (
+      _workspaceId: string,
+      _conversationId: string,
+      _contactId: string,
+      _envelope: { action: { type: string } },
+    ) => ({ kind: "none" as const, data: {} }));
     const generate = vi.fn()
       .mockResolvedValueOnce({ text: JSON.stringify({
         reply: "I'll connect you to the team.",
