@@ -6,6 +6,8 @@ import { AppError } from "@/server/http/errors";
 
 export type PendingActionType = "BOOK_APPOINTMENT" | "SEND_SMS";
 
+const PENDING_ACTION_TTL_MS = 30 * 60 * 1000;
+
 type PendingActionState =
   | { state: "AWAITING_CONFIRMATION"; action: typeof pendingAgentActions.$inferSelect }
   | { state: "READY"; action: typeof pendingAgentActions.$inferSelect }
@@ -55,7 +57,17 @@ export async function getAwaitingPendingAction(workspaceId: string, conversation
     eq(pendingAgentActions.conversationId, conversationId),
     eq(pendingAgentActions.status, "AWAITING_CONFIRMATION"),
   )).orderBy(desc(pendingAgentActions.createdAt)).limit(1);
-  return action ?? null;
+  if (!action) return null;
+  if (Date.now() - action.createdAt.getTime() <= PENDING_ACTION_TTL_MS) return action;
+  await db.update(pendingAgentActions).set({
+    status: "EXPIRED",
+    updatedAt: new Date(),
+  }).where(and(
+    eq(pendingAgentActions.workspaceId, workspaceId),
+    eq(pendingAgentActions.id, action.id),
+    eq(pendingAgentActions.status, "AWAITING_CONFIRMATION"),
+  ));
+  return null;
 }
 
 export async function stagePendingActionProposal(input: {
@@ -87,17 +99,24 @@ export async function stagePendingActionProposal(input: {
       return { state: "EXECUTED", action: completed, result: completed.result };
     }
 
-    const [awaiting] = await tx.select().from(pendingAgentActions).where(and(
+    let [awaiting] = await tx.select().from(pendingAgentActions).where(and(
       eq(pendingAgentActions.workspaceId, input.workspaceId),
       eq(pendingAgentActions.conversationId, input.conversationId),
       eq(pendingAgentActions.type, input.type),
       eq(pendingAgentActions.status, "AWAITING_CONFIRMATION"),
     )).orderBy(desc(pendingAgentActions.createdAt)).limit(1);
+    const now = new Date();
+    if (awaiting && now.getTime() - awaiting.createdAt.getTime() > PENDING_ACTION_TTL_MS) {
+      await tx.update(pendingAgentActions).set({
+        status: "EXPIRED",
+        updatedAt: now,
+      }).where(eq(pendingAgentActions.id, awaiting.id));
+      awaiting = undefined;
+    }
     if (awaiting?.payloadHash === hash) {
       return { state: "AWAITING_CONFIRMATION", action: awaiting };
     }
 
-    const now = new Date();
     if (awaiting) {
       await tx.update(pendingAgentActions).set({
         status: "SUPERSEDED",
@@ -163,7 +182,7 @@ export async function stageOrConfirmPendingAction(input: {
       }).where(eq(pendingAgentActions.id, confirmed.id));
     }
 
-    const [awaiting] = await tx.select().from(pendingAgentActions).where(and(
+    let [awaiting] = await tx.select().from(pendingAgentActions).where(and(
       eq(pendingAgentActions.workspaceId, input.workspaceId),
       eq(pendingAgentActions.conversationId, input.conversationId),
       eq(pendingAgentActions.type, input.type),
@@ -171,6 +190,13 @@ export async function stageOrConfirmPendingAction(input: {
     )).orderBy(desc(pendingAgentActions.createdAt)).limit(1);
 
     const now = new Date();
+    if (awaiting && now.getTime() - awaiting.createdAt.getTime() > PENDING_ACTION_TTL_MS) {
+      await tx.update(pendingAgentActions).set({
+        status: "EXPIRED",
+        updatedAt: now,
+      }).where(eq(pendingAgentActions.id, awaiting.id));
+      awaiting = undefined;
+    }
     const latestText = await latestCustomerText(tx, input.workspaceId, input.conversationId);
     if (awaiting?.payloadHash === hash) {
       if (!isExplicitActionConfirmation(latestText)) {
