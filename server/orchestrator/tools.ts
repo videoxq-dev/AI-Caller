@@ -87,6 +87,9 @@ export const orchestratorEnvelopeSchema = z.object({
     intent: optionalShortText,
     serviceRequested: z.string().trim().min(1).max(500).nullable().optional(),
   }).optional(),
+  unresolved: z.object({
+    reason: z.string().trim().min(1).max(1000),
+  }).optional(),
   action: orchestratorActionSchema.default({ type: "NONE" }),
 });
 
