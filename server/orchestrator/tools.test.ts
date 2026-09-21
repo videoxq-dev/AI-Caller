@@ -1,7 +1,7 @@
 import { afterAll, beforeEach, describe, expect, it } from "vitest";
 import { and, eq } from "drizzle-orm";
 import { closeDatabase, db } from "@/db";
-import { aiAgents, contacts, leads, workspaces } from "@/db/schema";
+import { aiAgents, contacts, conversationHumanCases, conversations, leads, pendingAgentActions, workspaces } from "@/db/schema";
 import { listAppointments } from "@/server/domain/core/repository";
 import { saveBusinessSetup } from "@/server/domain/onboarding/repository";
 import { appendMessage, getOrCreateOpenConversation } from "@/server/domain/core/repository";
@@ -134,7 +134,7 @@ describe("orchestrator lead updates", () => {
     expect(lead.qualificationData).toEqual({ service: "Commercial HVAC repair", urgency: "Today" });
     expect(lead.qualificationCompletedAt).toBeInstanceOf(Date);
   });
-  it("executes availability and a confirmed in-app booking with no connected calendar", async () => {
+  it("checks availability, stages booking, and commits only after explicit confirmation", async () => {
     await saveBusinessSetup(workspaceId, {
       businessName: "Office Cleaning", timezone: "UTC", completeStep: true,
       hours: Array.from({ length: 7 }, (_, dayOfWeek) => ({
@@ -149,12 +149,57 @@ describe("orchestrator lead updates", () => {
     expect(availability.data.slots).toEqual(expect.arrayContaining([
       expect.objectContaining({ startsAt: "2030-09-23T10:00:00.000Z" }),
     ]));
-    const booked = await executeOrchestratorTools(workspaceId, conversationId, contactId, {
-      action: { type: "BOOK_APPOINTMENT", startsAt: "2030-09-23T10:00:00Z",
-        endsAt: "2030-09-23T14:00:00Z", timezone: "UTC", title: "Office Cleaning" },
+
+    const action = {
+      type: "BOOK_APPOINTMENT" as const,
+      startsAt: "2030-09-23T10:00:00Z",
+      endsAt: "2030-09-23T14:00:00Z",
+      timezone: "UTC",
+      title: "Office Cleaning",
+      notes: "30 North Gould Street",
+    };
+    const staged = await executeOrchestratorTools(workspaceId, conversationId, contactId, { action });
+    expect(staged).toMatchObject({
+      kind: "pending_action",
+      data: { type: "BOOK_APPOINTMENT", title: "Office Cleaning" },
     });
+    expect((await listAppointments(workspaceId)).total).toBe(0);
+
+    await appendMessage(workspaceId, conversationId, {
+      channel: "WEBCHAT",
+      direction: "INBOUND",
+      senderType: "CUSTOMER",
+      contentType: "TEXT",
+      body: "Yes, please.",
+      provider: null,
+      externalMessageId: null,
+      status: "RECEIVED",
+      metadata: {},
+    });
+    const booked = await executeOrchestratorTools(workspaceId, conversationId, contactId, { action });
     expect(booked).toMatchObject({ kind: "booking", data: { status: "CONFIRMED" } });
     expect((await listAppointments(workspaceId)).total).toBe(1);
+
+    const repeated = await executeOrchestratorTools(workspaceId, conversationId, contactId, { action });
+    expect(repeated).toMatchObject({ kind: "booking", data: { status: "CONFIRMED" } });
+    expect((await listAppointments(workspaceId)).total).toBe(1);
+    expect((await db.select().from(pendingAgentActions))).toHaveLength(1);
+  });
+
+  it("opens a human issue without transferring conversation ownership", async () => {
+    const escalation = await executeOrchestratorTools(workspaceId, conversationId, contactId, {
+      action: { type: "ESCALATE", reason: "Customer asked for a manager to approve an exception." },
+    });
+
+    expect(escalation).toMatchObject({
+      kind: "escalation",
+      data: { handlingMode: "AI", scope: "ISSUE" },
+    });
+    const [conversation] = await db.select().from(conversations).where(eq(conversations.id, conversationId));
+    expect(conversation.handlingMode).toBe("AI");
+    const issues = await db.select().from(conversationHumanCases);
+    expect(issues).toHaveLength(1);
+    expect(issues[0]).toMatchObject({ status: "OPEN", conversationId });
   });
 
   it("denies a forged booking before touching the calendar or customer record", async () => {
