@@ -1,4 +1,4 @@
-import { and, eq, gt, inArray, lt } from "drizzle-orm";
+import { and, eq, gt, inArray, lt, ne } from "drizzle-orm";
 import { db } from "@/db";
 import { appointments, bookingReservations } from "@/db/schema";
 import { getBusinessSetup } from "@/server/domain/onboarding/repository";
@@ -132,6 +132,7 @@ export async function filterSlotsThroughLocalPolicy(
   input: AvailabilityInput,
   offered: Window[],
   now = new Date(),
+  excludeCommandId?: string,
 ) {
   const schedule = await nativeHours(workspaceId);
   if (!Number.isFinite(input.startsAt.getTime()) || !Number.isFinite(input.endsAt.getTime()) ||
@@ -152,6 +153,7 @@ export async function filterSlotsThroughLocalPolicy(
       .from(bookingReservations).where(and(
         eq(bookingReservations.workspaceId, workspaceId),
         eq(bookingReservations.state, "ACTIVE"),
+        ...(excludeCommandId ? [ne(bookingReservations.commandId, excludeCommandId)] : []),
         lt(bookingReservations.startsAt, new Date(input.endsAt.getTime() + 36 * 60 * 60_000)),
         gt(bookingReservations.endsAt, new Date(input.startsAt.getTime() - 36 * 60 * 60_000)),
       )).limit(1001),
