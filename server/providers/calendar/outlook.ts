@@ -93,7 +93,7 @@ export class OutlookCalendarProvider implements CalendarProvider {
     return slotize(input.startsAt, input.endsAt, busy, input.durationMinutes ?? numberSetting(this.settings, "meetingDurationMinutes", 30));
   }
 
-  async book(input: { startsAt: Date; endsAt: Date; timezone: string; title: string; attendeeName?: string; attendeeEmail?: string }) {
+  async book(input: { startsAt: Date; endsAt: Date; timezone: string; title: string; attendeeName?: string; attendeeEmail?: string; location?: string; idempotencyKey?: string }) {
     const token = await this.token();
     const response = await providerJson<{ id?: string; start?: { dateTime?: string }; end?: { dateTime?: string } }>(
       `https://graph.microsoft.com/v1.0${this.eventsPath()}`,
@@ -102,6 +102,8 @@ export class OutlookCalendarProvider implements CalendarProvider {
         headers: { authorization: `Bearer ${token}`, "content-type": "application/json", Prefer: 'outlook.timezone="UTC"' },
         body: JSON.stringify({
           subject: input.title,
+          ...(input.idempotencyKey ? { transactionId: input.idempotencyKey } : {}),
+          ...(input.location ? { location: { displayName: input.location } } : {}),
           start: { dateTime: toUtcLocalString(input.startsAt), timeZone: "UTC" },
           end: { dateTime: toUtcLocalString(input.endsAt), timeZone: "UTC" },
           ...(input.attendeeEmail ? {
@@ -115,11 +117,12 @@ export class OutlookCalendarProvider implements CalendarProvider {
       this.fetcher,
     );
     if (!response.id) throw new Error("Microsoft Graph did not return an event ID.");
-    return {
-      externalId: response.id,
-      startsAt: parseDate(response.start?.dateTime, input.startsAt),
-      endsAt: parseDate(response.end?.dateTime, input.endsAt),
-    };
+    const startsAt = parseDate(response.start?.dateTime, new Date(NaN));
+    const endsAt = parseDate(response.end?.dateTime, new Date(NaN));
+    if (!Number.isFinite(startsAt.getTime()) || !Number.isFinite(endsAt.getTime()) || endsAt <= startsAt) {
+      throw new Error("Microsoft Calendar did not return valid confirmed event times.");
+    }
+    return { externalId: response.id, startsAt, endsAt };
   }
 
   async reschedule(input: { externalId: string; startsAt: Date; endsAt: Date; timezone: string }) {
