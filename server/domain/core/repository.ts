@@ -487,7 +487,7 @@ export async function getAppointment(workspaceId: string, appointmentId: string)
 export async function insertAppointment(
   workspaceId: string,
   input: AppointmentInput,
-  external: { integrationId: string | null; externalEventId: string | null; status?: "PENDING" | "CONFIRMED" },
+  external: { integrationId: string | null; externalEventId: string | null; status?: "PENDING" | "CONFIRMED"; bookingCommandId?: string },
 ) {
   await ensureContactInWorkspace(workspaceId, input.contactId);
   return db.transaction(async (tx) => {
@@ -497,6 +497,7 @@ export async function insertAppointment(
       conversationId: input.conversationId ?? null,
       integrationId: external.integrationId,
       externalEventId: external.externalEventId,
+      bookingCommandId: external.bookingCommandId ?? null,
       serviceId: input.serviceId ?? null,
       title: input.title,
       startsAt: input.startsAt,
@@ -540,7 +541,7 @@ function appointmentLocalDate(date: Date, timezone: string) {
   return `${part("year")}-${part("month")}-${part("day")}`;
 }
 
-function assertNativePolicyAvailability(
+export function assertNativePolicyAvailability(
   input: Pick<AppointmentInput, "startsAt" | "endsAt">,
   existing: Array<{ startsAt: Date; endsAt: Date }>,
   policy: NativeBookingPolicy,
