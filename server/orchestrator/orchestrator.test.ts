@@ -478,6 +478,27 @@ describe("orchestrator response protocol", () => {
     expect(executeTools).not.toHaveBeenCalled();
   });
 
+  it("blocks model-proposed handoff when When Unsure says ask a clarifying question", async () => {
+    const executeTools = vi.fn();
+    const orchestrator = createResponseOrchestrator({
+      buildContext: vi.fn(async () => ({
+        ...fakeContext(), source: "INBOUND_TURN" as const,
+        messages: [{ role: "user" as const, content: "Can you help with our warranty exception?" }],
+        agent: { id: "agent-1", status: "ACTIVE" as const,
+          whenUnsure: "Ask a clarifying question", escalationMessage: null,
+          behaviorSettings: { capabilities: { ...defaultAgentCapabilities, ESCALATE: true } } },
+      })),
+      executeTools,
+      generate: vi.fn(async () => ({ text: JSON.stringify({
+        reply: "I'll hand this to a person.", action: { type: "ESCALATE", reason: "Unsure" },
+      }) })),
+    });
+    const result = await orchestrator.respond("workspace", "conversation");
+    expect(result.handlingMode).toBe("AI");
+    expect(result.reply).toContain("clarify");
+    expect(executeTools).not.toHaveBeenCalled();
+  });
+
   it("does not invent staff notification when the model returns only a promise", async () => {
     const orchestrator = createResponseOrchestrator({
       buildContext: vi.fn(async () => fakeContext()),
