@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import type { CalendarProvider } from "@/server/providers/contracts";
 import { createCalendarBookingService } from "./calendar-booking";
+import type { AppointmentInput } from "./schemas";
 
 function provider(): CalendarProvider {
   return {
@@ -84,7 +85,7 @@ describe("calendar booking service", () => {
       bufferAfterMinutes: 0,
       maxBookingsPerDay: 8,
     }));
-    const insertNativeAppointment = vi.fn(async (_workspaceId: string, booking: typeof input) => ({
+    const insertNativeAppointment = vi.fn(async (_workspaceId: string, booking: AppointmentInput) => ({
       id: "appointment-native",
       workspaceId: "workspace-1",
       contactId: booking.contactId,
