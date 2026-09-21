@@ -311,7 +311,7 @@ try {
     { sid: "SM-m5-2", body: "What times are available tomorrow?",
       expectedPattern: "%I checked the schedule. Available times include%10:00 AM%",
       expectedContains: "I checked the schedule. Available times include" },
-    { sid: "SM-m5-4", body: "My name is SMS Visitor, sms.visitor@example.com. Book the 10:00 AM slot",
+    { sid: "SM-m5-3", body: "My name is SMS Visitor, sms.visitor@example.com. Book the 10:00 AM slot",
       expectedPattern: "%Would you like me to book it?%",
       expectedContains: "Would you like me to book it?" },
     { sid: "SM-m5-4", body: "Yes, please.",
