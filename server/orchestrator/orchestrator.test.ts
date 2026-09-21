@@ -386,6 +386,73 @@ describe("orchestrator response protocol", () => {
     expect(executeTools).toHaveBeenCalledOnce();
   });
 
+  it("commits a stored staged action directly when the customer explicitly confirms it", async () => {
+    const generate = vi.fn();
+    const executeTools = vi.fn(async () => ({
+      kind: "booking" as const,
+      data: {
+        appointmentId: "appointment-1",
+        title: "Office Cleaning",
+        startsAt: "2037-09-23T10:00:00.000Z",
+        endsAt: "2037-09-23T11:00:00.000Z",
+        timezone: "UTC",
+        status: "CONFIRMED",
+      },
+    }));
+    const getAwaitingAction = vi.fn(async () => ({
+      id: "pending-1",
+      workspaceId: "workspace",
+      conversationId: "conversation",
+      contactId: fakeContext().contact.id,
+      type: "BOOK_APPOINTMENT",
+      payload: {
+        startsAt: "2037-09-23T10:00:00.000Z",
+        endsAt: "2037-09-23T11:00:00.000Z",
+        timezone: "UTC",
+        title: "Office Cleaning",
+        serviceId: null,
+        notes: "30 North Gould Street",
+      },
+      payloadHash: "hash",
+      status: "AWAITING_CONFIRMATION",
+      createdAt: new Date(),
+      updatedAt: new Date(),
+      confirmedAt: null,
+      executedAt: null,
+      failureCode: null,
+      result: null,
+    }));
+    const orchestrator = createResponseOrchestrator({
+      buildContext: vi.fn(async () => ({
+        ...fakeContext(),
+        messages: [
+          { role: "assistant" as const, content: "Office Cleaning on September 23 at 10 AM. Would you like me to book it?" },
+          { role: "user" as const, content: "Yes, please." },
+        ],
+      })),
+      executeTools,
+      generate,
+      getAwaitingAction,
+    });
+
+    const result = await orchestrator.respond("workspace", "conversation");
+
+    expect(result).toMatchObject({
+      handlingMode: "AI",
+      toolResult: { kind: "booking", data: { appointmentId: "appointment-1", status: "CONFIRMED" } },
+    });
+    expect(result.reply).toContain("is booked for");
+    expect(generate).not.toHaveBeenCalled();
+    expect(executeTools).toHaveBeenCalledOnce();
+    expect(executeTools.mock.calls[0][3]).toMatchObject({
+      action: {
+        type: "BOOK_APPOINTMENT",
+        title: "Office Cleaning",
+        notes: "30 North Gould Street",
+      },
+    });
+  });
+
   it("responds truthfully when a configured capability is revoked during model planning", async () => {
     const generate = vi.fn(async () => ({ text: JSON.stringify({
       reply: "Your appointment is confirmed.",
