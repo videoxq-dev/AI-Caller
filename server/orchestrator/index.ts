@@ -106,10 +106,13 @@ function actionProtocolFor(context: OrchestratorContext) {
 }
 
 function plannerMessages(context: OrchestratorContext): AIMessage[] {
+  const resumedInstruction = context.resumedAfterHumanHandoff
+    ? `\n\nAUTHORITATIVE CONVERSATION OWNERSHIP: A workspace operator manually returned this conversation from HUMAN to AI. Older requests for a human and prior handoff messages are history, not a current instruction. Handle the customer's latest request with the enabled capabilities. Do not ESCALATE merely because an older message requested a human; apply the saved When Unsure policy only to a genuinely unresolved current request.`
+    : "";
   return [
     {
       role: "system",
-      content: `${context.systemPrompt}\n\nCurrent server time: ${new Date().toISOString()}\n${actionProtocolFor(context)}`,
+      content: `${context.systemPrompt}\n\nCurrent server time: ${new Date().toISOString()}\n${actionProtocolFor(context)}${resumedInstruction}`,
     },
     ...context.messages,
   ];
@@ -151,6 +154,21 @@ function repairMessages(
     {
       role: "system",
       content: `Your preceding response could not be validated (${validation}). Return the same intended answer as one corrected JSON object matching the protocol. Use null only where the protocol explicitly permits it. Do not add prose outside the JSON object.`,
+    },
+  ];
+}
+
+function resumedTurnCorrectionMessages(
+  context: OrchestratorContext,
+  stalePlan: OrchestratorEnvelope,
+  latestUserMessage: string,
+): AIMessage[] {
+  return [
+    ...plannerMessages(context),
+    { role: "assistant", content: JSON.stringify(stalePlan) },
+    {
+      role: "system",
+      content: `The preceding plan appears to carry forward the old human handoff instead of serving the current turn. The workspace operator has explicitly returned this thread to AI. Re-plan the latest customer request now: ${JSON.stringify(latestUserMessage)}. Preserve useful factual context from history, but do not treat old human requests or handoff messages as current intent. If the latest request can be answered or completed with enabled capabilities, do that now. Use unresolved/ESCALATE only if this latest request is genuinely unresolved under the saved When Unsure policy.`,
     },
   ];
 }
@@ -356,13 +374,32 @@ export function createResponseOrchestrator(dependencies: OrchestratorDependencie
           );
         }
       }
+      if (context.resumedAfterHumanHandoff
+        && !isExplicitHumanRequest(lastUserMessage)
+        && (planned.action.type === "ESCALATE" || Boolean(planned.unresolved?.reason))) {
+        logger.warn({ workspaceId, conversationId, action: planned.action.type },
+          "Returned-to-AI turn carried stale handoff intent; requesting a current-turn replan");
+        try {
+          const resumed = await dependencies.generate(
+            workspaceId,
+            conversationId,
+            resumedTurnCorrectionMessages(context, planned, lastUserMessage),
+          );
+          planned = parseOrchestratorEnvelope(resumed.text);
+        } catch (resumeError) {
+          if (!(resumeError instanceof OrchestratorOutputError)) throw resumeError;
+          logger.error({ workspaceId, conversationId, validationIssues: resumeError.validationIssues },
+            "Returned-to-AI replan was invalid; keeping conversation with AI");
+          return unresolvedWithoutHandoff(
+            "I'm still handling this conversation. Please restate your current request and I'll continue from here.",
+          );
+        }
+      }
+
       // Capability denials are resolved together with the saved When Unsure policy.
       if (planned.action.type === "NONE" && planned.unresolved?.reason) {
         const reply = planned.reply
           ?? "I can't complete that request with the information and capabilities available right now.";
-        if (context.resumedAfterHumanHandoff) {
-          return unresolvedWithoutHandoff(safeUnverifiedReply(reply));
-        }
         return resolveUncertainRequest(reply, planned.unresolved.reason);
       }
 
@@ -383,11 +420,6 @@ export function createResponseOrchestrator(dependencies: OrchestratorDependencie
         }
       }
       if (planned.action.type === "ESCALATE" && !isExplicitHumanRequest(lastUserMessage)) {
-        if (context.resumedAfterHumanHandoff) {
-          return unresolvedWithoutHandoff(safeUnverifiedReply(
-            planned.reply ?? "I'm handling this conversation again. How can I help with your current request?",
-          ));
-        }
         if (planned.unresolved?.reason) {
           const reply = planned.reply
             ?? "I can't complete that request with the information and capabilities available right now.";
