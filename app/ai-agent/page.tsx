@@ -2,6 +2,8 @@
 
 import Link from "next/link";
 import { AppNav } from "@/components/core-domain/app-nav";
+import { KnowledgeEditor } from "../setup/ai/knowledge-editor";
+import { KnowledgeImportEditor } from "../setup/ai/knowledge-import-editor";
 import { useEffect, useState } from "react";
 import {
   CalendarIcon,
@@ -19,6 +21,9 @@ type Capability = { key: string; label: string; description: string };
 type DashboardData = { metrics: Record<"inquiries" | "aiConversations" | "qualifiedLeads" | "appointments", { value: number }>; credit: { balance: number }; activity: Array<{ id: string; label: string; detail: string; occurredAt: string; href: string }> };
 type Channel = "WhatsApp" | "Phone" | "SMS" | "Web Chat";
 type QualificationCriterion = { id: string; label: string; question: string; required: boolean };
+type ServiceRow = { id: string; name: string; description: string | null; priceText: string | null; durationMinutes: number | null; active: boolean };
+type FAQRow = { id: string; question: string; answer: string; active: boolean };
+type PolicyRow = { id: string; type: string; title: string; content: string };
 type AgentApiRecord = {
   id: string;
   status: AgentStatus;
@@ -53,7 +58,10 @@ export default function AIAgentPage() {
   const [capabilityCatalog, setCapabilityCatalog] = useState<Capability[]>([]);
   const [capabilities, setCapabilities] = useState<Record<string, boolean>>({});
   const [capabilitiesSaved, setCapabilitiesSaved] = useState(false);
-  const [knowledgeCounts, setKnowledgeCounts] = useState({ services: 0, faqs: 0, policies: 0 });
+  const [knowledgeServices, setKnowledgeServices] = useState<ServiceRow[]>([]);
+  const [knowledgeFaqs, setKnowledgeFaqs] = useState<FAQRow[]>([]);
+  const [knowledgePolicies, setKnowledgePolicies] = useState<PolicyRow[]>([]);
+  const [knowledgeWebsite, setKnowledgeWebsite] = useState("");
   const [saved, setSaved] = useState(false);
   const [tone, setTone] = useState("Friendly & professional");
   const [goal, setGoal] = useState("Book appointments");
@@ -75,56 +83,115 @@ export default function AIAgentPage() {
 
   useEffect(() => {
     let cancelled = false;
-    fetch("/api/agent", { cache: "no-store" })
-      .then(async (response) => {
-        if (!response.ok) throw new Error("Unable to load AI agent settings.");
-        return response.json() as Promise<{ agent: AgentApiRecord | null; capabilities: Record<string, boolean> | null; capabilityCatalog: Capability[]; canManage: boolean; services: unknown[]; faqs: unknown[]; policies: unknown[] }>;
-      })
-      .then(({ agent, capabilities: stored, capabilityCatalog: catalog, canManage: manage, services, faqs, policies }) => {
-        if (cancelled) return;
-        setCapabilityCatalog(catalog);
-        setCanManage(manage);
-        setKnowledgeCounts({ services: services.length, faqs: faqs.length, policies: policies.length });
-        setCapabilities(stored ?? {});
-        if (!agent) return;
-        setAgentStatus(agent.status);
-        setHasAgent(true);
-        setAssistantName(agent.name);
-        setTone(agent.tone);
-        setGoal(agent.primaryGoal);
-        setWhenUnsure(agent.whenUnsure);
-        setOpeningMessage(agent.openingMessage ?? "");
-        setEscalationMessage(agent.escalationMessage ?? "");
-        setAdvancedInstructions(agent.advancedInstructions);
-        const behavior = agent.behaviorSettings ?? {};
-        const rules = Array.isArray(behavior.guardrails) ? behavior.guardrails.filter((item): item is string => typeof item === "string") : [];
-        setGuardrails({
-          pricing: rules.includes("Never invent pricing"),
-          availability: rules.includes("Never confirm unavailable appointments"),
-          approvedInfo: rules.includes("Only answer based on approved business information") || rules.includes("Only answer from approved business information"),
-          collectContact: rules.includes("Collect customer name and phone number before handing off") || rules.includes("Collect customer name and contact before handoff"),
+    async function loadSettings() {
+      const [agentResponse, businessResponse] = await Promise.all([
+        fetch("/api/agent", { cache: "no-store" }),
+        fetch("/api/business", { cache: "no-store" }),
+      ]);
+      if (!agentResponse.ok) throw new Error("Unable to load AI agent settings.");
+      if (!businessResponse.ok) throw new Error("Unable to load business knowledge settings.");
+      const agentData = await agentResponse.json() as {
+        agent: AgentApiRecord | null;
+        capabilities: Record<string, boolean> | null;
+        capabilityCatalog: Capability[];
+        canManage: boolean;
+        services: ServiceRow[];
+        faqs: FAQRow[];
+        policies: PolicyRow[];
+      };
+      const businessData = await businessResponse.json() as {
+        profile?: { websiteUrl?: string | null } | null;
+      };
+      if (cancelled) return;
+      const { agent, capabilities: stored, capabilityCatalog: catalog, canManage: manage,
+        services, faqs, policies } = agentData;
+      setCapabilityCatalog(catalog);
+      setCanManage(manage);
+      setKnowledgeServices(services);
+      setKnowledgeFaqs(faqs);
+      setKnowledgePolicies(policies);
+      setKnowledgeWebsite(businessData.profile?.websiteUrl ?? "");
+      setCapabilities(stored ?? {});
+      if (!agent) return;
+      setAgentStatus(agent.status);
+      setHasAgent(true);
+      setAssistantName(agent.name);
+      setTone(agent.tone);
+      setGoal(agent.primaryGoal);
+      setWhenUnsure(agent.whenUnsure);
+      setOpeningMessage(agent.openingMessage ?? "");
+      setEscalationMessage(agent.escalationMessage ?? "");
+      setAdvancedInstructions(agent.advancedInstructions);
+      const behavior = agent.behaviorSettings ?? {};
+      const rules = Array.isArray(behavior.guardrails)
+        ? behavior.guardrails.filter((item): item is string => typeof item === "string") : [];
+      setGuardrails({
+        pricing: rules.includes("Never invent pricing"),
+        availability: rules.includes("Never confirm unavailable appointments"),
+        approvedInfo: rules.includes("Only answer based on approved business information")
+          || rules.includes("Only answer from approved business information"),
+        collectContact: rules.includes("Collect customer name and phone number before handing off")
+          || rules.includes("Collect customer name and contact before handoff"),
+      });
+      const voice = behavior.voice && typeof behavior.voice === "object"
+        ? behavior.voice as Record<string, unknown> : {};
+      if (typeof voice.profileKey === "string") setVoiceProfile(voice.profileKey);
+      if (typeof voice.language === "string") setVoiceLanguage(voice.language);
+      if (typeof voice.speakingRate === "number") setVoiceSpeed(voice.speakingRate);
+      if (voice.recordingPolicy === "ANNOUNCE" || voice.recordingPolicy === "EXPLICIT_CONSENT") {
+        setRecordingPolicy(voice.recordingPolicy);
+      }
+      if (typeof voice.afterHoursEnabled === "boolean") setAfterHoursEnabled(voice.afterHoursEnabled);
+      const qualification = behavior.qualification && typeof behavior.qualification === "object"
+        ? behavior.qualification as Record<string, unknown> : {};
+      if (typeof qualification.enabled === "boolean") setQualificationEnabled(qualification.enabled);
+      if (Array.isArray(qualification.criteria)) {
+        const parsed = qualification.criteria.filter((item): item is QualificationCriterion => {
+          if (!item || typeof item !== "object") return false;
+          const value = item as Record<string, unknown>;
+          return typeof value.id === "string" && typeof value.label === "string"
+            && typeof value.question === "string" && typeof value.required === "boolean";
         });
-        const voice = behavior.voice && typeof behavior.voice === "object" ? behavior.voice as Record<string, unknown> : {};
-        if (typeof voice.profileKey === "string") setVoiceProfile(voice.profileKey);
-        if (typeof voice.language === "string") setVoiceLanguage(voice.language);
-        if (typeof voice.speakingRate === "number") setVoiceSpeed(voice.speakingRate);
-        if (voice.recordingPolicy === "ANNOUNCE" || voice.recordingPolicy === "EXPLICIT_CONSENT") setRecordingPolicy(voice.recordingPolicy);
-        if (typeof voice.afterHoursEnabled === "boolean") setAfterHoursEnabled(voice.afterHoursEnabled);
-        const qualification = behavior.qualification && typeof behavior.qualification === "object" ? behavior.qualification as Record<string, unknown> : {};
-        if (typeof qualification.enabled === "boolean") setQualificationEnabled(qualification.enabled);
-        if (Array.isArray(qualification.criteria)) {
-          const parsed = qualification.criteria.filter((item): item is QualificationCriterion => {
-            if (!item || typeof item !== "object") return false;
-            const value = item as Record<string, unknown>;
-            return typeof value.id === "string" && typeof value.label === "string" && typeof value.question === "string" && typeof value.required === "boolean";
-          });
-          if (parsed.length) setQualificationCriteria(parsed);
-        }
-      })
-      .catch((err) => { if (!cancelled) setSettingsError(err instanceof Error ? err.message : "Unable to load AI agent settings."); })
+        if (parsed.length) setQualificationCriteria(parsed);
+      }
+    }
+    void loadSettings()
+      .catch((err) => { if (!cancelled) setSettingsError(
+        err instanceof Error ? err.message : "Unable to load AI agent settings.",
+      ); })
       .finally(() => { if (!cancelled) setLoadingSettings(false); });
     return () => { cancelled = true; };
-  }, [setGoal, setTone, setWhenUnsure]);
+  }, []);
+
+  useEffect(() => {
+    if (tab !== "knowledge") return;
+    let cancelled = false;
+    void Promise.all([
+      fetch("/api/agent", { cache: "no-store" }),
+      fetch("/api/business", { cache: "no-store" }),
+    ]).then(async ([agentResponse, businessResponse]) => {
+      if (!agentResponse.ok || !businessResponse.ok) {
+        throw new Error("Unable to refresh business knowledge.");
+      }
+      const agentData = await agentResponse.json() as {
+        services: ServiceRow[]; faqs: FAQRow[]; policies: PolicyRow[]; canManage: boolean;
+      };
+      const businessData = await businessResponse.json() as {
+        profile?: { websiteUrl?: string | null } | null;
+      };
+      if (cancelled) return;
+      setKnowledgeServices(agentData.services);
+      setKnowledgeFaqs(agentData.faqs);
+      setKnowledgePolicies(agentData.policies);
+      setKnowledgeWebsite(businessData.profile?.websiteUrl ?? "");
+      setCanManage(agentData.canManage);
+    }).catch((err) => {
+      if (!cancelled) setSettingsError(
+        err instanceof Error ? err.message : "Unable to refresh business knowledge.",
+      );
+    });
+    return () => { cancelled = true; };
+  }, [tab]);
 
   const updateStatus = async (selected?: AgentStatus) => {
     const next: AgentStatus = selected ?? (agentStatus === "ACTIVE" ? "PAUSED" : "ACTIVE");
@@ -247,7 +314,14 @@ export default function AIAgentPage() {
           </div>
 
           {tab === "overview" && <OverviewTab agentName={assistantName} status={agentStatus} configured={hasAgent} onStatusChange={updateStatus} canManage={canManage} loading={loadingSettings || savingSettings} setTab={setTab} />}
-          {tab === "knowledge" && <KnowledgeTab counts={knowledgeCounts} />}
+          {tab === "knowledge" && <KnowledgeTab
+            services={knowledgeServices}
+            faqs={knowledgeFaqs}
+            policies={knowledgePolicies}
+            website={knowledgeWebsite}
+            canManage={canManage}
+            agentName={assistantName}
+          />}
           {tab === "behavior" && <BehaviorTab tone={tone} setTone={setTone} goal={goal} setGoal={setGoal} whenUnsure={whenUnsure} setWhenUnsure={setWhenUnsure} guardrails={guardrails} setGuardrails={setGuardrails} assistantName={assistantName} setAssistantName={setAssistantName} openingMessage={openingMessage} setOpeningMessage={setOpeningMessage} escalationMessage={escalationMessage} setEscalationMessage={setEscalationMessage} voiceProfile={voiceProfile} setVoiceProfile={setVoiceProfile} voiceLanguage={voiceLanguage} setVoiceLanguage={setVoiceLanguage} voiceSpeed={voiceSpeed} setVoiceSpeed={setVoiceSpeed} recordingPolicy={recordingPolicy} setRecordingPolicy={setRecordingPolicy} afterHoursEnabled={afterHoursEnabled} setAfterHoursEnabled={setAfterHoursEnabled} qualificationEnabled={qualificationEnabled} setQualificationEnabled={setQualificationEnabled} qualificationCriteria={qualificationCriteria} setQualificationCriteria={setQualificationCriteria} />}
           {tab === "capabilities" && <CapabilitiesTab catalog={capabilityCatalog} capabilities={capabilities} setCapabilities={(value) => { setCapabilitiesSaved(false); setCapabilities(value); }} saved={capabilitiesSaved} onSave={saveCapabilities} loading={loadingSettings || savingSettings} canManage={canManage} />}
           {tab === "test" && <TestTab />}
@@ -342,18 +416,33 @@ function OverviewTab({ agentName, status, configured, onStatusChange, canManage,
   </div>;
 }
 
-function KnowledgeTab({ counts }: { counts: { services: number; faqs: number; policies: number } }) {
-  return <div className="agentTabContent">
+function KnowledgeTab({ services, faqs, policies, website, canManage, agentName }: {
+  services: ServiceRow[];
+  faqs: FAQRow[];
+  policies: PolicyRow[];
+  website: string;
+  canManage: boolean;
+  agentName: string;
+}) {
+  return <div className="agentTabContent knowledgeManagement">
     <section className="agentCard knowledgeMainCard">
-      <div className="sectionTitle"><div><h2>Business knowledge</h2><p>The AI uses your saved business profile, services, FAQs, policies and imported knowledge.</p></div>
-        <Link href="/setup/ai">Manage knowledge</Link>
-      </div>
-      <div className="knowledgeList">
-        <p>Saved services: {counts.services}</p>
-        <p>Saved FAQs: {counts.faqs}</p>
-        <p>Saved policies: {counts.policies}</p>
-        <p>Manage imported documents and website information from your existing AI setup.</p>
-      </div>
+      <div className="sectionTitle"><div>
+        <h2>Business knowledge</h2>
+        <p>Manage the approved services, FAQs and policies {agentName} can use across every channel.</p>
+      </div></div>
+      {canManage ? <KnowledgeEditor
+        initialServices={services}
+        initialFaqs={faqs}
+        initialPolicies={policies}
+      /> : <p className="knowledgeReadOnly">Owner or admin access is required to change business knowledge.</p>}
+    </section>
+    <section className="agentCard knowledgeImportCard">
+      <div className="sectionTitle"><div>
+        <h2>Imported knowledge</h2>
+        <p>Import website content or text documents without leaving the AI Agent workspace.</p>
+      </div></div>
+      {canManage ? <KnowledgeImportEditor initialWebsite={website} />
+        : <p className="knowledgeReadOnly">Imported knowledge is read-only for staff members.</p>}
     </section>
   </div>;
 }

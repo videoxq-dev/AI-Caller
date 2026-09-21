@@ -17,6 +17,8 @@ export function KnowledgeImportEditor({ initialWebsite }: { initialWebsite: stri
   const [sources, setSources] = useState<KnowledgeSource[]>([]);
   const [busy, setBusy] = useState<"website" | "file" | null>(null);
 
+  useEffect(() => setWebsite(initialWebsite), [initialWebsite]);
+
   async function refresh() {
     const response = await fetch("/api/knowledge", { cache: "no-store" });
     const payload = await response.json().catch(() => null);

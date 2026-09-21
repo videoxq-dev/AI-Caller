@@ -105,6 +105,131 @@ function actionProtocolFor(context: OrchestratorContext) {
   }).join("\n");
 }
 
+const MONTHS = new Map([
+  ["january", 1], ["february", 2], ["march", 3], ["april", 4],
+  ["may", 5], ["june", 6], ["july", 7], ["august", 8],
+  ["september", 9], ["october", 10], ["november", 11], ["december", 12],
+]);
+const WEEKDAYS = ["sunday", "monday", "tuesday", "wednesday", "thursday", "friday", "saturday"];
+
+function zonedDateTimeParts(date: Date, timezone: string) {
+  const parts = new Intl.DateTimeFormat("en-US", {
+    timeZone: timezone, hourCycle: "h23", year: "numeric", month: "2-digit",
+    day: "2-digit", hour: "2-digit", minute: "2-digit",
+  }).formatToParts(date);
+  const part = (type: string) => Number(parts.find((row) => row.type === type)?.value ?? NaN);
+  return { year: part("year"), month: part("month"), day: part("day"),
+    hour: part("hour"), minute: part("minute") };
+}
+
+function localDateTimeToInstant(
+  input: { year: number; month: number; day: number; hour: number; minute: number },
+  timezone: string,
+) {
+  const target = Date.UTC(input.year, input.month - 1, input.day, input.hour, input.minute);
+  const validDate = new Date(Date.UTC(input.year, input.month - 1, input.day));
+  if (validDate.getUTCFullYear() !== input.year || validDate.getUTCMonth() + 1 !== input.month
+    || validDate.getUTCDate() !== input.day) return null;
+  let instant = target;
+  try {
+    for (let attempt = 0; attempt < 4; attempt += 1) {
+      const current = zonedDateTimeParts(new Date(instant), timezone);
+      const represented = Date.UTC(current.year, current.month - 1, current.day, current.hour, current.minute);
+      const delta = target - represented;
+      if (delta === 0) break;
+      instant += delta;
+    }
+    const roundTrip = zonedDateTimeParts(new Date(instant), timezone);
+    return Object.entries(input).every(([key, value]) =>
+      roundTrip[key as keyof typeof roundTrip] === value)
+      ? new Date(instant) : null;
+  } catch {
+    return null;
+  }
+}
+
+function deterministicAvailabilityPlan(
+  message: string,
+  timezone: string,
+  services: OrchestratorContext["services"] = [],
+): OrchestratorEnvelope | null {
+  if (!/\b(?:availability|available|openings?|slots?)\b/i.test(message)) return null;
+
+  const monthNames = [...MONTHS.keys()].join("|");
+  const dayFirst = new RegExp(
+    `\\b(?:(sunday|monday|tuesday|wednesday|thursday|friday|saturday)\\s+)?(\\d{1,2})(?:st|nd|rd|th)?\\s+(${monthNames})\\s*,?\\s*(\\d{4})\\b`,
+    "i",
+  ).exec(message);
+  const monthFirst = new RegExp(
+    `\\b(?:(sunday|monday|tuesday|wednesday|thursday|friday|saturday)\\s+)?(${monthNames})\\s+(\\d{1,2})(?:st|nd|rd|th)?\\s*,?\\s*(\\d{4})\\b`,
+    "i",
+  ).exec(message);
+  const iso = /\b(\d{4})-(\d{2})-(\d{2})\b/.exec(message);
+
+  let year: number;
+  let month: number;
+  let day: number;
+  let weekday: string | undefined;
+  if (dayFirst) {
+    weekday = dayFirst[1]?.toLowerCase();
+    day = Number(dayFirst[2]);
+    month = MONTHS.get(dayFirst[3].toLowerCase()) ?? 0;
+    year = Number(dayFirst[4]);
+  } else if (monthFirst) {
+    weekday = monthFirst[1]?.toLowerCase();
+    month = MONTHS.get(monthFirst[2].toLowerCase()) ?? 0;
+    day = Number(monthFirst[3]);
+    year = Number(monthFirst[4]);
+  } else if (iso) {
+    year = Number(iso[1]); month = Number(iso[2]); day = Number(iso[3]);
+  } else {
+    return null;
+  }
+
+  const time12 = /\b(?:at|by)\s+(\d{1,2})(?::(\d{2}))?\s*(a\.?m\.?|p\.?m\.?)\b/i.exec(message);
+  const time24 = /\b(?:at|by)\s+([01]?\d|2[0-3]):([0-5]\d)\b/i.exec(message);
+  let hour: number;
+  let minute: number;
+  if (time12) {
+    hour = Number(time12[1]);
+    minute = Number(time12[2] ?? 0);
+    if (hour < 1 || hour > 12 || minute > 59) return null;
+    const pm = time12[3].toLowerCase().startsWith("p");
+    hour = hour % 12 + (pm ? 12 : 0);
+  } else if (time24) {
+    hour = Number(time24[1]);
+    minute = Number(time24[2]);
+  } else {
+    return null;
+  }
+
+  const date = new Date(Date.UTC(year, month - 1, day));
+  if (date.getUTCFullYear() !== year || date.getUTCMonth() + 1 !== month || date.getUTCDate() !== day) return null;
+  if (weekday && WEEKDAYS[date.getUTCDay()] !== weekday) return null;
+
+  const startsAt = localDateTimeToInstant({ year, month, day, hour, minute }, timezone);
+  if (!startsAt || startsAt.getTime() <= Date.now()) return null;
+  const normalizedMessage = message.toLocaleLowerCase("en-US");
+  const matchedServices = services.filter((service) =>
+    service.name.trim().length >= 2
+    && normalizedMessage.includes(service.name.trim().toLocaleLowerCase("en-US")));
+  const durationMinutes = matchedServices.length === 1
+    && matchedServices[0].durationMinutes
+    && matchedServices[0].durationMinutes > 0
+    ? matchedServices[0].durationMinutes : undefined;
+  const searchMinutes = Math.max(120, durationMinutes ?? 0);
+  const endsAt = new Date(startsAt.getTime() + searchMinutes * 60_000);
+  return {
+    action: {
+      type: "CHECK_AVAILABILITY",
+      startsAt: startsAt.toISOString(),
+      endsAt: endsAt.toISOString(),
+      timezone,
+      ...(durationMinutes ? { durationMinutes } : {}),
+    },
+  };
+}
+
 function plannerMessages(context: OrchestratorContext): AIMessage[] {
   const resumedInstruction = context.resumedAfterHumanHandoff
     ? `\n\nAUTHORITATIVE CONVERSATION OWNERSHIP: A workspace operator manually returned this conversation from HUMAN to AI. Older requests for a human and prior handoff messages are history, not a current instruction. Handle the customer's latest request with the enabled capabilities. Do not ESCALATE merely because an older message requested a human; apply the saved When Unsure policy only to a genuinely unresolved current request.`
@@ -369,9 +494,19 @@ export function createResponseOrchestrator(dependencies: OrchestratorDependencie
           if (!(repairError instanceof OrchestratorOutputError)) throw repairError;
           logger.error({ workspaceId, conversationId, validationIssues: repairError.validationIssues },
             "AI provider returned invalid orchestration output after correction");
-          return unresolvedWithoutHandoff(
-            "I couldn't safely interpret that. Please restate your request, including any service, date, or time details that matter.",
-          );
+          const deterministic = (!allowed || allowed.CHECK_AVAILABILITY)
+            ? deterministicAvailabilityPlan(
+              lastUserMessage, context.timezone ?? "UTC", context.services,
+            )
+            : null;
+          if (!deterministic) {
+            return unresolvedWithoutHandoff(
+              "I couldn't safely interpret that. Please restate your request, including any service, date, or time details that matter.",
+            );
+          }
+          logger.warn({ workspaceId, conversationId, action: deterministic.action.type },
+            "Using deterministic recovery for an explicit availability request");
+          planned = deterministic;
         }
       }
       if (context.resumedAfterHumanHandoff

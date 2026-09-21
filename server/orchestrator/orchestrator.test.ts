@@ -46,6 +46,36 @@ describe("orchestrator response protocol", () => {
     });
   });
 
+  it("keeps a valid action when optional planner metadata is invalid", () => {
+    expect(parseOrchestratorEnvelope(JSON.stringify({
+      reply: "Checking that time.",
+      lead: { status: "BOOKED", intent: "Office cleaning" },
+      contact: { email: "not-an-email" },
+      action: {
+        type: "CHECK_AVAILABILITY",
+        startsAt: "2030-09-23T10:00:00Z",
+        endsAt: "2030-09-23T12:00:00Z",
+        timezone: "UTC",
+        durationMinutes: "30",
+      },
+    }))).toEqual({
+      reply: "Checking that time.",
+      action: {
+        type: "CHECK_AVAILABILITY",
+        startsAt: "2030-09-23T10:00:00Z",
+        endsAt: "2030-09-23T12:00:00Z",
+        timezone: "UTC",
+        durationMinutes: 30,
+      },
+    });
+  });
+
+  it("extracts the first complete JSON object without swallowing trailing model output", () => {
+    expect(parseOrchestratorEnvelope(
+      '{"reply":"I can help.","action":{"type":"NONE"}}\n{"debug":"ignore me"}',
+    )).toEqual({ reply: "I can help.", action: { type: "NONE" } });
+  });
+
   it("rejects malformed or invalid structured actions instead of exposing raw JSON", () => {
     expect(() => parseOrchestratorEnvelope('{"action":{"type":"BOOK_APPOINTMENT"}}')).toThrow("invalid orchestration action");
     expect(() => parseOrchestratorEnvelope(JSON.stringify({
@@ -166,6 +196,44 @@ describe("orchestrator response protocol", () => {
     expect(result.reply).toContain("restate your request");
     expect(generate).toHaveBeenCalledTimes(2);
     expect(executeTools).not.toHaveBeenCalled();
+  });
+
+  it("falls back to an authoritative availability check for a fully specified date and time when planner repair fails", async () => {
+    const generate = vi.fn(async () => ({ text: '{"action":}' }));
+    const executeTools = vi.fn(async (_workspaceId, _conversationId, _contactId, envelope) => {
+      expect(envelope.action).toMatchObject({
+        type: "CHECK_AVAILABILITY",
+        startsAt: "2037-09-23T10:00:00.000Z",
+        timezone: "UTC",
+        durationMinutes: 60,
+      });
+      return { kind: "availability" as const, data: {
+        timezone: "UTC",
+        slots: [{ startsAt: "2037-09-23T10:00:00.000Z", endsAt: "2037-09-23T10:30:00.000Z" }],
+      } };
+    });
+    const orchestrator = createResponseOrchestrator({
+      buildContext: vi.fn(async () => ({
+        ...fakeContext(),
+        timezone: "UTC",
+        services: [{ id: "service-office", name: "Office Cleaning", durationMinutes: 60 }],
+        messages: [{ role: "user" as const,
+          content: "I want to book my office cleaning appointment but first I want to check availability for Wednesday 23 September 2037 at 10:00 AM" }],
+        agent: { id: "agent-1", status: "ACTIVE" as const,
+          whenUnsure: "Escalate to a human", escalationMessage: null,
+          behaviorSettings: { capabilities: { ...defaultAgentCapabilities } } },
+      })),
+      executeTools,
+      generate,
+    });
+
+    const result = await orchestrator.respond("workspace", "conversation");
+
+    expect(result.handlingMode).toBe("AI");
+    expect(result.reply).toContain("Available times include");
+    expect(result.reply).toContain("10:00 AM");
+    expect(generate).toHaveBeenCalledTimes(2);
+    expect(executeTools).toHaveBeenCalledOnce();
   });
 
   it("replans a returned-to-AI conversation around the latest legitimate request", async () => {

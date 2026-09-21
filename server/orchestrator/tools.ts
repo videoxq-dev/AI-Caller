@@ -30,7 +30,7 @@ const timezoneSchema = z.string().trim().min(1).max(100).refine((value) => {
   }
 }, "Timezone must be a valid IANA timezone.");
 
-export const orchestratorActionSchema = z.discriminatedUnion("type", [
+const orchestratorActionObjectSchema = z.discriminatedUnion("type", [
   z.object({ type: z.literal("NONE") }),
   z.object({
     type: z.literal("RECORD_SMS_CONSENT"),
@@ -78,36 +78,67 @@ export const orchestratorActionSchema = z.discriminatedUnion("type", [
   }
 });
 
+function normalizePlannerAction(value: unknown) {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return value;
+  const action = { ...(value as Record<string, unknown>) };
+  if (action.durationMinutes === null) delete action.durationMinutes;
+  if (typeof action.durationMinutes === "string" && /^\d+$/.test(action.durationMinutes.trim())) {
+    action.durationMinutes = Number(action.durationMinutes);
+  }
+  if (action.serviceId === "") action.serviceId = null;
+  if (action.notes === "") action.notes = null;
+  if (action.reason === null) delete action.reason;
+  return action;
+}
+
+export const orchestratorActionSchema = z.preprocess(
+  normalizePlannerAction,
+  orchestratorActionObjectSchema,
+);
+
+const contactHintSchema = z.object({
+  name: z.string().trim().min(1).max(200).optional(),
+  email: z.string().trim().email().max(320).transform((value) => value.toLowerCase()).optional(),
+  phone: z.string().trim().min(1).max(50).optional(),
+});
+const leadHintSchema = z.object({
+  status: z.enum(["NEW", "QUALIFIED"]).optional(),
+  intent: optionalShortText,
+  serviceRequested: z.string().trim().min(1).max(500).nullable().optional(),
+});
+const unresolvedHintSchema = z.object({
+  reason: z.string().trim().min(1).max(1000),
+});
+
 const orchestratorEnvelopeObjectSchema = z.object({
   reply: z.string().trim().min(1).max(5000).optional(),
-  contact: z.object({
-    name: z.string().trim().min(1).max(200).optional(),
-    email: z.string().trim().email().max(320).transform((value) => value.toLowerCase()).optional(),
-    phone: z.string().trim().min(1).max(50).optional(),
-  }).optional(),
-  lead: z.object({
-    status: z.enum(["NEW", "QUALIFIED"]).optional(),
-    intent: optionalShortText,
-    serviceRequested: z.string().trim().min(1).max(500).nullable().optional(),
-  }).optional(),
-  unresolved: z.object({
-    reason: z.string().trim().min(1).max(1000),
-  }).optional(),
+  contact: contactHintSchema.optional(),
+  lead: leadHintSchema.optional(),
+  unresolved: unresolvedHintSchema.optional(),
   action: orchestratorActionSchema.default({ type: "NONE" }),
 });
 
 export const orchestratorEnvelopeSchema = z.preprocess((value) => {
   if (!value || typeof value !== "object" || Array.isArray(value)) return value;
   const normalized = { ...(value as Record<string, unknown>) };
-  for (const key of ["reply", "contact", "lead", "unresolved"] as const) {
-    if (normalized[key] === null) delete normalized[key];
+  if (normalized.reply === null || typeof normalized.reply !== "string") delete normalized.reply;
+  for (const [key, schema] of [
+    ["contact", contactHintSchema],
+    ["lead", leadHintSchema],
+    ["unresolved", unresolvedHintSchema],
+  ] as const) {
+    if (normalized[key] === null) {
+      delete normalized[key];
+      continue;
+    }
+    if (normalized[key] !== undefined) {
+      const parsed = schema.safeParse(normalized[key]);
+      if (parsed.success) normalized[key] = parsed.data;
+      else delete normalized[key];
+    }
   }
   if (normalized.action === null) delete normalized.action;
-  if (normalized.action && typeof normalized.action === "object" && !Array.isArray(normalized.action)) {
-    const action = { ...(normalized.action as Record<string, unknown>) };
-    if (action.durationMinutes === null) delete action.durationMinutes;
-    normalized.action = action;
-  }
+  else normalized.action = normalizePlannerAction(normalized.action);
   return normalized;
 }, orchestratorEnvelopeObjectSchema);
 
@@ -135,9 +166,30 @@ function extractJson(text: string) {
     ? trimmed.replace(/^```(?:json)?\s*/i, "").replace(/\s*```$/, "")
     : trimmed;
   const start = unfenced.indexOf("{");
-  const end = unfenced.lastIndexOf("}");
-  if (start < 0 || end <= start) return null;
-  return unfenced.slice(start, end + 1);
+  if (start < 0) return null;
+  let depth = 0;
+  let quoted = false;
+  let escaped = false;
+  for (let index = start; index < unfenced.length; index += 1) {
+    const char = unfenced[index];
+    if (quoted) {
+      if (escaped) escaped = false;
+      else if (char === "\\") escaped = true;
+      else if (char === '"') quoted = false;
+      continue;
+    }
+    if (char === '"') {
+      quoted = true;
+      continue;
+    }
+    if (char === "{") depth += 1;
+    if (char === "}") {
+      depth -= 1;
+      if (depth === 0) return unfenced.slice(start, index + 1);
+      if (depth < 0) return null;
+    }
+  }
+  return null;
 }
 
 export function parseOrchestratorEnvelope(text: string): OrchestratorEnvelope {

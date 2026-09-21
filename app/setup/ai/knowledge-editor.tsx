@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import "./knowledge-editor.css";
 
 type ServiceRow = { id: string; name: string; description: string | null; priceText: string | null; durationMinutes: number | null; active: boolean };
@@ -15,6 +15,10 @@ export function KnowledgeEditor({ initialServices, initialFaqs, initialPolicies 
   const [policies, setPolicies] = useState(initialPolicies);
   const [editing, setEditing] = useState<{ kind: EditorKind; id?: string } | null>(null);
   const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => setServices(initialServices), [initialServices]);
+  useEffect(() => setFaqs(initialFaqs), [initialFaqs]);
+  useEffect(() => setPolicies(initialPolicies), [initialPolicies]);
 
   async function request(url: string, method: "POST" | "PATCH" | "DELETE", body?: unknown) {
     const response = await fetch(url, {
