@@ -90,6 +90,7 @@ export function attachRealtimeMedia({ telnyx, identity, streamId }: BridgeOption
   let priorConversation = "";
   let historyInjected = false;
   let openingMessage = "How can I help you today?";
+  let openingPending = false;
   let openingRequested = false;
   const startedAt = Date.now();
 
@@ -154,7 +155,7 @@ export function attachRealtimeMedia({ telnyx, identity, streamId }: BridgeOption
   }
 
   function requestOpening() {
-    if (!open || !ready || !speechAllowed || openingRequested) return;
+    if (!open || !ready || !speechAllowed || !openingPending || openingRequested) return;
     openingRequested = true;
     sendOpenAI({
       type: "response.create",
@@ -486,6 +487,7 @@ export function attachRealtimeMedia({ telnyx, identity, streamId }: BridgeOption
       openingMessage = typeof call.metadata.openingMessage === "string" && call.metadata.openingMessage.trim()
         ? call.metadata.openingMessage.trim().slice(0, 2000)
         : "How can I help you today?";
+      openingPending = call.metadata.realtimeOpeningPending === true;
       // All audio captured before the complete opening is discarded.
       initialAudio.length = 0;
       initialBytes = 0;
