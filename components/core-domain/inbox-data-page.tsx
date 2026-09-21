@@ -9,7 +9,8 @@ type Contact = { id: string; name: string | null; email: string | null; phone: s
 type Conversation = { id: string; contactId: string; status: "OPEN" | "CLOSED"; handlingMode: "AI" | "HUMAN"; assignedUserId: string | null; lastMessageAt: string | null; createdAt: string };
 type ConversationRow = { conversation: Conversation; contact: Contact; channels: Channel[] };
 type Message = { id: string; channel: Channel; direction: "INBOUND" | "OUTBOUND" | "INTERNAL"; senderType: "CUSTOMER" | "AI" | "USER" | "SYSTEM"; contentType: string; body: string; createdAt: string; metadata: Record<string, unknown> };
-type Timeline = { conversation: Conversation; contact: Contact; messages: Message[] };
+type HumanCase = { id: string; reason: string; status: string; createdAt: string; assignedUserId: string | null };
+type Timeline = { conversation: Conversation; contact: Contact; messages: Message[]; openHumanCases: HumanCase[] };
 type TeamMember = { userId: string; name: string; email: string; role: "OWNER" | "ADMIN" | "STAFF" };
 
 
@@ -182,6 +183,7 @@ export function InboxDataPage() {
   const [currentUserId, setCurrentUserId] = useState<string | null>(null);
   const [currentRole, setCurrentRole] = useState<"OWNER" | "ADMIN" | "STAFF" | null>(null);
   const [assignmentPending, setAssignmentPending] = useState(false);
+  const [resolvingIssueId, setResolvingIssueId] = useState<string | null>(null);
 
   const loadConversations = useCallback(async () => {
     setLoading(true);
@@ -298,11 +300,33 @@ export function InboxDataPage() {
   }
 
   const latestChannel = timeline?.messages.at(-1)?.channel ?? "WEBCHAT";
+  const hasOpenHumanIssue = Boolean(timeline?.openHumanCases?.length);
   const canReplyOnStaffChannel = Boolean(
     timeline
     && (latestChannel === "WHATSAPP" || latestChannel === "SMS" || latestChannel === "WEBCHAT")
-    && timeline.conversation.handlingMode === "HUMAN",
+    && (timeline.conversation.handlingMode === "HUMAN" || hasOpenHumanIssue),
   );
+
+  async function resolveIssue(issueId: string) {
+    if (!timeline) return;
+    setResolvingIssueId(issueId);
+    setError(null);
+    try {
+      const response = await fetch(
+        `/api/conversations/${timeline.conversation.id}/issues/${issueId}`,
+        { method: "PUT" },
+      );
+      if (!response.ok) {
+        const data = await response.json().catch(() => null) as { error?: { message?: string } } | null;
+        throw new Error(data?.error?.message ?? "Unable to resolve staff issue.");
+      }
+      await Promise.all([loadTimeline(timeline.conversation.id), loadConversations()]);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Unable to resolve staff issue.");
+    } finally {
+      setResolvingIssueId(null);
+    }
+  }
 
   async function sendStaffReply() {
     if (!timeline || !canReplyOnStaffChannel || !draft.trim()) return;
@@ -384,12 +408,12 @@ export function InboxDataPage() {
                   return <Fragment key={message.id}>{fallbackCallCards.has(message.id) && <VoiceCallCard message={message} />}<div className={`messageRow ${customer ? "customer" : "agent"}`}>{customer && <span className="miniAvatar">{initials(timeline.contact.name)}</span>}<div className={`messageBubble ${customer ? "incoming" : "outgoing"}`}><div className="messageMeta"><span className={`channelBadge ${channelLabels[message.channel].toLowerCase().replace(" ", "-")}`}>{message.channel === "PHONE" ? <PhoneIcon size={13} /> : <MessageIcon size={13} />}{channelLabels[message.channel]}</span><time>{displayTime(message.createdAt)}</time></div><p>{message.body}</p></div>{!customer && <span className="botAvatar">{message.senderType === "USER" ? <UsersIcon size={16} /> : "✦"}</span>}</div></Fragment>;
                 })}
               </div>
-              <div className="composerWrap"><div className="composerTabs"><button className="active" type="button">Message</button></div><textarea aria-label="Conversation reply" value={draft} onChange={(event) => setDraft(event.target.value)} disabled={!canReplyOnStaffChannel || sendingReply} placeholder={canReplyOnStaffChannel ? `Reply by ${channelLabels[latestChannel]}…` : latestChannel === "WHATSAPP" || latestChannel === "SMS" || latestChannel === "WEBCHAT" ? `Take over this conversation to reply by ${channelLabels[latestChannel]}.` : `Staff outbound ${channelLabels[latestChannel]} replies are not enabled yet.`} /><div className="composerFooter"><span>{canReplyOnStaffChannel ? latestChannel === "WHATSAPP" ? "Free-form WhatsApp replies require an active 24-hour customer window." : latestChannel === "SMS" ? "Staff SMS replies use the workspace's active SMS provider." : "Web Chat replies appear in the customer's active widget session." : "Take over a supported messaging conversation to reply as staff."}</span>{canReplyOnStaffChannel && <button className="sendButton" type="button" disabled={sendingReply || !draft.trim()} onClick={() => void sendStaffReply()}>{sendingReply ? "Sending…" : "Send"}</button>}</div></div>
+              <div className="composerWrap"><div className="composerTabs"><button className="active" type="button">Message</button></div><textarea aria-label="Conversation reply" value={draft} onChange={(event) => setDraft(event.target.value)} disabled={!canReplyOnStaffChannel || sendingReply} placeholder={canReplyOnStaffChannel ? hasOpenHumanIssue && timeline?.conversation.handlingMode !== "HUMAN" ? `Reply to the open staff issue by ${channelLabels[latestChannel]}…` : `Reply by ${channelLabels[latestChannel]}…` : latestChannel === "WHATSAPP" || latestChannel === "SMS" || latestChannel === "WEBCHAT" ? `Take over this conversation to reply by ${channelLabels[latestChannel]}.` : `Staff outbound ${channelLabels[latestChannel]} replies are not enabled yet.`} /><div className="composerFooter"><span>{canReplyOnStaffChannel ? hasOpenHumanIssue && timeline?.conversation.handlingMode !== "HUMAN" ? "This reply addresses an open staff issue while Mia remains available for other requests." : latestChannel === "WHATSAPP" ? "Free-form WhatsApp replies require an active 24-hour customer window." : latestChannel === "SMS" ? "Staff SMS replies use the workspace's active SMS provider." : "Web Chat replies appear in the customer's active widget session." : "Take over a supported messaging conversation to reply as staff."}</span>{canReplyOnStaffChannel && <button className="sendButton" type="button" disabled={sendingReply || !draft.trim()} onClick={() => void sendStaffReply()}>{sendingReply ? "Sending…" : "Send"}</button>}</div></div>
             </> : <div style={{ display: "grid", placeItems: "center", height: "100%", minHeight: 420 }}>Select a conversation to view its timeline.</div>}
           </section>
 
           <aside className="contactColumn">
-            {timeline ? <><div className="contactTabs"><button className="active" type="button">Contact</button></div><section className="contactSummary"><span className="largeAvatar">{initials(timeline.contact.name)}</span><div><strong>{timeline.contact.name ?? "Unnamed contact"}</strong><span>{timeline.contact.phone ?? "No phone"}</span><span>{timeline.contact.email ?? "No email"}</span></div></section><div className="contactChannelRow"><span className={`channelBadge ${channelLabels[latestChannel].toLowerCase().replace(" ", "-")}`}>{channelLabels[latestChannel]}</span><span className="currentChannel">Latest channel</span></div><section className="detailSection"><div className="detailHeading"><strong>Conversation state</strong></div><div className="infoRows compact"><div><span>Handling</span><strong>{timeline.conversation.handlingMode}</strong></div><div><span>Status</span><strong>{timeline.conversation.status}</strong></div><div><span>Messages</span><strong>{timeline.messages.length}</strong></div><div><span>Assigned to</span><strong>{teamMembers.find((member) => member.userId === timeline.conversation.assignedUserId)?.name ?? "Unassigned"}</strong></div></div>{currentRole === "OWNER" || currentRole === "ADMIN" ? <label className="inboxAssigneeField"><span>Reassign conversation</span><select value={timeline.conversation.assignedUserId ?? ""} disabled={assignmentPending} onChange={(event) => void updateAssignment(event.target.value || null)}><option value="">Unassigned</option>{teamMembers.map((member) => <option key={member.userId} value={member.userId}>{member.name} · {member.role}</option>)}</select></label> : currentUserId && timeline.conversation.assignedUserId !== currentUserId ? <button className="inboxAssignSelf" type="button" disabled={assignmentPending} onClick={() => void updateAssignment(currentUserId)}>Assign to me</button> : null}</section></> : null}
+            {timeline ? <><div className="contactTabs"><button className="active" type="button">Contact</button></div><section className="contactSummary"><span className="largeAvatar">{initials(timeline.contact.name)}</span><div><strong>{timeline.contact.name ?? "Unnamed contact"}</strong><span>{timeline.contact.phone ?? "No phone"}</span><span>{timeline.contact.email ?? "No email"}</span></div></section><div className="contactChannelRow"><span className={`channelBadge ${channelLabels[latestChannel].toLowerCase().replace(" ", "-")}`}>{channelLabels[latestChannel]}</span><span className="currentChannel">Latest channel</span></div><section className="detailSection"><div className="detailHeading"><strong>Conversation state</strong></div><div className="infoRows compact"><div><span>Handling</span><strong>{timeline.conversation.handlingMode}</strong></div><div><span>Status</span><strong>{timeline.conversation.status}</strong></div><div><span>Messages</span><strong>{timeline.messages.length}</strong></div><div><span>Open staff issues</span><strong>{timeline.openHumanCases?.length ?? 0}</strong></div><div><span>Assigned to</span><strong>{teamMembers.find((member) => member.userId === timeline.conversation.assignedUserId)?.name ?? "Unassigned"}</strong></div></div>{timeline.openHumanCases?.length ? <div className="humanCaseList">{timeline.openHumanCases.map((issue) => <div className="humanCaseCard" key={issue.id}><p>{issue.reason}</p><button type="button" disabled={resolvingIssueId === issue.id} onClick={() => void resolveIssue(issue.id)}>{resolvingIssueId === issue.id ? "Resolving…" : "Mark resolved"}</button></div>)}</div> : null}{currentRole === "OWNER" || currentRole === "ADMIN" ? <label className="inboxAssigneeField"><span>Reassign conversation</span><select value={timeline.conversation.assignedUserId ?? ""} disabled={assignmentPending} onChange={(event) => void updateAssignment(event.target.value || null)}><option value="">Unassigned</option>{teamMembers.map((member) => <option key={member.userId} value={member.userId}>{member.name} · {member.role}</option>)}</select></label> : currentUserId && timeline.conversation.assignedUserId !== currentUserId ? <button className="inboxAssignSelf" type="button" disabled={assignmentPending} onClick={() => void updateAssignment(currentUserId)}>Assign to me</button> : null}</section></> : null}
           </aside>
         </div>
       </section>
