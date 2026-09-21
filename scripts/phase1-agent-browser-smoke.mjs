@@ -180,11 +180,26 @@ try {
   await widgetFrame.getByText(/QA Consultation is \$120/).last().waitFor({ timeout: 15_000 });
   await composer.fill("Book the QA Consultation. My name is QA Visitor, qa.visitor@example.com");
   await widgetFrame.getByRole("button", { name: "Send message" }).click();
-  await widgetFrame.getByText(/can't perform that action/).last().waitFor({ timeout: 15_000 });
+  await widgetFrame.getByText(/can't book an appointment.*flagged your request for staff follow-up/i)
+    .last().waitFor({ timeout: 15_000 });
   const forbiddenBookings = await pool.query(`SELECT count(*)::int AS count FROM appointments
     WHERE workspace_id = $1`, [workspaceId]);
   assert(forbiddenBookings.rows[0].count === 0,
     "The real Web Chat channel persisted a booking disabled by the owner.");
+  const webchatSession = await pool.query(
+    `SELECT conversation_id FROM webchat_sessions WHERE workspace_id = $1 ORDER BY created_at DESC LIMIT 1`,
+    [workspaceId],
+  );
+  const liveConversationId = webchatSession.rows[0]?.conversation_id;
+  assert(liveConversationId, "Phase 1 Web Chat did not expose its conversation.");
+  const handoff = await pool.query(
+    `SELECT handling_mode FROM conversations WHERE workspace_id = $1 AND id = $2`,
+    [workspaceId, liveConversationId],
+  );
+  assert(handoff.rows[0]?.handling_mode === "HUMAN",
+    "When Unsure = Escalate to a human did not create a real human handoff after truthful refusal.");
+  await api(context, "PUT", `/api/conversations/${liveConversationId}/handling`,
+    { mode: "AI" }, "return owner-accepted Web Chat to AI after escalation");
 
   // Re-enable booking and run the actual Web Chat -> AI -> in-app appointment
   // path without any connected calendar. Keep the business's one agent/number.
