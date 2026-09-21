@@ -140,7 +140,7 @@ export async function handleBookingTurn(
               ? "Your " + appointment.title + " appointment is confirmed for " +
                 humanTime(appointment.startsAt, preview.content.timezone as string) +
                 " (" + preview.content.timezone + ")."
-              : "Your appointment is confirmed. You can view the receipt in Appointments.",
+              : "I'm still verifying the appointment receipt. I can't confirm that it's booked yet.",
           };
         }
         return { reply: result.state === "FAILED"
