@@ -148,7 +148,11 @@ function localDateTimeToInstant(
   }
 }
 
-function deterministicAvailabilityPlan(message: string, timezone: string): OrchestratorEnvelope | null {
+function deterministicAvailabilityPlan(
+  message: string,
+  timezone: string,
+  services: OrchestratorContext["services"] = [],
+): OrchestratorEnvelope | null {
   if (!/\b(?:availability|available|openings?|slots?)\b/i.test(message)) return null;
 
   const monthNames = [...MONTHS.keys()].join("|");
@@ -205,13 +209,23 @@ function deterministicAvailabilityPlan(message: string, timezone: string): Orche
 
   const startsAt = localDateTimeToInstant({ year, month, day, hour, minute }, timezone);
   if (!startsAt || startsAt.getTime() <= Date.now()) return null;
-  const endsAt = new Date(startsAt.getTime() + 2 * 60 * 60_000);
+  const normalizedMessage = message.toLocaleLowerCase("en-US");
+  const matchedServices = services.filter((service) =>
+    service.name.trim().length >= 2
+    && normalizedMessage.includes(service.name.trim().toLocaleLowerCase("en-US")));
+  const durationMinutes = matchedServices.length === 1
+    && matchedServices[0].durationMinutes
+    && matchedServices[0].durationMinutes > 0
+    ? matchedServices[0].durationMinutes : undefined;
+  const searchMinutes = Math.max(120, durationMinutes ?? 0);
+  const endsAt = new Date(startsAt.getTime() + searchMinutes * 60_000);
   return {
     action: {
       type: "CHECK_AVAILABILITY",
       startsAt: startsAt.toISOString(),
       endsAt: endsAt.toISOString(),
       timezone,
+      ...(durationMinutes ? { durationMinutes } : {}),
     },
   };
 }
@@ -481,7 +495,9 @@ export function createResponseOrchestrator(dependencies: OrchestratorDependencie
           logger.error({ workspaceId, conversationId, validationIssues: repairError.validationIssues },
             "AI provider returned invalid orchestration output after correction");
           const deterministic = (!allowed || allowed.CHECK_AVAILABILITY)
-            ? deterministicAvailabilityPlan(lastUserMessage, context.timezone ?? "UTC")
+            ? deterministicAvailabilityPlan(
+              lastUserMessage, context.timezone ?? "UTC", context.services,
+            )
             : null;
           if (!deterministic) {
             return unresolvedWithoutHandoff(
