@@ -100,6 +100,7 @@ describe("calendar booking service", () => {
       status: "CONFIRMED" as const,
       bookingSource: booking.bookingSource ?? null,
       notes: booking.notes ?? null,
+      bookingCommandId: null,
       createdAt: new Date("2026-09-20T12:00:00.000Z"),
       updatedAt: new Date("2026-09-20T12:00:00.000Z"),
     }));

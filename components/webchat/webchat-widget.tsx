@@ -319,8 +319,8 @@ export function WebchatWidget({ widgetKey, config }: { widgetKey: string; config
                   message.booking.status === "STALE" ||
                     new Date(message.booking.expiresAt).getTime() <= Date.now() ||
                     messages.some((other) => other.booking?.draftId === message.booking?.draftId &&
-                      other.booking.previewId !== message.booking.previewId &&
-                      other.booking.version > message.booking.version)
+                      other.booking?.previewId !== message.booking?.previewId &&
+                      (other.booking?.version ?? 0) > (message.booking?.version ?? 0))
                     ? <small>Preview expired or replaced</small> : <>
                       <button type="button" disabled={Boolean(confirmingPreview || sending)}
                         onClick={() => void confirmBooking(message.booking!)}>Confirm appointment</button>
