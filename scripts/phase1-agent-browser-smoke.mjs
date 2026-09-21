@@ -49,12 +49,31 @@ try {
   const workspaceId = owners.rows[0]?.workspace_id;
   assert(workspaceId, "Workspace was not provisioned.");
 
+  const additional = await api(context, "PUT", "/api/workspaces", {
+    name: "Phase One Second Workspace",
+  }, "create an additional workspace", 201);
+  assert(additional.workspace?.role === "OWNER"
+    && additional.workspace?.workspaceName === "Phase One Second Workspace",
+  "Workspace creation did not return a new owner workspace.");
+  const afterCreate = await api(context, "GET", "/api/workspaces", undefined,
+    "list workspaces after creation");
+  assert(afterCreate.workspaces?.length === 2
+    && afterCreate.activeWorkspaceId === additional.workspace.workspaceId,
+  "The new workspace was not available and selected after creation.");
+  await api(context, "POST", "/api/workspaces", { workspaceId },
+    "switch back to the original workspace");
+  const switched = await api(context, "GET", "/api/workspaces", undefined,
+    "verify original workspace switch");
+  assert(switched.activeWorkspaceId === workspaceId,
+    "The owner could not switch back to the original workspace.");
+
   const empty = await api(context, "GET", "/api/agent", undefined, "read new agent");
   assert(empty.agent === null, "An unconfigured workspace showed a fictional agent.");
   await api(context, "PATCH", "/api/agent/status",
     { status: "ACTIVE" }, "cannot activate a missing agent", 409);
 
   await page.goto(`${baseUrl}/ai-agent`, { waitUntil: "networkidle" });
+  await page.getByRole("button", { name: "Create workspace", exact: true }).waitFor();
   await page.getByRole("button", { name: "Behavior", exact: true }).click();
   await page.getByLabel("Assistant name").fill("Mia");
   await page.getByLabel("Primary goal").selectOption("Answer questions");

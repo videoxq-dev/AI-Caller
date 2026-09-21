@@ -46,7 +46,10 @@ export const orchestratorActionSchema = z.discriminatedUnion("type", [
     startsAt: z.string().datetime({ offset: true }),
     endsAt: z.string().datetime({ offset: true }),
     timezone: timezoneSchema,
-    durationMinutes: z.number().int().min(5).max(1440).optional(),
+    durationMinutes: z.preprocess(
+      (value) => value === null ? undefined : value,
+      z.number().int().min(5).max(1440).optional(),
+    ),
   }),
   z.object({
     type: z.literal("BOOK_APPOINTMENT"),
@@ -75,7 +78,7 @@ export const orchestratorActionSchema = z.discriminatedUnion("type", [
   }
 });
 
-export const orchestratorEnvelopeSchema = z.object({
+const orchestratorEnvelopeObjectSchema = z.object({
   reply: z.string().trim().min(1).max(5000).optional(),
   contact: z.object({
     name: z.string().trim().min(1).max(200).optional(),
@@ -93,11 +96,36 @@ export const orchestratorEnvelopeSchema = z.object({
   action: orchestratorActionSchema.default({ type: "NONE" }),
 });
 
+export const orchestratorEnvelopeSchema = z.preprocess((value) => {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return value;
+  const normalized = { ...(value as Record<string, unknown>) };
+  for (const key of ["reply", "contact", "lead", "unresolved"] as const) {
+    if (normalized[key] === null) delete normalized[key];
+  }
+  if (normalized.action === null) delete normalized.action;
+  if (normalized.action && typeof normalized.action === "object" && !Array.isArray(normalized.action)) {
+    const action = { ...(normalized.action as Record<string, unknown>) };
+    if (action.durationMinutes === null) delete action.durationMinutes;
+    normalized.action = action;
+  }
+  return normalized;
+}, orchestratorEnvelopeObjectSchema);
+
 export type OrchestratorEnvelope = z.infer<typeof orchestratorEnvelopeSchema>;
 export type OrchestratorToolResult = {
   kind: "none" | "contact" | "qualification" | "availability" | "booking" | "escalation" | "consent" | "sms";
   data: Record<string, unknown>;
 };
+
+export class OrchestratorOutputError extends Error {
+  constructor(
+    message: string,
+    readonly validationIssues: string[] = [],
+  ) {
+    super(message);
+    this.name = "OrchestratorOutputError";
+  }
+}
 
 type LeadStatus = "NEW" | "QUALIFIED" | "BOOKED" | "WON" | "LOST";
 
@@ -119,15 +147,21 @@ export function parseOrchestratorEnvelope(text: string): OrchestratorEnvelope {
     try {
       decoded = JSON.parse(json);
     } catch {
-      throw new Error("AI provider returned malformed orchestration JSON.");
+      throw new OrchestratorOutputError("AI provider returned malformed orchestration JSON.");
     }
     const parsed = orchestratorEnvelopeSchema.safeParse(decoded);
-    if (!parsed.success) throw new Error("AI provider returned an invalid orchestration action.");
+    if (!parsed.success) {
+      throw new OrchestratorOutputError(
+        "AI provider returned an invalid orchestration action.",
+        parsed.error.issues.slice(0, 8).map((issue) =>
+          `${issue.path.join(".") || "response"}: ${issue.message}`),
+      );
+    }
     return parsed.data;
   }
 
   const reply = text.trim();
-  if (!reply) throw new Error("AI provider returned an empty orchestration response.");
+  if (!reply) throw new OrchestratorOutputError("AI provider returned an empty orchestration response.");
   return { reply: reply.slice(0, 5000), action: { type: "NONE" } };
 }
 
@@ -316,7 +350,7 @@ export async function executeOrchestratorTools(
   }
 
   if (envelope.action.type === "CHECK_AVAILABILITY") {
-    const slots = await calendarBookingService.getAvailability(workspaceId, {
+    const availability = await calendarBookingService.getAvailability(workspaceId, {
       startsAt: new Date(envelope.action.startsAt),
       endsAt: new Date(envelope.action.endsAt),
       timezone: envelope.action.timezone,
@@ -325,7 +359,8 @@ export async function executeOrchestratorTools(
     return {
       kind: "availability",
       data: {
-        slots: slots.slice(0, 12).map((slot) => ({
+        timezone: availability.timezone,
+        slots: availability.slots.slice(0, 12).map((slot) => ({
           startsAt: slot.startsAt.toISOString(),
           endsAt: slot.endsAt.toISOString(),
         })),

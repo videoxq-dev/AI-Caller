@@ -34,6 +34,7 @@ import {
   type LeadInput,
   type MessageInput,
 } from "./schemas";
+import type { NativeBookingPolicy } from "./native-calendar";
 
 type ContactListOptions = {
   query?: string;
@@ -527,24 +528,61 @@ export async function insertAppointment(
  * connected. Serialize competing bookings for a workspace before checking
  * overlaps and persist the appointment + domain event in the same transaction.
  */
-export async function insertNativeAppointment(workspaceId: string, input: AppointmentInput) {
+function appointmentLocalDate(date: Date, timezone: string) {
+  const parts = new Intl.DateTimeFormat("en-US", {
+    timeZone: timezone,
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).formatToParts(date);
+  const part = (name: string) => parts.find((row) => row.type === name)?.value ?? "";
+  return `${part("year")}-${part("month")}-${part("day")}`;
+}
+
+function assertNativePolicyAvailability(
+  input: Pick<AppointmentInput, "startsAt" | "endsAt">,
+  existing: Array<{ startsAt: Date; endsAt: Date }>,
+  policy: NativeBookingPolicy,
+) {
+  const candidateDate = appointmentLocalDate(input.startsAt, policy.timezone);
+  const bookingsOnDay = existing.filter((row) =>
+    appointmentLocalDate(row.startsAt, policy.timezone) === candidateDate).length;
+  if (bookingsOnDay >= policy.maxBookingsPerDay) {
+    throw new AppError("APPOINTMENT_DAILY_LIMIT_REACHED",
+      "The maximum number of bookings has been reached for that day.", 409);
+  }
+  const protectedStart = input.startsAt.getTime() - policy.bufferBeforeMinutes * 60_000;
+  const protectedEnd = input.endsAt.getTime() + policy.bufferAfterMinutes * 60_000;
+  if (existing.some((row) => {
+    const existingProtectedStart = row.startsAt.getTime() - policy.bufferBeforeMinutes * 60_000;
+    const existingProtectedEnd = row.endsAt.getTime() + policy.bufferAfterMinutes * 60_000;
+    return existingProtectedStart < protectedEnd && existingProtectedEnd > protectedStart;
+  })) {
+    throw new AppError("APPOINTMENT_SLOT_UNAVAILABLE",
+      "That time conflicts with another appointment or its required buffer.", 409);
+  }
+}
+
+export async function insertNativeAppointment(
+  workspaceId: string,
+  input: AppointmentInput,
+  policy: NativeBookingPolicy,
+) {
   await ensureContactInWorkspace(workspaceId, input.contactId);
   return db.transaction(async tx => {
     await tx.execute(sql`SELECT pg_advisory_xact_lock(hashtext(${workspaceId}))`);
-    const [conflict] = await tx.select().from(appointments)
+    const existing = await tx.select().from(appointments)
       .where(and(eq(appointments.workspaceId, workspaceId),
         inArray(appointments.status, ["PENDING", "CONFIRMED"]),
-        lt(appointments.startsAt, input.endsAt), gt(appointments.endsAt, input.startsAt)))
-      .limit(1);
-    if (conflict) {
-      const sameRequest = conflict.contactId === input.contactId
-        && conflict.title === input.title
-        && conflict.startsAt.getTime() === input.startsAt.getTime()
-        && conflict.endsAt.getTime() === input.endsAt.getTime();
-      if (sameRequest) return conflict;
-      throw new AppError("APPOINTMENT_SLOT_UNAVAILABLE",
-        "That time is already booked. Please choose another available slot.", 409);
-    }
+        lt(appointments.startsAt, new Date(input.endsAt.getTime() + 36 * 60 * 60_000)),
+        gt(appointments.endsAt, new Date(input.startsAt.getTime() - 36 * 60 * 60_000))))
+      .limit(1000);
+    const sameRequest = existing.find((row) => row.contactId === input.contactId
+      && row.title === input.title
+      && row.startsAt.getTime() === input.startsAt.getTime()
+      && row.endsAt.getTime() === input.endsAt.getTime());
+    if (sameRequest) return sameRequest;
+    assertNativePolicyAvailability(input, existing, policy);
     const [appointment] = await tx.insert(appointments).values({
       workspaceId, contactId: input.contactId,
       conversationId: input.conversationId ?? null, integrationId: null,
@@ -567,7 +605,10 @@ export async function insertNativeAppointment(workspaceId: string, input: Appoin
 }
 
 export async function updateNativeAppointmentAfterReschedule(
-  workspaceId: string, appointmentId: string, input: AppointmentRescheduleInput,
+  workspaceId: string,
+  appointmentId: string,
+  input: AppointmentRescheduleInput,
+  policy: NativeBookingPolicy,
 ) {
   return db.transaction(async tx => {
     await tx.execute(sql`SELECT pg_advisory_xact_lock(hashtext(${workspaceId}))`);
@@ -578,13 +619,16 @@ export async function updateNativeAppointmentAfterReschedule(
     if (previous.status === "CANCELLED") {
       throw new AppError("APPOINTMENT_CANCELLED", "Cancelled appointments cannot be rescheduled.", 409);
     }
-    const [conflict] = await tx.select({ id: appointments.id }).from(appointments).where(and(
+    const existing = await tx.select({
+      startsAt: appointments.startsAt,
+      endsAt: appointments.endsAt,
+    }).from(appointments).where(and(
       eq(appointments.workspaceId, workspaceId), ne(appointments.id, appointmentId),
       inArray(appointments.status, ["PENDING", "CONFIRMED"]),
-      lt(appointments.startsAt, input.endsAt), gt(appointments.endsAt, input.startsAt),
-    )).limit(1);
-    if (conflict) throw new AppError("APPOINTMENT_SLOT_UNAVAILABLE",
-      "That time is already booked. Please choose another available slot.", 409);
+      lt(appointments.startsAt, new Date(input.endsAt.getTime() + 36 * 60 * 60_000)),
+      gt(appointments.endsAt, new Date(input.startsAt.getTime() - 36 * 60 * 60_000)),
+    )).limit(1000);
+    assertNativePolicyAvailability(input, existing, policy);
     const [appointment] = await tx.update(appointments).set({
       startsAt: input.startsAt, endsAt: input.endsAt, timezone: input.timezone,
       status: "CONFIRMED", updatedAt: new Date(),

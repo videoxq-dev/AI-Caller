@@ -122,3 +122,27 @@ export async function ensureDefaultWorkspace(user: WorkspaceUser): Promise<Works
     };
   });
 }
+
+export async function createWorkspaceForUser(userId: string, name: string): Promise<WorkspaceMembership> {
+  const workspaceName = name.trim();
+  return db.transaction(async (tx) => {
+    const [workspace] = await tx.insert(workspaces).values({ name: workspaceName })
+      .returning({ id: workspaces.id, name: workspaces.name, status: workspaces.status });
+    await tx.insert(memberships).values({
+      workspaceId: workspace.id,
+      userId,
+      role: "OWNER",
+    });
+    await tx.insert(workspacePlans).values({
+      workspaceId: workspace.id,
+      planId: "PERSONAL",
+      source: "DEFAULT",
+    });
+    return {
+      workspaceId: workspace.id,
+      workspaceName: workspace.name,
+      workspaceStatus: workspace.status,
+      role: "OWNER" as const,
+    };
+  });
+}

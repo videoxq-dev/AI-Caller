@@ -358,4 +358,43 @@ describe("Realtime Telnyx/OpenAI media contract", () => {
     expect(telnyx.readyState).toBe(3);
   });
 
+  it("keeps the call open when a tool-only response omits usage or the business tool fails", async () => {
+    vi.mocked(runRealtimeBusinessTool).mockRejectedValueOnce(new Error("calendar unavailable"));
+    const telnyx = telnyxSocket();
+    const bridge = attachRealtimeMedia({
+      telnyx: telnyx as unknown as WebSocket,
+      identity: { workspaceId: "ws", callId: "call-id", externalCallId: "telnyx-call" },
+      streamId: "stream",
+    });
+    await vi.waitFor(() => expect(shared.client).not.toBeNull());
+    const openai = currentOpenai();
+    openai.emit("open");
+    openai.emit("message", Buffer.from(JSON.stringify({ type: "session.updated" })));
+    openai.emit("message", Buffer.from(JSON.stringify({
+      type: "response.created", response: { id: "tool-response" },
+    })));
+    openai.emit("message", Buffer.from(JSON.stringify({
+      type: "response.output_item.done", response_id: "tool-response", item: {
+        type: "function_call", call_id: "tool-failure", name: "check_availability",
+        arguments: JSON.stringify({ startsAt: "2030-09-23T10:00:00Z" }),
+      },
+    })));
+    openai.emit("message", Buffer.from(JSON.stringify({
+      type: "response.done", response: { id: "tool-response", status: "completed" },
+    })));
+
+    await vi.waitFor(() => expect(openai.sent.some((event) =>
+      event.type === "conversation.item.create"
+      && (event.item as Record<string, unknown>)?.call_id === "tool-failure")).toBe(true));
+    await vi.waitFor(() => expect(openai.sent.some((event) => event.type === "response.create")).toBe(true));
+    expect(telnyx.readyState).toBe(1);
+    expect(logger.error).toHaveBeenCalledWith(
+      expect.objectContaining({ workspaceId: "ws", callId: "call-id" }),
+      "Realtime business tool failed",
+    );
+
+    await bridge.stop();
+    expect(vi.mocked(finishRealtimeStream).mock.calls.at(-1)?.[3]).toBe(false);
+  });
+
 });
