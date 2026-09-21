@@ -11,10 +11,25 @@ type WidgetConfig = {
   marketingProgramApproved?: boolean;
 };
 
+type BookingCard = {
+  draftId: string;
+  previewId: string;
+  version: number;
+  serviceName: string;
+  startsAt: string;
+  endsAt: string;
+  timezone: string;
+  durationMinutes: number;
+  requiredLocation: string | null;
+  expiresAt: string;
+  status: "AWAITING_CONFIRMATION" | "STALE" | "CONFIRMED";
+};
+
 type ChatMessage = {
   id: string;
   role: "customer" | "assistant";
   text: string;
+  booking?: BookingCard;
 };
 
 type SessionResponse = {
@@ -36,6 +51,7 @@ export function WebchatWidget({ widgetKey, config }: { widgetKey: string; config
   const [loading, setLoading] = useState(true);
   const [sending, setSending] = useState(false);
   const [assistantTyping, setAssistantTyping] = useState(false);
+  const [confirmingPreview, setConfirmingPreview] = useState<string | null>(null);
   const [status, setStatus] = useState("AI online");
   const scrollerRef = useRef<HTMLDivElement>(null);
   const sessionStorageKey = useMemo(() => `ai-caller:session:${widgetKey}`, [widgetKey]);
@@ -138,6 +154,43 @@ export function WebchatWidget({ widgetKey, config }: { widgetKey: string; config
     });
   }
 
+
+  async function confirmBooking(card: BookingCard) {
+    if (!sessionToken || confirmingPreview || card.status !== "AWAITING_CONFIRMATION" ||
+      new Date(card.expiresAt).getTime() <= Date.now()) return;
+    const eventId = window.crypto.randomUUID();
+    setConfirmingPreview(card.previewId);
+    setMessages((current) => [...current, { id: eventId, role: "customer", text: "Confirm appointment" }]);
+    try {
+      const response = await fetch("/api/widget/bookings/confirm", {
+        method: "POST",
+        headers: {
+          authorization: "Bearer " + sessionToken, "content-type": "application/json",
+        },
+        body: JSON.stringify({
+          draftId: card.draftId, previewId: card.previewId,
+          expectedVersion: card.version, clientEventId: eventId,
+        }),
+      });
+      const result = await response.json() as {
+        reply?: string; status?: string; bookingCard?: BookingCard;
+        error?: { message?: string };
+      };
+      if (!response.ok) throw new Error(result.error?.message ?? "Unable to confirm appointment.");
+      setMessages((current) => [
+        ...current.map((message) => message.booking?.previewId === card.previewId
+          ? { ...message, booking: result.bookingCard ?? message.booking } : message),
+        { id: "booking_reply_" + eventId, role: "assistant", text: result.reply ??
+          "Your booking is being verified." },
+      ]);
+    } catch (error) {
+      setMessages((current) => [...current, {
+        id: "notice_booking_" + eventId, role: "assistant",
+        text: error instanceof Error ? error.message : "Unable to confirm appointment.",
+      }]);
+    } finally { setConfirmingPreview(null); }
+  }
+
   async function sendMessage() {
     const value = input.trim();
     if (!value || !sessionToken || sending) return;
@@ -178,8 +231,18 @@ export function WebchatWidget({ widgetKey, config }: { widgetKey: string; config
           const eventName = lines.find((line) => line.startsWith("event: "))?.slice(7);
           const dataLine = lines.find((line) => line.startsWith("data: "))?.slice(6);
           if (eventName && dataLine) {
-            const data = JSON.parse(dataLine) as { delta?: string; message?: string; handlingMode?: string; agentAvailable?: boolean };
+            const data = JSON.parse(dataLine) as { delta?: string; message?: string;
+              handlingMode?: string; agentAvailable?: boolean; previewId?: string;
+              draftId?: string; version?: number; serviceName?: string;
+              startsAt?: string; endsAt?: string; timezone?: string;
+              durationMinutes?: number; requiredLocation?: string | null;
+              expiresAt?: string; status?: BookingCard["status"] };
             if (eventName === "message" && data.delta) appendAssistantDelta(replyId, data.delta);
+            if (eventName === "booking" && data.previewId && data.draftId) {
+              const booking = data as BookingCard;
+              setMessages((current) => current.map((message) =>
+                message.id === replyId ? { ...message, booking } : message));
+            }
             if (eventName === "handoff") {
               setAssistantTyping(false);
               setStatus("Human handoff");
@@ -239,7 +302,34 @@ export function WebchatWidget({ widgetKey, config }: { widgetKey: string; config
       <div className="webchatMessages" ref={scrollerRef} aria-live="polite">
         {loading && <p className="webchatLoading">Starting chat…</p>}
         {messages.map((message) => (
-          <div key={message.id} className={`webchatMessage ${message.role}`}><span>{message.text}</span></div>
+          <div key={message.id} className={`webchatMessage ${message.role} ${message.booking ? "withBooking" : ""}`}>
+            <span>{message.text}</span>
+            {message.booking && <section className="webchatBookingCard" aria-label="Appointment confirmation">
+              <strong>{message.booking.serviceName}</strong>
+              <div>{new Intl.DateTimeFormat("en-US", {
+                dateStyle: "full", timeStyle: "short", timeZone: message.booking.timezone,
+              }).format(new Date(message.booking.startsAt))}</div>
+              <div>Ends {new Intl.DateTimeFormat("en-US", {
+                timeStyle: "short", timeZone: message.booking.timezone,
+              }).format(new Date(message.booking.endsAt))} ({message.booking.timezone})</div>
+              <small>{message.booking.durationMinutes} minutes
+                {message.booking.requiredLocation ? " · " + message.booking.requiredLocation : ""}</small>
+              <div className="webchatBookingActions">
+                {message.booking.status === "CONFIRMED" ? <strong>Confirmed</strong> :
+                  message.booking.status === "STALE" ||
+                    new Date(message.booking.expiresAt).getTime() <= Date.now() ||
+                    messages.some((other) => other.booking?.draftId === message.booking?.draftId &&
+                      other.booking.previewId !== message.booking.previewId &&
+                      other.booking.version > message.booking.version)
+                    ? <small>Preview expired or replaced</small> : <>
+                      <button type="button" disabled={Boolean(confirmingPreview || sending)}
+                        onClick={() => void confirmBooking(message.booking!)}>Confirm appointment</button>
+                      <button type="button" className="secondary" disabled={Boolean(confirmingPreview)}
+                        onClick={() => setInput("Change the appointment to ")}>Change</button>
+                    </>}
+              </div>
+            </section>}
+          </div>
         ))}
         {assistantTyping && <div className="webchatMessage assistant webchatTyping" aria-label="AI is typing" role="status">
           <span aria-hidden="true"><i /><i /><i /></span>
