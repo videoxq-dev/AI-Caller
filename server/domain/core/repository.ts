@@ -626,6 +626,7 @@ export async function updateNativeAppointmentAfterReschedule(
   appointmentId: string,
   input: AppointmentRescheduleInput,
   policy: NativeBookingPolicy,
+  expectedUpdatedAt?: Date,
 ) {
   return db.transaction(async tx => {
     await tx.execute(sql`SELECT pg_advisory_xact_lock(hashtext(${workspaceId}))`);
@@ -633,8 +634,11 @@ export async function updateNativeAppointmentAfterReschedule(
       eq(appointments.workspaceId, workspaceId), eq(appointments.id, appointmentId),
     )).limit(1);
     if (!previous) throw new AppError("APPOINTMENT_NOT_FOUND", "Appointment not found.", 404);
-    if (previous.status === "CANCELLED") {
-      throw new AppError("APPOINTMENT_CANCELLED", "Cancelled appointments cannot be rescheduled.", 409);
+    if (!["PENDING", "CONFIRMED"].includes(previous.status)) {
+      throw new AppError("APPOINTMENT_NOT_EDITABLE", "Only upcoming confirmed or pending appointments can be rescheduled.", 409);
+    }
+    if (expectedUpdatedAt && previous.updatedAt.getTime() !== expectedUpdatedAt.getTime()) {
+      throw new AppError("APPOINTMENT_CHANGED", "That appointment changed. Please review its current time before rescheduling.", 409);
     }
     const existing = await tx.select({
       startsAt: appointments.startsAt,
@@ -660,7 +664,9 @@ export async function updateNativeAppointmentAfterReschedule(
     const [appointment] = await tx.update(appointments).set({
       startsAt: input.startsAt, endsAt: input.endsAt, timezone: input.timezone,
       status: "CONFIRMED", updatedAt: new Date(),
-    }).where(and(eq(appointments.workspaceId, workspaceId), eq(appointments.id, appointmentId))).returning();
+    }).where(and(eq(appointments.workspaceId, workspaceId), eq(appointments.id, appointmentId),
+      expectedUpdatedAt ? eq(appointments.updatedAt, expectedUpdatedAt) : undefined)).returning();
+    if (!appointment) throw new AppError("APPOINTMENT_CHANGED", "That appointment changed before rescheduling.", 409);
     await tx.insert(automationEvents).values({
       workspaceId, type: "APPOINTMENT_RESCHEDULED",
       aggregateType: "APPOINTMENT", aggregateId: appointment.id,
@@ -680,6 +686,7 @@ export async function updateAppointmentAfterReschedule(
   appointmentId: string,
   input: AppointmentRescheduleInput,
   externalEventId?: string,
+  expectedUpdatedAt?: Date,
 ) {
   return db.transaction(async (tx) => {
     const [appointment] = await tx.update(appointments).set({
@@ -689,8 +696,9 @@ export async function updateAppointmentAfterReschedule(
       externalEventId: externalEventId,
       status: "CONFIRMED",
       updatedAt: new Date(),
-    }).where(and(eq(appointments.workspaceId, workspaceId), eq(appointments.id, appointmentId))).returning();
-    if (!appointment) throw new AppError("APPOINTMENT_NOT_FOUND", "Appointment not found.", 404);
+    }).where(and(eq(appointments.workspaceId, workspaceId), eq(appointments.id, appointmentId),
+      expectedUpdatedAt ? eq(appointments.updatedAt, expectedUpdatedAt) : undefined)).returning();
+    if (!appointment) throw new AppError("APPOINTMENT_CHANGED", "That appointment changed before rescheduling.", 409);
     await tx.insert(automationEvents).values({
       workspaceId,
       type: "APPOINTMENT_RESCHEDULED",
@@ -712,11 +720,13 @@ export async function setAppointmentStatus(
   workspaceId: string,
   appointmentId: string,
   status: "PENDING" | "CONFIRMED" | "COMPLETED" | "CANCELLED" | "NO_SHOW",
+  expectedUpdatedAt?: Date,
 ) {
   return db.transaction(async (tx) => {
     const [appointment] = await tx.update(appointments).set({ status, updatedAt: new Date() })
-      .where(and(eq(appointments.workspaceId, workspaceId), eq(appointments.id, appointmentId))).returning();
-    if (!appointment) throw new AppError("APPOINTMENT_NOT_FOUND", "Appointment not found.", 404);
+      .where(and(eq(appointments.workspaceId, workspaceId), eq(appointments.id, appointmentId),
+        expectedUpdatedAt ? eq(appointments.updatedAt, expectedUpdatedAt) : undefined)).returning();
+    if (!appointment) throw new AppError("APPOINTMENT_CHANGED", "That appointment changed before its status could be updated.", 409);
     if (status === "CANCELLED") {
       await tx.insert(automationEvents).values({
         workspaceId,
