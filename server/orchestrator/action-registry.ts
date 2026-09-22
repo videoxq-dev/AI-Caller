@@ -88,6 +88,10 @@ const realtimeToolCapabilityRules = {
 
 export type RealtimeBusinessToolName = keyof typeof realtimeToolCapabilityRules;
 
+export function isRealtimeBusinessToolName(name: string): name is RealtimeBusinessToolName {
+  return Object.prototype.hasOwnProperty.call(realtimeToolCapabilityRules, name);
+}
+
 export function registeredAgentAction(name: RegisteredAgentActionName) {
   return agentActionRegistry[name];
 }
