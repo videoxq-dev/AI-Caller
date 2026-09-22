@@ -3,9 +3,8 @@ import { db } from "@/db";
 import {
   appointmentManagementRequests, appointments, bookingReservations, messages,
 } from "@/db/schema";
-import { capabilitiesFromBehaviorSettings } from "@/server/agent/capabilities";
+import { capabilitiesFromBehaviorSettings, type AgentCapability } from "@/server/agent/capabilities";
 import { getWorkspaceAgent } from "@/server/agent/service";
-import { getBusinessSetup } from "@/server/domain/onboarding/repository";
 import { calendarBookingService } from "@/server/domain/core/calendar-booking";
 import { assertNativePolicyAvailability } from "@/server/domain/core/repository";
 import { validateNativeBooking } from "@/server/domain/core/native-calendar";
@@ -14,7 +13,7 @@ import { logger } from "@/server/observability/logger";
 import { isExplicitActionConfirmation } from "@/server/orchestrator/pending-actions";
 import { resolveCalendarProviderForIntegration } from "@/server/providers/registry";
 import {
-  displayBookingInstant, parseBookingDate, parseBookingTime, resolveBookingLocalTime,
+  parseBookingDate, parseBookingTime, resolveBookingLocalTime,
 } from "./time";
 import type { BookingContext } from "./drafts";
 
@@ -144,7 +143,7 @@ async function saveRequest(row: RequestRow, patch: Partial<RequestRow>, now: Dat
   return updated;
 }
 
-async function agentAllows(ctx: BookingContext, capability: "RESCHEDULE_APPOINTMENT" | "CANCEL_APPOINTMENT") {
+async function agentAllows(ctx: BookingContext, capability: AgentCapability) {
   const agent = await getWorkspaceAgent(ctx.workspaceId);
   if (!agent || agent.status !== "ACTIVE") return false;
   return capabilitiesFromBehaviorSettings(agent.behaviorSettings)[capability];
@@ -380,7 +379,7 @@ export async function handleAppointmentManagementTurn(
       preview: { requestId: active.id },
     };
   }
-  if (!await agentAllows(ctx, "CHECK_AVAILABILITY" as "RESCHEDULE_APPOINTMENT")) {
+  if (!await agentAllows(ctx, "CHECK_AVAILABILITY")) {
     // CHECK_AVAILABILITY is independently revocable.
     return { reply: "I can't check availability at the moment, so I won't change your appointment." };
   }
