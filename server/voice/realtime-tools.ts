@@ -5,7 +5,7 @@ import { bookingDrafts, bookingOffers, bookingPreviews, messages, services } fro
 import { AppError } from "@/server/http/errors";
 import { requireActiveWorkspaceAgent } from "@/server/agent/service";
 import { assertAgentActionAllowed, type AgentCapabilities } from "@/server/agent/capabilities";
-import { realtimeBusinessToolAllowed, type RealtimeBusinessToolName } from "@/server/orchestrator/action-registry";
+import { isRealtimeBusinessToolName, realtimeBusinessToolAllowed, type RealtimeBusinessToolName } from "@/server/orchestrator/action-registry";
 import { executeTrackedOrchestratorTools, recordExternalTaskReceipt } from "@/server/orchestrator/task-runs";
 import { buildConversationContext } from "@/server/orchestrator/context";
 import { orchestratorActionSchema } from "@/server/orchestrator/tools";
@@ -440,14 +440,8 @@ export async function runRealtimeBusinessTool(input: {
   // The server execution boundary is authoritative.
   try {
     const policy = await requireActiveWorkspaceAgent(input.workspaceId, "ANSWER_INQUIRY");
-    if (input.name in {
-      capture_booking_details: true,
-      check_availability: true,
-      book_appointment: true,
-      escalate_to_staff: true,
-      qualify_lead: true,
-    } && !realtimeBusinessToolAllowed(
-      input.name as RealtimeBusinessToolName,
+    if (isRealtimeBusinessToolName(input.name) && !realtimeBusinessToolAllowed(
+      input.name,
       policy.capabilities,
     )) {
       throw new AppError(
