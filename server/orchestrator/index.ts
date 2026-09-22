@@ -953,6 +953,14 @@ export function createResponseOrchestrator(dependencies: OrchestratorDependencie
           const finalEnvelope = outcome.finalEnvelope;
           const lastAction = outcome.steps[outcome.steps.length - 1]?.envelope.action ?? first.action;
 
+          if (outcome.stopReason === "COMPLETE" && finalEnvelope.unresolved?.reason) {
+            return resolveUncertainRequest(
+              finalEnvelope.reply
+                ?? "I can't complete that request with the information and capabilities available right now.",
+              finalEnvelope.unresolved.reason,
+            );
+          }
+
           if (finalResult.kind === "pending_action") {
             return {
               reply: pendingActionReply(finalResult, context.timezone ?? "UTC"),
