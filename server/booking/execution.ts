@@ -265,8 +265,7 @@ export async function executeBookingCommand(workspaceId: string, commandId: stri
   }
 }
 
-export async function recoverBookingCommands(limit = 50) {
-  const now = new Date();
+export async function recoverBookingCommands(limit = 50, now = new Date()) {
   const work = await db.select().from(bookingCommands).where(or(
     eq(bookingCommands.state, "PENDING"),
     and(eq(bookingCommands.state, "COMMITTING"), lt(bookingCommands.leaseExpiresAt, now)),
