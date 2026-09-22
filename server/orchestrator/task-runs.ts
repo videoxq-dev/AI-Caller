@@ -25,6 +25,7 @@ export type AgentTaskRunStatus =
   | "RUNNING"
   | "WAITING_CUSTOMER"
   | "WAITING_CONFIRMATION"
+  | "WAITING_SYSTEM"
   | "COMPLETED"
   | "FAILED";
 
@@ -66,6 +67,14 @@ function bookingExecutionProtected(envelope: OrchestratorEnvelope) {
 function taskStatusForResult(result: OrchestratorToolResult): AgentTaskRunStatus {
   if (result.kind === "pending_action") return "WAITING_CONFIRMATION";
   if (result.kind === "availability") return "WAITING_CUSTOMER";
+  if (result.kind === "booking"
+    && ["COMMITTING", "RECONCILING"].includes(String(result.data.status ?? result.data.state ?? ""))) {
+    return "WAITING_SYSTEM";
+  }
+  if (result.kind === "booking"
+    && String(result.data.status ?? result.data.state ?? "") === "FAILED") {
+    return "FAILED";
+  }
   if (result.kind === "qualification"
     && result.data.qualified !== true
     && Array.isArray(result.data.missingRequired)
