@@ -52,7 +52,7 @@ describe("existing appointment management (isolated from V2 booking)", () => {
   async function inbound(body: string) {
     return appendMessage(ctx.workspaceId, ctx.conversationId!, {
       channel: "WEBCHAT", direction: "INBOUND", senderType: "CUSTOMER",
-      contentType: "TEXT", body, status: "RECEIVED",
+      contentType: "TEXT", body, status: "RECEIVED", metadata: {},
     });
   }
 
@@ -66,7 +66,7 @@ describe("existing appointment management (isolated from V2 booking)", () => {
   async function delivered(requestId: string, text: string) {
     const reply = await appendMessage(ctx.workspaceId, ctx.conversationId!, {
       channel: "WEBCHAT", direction: "OUTBOUND", senderType: "AI",
-      contentType: "TEXT", body: text, status: "DELIVERED",
+      contentType: "TEXT", body: text, status: "DELIVERED", metadata: {},
     });
     await recordAppointmentManagementPreviewDelivery(ctx, requestId, reply.id,
       (await db.select().from(appointmentManagementRequests)
