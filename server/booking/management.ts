@@ -271,10 +271,22 @@ async function finishRequest(ctx: BookingContext, row: RequestRow, sourceMessage
       if (!row.proposedStartsAt || !row.proposedEndsAt) {
         throw new AppError("APPOINTMENT_CHANGE_INCOMPLETE", "Please choose a new date and time.", 422);
       }
+      const serviceChange = row.proposedServiceId
+        ? await db.select().from(services).where(and(
+            eq(services.workspaceId, ctx.workspaceId),
+            eq(services.id, row.proposedServiceId),
+            eq(services.active, true),
+          )).limit(1).then(rows => rows[0] ?? null)
+        : null;
+      if (row.proposedServiceId && !serviceChange) {
+        throw new AppError("APPOINTMENT_SERVICE_UNAVAILABLE",
+          "The requested service is no longer available.", 409);
+      }
       await availableForReschedule(ctx, appointment, row.proposedStartsAt, row.proposedEndsAt, now);
       updated = await calendarBookingService.reschedule(ctx.workspaceId, appointment.id, {
         startsAt: row.proposedStartsAt, endsAt: row.proposedEndsAt, timezone: row.timezone ?? appointment.timezone,
-      }, row.originalUpdatedAt ?? undefined);
+      }, row.originalUpdatedAt ?? undefined,
+      serviceChange ? { serviceId: serviceChange.id, title: serviceChange.name } : undefined);
     }
     await db.update(appointmentManagementRequests).set({
       status: "COMPLETED", completedAt: new Date(), updatedAt: new Date(),
@@ -412,34 +424,53 @@ export async function handleAppointmentManagementTurn(
     return { reply: "I can't check availability at the moment, so I won't change your appointment." };
   }
   const changes = extractRequestedTime(message.body);
-  if (!changes.date && !changes.time && message.body.trim()) {
-    const configured = await db.select({ name: services.name }).from(services)
-      .where(and(eq(services.workspaceId, ctx.workspaceId), eq(services.active, true)))
-      .limit(30);
-    const differentService = configured.find(service =>
-      service.name.toLowerCase() !== appointment.title.toLowerCase()
-      && message.body.toLowerCase().includes(service.name.toLowerCase()));
-    if (differentService) {
-      const reply = "Your linked appointment is " + appointment.title +
-        ". Changing its service to " + differentService.name +
-        " needs staff review; I can safely change the existing appointment's date or time, or cancel it. No new appointment was created.";
-      const agent = await getWorkspaceAgent(ctx.workspaceId);
-      if (agent && /escalate/i.test(agent.whenUnsure) &&
-        capabilitiesFromBehaviorSettings(agent.behaviorSettings).ESCALATE) {
-        try {
-          await escalateConversationIssue({
-            workspaceId: ctx.workspaceId, conversationId: ctx.conversationId!,
-            reason: "Customer requests changing existing appointment " +
-              appointment.id + " from " + appointment.title + " to " + differentService.name + ".",
-          });
-          return { reply: reply + " I've flagged the service change for staff follow-up." };
-        } catch (error) {
-          logger.warn({ err: error, workspaceId: ctx.workspaceId },
-            "Requested appointment service change could not be escalated");
+  let proposedServiceId = active.proposedServiceId;
+  const configured = await db.select().from(services)
+    .where(and(eq(services.workspaceId, ctx.workspaceId), eq(services.active, true)))
+    .limit(30);
+  const mentioned = configured.filter(service =>
+    message.body.toLowerCase().includes(service.name.toLowerCase()));
+  if (mentioned.length > 1) {
+    return { reply: "Which one service would you like for the existing appointment?" };
+  }
+  if (mentioned.length === 1) {
+    const desired = mentioned[0];
+    if (desired.name.toLowerCase() !== appointment.title.toLowerCase()) {
+      if (appointment.integrationId || appointment.externalEventId) {
+        const reply = "Changing the service on this connected calendar appointment needs staff review so both calendars agree. I haven't changed or rebooked your appointment.";
+        const agent = await getWorkspaceAgent(ctx.workspaceId);
+        if (agent && /escalate/i.test(agent.whenUnsure) &&
+          capabilitiesFromBehaviorSettings(agent.behaviorSettings).ESCALATE) {
+          try {
+            await escalateConversationIssue({
+              workspaceId: ctx.workspaceId, conversationId: ctx.conversationId!,
+              reason: "Change service on connected appointment " + appointment.id +
+                " from " + appointment.title + " to " + desired.name + ".",
+            });
+            return { reply: reply + " I've flagged that service change for staff follow-up." };
+          } catch (error) {
+            logger.warn({ err: error, workspaceId: ctx.workspaceId },
+              "Appointment service-change escalation failed");
+          }
         }
+        return { reply };
       }
-      return { reply };
+      if (!desired.durationMinutes || desired.durationMinutes < 5 ||
+        desired.durationMinutes > 1440) {
+        return { reply: "The requested service needs a valid configured duration. No appointment was changed." };
+      }
+      proposedServiceId = desired.id;
+    } else {
+      // The customer corrected a previous service change back to the
+      // original service. The old proposal must not survive this correction.
+      proposedServiceId = null;
     }
+  }
+  const selectedService = proposedServiceId
+    ? configured.find(service => service.id === proposedServiceId) ?? null
+    : null;
+  if (proposedServiceId && !selectedService) {
+    return { reply: "That service is no longer available. Please choose an active service. Your original appointment is unchanged." };
   }
   const rawTime = changes.time ? parseBookingTime(changes.time) : null;
   const timezone = rawTime?.timezone ?? active.timezone ?? appointment.timezone;
@@ -452,21 +483,24 @@ export async function handleAppointmentManagementTurn(
   if (!localDate || !localTime) {
     active = await saveRequest(active, {
       status: "COLLECTING", localDate, localTime, timezone,
-      proposedStartsAt: null, proposedEndsAt: null,
+      proposedServiceId, proposedStartsAt: null, proposedEndsAt: null,
       previewDeliveredAt: null, previewDeliveryReference: null,
       expiresAt: new Date(now.getTime() + REQUEST_TTL_MS),
     }, now);
     return { reply: !localDate
       ? "I found your existing " + appointmentLabel(appointment) +
-        ". What new date would you like? I will keep the existing service and duration."
+        ". What date would you like for " +
+        (selectedService?.name ?? appointment.title) +
+        "? Tell me if you'd prefer to retain its current date and time."
       : "What start time would you prefer on " + localDate +
         "? Your existing " + appointment.title + " appointment has not been changed." };
   }
-  const durationMinutes = (appointment.endsAt.getTime() - appointment.startsAt.getTime()) / 60_000;
+  const durationMinutes = selectedService?.durationMinutes ??
+    (appointment.endsAt.getTime() - appointment.startsAt.getTime()) / 60_000;
   let proposed: ReturnType<typeof resolveBookingLocalTime>;
   try {
     proposed = resolveBookingLocalTime({ localDate, localTime, timezone, durationMinutes }, now);
-    if (proposed.startsAt.getTime() === appointment.startsAt.getTime() &&
+    if (!selectedService && proposed.startsAt.getTime() === appointment.startsAt.getTime() &&
         proposed.endsAt.getTime() === appointment.endsAt.getTime()) {
       return { reply: "That is already your appointment time. What different date or time would you prefer?" };
     }
@@ -474,13 +508,14 @@ export async function handleAppointmentManagementTurn(
   } catch (error) {
     await saveRequest(active, {
       status: "COLLECTING", localDate, localTime: null, timezone,
-      proposedStartsAt: null, proposedEndsAt: null,
+      proposedServiceId, proposedStartsAt: null, proposedEndsAt: null,
       previewDeliveredAt: null, previewDeliveryReference: null,
     }, now);
     return { reply: errorMessage(error) + " Your original appointment is unchanged. What other time would you prefer?" };
   }
   active = await saveRequest(active, {
     status: "AWAITING_CONFIRMATION", localDate, localTime, timezone,
+    proposedServiceId,
     proposedStartsAt: proposed.startsAt, proposedEndsAt: proposed.endsAt,
     previewDeliveredAt: null, previewDeliveryReference: null,
     expiresAt: new Date(now.getTime() + REQUEST_TTL_MS),
@@ -488,6 +523,7 @@ export async function handleAppointmentManagementTurn(
   return {
     reply: "I checked the calendar. Please confirm: move your existing " +
       appointmentLabel(appointment) + " appointment to " +
+      (selectedService ? selectedService.name + " on " : "") +
       humanTime(proposed.startsAt, timezone) + "–" +
       new Intl.DateTimeFormat("en-US", { timeZone: timezone, timeStyle: "short" }).format(proposed.endsAt) +
       "? Reply YES to reschedule, or tell me another date/time. No new appointment will be created.",
