@@ -165,14 +165,14 @@ describe("stored exact booking offers and previews (disposable PostgreSQL)", () 
     expect(range.offers.length).toBeLessThanOrEqual(12);
     for (const offer of range.offers) {
       expect(offer.durationMinutes).toBe(240);
-      expect(offer.startsAt).toBeGreaterThan(now);
-      expect(offer.expiresAt).toBeGreaterThan(offer.checkedAt);
+      expect(offer.startsAt.getTime()).toBeGreaterThan(now.getTime());
+      expect(offer.expiresAt.getTime()).toBeGreaterThan(offer.checkedAt.getTime());
     }
   });
 
   it("requires a carrier-accepted outbound receipt before SMS can authorize confirmation", async () => {
     const smsContext: BookingContext = {
-      ...ctx, channel: "SMS", sessionKey: "SMS:" + conversationId,
+      ...ctx, channel: "SMS", sessionKey: "SMS:" + ctx.conversationId!,
     };
     const started = await openBookingDraft(smsContext, now);
     if (started.state !== "OPENED") throw new Error("Expected a fresh SMS draft");
@@ -194,7 +194,7 @@ describe("stored exact booking offers and previews (disposable PostgreSQL)", () 
       draftId: started.draft.id, expectedVersion: selected.draft.version,
     }, now);
     const [notAccepted] = await db.insert(messages).values({
-      workspaceId, conversationId, channel: "SMS", direction: "OUTBOUND",
+      workspaceId: ctx.workspaceId, conversationId: ctx.conversationId!, channel: "SMS", direction: "OUTBOUND",
       senderType: "AI", contentType: "TEXT", body: "Confirm this appointment?",
       status: "SENDING", metadata: {
         bookingPreviewId: prepared.preview.id, bookingDraftId: started.draft.id,
@@ -208,7 +208,7 @@ describe("stored exact booking offers and previews (disposable PostgreSQL)", () 
     }, now)).rejects.toMatchObject({ code: "BOOKING_DELIVERY_NOT_VERIFIED" });
 
     const [accepted] = await db.insert(messages).values({
-      workspaceId, conversationId, channel: "SMS", direction: "OUTBOUND",
+      workspaceId: ctx.workspaceId, conversationId: ctx.conversationId!, channel: "SMS", direction: "OUTBOUND",
       senderType: "AI", contentType: "TEXT", body: "Confirm this appointment?",
       provider: "telnyx", externalMessageId: "sms-preview-1", status: "SENT",
       metadata: {
