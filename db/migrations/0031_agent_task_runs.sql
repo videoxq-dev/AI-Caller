@@ -49,3 +49,8 @@ CREATE UNIQUE INDEX "agent_task_steps_run_idempotency_uq"
   WHERE "idempotency_key" IS NOT NULL;
 CREATE INDEX "agent_task_steps_workspace_action_idx"
   ON "agent_task_steps" ("workspace_id","action","started_at");
+
+ALTER TABLE "usage_events"
+  ADD COLUMN "task_run_id" uuid REFERENCES "agent_task_runs"("id") ON DELETE SET NULL;
+CREATE INDEX "usage_events_task_run_idx"
+  ON "usage_events" ("task_run_id","created_at");
