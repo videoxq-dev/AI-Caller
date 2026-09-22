@@ -5,6 +5,7 @@ import { bookingDrafts, bookingOffers, bookingPreviews, messages, services } fro
 import { AppError } from "@/server/http/errors";
 import { requireActiveWorkspaceAgent } from "@/server/agent/service";
 import { assertAgentActionAllowed, type AgentCapabilities } from "@/server/agent/capabilities";
+import { realtimeBusinessToolAllowed, type RealtimeBusinessToolName } from "@/server/orchestrator/action-registry";
 import { buildConversationContext } from "@/server/orchestrator/context";
 import { executeOrchestratorTools, orchestratorActionSchema } from "@/server/orchestrator/tools";
 import { isExplicitActionConfirmation, stagePendingActionProposal } from "@/server/orchestrator/pending-actions";
@@ -67,16 +68,8 @@ export const realtimeTools = [
 ] as const;
 
 export function realtimeToolsForCapabilities(policy: AgentCapabilities) {
-  const toolCapabilities = {
-    capture_booking_details: "BOOK_APPOINTMENT",
-    check_availability: "CHECK_AVAILABILITY",
-    book_appointment: "BOOK_APPOINTMENT",
-    escalate_to_staff: "ESCALATE",
-    qualify_lead: "QUALIFY_LEAD",
-  } as const;
-  return realtimeTools.filter((tool) => tool.name === "capture_booking_details"
-    ? policy.CHECK_AVAILABILITY || policy.BOOK_APPOINTMENT
-    : policy[toolCapabilities[tool.name]]);
+  return realtimeTools.filter((tool) =>
+    realtimeBusinessToolAllowed(tool.name as RealtimeBusinessToolName, policy));
 }
 
 function record(v: unknown): Record<string, unknown> {
