@@ -144,6 +144,14 @@ async function ensureTaskRun(
   return created;
 }
 
+export async function ensureConversationTurnTaskRun(
+  workspaceId: string,
+  conversationId: string,
+  contactId: string,
+) {
+  return ensureTaskRun(workspaceId, conversationId, contactId);
+}
+
 async function beginTaskStep(
   run: typeof agentTaskRuns.$inferSelect,
   action: RegisteredAgentActionName,
