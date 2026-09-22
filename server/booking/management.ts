@@ -1,11 +1,12 @@
 import { and, asc, desc, eq, gt, inArray, lt, ne, sql } from "drizzle-orm";
 import { db } from "@/db";
 import {
-  appointmentManagementRequests, appointments, bookingReservations, messages,
+  appointmentManagementRequests, appointments, bookingReservations, messages, services,
 } from "@/db/schema";
 import { capabilitiesFromBehaviorSettings, type AgentCapability } from "@/server/agent/capabilities";
 import { getWorkspaceAgent } from "@/server/agent/service";
 import { calendarBookingService } from "@/server/domain/core/calendar-booking";
+import { escalateConversationIssue } from "@/server/collaboration/service";
 import { assertNativePolicyAvailability } from "@/server/domain/core/repository";
 import { validateNativeBooking } from "@/server/domain/core/native-calendar";
 import { AppError } from "@/server/http/errors";
@@ -396,6 +397,35 @@ export async function handleAppointmentManagementTurn(
     return { reply: "I can't check availability at the moment, so I won't change your appointment." };
   }
   const changes = extractRequestedTime(message.body);
+  if (!changes.date && !changes.time && message.body.trim()) {
+    const configured = await db.select({ name: services.name }).from(services)
+      .where(and(eq(services.workspaceId, ctx.workspaceId), eq(services.active, true)))
+      .limit(30);
+    const differentService = configured.find(service =>
+      service.name.toLowerCase() !== appointment.title.toLowerCase()
+      && message.body.toLowerCase().includes(service.name.toLowerCase()));
+    if (differentService) {
+      const reply = "Your linked appointment is " + appointment.title +
+        ". Changing its service to " + differentService.name +
+        " needs staff review; I can safely change the existing appointment's date or time, or cancel it. No new appointment was created.";
+      const agent = await getWorkspaceAgent(ctx.workspaceId);
+      if (agent && /escalate/i.test(agent.whenUnsure) &&
+        capabilitiesFromBehaviorSettings(agent.behaviorSettings).ESCALATE) {
+        try {
+          await escalateConversationIssue({
+            workspaceId: ctx.workspaceId, conversationId: ctx.conversationId!,
+            reason: "Customer requests changing existing appointment " +
+              appointment.id + " from " + appointment.title + " to " + differentService.name + ".",
+          });
+          return { reply: reply + " I've flagged the service change for staff follow-up." };
+        } catch (error) {
+          logger.warn({ err: error, workspaceId: ctx.workspaceId },
+            "Requested appointment service change could not be escalated");
+        }
+      }
+      return { reply };
+    }
+  }
   const rawTime = changes.time ? parseBookingTime(changes.time) : null;
   const timezone = rawTime?.timezone ?? active.timezone ?? appointment.timezone;
   let localDate = active.localDate;
