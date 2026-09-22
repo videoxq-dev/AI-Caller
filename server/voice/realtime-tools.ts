@@ -421,6 +421,7 @@ export async function runRealtimeBusinessTool(input: {
   callId: string; streamId: string;
   name: string; arguments: string;
   sourceEventId?: string;
+  taskKey?: string;
   isCurrentTurn: () => boolean;
 }) {
   if (!input.isCurrentTurn()) return { ok: false, reason: "The caller corrected the request." };
@@ -596,8 +597,22 @@ export async function runRealtimeBusinessTool(input: {
     if (parsed.data.type === "CHECK_AVAILABILITY" && !bookingSnapshot) {
       return { ok: false, reason: "Record the caller's service, location, date and time before checking availability." };
     }
-    const result = await executeTrackedOrchestratorTools(input.workspaceId,
-      input.conversationId, input.contactId, { action: parsed.data });
+    const result = await executeTrackedOrchestratorTools(
+      input.workspaceId,
+      input.conversationId,
+      input.contactId,
+      { action: parsed.data },
+      input.taskKey ? {
+        taskKey: input.taskKey,
+        sourceMessageId: null,
+        objective: "Handle live caller request",
+        metadata: {
+          channel: "PHONE",
+          voiceCallId: input.callId,
+          realtimeSourceEventId: input.sourceEventId ?? null,
+        },
+      } : undefined,
+    );
     if (parsed.data.type === "CHECK_AVAILABILITY") {
       const start = parsed.data.startsAt;
       const slots = Array.isArray(result.data.slots) ? result.data.slots : [];
