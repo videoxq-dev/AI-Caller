@@ -18,6 +18,8 @@ CREATE TABLE "appointment_management_requests" (
   "local_time" text,
   "timezone" text,
   "source_event_id" text,
+  "preview_delivered_at" timestamptz,
+  "preview_delivery_reference" text,
   "expires_at" timestamptz NOT NULL,
   "completed_at" timestamptz,
   "created_at" timestamptz NOT NULL DEFAULT now(),
