@@ -1,6 +1,7 @@
 import { afterAll, beforeEach, describe, expect, it } from "vitest";
+import { asc, eq } from "drizzle-orm";
 import { closeDatabase, db } from "@/db";
-import { appointments, bookingDrafts, contacts, messages, services, workspaces } from "@/db/schema";
+import { agentTaskRuns, agentTaskSteps, appointments, bookingDrafts, contacts, messages, services, workspaces } from "@/db/schema";
 import { getOrCreateOpenConversation } from "@/server/domain/core/repository";
 import { saveBusinessSetup } from "@/server/domain/onboarding/repository";
 import { createVoiceCall, updateVoiceCall } from "./repository";
@@ -115,7 +116,31 @@ describe("Realtime voice booking v2 uses durable booking authority", () => {
     const replay = await run("book_appointment", {}, "tool-commit-repeat");
     expect(replay).toMatchObject({ ok: true, kind: "booking" });
     expect(await db.select().from(appointments)).toHaveLength(1);
-    expect((await db.select().from(bookingDrafts))[0].status).toBe("CONFIRMED");
+    const [draft] = await db.select().from(bookingDrafts);
+    expect(draft.status).toBe("CONFIRMED");
+
+    const [task] = await db.select().from(agentTaskRuns)
+      .where(eq(agentTaskRuns.taskKey, `booking:${draft.id}`));
+    const taskSteps = await db.select().from(agentTaskSteps)
+      .where(eq(agentTaskSteps.runId, task.id))
+      .orderBy(asc(agentTaskSteps.sequence));
+    expect(task.status).toBe("COMPLETED");
+    expect(task.metadata).toMatchObject({
+      channel: "PHONE",
+      voiceCallId: callId,
+      bookingDraftId: draft.id,
+    });
+    expect(taskSteps.map(step => step.action)).toEqual([
+      "CHECK_AVAILABILITY",
+      "BOOK_APPOINTMENT",
+      "BOOK_APPOINTMENT",
+    ]);
+    expect(taskSteps[0].result).toMatchObject({ kind: "availability" });
+    expect(taskSteps[1].result).toMatchObject({ kind: "pending_action" });
+    expect(taskSteps[2].result).toMatchObject({
+      kind: "booking",
+      data: { status: "CONFIRMED" },
+    });
   });
 
   it("will not commit an interrupted or undelivered preview", async () => {
