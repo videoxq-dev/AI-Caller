@@ -9,7 +9,7 @@ import {
   type RegisteredAgentActionName,
 } from "./action-registry";
 import {
-  executeOrchestratorTools,
+  executeValidatedOrchestratorTools,
   type OrchestratorEnvelope,
   type OrchestratorToolResult,
 } from "./tools";
