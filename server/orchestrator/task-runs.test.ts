@@ -1,5 +1,6 @@
 import { afterAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { closeDatabase, db } from "@/db";
+import { eq } from "drizzle-orm";
 import {
   agentTaskRuns,
   agentTaskSteps,
@@ -119,6 +120,54 @@ describe("agent task execution persistence", () => {
     expect(runs[0].taskKey).toMatch(/^turn:/);
     expect(steps).toHaveLength(1);
     expect(steps[0].idempotencyKey).toContain("orchestrator:QUALIFY_LEAD:");
+  });
+
+  it("marks an authoritative failed SMS outcome as a failed task", async () => {
+    const result: OrchestratorToolResult = {
+      kind: "sms",
+      data: { sent: false, reason: "Carrier rejected the message." },
+    };
+    const tracked = createTrackedActionExecutor(vi.fn(async () => result));
+    const envelope: OrchestratorEnvelope = {
+      action: { type: "SEND_SMS", text: "Your requested link" },
+    };
+
+    expect(await tracked(workspaceId, conversationId, contactId, envelope)).toEqual(result);
+
+    const [run] = await db.select().from(agentTaskRuns);
+    const [step] = await db.select().from(agentTaskSteps);
+    expect(run.status).toBe("FAILED");
+    expect(run.completedAt).not.toBeNull();
+    expect(step.status).toBe("COMPLETED");
+    expect(step.result).toEqual({ kind: "sms", data: result.data });
+  });
+
+  it("revalidates a persisted result before idempotent replay", async () => {
+    const result: OrchestratorToolResult = {
+      kind: "qualification",
+      data: { qualified: true, score: 100, missingRequired: [] },
+    };
+    const executor = vi.fn(async () => result);
+    const tracked = createTrackedActionExecutor(executor);
+    const envelope: OrchestratorEnvelope = {
+      action: {
+        type: "QUALIFY_LEAD",
+        answers: [{ criterionId: "budget", answer: "Yes" }],
+      },
+    };
+
+    await tracked(workspaceId, conversationId, contactId, envelope);
+    const [step] = await db.select().from(agentTaskSteps);
+    await db.update(agentTaskSteps).set({
+      result: {
+        kind: "qualification",
+        data: { qualified: "yes", score: 100, missingRequired: [] },
+      },
+    }).where(eq(agentTaskSteps.id, step.id));
+
+    await expect(tracked(workspaceId, conversationId, contactId, envelope))
+      .rejects.toThrow("A business action returned an invalid result");
+    expect(executor).toHaveBeenCalledOnce();
   });
 
   it("keeps a task waiting when a consequential action requires confirmation", async () => {
