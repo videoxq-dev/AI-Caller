@@ -3,7 +3,7 @@ import { and, eq } from "drizzle-orm";
 import { closeDatabase, db } from "@/db";
 import {
   aiAgents, appointmentManagementRequests, appointments, automationEvents,
-  bookingDrafts, contacts, workspaces,
+  bookingDrafts, contacts, services, workspaces,
 } from "@/db/schema";
 import { appendMessage, getOrCreateOpenConversation } from "@/server/domain/core/repository";
 import { saveBusinessSetup } from "@/server/domain/onboarding/repository";
@@ -136,6 +136,49 @@ describe("existing appointment management (isolated from V2 booking)", () => {
     expect((await db.select().from(automationEvents)
       .where(eq(automationEvents.type, "APPOINTMENT_CANCELLED")))).toHaveLength(1);
     expect(await db.select().from(bookingDrafts)).toHaveLength(0);
+  });
+
+  it("changes the existing native appointment's service and recalculates its duration", async () => {
+    const [industrial] = await db.insert(services).values({
+      workspaceId: ctx.workspaceId, name: "Industrial Cleaning",
+      durationMinutes: 120, active: true,
+    }).returning();
+    await turn("I'd like to update my appointment");
+    const chosen = await turn("Industrial Cleaning");
+    expect(chosen?.reply).toContain("Industrial Cleaning");
+    expect(chosen?.reply).toContain("What date");
+    const preview = await turn("September 24, 2037 at 10 AM");
+    expect(preview?.reply).toContain("Industrial Cleaning");
+    expect(preview?.preview).toBeDefined();
+    await delivered(preview!.preview!.requestId, preview!.reply);
+    const committed = await turn("Yes");
+    expect(committed?.reply).toContain("Industrial Cleaning");
+    const rows = await db.select().from(appointments);
+    expect(rows).toHaveLength(1);
+    expect(rows[0].id).toBe(appointmentId);
+    expect(rows[0].serviceId).toBe(industrial.id);
+    expect(rows[0].title).toBe("Industrial Cleaning");
+    expect(rows[0].startsAt.toISOString()).toBe("2037-09-24T10:00:00.000Z");
+    expect(rows[0].endsAt.toISOString()).toBe("2037-09-24T12:00:00.000Z");
+    expect(await db.select().from(bookingDrafts)).toHaveLength(0);
+  });
+
+  it("refuses a stale proposal rather than overriding a staff change", async () => {
+    await turn("I'd like to update my appointment");
+    const preview = await turn("September 24, 2037 at 10 AM");
+    await delivered(preview!.preview!.requestId, preview!.reply);
+    const changed = new Date("2037-09-25T10:00:00.000Z");
+    await db.update(appointments).set({
+      startsAt: changed,
+      endsAt: new Date("2037-09-25T14:00:00.000Z"),
+      updatedAt: new Date("2036-08-10T00:00:00.000Z"),
+    }).where(eq(appointments.id, appointmentId));
+    const result = await turn("Yes");
+    expect(result?.reply).toContain("changed since I prepared the proposal");
+    expect((await db.select().from(appointments))[0].startsAt.toISOString())
+      .toBe(changed.toISOString());
+    expect((await db.select().from(automationEvents)
+      .where(eq(automationEvents.type, "APPOINTMENT_RESCHEDULED")))).toHaveLength(0);
   });
 
   it("does not disclose or modify another contact's appointment", async () => {
