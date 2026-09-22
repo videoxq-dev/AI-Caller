@@ -226,8 +226,10 @@ const orchestratorToolResultSchema = z.discriminatedUnion("kind", [
   }),
 ]);
 
-function allowedToolResultKinds(envelope: OrchestratorEnvelope) {
-  switch (envelope.action.type) {
+type OrchestratorActionType = OrchestratorEnvelope["action"]["type"];
+
+function allowedToolResultKinds(action: OrchestratorActionType) {
+  switch (action) {
     case "NONE": return new Set<OrchestratorToolResult["kind"]>(["none", "contact"]);
     case "RECORD_SMS_CONSENT": return new Set<OrchestratorToolResult["kind"]>(["consent"]);
     case "SEND_SMS": return new Set<OrchestratorToolResult["kind"]>(["pending_action", "sms"]);
@@ -238,17 +240,17 @@ function allowedToolResultKinds(envelope: OrchestratorEnvelope) {
   }
 }
 
-export function validateOrchestratorToolResult(
-  envelope: OrchestratorEnvelope,
+export function validateOrchestratorToolResultForAction(
+  action: OrchestratorActionType,
   value: unknown,
 ): OrchestratorToolResult {
   const parsed = orchestratorToolResultSchema.safeParse(value);
-  if (!parsed.success || !allowedToolResultKinds(envelope).has(
+  if (!parsed.success || !allowedToolResultKinds(action).has(
     parsed.success ? parsed.data.kind : "none",
   )) {
     logger.error(
       {
-        action: envelope.action.type,
+        action,
         issues: parsed.success
           ? [`Unexpected result kind ${parsed.data.kind}`]
           : parsed.error.issues.slice(0, 8).map((issue) =>
@@ -263,6 +265,13 @@ export function validateOrchestratorToolResult(
     );
   }
   return parsed.data as OrchestratorToolResult;
+}
+
+export function validateOrchestratorToolResult(
+  envelope: OrchestratorEnvelope,
+  value: unknown,
+): OrchestratorToolResult {
+  return validateOrchestratorToolResultForAction(envelope.action.type, value);
 }
 
 export class OrchestratorOutputError extends Error {
