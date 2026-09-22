@@ -260,7 +260,8 @@ export function createWhatsAppWebhookService(dependencies: WhatsAppServiceDepend
             senderType: "AI",
             text: reply,
             metadata: managementTurn?.preview
-              ? { appointmentManagementRequestId: managementTurn.preview.requestId }
+              ? { appointmentManagementRequestId: managementTurn.preview.requestId,
+                    appointmentManagementVersion: managementTurn.preview.version }
               : bookingTurn?.preview ? {
               bookingPreviewId: bookingTurn.preview.previewId,
               bookingDraftId: bookingTurn.preview.draftId,
@@ -275,6 +276,7 @@ export function createWhatsAppWebhookService(dependencies: WhatsAppServiceDepend
               "WhatsApp accepted no durable receipt for the appointment-change preview.", 503);
             await recordAppointmentManagementPreviewDelivery(
               bookingContext, managementTurn.preview.requestId, messageId,
+              managementTurn.preview.version,
             );
           }
           if (bookingTurn?.preview) {
