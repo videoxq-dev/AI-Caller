@@ -45,8 +45,14 @@ export function envelopeHasServerWork(envelope: OrchestratorEnvelope) {
     || Boolean(envelope.lead);
 }
 
-export function resultAllowsSameTurnContinuation(result: OrchestratorToolResult) {
-  return result.kind === "qualification" || result.kind === "contact";
+export function stepAllowsSameTurnContinuation(
+  envelope: OrchestratorEnvelope,
+  result: OrchestratorToolResult,
+) {
+  if (result.kind === "qualification" || result.kind === "contact") return true;
+  return result.kind === "none"
+    && envelope.action.type === "NONE"
+    && Boolean(envelope.lead);
 }
 
 export async function runBoundedTaskChain(input: {
@@ -72,7 +78,7 @@ export async function runBoundedTaskChain(input: {
   let currentEnvelope = input.initialEnvelope;
   let currentResult = input.initialResult;
 
-  while (resultAllowsSameTurnContinuation(currentResult)) {
+  while (stepAllowsSameTurnContinuation(currentEnvelope, currentResult)) {
     if (steps.length >= maxActions) {
       return {
         finalEnvelope: currentEnvelope,
@@ -108,7 +114,7 @@ export async function runBoundedTaskChain(input: {
     currentEnvelope = next;
     currentResult = result;
 
-    if (!resultAllowsSameTurnContinuation(result)) {
+    if (!stepAllowsSameTurnContinuation(next, result)) {
       return {
         finalEnvelope: next,
         finalResult: result,
