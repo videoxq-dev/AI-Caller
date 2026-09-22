@@ -163,6 +163,25 @@ describe("existing appointment management (isolated from V2 booking)", () => {
     expect(await db.select().from(bookingDrafts)).toHaveLength(0);
   });
 
+  it("keeps the original slot only when requested during a service change", async () => {
+    await db.insert(services).values({
+      workspaceId: ctx.workspaceId, name: "Industrial Cleaning",
+      durationMinutes: 120, active: true,
+    });
+    await turn("I want to change my appointment");
+    await turn("Industrial Cleaning");
+    const proposed = await turn("Keep the same date and time");
+    expect(proposed?.reply).toContain("Industrial Cleaning");
+    expect(proposed?.reply).toContain("Sep 23, 2037");
+    expect(proposed?.preview).toBeDefined();
+    await delivered(proposed!.preview!.requestId, proposed!.reply);
+    expect((await turn("Yes"))?.reply).toContain("Industrial Cleaning");
+    const [changed] = await db.select().from(appointments);
+    expect(changed.id).toBe(appointmentId);
+    expect(changed.startsAt.toISOString()).toBe(oldStart.toISOString());
+    expect(changed.endsAt.toISOString()).toBe("2037-09-23T12:00:00.000Z");
+  });
+
   it("refuses a stale proposal rather than overriding a staff change", async () => {
     await turn("I'd like to update my appointment");
     const preview = await turn("September 24, 2037 at 10 AM");
