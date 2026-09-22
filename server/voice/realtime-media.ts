@@ -327,6 +327,7 @@ export function attachRealtimeMedia({ telnyx, identity, streamId }: BridgeOption
       name: item.name, arguments: item.arguments, sourceEventId: item.call_id,
       isCurrentTurn: () => open && epoch === callerSpeechEpoch,
     });
+    if (!result) return;
     logger.info({ workspaceId, callId, tool: item.name, ok: result.ok,
       kind: "kind" in result ? result.kind : undefined,
       code: "code" in result ? result.code : undefined,
