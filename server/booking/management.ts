@@ -353,11 +353,10 @@ export async function handleAppointmentManagementTurn(
   if (active && !initialIntent &&
     /\b(?:what services|what do you offer|opening hours|how much|price)\b/i.test(message.body)) return null;
   if (active && !initialIntent && /^(?:thanks|thank you|hello|hi|goodbye|bye)[.! ]*$/i.test(message.body.trim())) return null;
-  if (isExplicitActionConfirmation(message.body) &&
-    active?.status !== "AWAITING_CONFIRMATION" &&
-    await hasUnfinishedBooking(ctx)) {
-    return null; // A live V2 booking confirmation takes precedence over stale edits.
-  }
+  // The V2 booking engine owns every turn of an unfinished new booking,
+  // including ambiguous "cancel my appointment" and subsequent approvals.
+  // Do not turn draft-cancellation words into a destructive existing edit.
+  if (!active && await hasUnfinishedBooking(ctx)) return null;
   if (!active && !initialIntent) {
     if (isExplicitActionConfirmation(message.body)) {
       const [last] = await db.select().from(appointmentManagementRequests)
@@ -373,7 +372,6 @@ export async function handleAppointmentManagementTurn(
     return null;
   }
   if (!active && initialIntent === "STATUS") {
-    if (await hasUnfinishedBooking(ctx)) return null;
     return { reply: statusReply(await linkedAppointments(ctx, now, true)) };
   }
   if (active?.status === "EXECUTING") {
