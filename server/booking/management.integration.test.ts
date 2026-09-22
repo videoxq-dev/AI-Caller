@@ -80,7 +80,7 @@ describe("existing appointment management (isolated from V2 booking)", () => {
     expect(appointmentManagementIntent("I want to book a new appointment")).toBeNull();
     const started = await turn("I'd like to update my appointment");
     expect(started?.reply).toContain("I found your existing Office Cleaning");
-    expect(started?.reply).toContain("What new date");
+    expect(started?.reply).toContain("What date would you like");
     expect(await db.select().from(bookingDrafts)).toHaveLength(0);
   });
 
