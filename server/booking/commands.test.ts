@@ -215,7 +215,7 @@ describe("durable native appointment command (disposable PostgreSQL)", () => {
       attemptCount: 1,
     }).where(eq(bookingCommands.id, commandId));
 
-    const recovered = await recoverBookingCommands();
+    const recovered = await recoverBookingCommands(50, later(3000));
     expect(recovered.unresolved).toBe(1);
     const [command] = await db.select().from(bookingCommands).where(eq(bookingCommands.id, commandId));
     expect(command.state).toBe("RECONCILING");
