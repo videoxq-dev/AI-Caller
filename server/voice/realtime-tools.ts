@@ -1,3 +1,4 @@
+import { z } from "zod";
 import { and, desc, eq, sql } from "drizzle-orm";
 import { db } from "@/db";
 import { bookingDrafts, bookingOffers, bookingPreviews, messages, services } from "@/db/schema";
