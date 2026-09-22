@@ -90,6 +90,34 @@ describe("bounded task runner", () => {
     expect(execute).not.toHaveBeenCalled();
   });
 
+  it("does not replan a metadata-only mutation that already has a final reply", async () => {
+    const envelope = {
+      reply: "Thanks.",
+      contact: { phone: "+13074453684" },
+      action: { type: "NONE" as const },
+    };
+    expect(stepAllowsSameTurnContinuation(
+      envelope,
+      { kind: "contact", data: { contactId: "contact-1", updatedFields: ["phone"] } },
+    )).toBe(false);
+
+    const replan = vi.fn();
+    const execute = vi.fn();
+    const outcome = await runBoundedTaskChain({
+      initialEnvelope: envelope,
+      initialResult: {
+        kind: "contact",
+        data: { contactId: "contact-1", updatedFields: ["phone"] },
+      },
+      replan,
+      execute,
+    });
+    expect(outcome.stopReason).toBe("TERMINAL_RESULT");
+    expect(outcome.steps).toHaveLength(1);
+    expect(replan).not.toHaveBeenCalled();
+    expect(execute).not.toHaveBeenCalled();
+  });
+
   it("continues after a lead-only mutation and then finalizes naturally", async () => {
     const execute = vi.fn(async () => ({
       kind: "none" as const,
