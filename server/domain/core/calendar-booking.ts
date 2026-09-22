@@ -23,6 +23,7 @@ type StoredAppointment = {
   endsAt: Date;
   timezone: string;
   status: "PENDING" | "CONFIRMED" | "COMPLETED" | "CANCELLED" | "NO_SHOW";
+  updatedAt?: Date;
 };
 
 type BookingDependencies = {
@@ -45,11 +46,13 @@ type BookingDependencies = {
     appointmentId: string,
     input: AppointmentRescheduleInput,
     externalEventId?: string,
+    expectedUpdatedAt?: Date,
   ) => Promise<StoredAppointment>;
   setStatus: (
     workspaceId: string,
     appointmentId: string,
     status: "PENDING" | "CONFIRMED" | "COMPLETED" | "CANCELLED" | "NO_SHOW",
+    expectedUpdatedAt?: Date,
   ) => Promise<StoredAppointment>;
 };
 
@@ -107,7 +110,7 @@ export function createCalendarBookingService(dependencies: BookingDependencies) 
         return dependencies.insertNativeAppointment(workspaceId, {
           ...input,
           timezone: validated.timezone,
-        }, validated);
+        }, validated, expectedUpdatedAt);
       }
       const { integrationId, provider } = current;
       if (dependencies.filterAvailability) {
@@ -162,11 +165,15 @@ export function createCalendarBookingService(dependencies: BookingDependencies) 
       }
     },
 
-    async reschedule(workspaceId: string, appointmentId: string, input: AppointmentRescheduleInput) {
+    async reschedule(workspaceId: string, appointmentId: string, input: AppointmentRescheduleInput,
+      expectedUpdatedAt?: Date) {
       const appointment = await dependencies.getAppointment(workspaceId, appointmentId);
       if (!appointment) throw new AppError("APPOINTMENT_NOT_FOUND", "Appointment not found.", 404);
-      if (appointment.status === "CANCELLED") {
-        throw new AppError("APPOINTMENT_CANCELLED", "Cancelled appointments cannot be rescheduled.", 409);
+      if (!["PENDING", "CONFIRMED"].includes(appointment.status)) {
+        throw new AppError("APPOINTMENT_NOT_EDITABLE", "This appointment can no longer be rescheduled.", 409);
+      }
+      if (expectedUpdatedAt && appointment.updatedAt?.getTime() !== expectedUpdatedAt.getTime()) {
+        throw new AppError("APPOINTMENT_CHANGED", "The appointment changed since your approval preview.", 409);
       }
       if (!appointment.integrationId && !appointment.externalEventId) {
         if (!dependencies.validateNativeBooking || !dependencies.updateNativeAppointmentAfterReschedule) {
@@ -196,8 +203,17 @@ export function createCalendarBookingService(dependencies: BookingDependencies) 
           appointmentId,
           { ...input, startsAt: providerBooking.startsAt, endsAt: providerBooking.endsAt },
           providerBooking.externalId,
+          expectedUpdatedAt,
         );
       } catch (error) {
+        // Another actor may have updated the local appointment after the
+        // provider accepted this change. Blind rollback could overwrite that
+        // newer appointment; leave reconciliation to an authorized operator.
+        if (error instanceof AppError && error.code === "APPOINTMENT_CHANGED") {
+          logger.error({ err: error, workspaceId, appointmentId },
+            "Provider rescheduled appointment but its local version changed; reconciliation required");
+          throw error;
+        }
         try {
           await provider.reschedule({
             externalId: providerBooking.externalId,
@@ -215,17 +231,21 @@ export function createCalendarBookingService(dependencies: BookingDependencies) 
       }
     },
 
-    async cancel(workspaceId: string, appointmentId: string) {
+    async cancel(workspaceId: string, appointmentId: string,
+      expectedUpdatedAt?: Date) {
       const appointment = await dependencies.getAppointment(workspaceId, appointmentId);
       if (!appointment) throw new AppError("APPOINTMENT_NOT_FOUND", "Appointment not found.", 404);
       if (appointment.status === "CANCELLED") return appointment;
+      if (expectedUpdatedAt && appointment.updatedAt?.getTime() !== expectedUpdatedAt.getTime()) {
+        throw new AppError("APPOINTMENT_CHANGED", "The appointment changed since your approval preview.", 409);
+      }
 
       if (appointment.integrationId && appointment.externalEventId) {
         const provider = await dependencies.resolveForIntegration(workspaceId, appointment.integrationId);
         await provider.cancel({ externalId: appointment.externalEventId });
       }
 
-      return dependencies.setStatus(workspaceId, appointmentId, "CANCELLED");
+      return dependencies.setStatus(workspaceId, appointmentId, "CANCELLED", expectedUpdatedAt);
     },
   };
 }
