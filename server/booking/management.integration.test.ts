@@ -136,6 +136,15 @@ describe("existing appointment management (isolated from V2 booking)", () => {
       .where(eq(automationEvents.type, "APPOINTMENT_RESCHEDULED")))).toHaveLength(1);
   });
 
+  it("recovers conversationally from invalid proposed times without creating appointments", async () => {
+    await turn("Please reschedule my appointment");
+    const invalid = await turn("September 24, 2037 at 25:99");
+    expect(invalid?.reply).toContain("valid time");
+    const [current] = await db.select().from(appointments);
+    expect(current.startsAt.toISOString()).toBe(oldStart.toISOString());
+    expect(await db.select().from(bookingDrafts)).toHaveLength(0);
+  });
+
   it("cancels only after the customer receives and confirms the exact appointment preview", async () => {
     const preview = await turn("Please cancel my appointment");
     expect(preview?.reply).toContain("Please confirm: cancel your existing");
