@@ -116,34 +116,58 @@ async function ensureTaskRun(
   const taskKey = identity.taskKey
     ?? (sourceMessageId ? `turn:${sourceMessageId}` : `conversation:${conversationId}`);
 
-  const [existing] = await db.select().from(agentTaskRuns).where(and(
-    eq(agentTaskRuns.workspaceId, workspaceId),
-    eq(agentTaskRuns.conversationId, conversationId),
-    eq(agentTaskRuns.taskKey, taskKey),
-  )).limit(1);
-  if (existing) {
-    if (!resume) return existing;
-    const [resumed] = await db.update(agentTaskRuns).set({
-      status: "RUNNING",
-      terminationReason: null,
-      completedAt: null,
-      updatedAt: new Date(),
-      ...(identity.objective !== undefined ? { objective: identity.objective } : {}),
-      ...(identity.metadata ? { metadata: { ...existing.metadata, ...identity.metadata } } : {}),
-    }).where(eq(agentTaskRuns.id, existing.id)).returning();
-    return resumed;
+  const loadExisting = async () => {
+    const [row] = await db.select().from(agentTaskRuns).where(and(
+      eq(agentTaskRuns.workspaceId, workspaceId),
+      eq(agentTaskRuns.conversationId, conversationId),
+      eq(agentTaskRuns.taskKey, taskKey),
+    )).limit(1);
+    return row ?? null;
+  };
+
+  let existing = await loadExisting();
+  if (!existing) {
+    const [created] = await db.insert(agentTaskRuns).values({
+      workspaceId,
+      conversationId,
+      contactId,
+      sourceMessageId,
+      taskKey,
+      objective: identity.objective ?? null,
+      metadata: identity.metadata ?? {},
+    }).onConflictDoNothing().returning();
+    if (created) return created;
+    existing = await loadExisting();
+    if (!existing) {
+      throw new AppError(
+        "AGENT_TASK_RUN_CONFLICT",
+        "The task state could not be established safely.",
+        409,
+      );
+    }
   }
 
-  const [created] = await db.insert(agentTaskRuns).values({
-    workspaceId,
-    conversationId,
-    contactId,
-    sourceMessageId,
-    taskKey,
-    objective: identity.objective ?? null,
-    metadata: identity.metadata ?? {},
-  }).returning();
-  return created;
+  if (!resume) return existing;
+  const [resumed] = await db.update(agentTaskRuns).set({
+    status: "RUNNING",
+    terminationReason: null,
+    completedAt: null,
+    updatedAt: new Date(),
+    ...(identity.objective !== undefined ? { objective: identity.objective } : {}),
+    ...(identity.metadata ? { metadata: { ...existing.metadata, ...identity.metadata } } : {}),
+  }).where(and(
+    eq(agentTaskRuns.id, existing.id),
+    eq(agentTaskRuns.workspaceId, workspaceId),
+    eq(agentTaskRuns.conversationId, conversationId),
+  )).returning();
+  if (!resumed) {
+    throw new AppError(
+      "AGENT_TASK_RUN_NOT_FOUND",
+      "The task state disappeared before execution.",
+      409,
+    );
+  }
+  return resumed;
 }
 
 export async function ensureConversationTurnTaskRun(
