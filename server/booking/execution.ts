@@ -265,6 +265,35 @@ export async function executeBookingCommand(workspaceId: string, commandId: stri
   }
 }
 
+async function recoverNativeCommand(command: Command) {
+  const data = snapshotOf(command);
+  try {
+    await checkExecutionPolicy(command, data);
+    const startsAt = new Date(data.startsAt);
+    const endsAt = new Date(data.endsAt);
+    const policy = await validateNativeBooking(command.workspaceId, { startsAt, endsAt });
+    // Native persistence is locally idempotent by bookingCommandId, and its
+    // workspace lock serializes this recovery with a slow original worker.
+    const appointment = await insertNativeAppointment(command.workspaceId, {
+      contactId: data.contactId, conversationId: data.conversationId,
+      serviceId: data.serviceId, title: data.title, startsAt, endsAt,
+      timezone: data.timezone, bookingSource: "AI_BOOKING_V2",
+      notes: data.location, attendeeName: data.attendeeName,
+      attendeeEmail: data.attendeeEmail,
+    }, policy, command.id);
+    return finish(command, appointment);
+  } catch (error) {
+    const persisted = await savedAppointment(command);
+    if (persisted) return finish(command, persisted);
+    if (error instanceof AppError && error.status < 500) {
+      return failWithoutSideEffect(command, error.code);
+    }
+    logger.warn({ err: error, workspaceId: command.workspaceId, commandId: command.id },
+      "Native booking recovery cannot yet establish a safe outcome");
+    return uncertain(command, "BOOKING_NATIVE_RECOVERY_UNCERTAIN");
+  }
+}
+
 async function deferReconciliationRead(command: Command, now: Date) {
   const ageMinutes = Math.max(0, Math.floor((now.getTime() - command.createdAt.getTime()) / 60_000));
   const exponent = Math.min(5, Math.floor(ageMinutes / 5));
@@ -300,6 +329,14 @@ export async function recoverBookingCommands(limit = 50, now = new Date()) {
       if (existing) {
         await finish(command, existing);
         confirmed++;
+        continue;
+      }
+      if (command.provider === "native") {
+        // A native write can be retried after a crash: the unique command
+        // reference and workspace capacity lock prevent duplicate appointments.
+        const result = await recoverNativeCommand(command);
+        if (result.state === "CONFIRMED") confirmed++;
+        else unresolved++;
         continue;
       }
       if (command.state === "COMMITTING") {
