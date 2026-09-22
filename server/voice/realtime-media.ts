@@ -344,7 +344,10 @@ export function attachRealtimeMedia({ telnyx, identity, streamId }: BridgeOption
       || call.metadata.voiceTechnology !== "REALTIME") return;
     const result = await runRealtimeBusinessTool({
       workspaceId, callId, streamId, conversationId: call.conversationId, contactId: call.contactId,
-      name: item.name, arguments: item.arguments, sourceEventId: item.call_id,
+      name: item.name,
+      arguments: item.arguments,
+      sourceEventId: item.call_id,
+      taskKey: `realtime:${callId}:epoch:${epoch}`,
       isCurrentTurn: () => open && epoch === callerSpeechEpoch,
     });
     const response = result ?? {
