@@ -110,7 +110,7 @@ export function createCalendarBookingService(dependencies: BookingDependencies) 
         return dependencies.insertNativeAppointment(workspaceId, {
           ...input,
           timezone: validated.timezone,
-        }, validated, expectedUpdatedAt, serviceChange);
+        }, validated);
       }
       const { integrationId, provider } = current;
       if (dependencies.filterAvailability) {
