@@ -192,7 +192,14 @@ const orchestratorToolResultSchema = z.discriminatedUnion("kind", [
       startsAt: z.string().datetime({ offset: true }).optional(),
       endsAt: z.string().datetime({ offset: true }).optional(),
       timezone: z.string().min(1).optional(),
-    }).passthrough(),
+    }).passthrough().refine((data) => {
+      const hasAppointmentReceipt = Boolean(
+        data.appointmentId && data.status && data.startsAt && data.endsAt && data.timezone,
+      );
+      const unresolvedState = String(data.state ?? data.status ?? "");
+      return hasAppointmentReceipt
+        || ["COMMITTING", "RECONCILING", "FAILED"].includes(unresolvedState);
+    }, "Booking results require a persisted appointment receipt or an explicit unresolved state."),
   }),
   z.object({
     kind: z.literal("pending_action"),
