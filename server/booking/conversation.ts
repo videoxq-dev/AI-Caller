@@ -521,6 +521,7 @@ export async function handleBookingTurn(
       {
         kind: "availability",
         data: {
+          timezone: current.customerTimezone ?? tz,
           state: found.state,
           slots: found.offers.map((offer) => ({
             offerId: offer.id,
