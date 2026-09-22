@@ -492,7 +492,12 @@ export async function handleAppointmentManagementTurn(
   if (proposedServiceId && !selectedService) {
     return { reply: "That service is no longer available. Please choose an active service. Your original appointment is unchanged." };
   }
-  const rawTime = changes.time ? parseBookingTime(changes.time) : null;
+  let rawTime: ReturnType<typeof parseBookingTime> | null = null;
+  try {
+    rawTime = changes.time ? parseBookingTime(changes.time) : null;
+  } catch (error) {
+    return { reply: errorMessage(error) + " Please give a valid appointment start time." };
+  }
   const timezone = rawTime?.timezone ?? active.timezone ?? appointment.timezone;
   let localDate = active.localDate;
   let localTime = rawTime?.localTime ?? active.localTime;
