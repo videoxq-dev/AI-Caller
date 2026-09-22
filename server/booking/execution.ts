@@ -73,13 +73,18 @@ async function finish(command: Command, appointment: typeof appointments.$inferS
 
 async function failWithoutSideEffect(command: Command, code: string) {
   const now = new Date();
-  await db.transaction(async (tx) => {
-    await tx.update(bookingCommands).set({
+  const transitioned = await db.transaction(async (tx) => {
+    const [failed] = await tx.update(bookingCommands).set({
       state: "FAILED", lastErrorCode: code.slice(0, 100),
       leaseOwner: null, leaseExpiresAt: null, updatedAt: now,
     }).where(and(eq(bookingCommands.id, command.id),
       eq(bookingCommands.workspaceId, command.workspaceId),
-      inArray(bookingCommands.state, ["PENDING", "COMMITTING", "RECONCILING"])));
+      inArray(bookingCommands.state, ["PENDING", "COMMITTING", "RECONCILING"])))
+      .returning({ id: bookingCommands.id });
+    // A competing worker may have confirmed the command after this caller
+    // observed an old state. Never release its reservation or mark its draft
+    // failed unless our conditional state transition actually won.
+    if (!failed) return false;
     await tx.update(bookingDrafts).set({
       status: "FAILED", updatedAt: now,
     }).where(and(eq(bookingDrafts.id, command.draftId),
@@ -89,7 +94,13 @@ async function failWithoutSideEffect(command: Command, code: string) {
       state: "RELEASED", releasedAt: now,
     }).where(and(eq(bookingReservations.workspaceId, command.workspaceId),
       eq(bookingReservations.commandId, command.id), eq(bookingReservations.state, "ACTIVE")));
+    return true;
   });
+  if (!transitioned) {
+    const saved = await savedAppointment(command);
+    if (saved) return finish(command, saved);
+    return { state: "RECONCILING" as const, code: "BOOKING_STATE_CHANGED" };
+  }
   return { state: "FAILED" as const, code };
 }
 
