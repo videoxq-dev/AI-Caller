@@ -118,6 +118,54 @@ export const pendingAgentActions = pgTable(
   ],
 );
 
+export const agentTaskRuns = pgTable(
+  "agent_task_runs",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    workspaceId: uuid("workspace_id").notNull().references(() => workspaces.id, { onDelete: "cascade" }),
+    conversationId: uuid("conversation_id").notNull().references(() => conversations.id, { onDelete: "cascade" }),
+    contactId: uuid("contact_id").notNull().references(() => contacts.id, { onDelete: "cascade" }),
+    sourceMessageId: uuid("source_message_id"),
+    status: text("status").default("RUNNING").notNull(),
+    objective: text("objective"),
+    terminationReason: text("termination_reason"),
+    metadata: jsonb("metadata").$type<Record<string, unknown>>().default({}).notNull(),
+    startedAt: timestamp("started_at", { withTimezone: true, mode: "date" }).defaultNow().notNull(),
+    completedAt: timestamp("completed_at", { withTimezone: true, mode: "date" }),
+    updatedAt: timestamp("updated_at", { withTimezone: true, mode: "date" }).defaultNow().notNull(),
+  },
+  (table) => [
+    uniqueIndex("agent_task_runs_source_message_uq")
+      .on(table.workspaceId, table.conversationId, table.sourceMessageId)
+      .where(sql`${table.sourceMessageId} is not null`),
+    index("agent_task_runs_workspace_status_idx").on(table.workspaceId, table.status, table.startedAt),
+    index("agent_task_runs_conversation_idx").on(table.conversationId, table.startedAt),
+  ],
+);
+
+export const agentTaskSteps = pgTable(
+  "agent_task_steps",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    workspaceId: uuid("workspace_id").notNull().references(() => workspaces.id, { onDelete: "cascade" }),
+    runId: uuid("run_id").notNull().references(() => agentTaskRuns.id, { onDelete: "cascade" }),
+    sequence: integer("sequence").notNull(),
+    action: text("action").notNull(),
+    risk: text("risk").notNull(),
+    status: text("status").default("RUNNING").notNull(),
+    input: jsonb("input").$type<Record<string, unknown>>().default({}).notNull(),
+    inputHash: text("input_hash").notNull(),
+    result: jsonb("result").$type<Record<string, unknown> | null>(),
+    errorCode: text("error_code"),
+    startedAt: timestamp("started_at", { withTimezone: true, mode: "date" }).defaultNow().notNull(),
+    completedAt: timestamp("completed_at", { withTimezone: true, mode: "date" }),
+  },
+  (table) => [
+    uniqueIndex("agent_task_steps_run_sequence_uq").on(table.runId, table.sequence),
+    index("agent_task_steps_workspace_action_idx").on(table.workspaceId, table.action, table.startedAt),
+  ],
+);
+
 export const usageEvents = pgTable(
   "usage_events",
   {
