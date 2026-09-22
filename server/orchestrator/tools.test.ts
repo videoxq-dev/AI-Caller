@@ -230,7 +230,7 @@ describe("orchestrator lead updates", () => {
         timezone: "UTC",
         slots: [{ startsAt: "not-a-date", endsAt: "2037-09-23T10:30:00Z" }],
       },
-    })).toThrowError(expect.objectContaining({ code: "AGENT_TOOL_RESULT_INVALID" }));
+    })).toThrow("A business action returned an invalid result");
   });
 
   it("rejects a valid result kind returned for the wrong action", () => {
@@ -239,7 +239,7 @@ describe("orchestrator lead updates", () => {
     }, {
       kind: "sms",
       data: { sent: true, messageId: "message-1" },
-    })).toThrowError(expect.objectContaining({ code: "AGENT_TOOL_RESULT_INVALID" }));
+    })).toThrow("A business action returned an invalid result");
   });
 
   it("accepts a server-backed pending booking receipt", () => {
