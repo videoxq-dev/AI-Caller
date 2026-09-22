@@ -187,11 +187,13 @@ export const usageEvents = pgTable(
     pricingDetails: jsonb("pricing_details").$type<Record<string, unknown>>().default({}).notNull(),
     referenceType: text("reference_type"),
     referenceId: text("reference_id"),
+    taskRunId: uuid("task_run_id").references(() => agentTaskRuns.id, { onDelete: "set null" }),
     createdAt: timestamp("created_at", { withTimezone: true, mode: "date" }).defaultNow().notNull(),
   },
   (table) => [
     index("usage_events_workspace_created_idx").on(table.workspaceId, table.createdAt),
     index("usage_events_reference_idx").on(table.workspaceId, table.referenceType, table.referenceId),
+    index("usage_events_task_run_idx").on(table.taskRunId, table.createdAt),
     uniqueIndex("usage_events_voice_call_reference_uq")
       .on(table.workspaceId, table.referenceType, table.referenceId)
       .where(sql`${table.referenceType} = 'VOICE_CALL' and ${table.referenceId} is not null`),
