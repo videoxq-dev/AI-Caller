@@ -55,7 +55,8 @@ function hashInput(value: Record<string, unknown>) {
 export function taskActionForEnvelope(envelope: OrchestratorEnvelope): RegisteredAgentActionName {
   if (envelope.action.type !== "NONE") return envelope.action.type;
   if (envelope.contact) return "UPDATE_CONTACT";
-  if (envelope.lead?.status === "QUALIFIED") return "QUALIFY_LEAD";
+  // Lead metadata never performs qualification. Only the explicit
+  // QUALIFY_LEAD action may evaluate configured criteria and promote status.
   if (envelope.lead) return "UPDATE_LEAD";
   return "ANSWER_INQUIRY";
 }
