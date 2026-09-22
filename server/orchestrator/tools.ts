@@ -1,5 +1,6 @@
 import { escalateConversationIssue } from "@/server/collaboration/service";
 import { assertAgentActionAllowed } from "@/server/agent/capabilities";
+import { capabilityForOrchestratorAction } from "./action-registry";
 import { requireActiveWorkspaceAgent } from "@/server/agent/service";
 import { and, desc, eq, inArray } from "drizzle-orm";
 import { db } from "@/db";
@@ -154,6 +155,131 @@ export type OrchestratorToolResult = {
   kind: "none" | "contact" | "qualification" | "availability" | "booking" | "pending_action" | "escalation" | "consent" | "sms";
   data: Record<string, unknown>;
 };
+
+const orchestratorToolResultSchema = z.discriminatedUnion("kind", [
+  z.object({ kind: z.literal("none"), data: z.record(z.string(), z.unknown()) }),
+  z.object({
+    kind: z.literal("contact"),
+    data: z.object({
+      contactId: z.string().min(1),
+      updatedFields: z.array(z.string().min(1)).max(20),
+    }).passthrough(),
+  }),
+  z.object({
+    kind: z.literal("qualification"),
+    data: z.object({
+      qualified: z.boolean(),
+      score: z.number().finite(),
+      missingRequired: z.array(z.string()).default([]),
+    }).passthrough(),
+  }),
+  z.object({
+    kind: z.literal("availability"),
+    data: z.object({
+      timezone: z.string().min(1),
+      slots: z.array(z.object({
+        startsAt: z.string().datetime({ offset: true }),
+        endsAt: z.string().datetime({ offset: true }),
+      }).passthrough()).max(50),
+    }).passthrough(),
+  }),
+  z.object({
+    kind: z.literal("booking"),
+    data: z.object({
+      appointmentId: z.string().min(1).optional(),
+      status: z.string().min(1).optional(),
+      state: z.string().min(1).optional(),
+      startsAt: z.string().datetime({ offset: true }).optional(),
+      endsAt: z.string().datetime({ offset: true }).optional(),
+      timezone: z.string().min(1).optional(),
+    }).passthrough().refine((data) => {
+      const hasAppointmentReceipt = Boolean(
+        data.appointmentId && data.status && data.startsAt && data.endsAt && data.timezone,
+      );
+      const unresolvedState = String(data.state ?? data.status ?? "");
+      return hasAppointmentReceipt
+        || ["COMMITTING", "RECONCILING", "FAILED"].includes(unresolvedState);
+    }, "Booking results require a persisted appointment receipt or an explicit unresolved state."),
+  }),
+  z.object({
+    kind: z.literal("pending_action"),
+    data: z.object({
+      pendingActionId: z.string().min(1),
+      type: z.enum(["BOOK_APPOINTMENT", "SEND_SMS"]),
+    }).passthrough(),
+  }),
+  z.object({
+    kind: z.literal("escalation"),
+    data: z.object({
+      issueCaseId: z.string().min(1),
+      scope: z.literal("ISSUE"),
+    }).passthrough(),
+  }),
+  z.object({
+    kind: z.literal("consent"),
+    data: z.object({
+      category: z.enum(["TRANSACTIONAL", "MARKETING", "ALL"]),
+      status: z.enum(["OPTED_IN", "OPTED_OUT"]),
+    }).passthrough(),
+  }),
+  z.object({
+    kind: z.literal("sms"),
+    data: z.object({
+      sent: z.boolean(),
+      messageId: z.string().min(1).optional(),
+      status: z.string().min(1).optional(),
+      reason: z.string().min(1).optional(),
+    }).passthrough(),
+  }),
+]);
+
+type OrchestratorActionType = OrchestratorEnvelope["action"]["type"];
+
+function allowedToolResultKinds(action: OrchestratorActionType) {
+  switch (action) {
+    case "NONE": return new Set<OrchestratorToolResult["kind"]>(["none", "contact"]);
+    case "RECORD_SMS_CONSENT": return new Set<OrchestratorToolResult["kind"]>(["consent"]);
+    case "SEND_SMS": return new Set<OrchestratorToolResult["kind"]>(["pending_action", "sms"]);
+    case "CHECK_AVAILABILITY": return new Set<OrchestratorToolResult["kind"]>(["availability"]);
+    case "BOOK_APPOINTMENT": return new Set<OrchestratorToolResult["kind"]>(["pending_action", "booking"]);
+    case "QUALIFY_LEAD": return new Set<OrchestratorToolResult["kind"]>(["qualification"]);
+    case "ESCALATE": return new Set<OrchestratorToolResult["kind"]>(["escalation"]);
+  }
+}
+
+export function validateOrchestratorToolResultForAction(
+  action: OrchestratorActionType,
+  value: unknown,
+): OrchestratorToolResult {
+  const parsed = orchestratorToolResultSchema.safeParse(value);
+  if (!parsed.success || !allowedToolResultKinds(action).has(
+    parsed.success ? parsed.data.kind : "none",
+  )) {
+    logger.error(
+      {
+        action,
+        issues: parsed.success
+          ? [`Unexpected result kind ${parsed.data.kind}`]
+          : parsed.error.issues.slice(0, 8).map((issue) =>
+              `${issue.path.join(".") || "result"}: ${issue.message}`),
+      },
+      "Orchestrator action returned an invalid authoritative result",
+    );
+    throw new AppError(
+      "AGENT_TOOL_RESULT_INVALID",
+      "A business action returned an invalid result and was not exposed to the customer.",
+      500,
+    );
+  }
+  return parsed.data as OrchestratorToolResult;
+}
+
+export function validateOrchestratorToolResult(
+  envelope: OrchestratorEnvelope,
+  value: unknown,
+): OrchestratorToolResult {
+  return validateOrchestratorToolResultForAction(envelope.action.type, value);
+}
 
 export class OrchestratorOutputError extends Error {
   constructor(
@@ -371,10 +497,11 @@ export async function executeOrchestratorTools(
   if (envelope.contact) assertAgentActionAllowed(agent.capabilities, "UPDATE_CONTACT");
   if (envelope.lead) assertAgentActionAllowed(agent.capabilities, "UPDATE_LEAD");
   if (envelope.lead?.status === "QUALIFIED") assertAgentActionAllowed(agent.capabilities, "QUALIFY_LEAD");
-  if (envelope.action.type !== "NONE") {
+  const actionCapability = capabilityForOrchestratorAction(envelope.action.type);
+  if (actionCapability) {
     // Revocation must remain available even when new opt-ins have been disabled.
     if (!(envelope.action.type === "RECORD_SMS_CONSENT" && envelope.action.status === "OPTED_OUT")) {
-      assertAgentActionAllowed(agent.capabilities, envelope.action.type);
+      assertAgentActionAllowed(agent.capabilities, actionCapability);
     }
   }
   const currentConversation = await getConversationById(workspaceId, conversationId);
@@ -676,3 +803,19 @@ export async function executeOrchestratorTools(
     },
   };
 }
+
+export async function executeValidatedOrchestratorTools(
+  workspaceId: string,
+  conversationId: string,
+  contactId: string,
+  envelope: OrchestratorEnvelope,
+): Promise<OrchestratorToolResult> {
+  const result = await executeOrchestratorTools(
+    workspaceId,
+    conversationId,
+    contactId,
+    envelope,
+  );
+  return validateOrchestratorToolResult(envelope, result);
+}
+

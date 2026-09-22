@@ -3,7 +3,6 @@ import { capabilitiesFromBehaviorSettings } from "@/server/agent/capabilities";
 import { logger } from "@/server/observability/logger";
 import { buildConversationContext, type OrchestratorContext } from "./context";
 import {
-  executeOrchestratorTools,
   OrchestratorOutputError,
   orchestratorActionSchema,
   parseOrchestratorEnvelope,
@@ -11,6 +10,8 @@ import {
   type OrchestratorToolResult,
 } from "./tools";
 import { generateAIWithUsage } from "./usage";
+import { ensureConversationTurnTaskRun, executeTrackedOrchestratorTools } from "./task-runs";
+import { runBoundedTaskChain, stepAllowsSameTurnContinuation } from "./bounded-task-runner";
 import {
   getAwaitingPendingAction,
   isExplicitActionConfirmation,
@@ -52,8 +53,18 @@ type OrchestratorDependencies = {
     contactId: string,
     envelope: OrchestratorEnvelope,
   ) => Promise<OrchestratorToolResult>;
-  generate: (workspaceId: string, referenceId: string, messages: AIMessage[]) => Promise<{ text: string }>;
+  generate: (
+    workspaceId: string,
+    referenceId: string,
+    messages: AIMessage[],
+    tracking?: { taskRunId?: string | null },
+  ) => Promise<{ text: string }>;
   getAwaitingAction?: typeof getAwaitingPendingAction;
+  ensureTaskRun?: (
+    workspaceId: string,
+    conversationId: string,
+    contactId: string,
+  ) => Promise<{ id: string }>;
 };
 
 const ACTION_PROTOCOL = `
@@ -328,6 +339,33 @@ function finalizerMessages(
     {
       role: "system",
       content: `SERVER TOOL RESULT (authoritative): ${JSON.stringify(toolResult)}\nReturn a final JSON envelope with a customer-facing reply and action {"type":"NONE"}. Do not request another tool action in this response.`,
+    },
+  ];
+}
+
+function continuationMessages(
+  context: OrchestratorContext,
+  previous: OrchestratorEnvelope,
+  toolResult: OrchestratorToolResult,
+  actionCount: number,
+): AIMessage[] {
+  return [
+    {
+      role: "system",
+      content: `${context.systemPrompt}\n\nCurrent server time: ${new Date().toISOString()}\n${actionProtocolFor(context)}`,
+    },
+    ...context.messages,
+    {
+      role: "assistant",
+      content: JSON.stringify(previous),
+    },
+    {
+      role: "system",
+      content: `SERVER TOOL RESULT (authoritative): ${JSON.stringify(toolResult)}
+You are continuing one bounded customer task after ${actionCount} server action(s).
+If the current request is complete or needs new customer input, return a final customer-facing reply with action {"type":"NONE"}.
+If exactly one additional enabled server action is logically required to continue the SAME current request, return that action instead.
+Never repeat an action with the same inputs. Never invent a tool result. Availability, staged confirmation, confirmed booking, SMS delivery, consent recording, and escalation are execution boundaries; after those, stop and speak from the authoritative server result. Consequential-action confirmation rules still apply.`,
     },
   ];
 }
@@ -621,7 +659,20 @@ export function createResponseOrchestrator(dependencies: OrchestratorDependencie
         }
       }
 
-      const firstResponse = await dependencies.generate(workspaceId, conversationId, plannerMessages(context));
+      const turnTask = dependencies.ensureTaskRun
+        ? await dependencies.ensureTaskRun(
+            workspaceId,
+            conversationId,
+            context.contact.id,
+          )
+        : null;
+      const taskTracking = turnTask ? { taskRunId: turnTask.id } : undefined;
+      const firstResponse = await dependencies.generate(
+        workspaceId,
+        conversationId,
+        plannerMessages(context),
+        taskTracking,
+      );
       let planned: OrchestratorEnvelope;
       try {
         planned = parseOrchestratorEnvelope(firstResponse.text);
@@ -631,7 +682,10 @@ export function createResponseOrchestrator(dependencies: OrchestratorDependencie
           "AI provider returned invalid orchestration output; requesting one correction");
         try {
           const repaired = await dependencies.generate(
-            workspaceId, conversationId, repairMessages(context, firstResponse.text, error),
+            workspaceId,
+            conversationId,
+            repairMessages(context, firstResponse.text, error),
+            taskTracking,
           );
           planned = parseOrchestratorEnvelope(repaired.text);
         } catch (repairError) {
@@ -663,6 +717,7 @@ export function createResponseOrchestrator(dependencies: OrchestratorDependencie
             workspaceId,
             conversationId,
             resumedTurnCorrectionMessages(context, planned, lastUserMessage),
+            taskTracking,
           );
           planned = parseOrchestratorEnvelope(resumed.text);
         } catch (resumeError) {
@@ -826,12 +881,221 @@ export function createResponseOrchestrator(dependencies: OrchestratorDependencie
         return { reply: bookingFallback(toolResult),
           handlingMode: "AI" as const, action: first.action, toolResult };
       }
-      if (toolResult.kind === "qualification" || toolResult.kind === "sms") {
+      if (stepAllowsSameTurnContinuation(first, toolResult)) {
+        let followUpActionType: OrchestratorEnvelope["action"]["type"] = first.action.type;
+        try {
+          const outcome = await runBoundedTaskChain({
+            initialEnvelope: first,
+            initialResult: toolResult,
+            maxActions: 5,
+            replan: async (previous, result, actionCount) => {
+              const response = await dependencies.generate(
+                workspaceId,
+                conversationId,
+                continuationMessages(context, previous, result, actionCount),
+                taskTracking,
+              );
+              try {
+                return parseOrchestratorEnvelope(response.text);
+              } catch (error) {
+                if (!(error instanceof OrchestratorOutputError)) throw error;
+                logger.warn(
+                  { workspaceId, conversationId, validationIssues: error.validationIssues },
+                  "Bounded task continuation was invalid; stopping after authoritative result",
+                );
+                const fallbackReply = result.kind === "qualification"
+                  ? result.data.qualified === true
+                    ? "Thanks. I've recorded your qualification details."
+                    : "Thanks. I've recorded those details. I still need more information before qualification is complete."
+                  : result.kind === "contact"
+                    ? "Thanks. I've updated the contact details you provided."
+                    : "Thanks. I've recorded those details.";
+                return {
+                  reply: fallbackReply,
+                  action: { type: "NONE" },
+                };
+              }
+            },
+            execute: async (next) => {
+              followUpActionType = next.action.type;
+              if (options.beforeTools && !(await options.beforeTools())) {
+                throw new AppError(
+                  "TASK_TURN_SUPERSEDED",
+                  "The customer changed the request before the next action executed.",
+                  409,
+                );
+              }
+              return dependencies.executeTools(
+                workspaceId,
+                conversationId,
+                context.contact.id,
+                next,
+              );
+            },
+          });
+
+          if (outcome.stopReason === "CYCLE" || outcome.stopReason === "ACTION_BUDGET") {
+            logger.warn(
+              {
+                workspaceId,
+                conversationId,
+                stopReason: outcome.stopReason,
+                actionCount: outcome.steps.length,
+              },
+              "Bounded task runner stopped before another same-turn action",
+            );
+            return unresolvedWithoutHandoff(
+              "I've completed the verified steps I could safely perform. Please tell me what you'd like me to do next.",
+            );
+          }
+
+          const finalResult = outcome.finalResult;
+          const finalEnvelope = outcome.finalEnvelope;
+          const lastAction = outcome.steps[outcome.steps.length - 1]?.envelope.action ?? first.action;
+
+          if (outcome.stopReason === "COMPLETE" && finalEnvelope.unresolved?.reason) {
+            return resolveUncertainRequest(
+              finalEnvelope.reply
+                ?? "I can't complete that request with the information and capabilities available right now.",
+              finalEnvelope.unresolved.reason,
+            );
+          }
+
+          if (finalResult.kind === "pending_action") {
+            return {
+              reply: pendingActionReply(finalResult, context.timezone ?? "UTC"),
+              handlingMode: "AI" as const,
+              action: lastAction,
+              toolResult: finalResult,
+            };
+          }
+          if (finalResult.kind === "availability") {
+            const availabilityTimezone = typeof finalResult.data.timezone === "string"
+              ? finalResult.data.timezone
+              : context.timezone ?? "UTC";
+            return {
+              reply: availabilityReply(finalResult, availabilityTimezone),
+              handlingMode: "AI" as const,
+              action: lastAction,
+              toolResult: finalResult,
+            };
+          }
+          if (finalResult.kind === "booking") {
+            return {
+              reply: bookingFallback(finalResult),
+              handlingMode: "AI" as const,
+              action: lastAction,
+              toolResult: finalResult,
+            };
+          }
+          if (finalResult.kind === "sms") {
+            return {
+              reply: finalResult.data.sent === true
+                ? "I have sent the requested text message."
+                : String(finalResult.data.reason ?? "I could not send that text message."),
+              handlingMode: "AI" as const,
+              action: lastAction,
+              toolResult: finalResult,
+            };
+          }
+          if (finalResult.kind === "escalation") {
+            return {
+              reply: isLivePhone
+                ? LIVE_PHONE_ESCALATION_REPLY
+                : "I've flagged this issue for staff follow-up. I can keep helping with anything else here.",
+              handlingMode: "AI" as const,
+              action: lastAction,
+              toolResult: finalResult,
+            };
+          }
+          if (finalResult.kind === "consent") {
+            return {
+              reply: finalEnvelope.reply ?? (finalResult.data.status === "OPTED_IN"
+                ? "Thank you. I've noted your SMS preference for the messaging program."
+                : "Understood. I've recorded that you do not want those SMS messages."),
+              handlingMode: "AI" as const,
+              action: lastAction,
+              toolResult: finalResult,
+            };
+          }
+
+          if (!finalEnvelope.reply) {
+            throw new Error("AI provider did not return a customer-facing response after the bounded task.");
+          }
+          const contactReceipt = finalResult.kind === "contact"
+            ? `I’ve updated your contact details (${Array.isArray(finalResult.data.updatedFields)
+                ? finalResult.data.updatedFields.join(", ")
+                : "provided fields"}).`
+            : null;
+          const reply = [contactReceipt, safeUnverifiedReply(finalEnvelope.reply)]
+            .filter(Boolean)
+            .join(" ");
+          return {
+            reply: isLivePhone ? safeLivePhoneReply(reply) : reply,
+            handlingMode: "AI" as const,
+            action: lastAction,
+            toolResult: finalResult,
+          };
+        } catch (error) {
+          if (error instanceof AppError && error.code === "TASK_TURN_SUPERSEDED") {
+            return {
+              reply: null,
+              handlingMode: "AI" as const,
+              action: { type: "NONE" as const },
+              toolResult: { kind: "none" as const, data: {} },
+            };
+          }
+          if (error instanceof AppError && (
+            error.code === "AGENT_NOT_ACTIVE"
+            || error.code === "AGENT_NOT_CONFIGURED"
+            || error.code === "CONVERSATION_HUMAN_HANDLING"
+          )) {
+            return {
+              reply: null,
+              handlingMode: "AI" as const,
+              action: { type: "NONE" as const },
+              toolResult: { kind: "none" as const, data: {} },
+            };
+          }
+          if (error instanceof AppError && error.code === "AGENT_ACTION_DISABLED") {
+            return resolveUncertainRequest(
+              approvedToolFailure(followUpActionType, error),
+              `Requested ${followUpActionType} is disabled; applying When Unsure policy.`,
+            );
+          }
+          if (error instanceof AppError && [
+            "BUSINESS_HOURS_NOT_CONFIGURED",
+            "CALENDAR_CONFIG_INVALID",
+            "CALENDAR_NOT_CONFIGURED",
+            "NATIVE_BOOKING_UNAVAILABLE",
+          ].includes(error.code)) {
+            return resolveUncertainRequest(
+              approvedToolFailure(followUpActionType, error),
+              `Unable to complete ${followUpActionType}; applying When Unsure policy.`,
+            );
+          }
+          if (error instanceof AppError && [
+            "APPOINTMENT_SLOT_UNAVAILABLE",
+            "APPOINTMENT_OUTSIDE_HOURS",
+            "APPOINTMENT_IN_PAST",
+            "APPOINTMENT_DAILY_LIMIT_REACHED",
+            "AVAILABILITY_RANGE_INVALID",
+          ].includes(error.code)) {
+            return unresolvedWithoutHandoff(
+              approvedToolFailure(followUpActionType, error),
+            );
+          }
+          throw error;
+        }
+      }
+
+      if (toolResult.kind === "sms") {
         try {
           const finalResponse = await dependencies.generate(
             workspaceId,
             conversationId,
             finalizerMessages(context, first, toolResult),
+            taskTracking,
           );
           const finalEnvelope = parseOrchestratorEnvelope(finalResponse.text);
           if (!finalEnvelope.reply) throw new Error("AI provider did not return a customer-facing response after the tool call.");
@@ -842,14 +1106,15 @@ export function createResponseOrchestrator(dependencies: OrchestratorDependencie
             toolResult,
           };
         } catch (error) {
-          if (toolResult.kind === "sms") {
-            logger.error({ err: error, workspaceId, conversationId }, "SMS tool finalized but AI response failed; returning authoritative SMS status");
-            return {
-              reply: toolResult.data.sent === true ? "I have sent the requested text message." : String(toolResult.data.reason ?? "I could not send that text message."),
-              handlingMode: "AI" as const, action: first.action, toolResult,
-            };
-          }
-          throw error;
+          logger.error({ err: error, workspaceId, conversationId }, "SMS tool finalized but AI response failed; returning authoritative SMS status");
+          return {
+            reply: toolResult.data.sent === true
+              ? "I have sent the requested text message."
+              : String(toolResult.data.reason ?? "I could not send that text message."),
+            handlingMode: "AI" as const,
+            action: first.action,
+            toolResult,
+          };
         }
       }
 
@@ -895,10 +1160,16 @@ export function createResponseOrchestrator(dependencies: OrchestratorDependencie
 
 export const responseOrchestrator = createResponseOrchestrator({
   buildContext: buildConversationContext,
-  executeTools: executeOrchestratorTools,
-  generate: async (workspaceId, referenceId, messages) => {
-    const response = await generateAIWithUsage(workspaceId, referenceId, messages);
+  executeTools: executeTrackedOrchestratorTools,
+  generate: async (workspaceId, referenceId, messages, tracking) => {
+    const response = await generateAIWithUsage(
+      workspaceId,
+      referenceId,
+      messages,
+      tracking,
+    );
     return { text: response.text };
   },
   getAwaitingAction: getAwaitingPendingAction,
+  ensureTaskRun: ensureConversationTurnTaskRun,
 });

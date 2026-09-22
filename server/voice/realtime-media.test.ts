@@ -382,8 +382,11 @@ describe("Realtime Telnyx/OpenAI media contract", () => {
     })));
     await vi.waitFor(() => expect(runRealtimeBusinessTool).toHaveBeenCalledTimes(1));
     expect(vi.mocked(runRealtimeBusinessTool).mock.calls[0]?.[0]).toMatchObject({
-      workspaceId: "ws", callId: "call-id", streamId: "stream",
+      workspaceId: "ws",
+      callId: "call-id",
+      streamId: "stream",
       name: "capture_booking_details",
+      taskKey: "realtime:call-id:epoch:1",
     });
     // Never create the next response while the tool-only provider response is
     // still active; wait for response.done and the completed tool output.
@@ -491,6 +494,75 @@ describe("Realtime Telnyx/OpenAI media contract", () => {
 
     await bridge.stop();
     expect(vi.mocked(finishRealtimeStream).mock.calls.at(-1)?.[3]).toBe(false);
+  });
+
+
+  it("caps business tools within one caller speech turn", async () => {
+    vi.mocked(runRealtimeBusinessTool).mockResolvedValue({
+      ok: true,
+      kind: "booking_state",
+      data: {
+        draftId: "draft-1",
+        version: 1,
+        serviceId: null,
+        date: "2026-09-26",
+        time: "10:00",
+        timezone: "UTC",
+        location: null,
+      },
+    } as Awaited<ReturnType<typeof runRealtimeBusinessTool>>);
+    const telnyx = telnyxSocket();
+    const bridge = attachRealtimeMedia({
+      telnyx: telnyx as unknown as WebSocket,
+      identity: { workspaceId: "ws", callId: "call-id", externalCallId: "telnyx-call" },
+      streamId: "stream",
+    });
+    await vi.waitFor(() => expect(shared.client).not.toBeNull());
+    const openai = currentOpenai();
+    openai.emit("open");
+    openai.emit("message", Buffer.from(JSON.stringify({ type: "session.updated" })));
+    openai.emit("message", Buffer.from(JSON.stringify({
+      type: "response.created", response: { id: "budget-tools" },
+    })));
+
+    for (let index = 1; index <= 6; index += 1) {
+      openai.emit("message", Buffer.from(JSON.stringify({
+        type: "response.output_item.done",
+        response_id: "budget-tools",
+        item: {
+          type: "function_call",
+          call_id: `budget-tool-${index}`,
+          name: "capture_booking_details",
+          arguments: JSON.stringify({ date: "2026-09-26" }),
+        },
+      })));
+    }
+
+    await vi.waitFor(() =>
+      expect(runRealtimeBusinessTool).toHaveBeenCalledTimes(5));
+    await vi.waitFor(() => {
+      const blocked = openai.sent.find(event =>
+        event.type === "conversation.item.create"
+        && (event.item as Record<string, unknown>)?.call_id === "budget-tool-6");
+      expect(blocked).toBeDefined();
+      const output = JSON.parse(String(
+        (blocked!.item as Record<string, unknown>).output,
+      )) as Record<string, unknown>;
+      expect(output).toMatchObject({
+        ok: false,
+        code: "AGENT_TASK_ACTION_BUDGET",
+      });
+    });
+    expect(logger.warn).toHaveBeenCalledWith(
+      expect.objectContaining({
+        workspaceId: "ws",
+        callId: "call-id",
+        usedTools: 5,
+      }),
+      "Realtime caller turn reached the business-tool action budget",
+    );
+
+    await bridge.stop();
   });
 
 });

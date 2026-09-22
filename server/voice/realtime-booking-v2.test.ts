@@ -1,23 +1,25 @@
 import { afterAll, beforeEach, describe, expect, it } from "vitest";
+import { asc, eq } from "drizzle-orm";
 import { closeDatabase, db } from "@/db";
-import { appointments, bookingDrafts, contacts, messages, services, workspaces } from "@/db/schema";
+import { agentTaskRuns, agentTaskSteps, aiAgents, appointments, bookingDrafts, contacts, messages, services, workspaces } from "@/db/schema";
 import { getOrCreateOpenConversation } from "@/server/domain/core/repository";
 import { saveBusinessSetup } from "@/server/domain/onboarding/repository";
 import { createVoiceCall, updateVoiceCall } from "./repository";
 import { runRealtimeBusinessTool } from "./realtime-tools";
 import { recordBookingPreviewDelivery } from "@/server/booking/offers";
+import { defaultAgentCapabilities } from "@/server/agent/capabilities";
 
 describe("Realtime voice booking v2 uses durable booking authority", () => {
-  let workspaceId = "", contactId = "", conversationId = "", callId = "";
+  let workspaceId = "", contactId = "", conversationId = "", callId = "", agentId = "";
 
   beforeEach(async () => {
     await db.delete(workspaces);
     const [workspace] = await db.insert(workspaces).values({ name: "Realtime booking v2" }).returning();
     workspaceId = workspace.id;
-    const [agent] = await db.insert((await import("@/db/schema")).aiAgents).values({
+    const [agent] = await db.insert(aiAgents).values({
       workspaceId, name: "Mia", status: "ACTIVE",
     }).returning();
-    void agent;
+    agentId = agent.id;
     const [contact] = await db.insert(contacts).values({ workspaceId, name: "Ada" }).returning();
     contactId = contact.id;
     conversationId = (await getOrCreateOpenConversation(workspaceId, contactId)).id;
@@ -115,7 +117,31 @@ describe("Realtime voice booking v2 uses durable booking authority", () => {
     const replay = await run("book_appointment", {}, "tool-commit-repeat");
     expect(replay).toMatchObject({ ok: true, kind: "booking" });
     expect(await db.select().from(appointments)).toHaveLength(1);
-    expect((await db.select().from(bookingDrafts))[0].status).toBe("CONFIRMED");
+    const [draft] = await db.select().from(bookingDrafts);
+    expect(draft.status).toBe("CONFIRMED");
+
+    const [task] = await db.select().from(agentTaskRuns)
+      .where(eq(agentTaskRuns.taskKey, `booking:${draft.id}`));
+    const taskSteps = await db.select().from(agentTaskSteps)
+      .where(eq(agentTaskSteps.runId, task.id))
+      .orderBy(asc(agentTaskSteps.sequence));
+    expect(task.status).toBe("COMPLETED");
+    expect(task.metadata).toMatchObject({
+      channel: "PHONE",
+      voiceCallId: callId,
+      bookingDraftId: draft.id,
+    });
+    expect(taskSteps.map(step => step.action)).toEqual([
+      "CHECK_AVAILABILITY",
+      "BOOK_APPOINTMENT",
+      "BOOK_APPOINTMENT",
+    ]);
+    expect(taskSteps[0].result).toMatchObject({ kind: "availability" });
+    expect(taskSteps[1].result).toMatchObject({ kind: "pending_action" });
+    expect(taskSteps[2].result).toMatchObject({
+      kind: "booking",
+      data: { status: "CONFIRMED" },
+    });
   });
 
   it("will not commit an interrupted or undelivered preview", async () => {
@@ -135,4 +161,36 @@ describe("Realtime voice booking v2 uses durable booking authority", () => {
     expect(notCommitted).toMatchObject({ ok: true, kind: "pending_action" });
     expect(await db.select().from(appointments)).toHaveLength(0);
   });
+
+  it("honors capability revocation immediately during an active Realtime call", async () => {
+    await run("capture_booking_details", {
+      serviceName: "Office Cleaning",
+      dateExpression: "September 23, 2030",
+      timeExpression: "11 AM (Africa/Lagos)",
+    }, "revocation-capture");
+
+    await db.update(aiAgents).set({
+      behaviorSettings: {
+        capabilities: {
+          ...defaultAgentCapabilities,
+          CHECK_AVAILABILITY: false,
+          BOOK_APPOINTMENT: false,
+        },
+      },
+    }).where(eq(aiAgents.id, agentId));
+
+    const checked = await run("check_availability", {}, "revocation-check");
+    expect(checked).toMatchObject({
+      ok: false,
+      code: "AGENT_ACTION_DISABLED",
+    });
+
+    const booked = await run("book_appointment", {}, "revocation-book");
+    expect(booked).toMatchObject({
+      ok: false,
+      code: "AGENT_ACTION_DISABLED",
+    });
+    expect(await db.select().from(appointments)).toHaveLength(0);
+  });
+
 });

@@ -10,6 +10,7 @@ import { AppError } from "@/server/http/errors";
 import { logger } from "@/server/observability/logger";
 import { generateAIWithUsage } from "@/server/orchestrator/usage";
 import { isExplicitActionConfirmation } from "@/server/orchestrator/pending-actions";
+import { recordExternalTaskReceipt } from "@/server/orchestrator/task-runs";
 import { confirmAndExecuteBooking, getBookingOutcome } from "./commands";
 import { getBookingDraft, openBookingDraft, patchBookingDraft, type BookingContext, type BookingPatch } from "./drafts";
 import { prepareBookingPreview, searchBookingAvailability, searchBookingRangeAvailability, selectBookingOffer } from "./offers";
@@ -76,6 +77,38 @@ async function bookingFailureReply(context: BookingContext, error: unknown) {
     "Booking failed and configured staff follow-up could not be recorded");
     return reply;
   }
+}
+
+async function recordBookingTaskReceipt(
+  context: BookingContext,
+  draftId: string,
+  sourceMessageId: string,
+  action: "CHECK_AVAILABILITY" | "BOOK_APPOINTMENT",
+  actionInput: Record<string, unknown>,
+  result: {
+    kind: "availability" | "booking" | "pending_action";
+    data: Record<string, unknown>;
+  },
+  idempotencyKey: string,
+) {
+  if (!context.conversationId) return;
+  await recordExternalTaskReceipt({
+    workspaceId: context.workspaceId,
+    conversationId: context.conversationId,
+    contactId: context.contactId,
+    taskKey: `booking:${draftId}`,
+    sourceMessageId,
+    objective: "Book appointment",
+    action,
+    actionInput,
+    result,
+    idempotencyKey,
+    metadata: {
+      channel: context.channel,
+      sessionKey: context.sessionKey,
+      bookingDraftId: draftId,
+    },
+  });
 }
 
 function previewReply(preview: typeof bookingPreviews.$inferSelect) {
@@ -185,6 +218,37 @@ export async function handleBookingTurn(
     const result = await getBookingOutcome(ctx, receiptDraft.id);
     const appointment = result.appointment;
     const timezone = receiptDraft.customerTimezone ?? appointment?.timezone ?? "UTC";
+    if (appointment) {
+      await recordBookingTaskReceipt(
+        ctx,
+        receiptDraft.id,
+        message.id,
+        "BOOK_APPOINTMENT",
+        { draftId: receiptDraft.id },
+        {
+          kind: "booking",
+          data: {
+            appointmentId: appointment.id,
+            title: appointment.title,
+            startsAt: appointment.startsAt.toISOString(),
+            endsAt: appointment.endsAt.toISOString(),
+            timezone: appointment.timezone,
+            status: appointment.status,
+          },
+        },
+        `booking-confirmed:${appointment.id}`,
+      );
+    } else if (result.state === "COMMITTING" || result.state === "RECONCILING") {
+      await recordBookingTaskReceipt(
+        ctx,
+        receiptDraft.id,
+        message.id,
+        "BOOK_APPOINTMENT",
+        { draftId: receiptDraft.id },
+        { kind: "booking", data: { state: result.state, status: result.state } },
+        `booking-outcome:${receiptDraft.id}:${result.state}:${message.id}`,
+      );
+    }
     return { reply: appointment
       ? "Your " + appointment.title + " appointment is confirmed for " + humanTime(appointment.startsAt, timezone) + " (" + timezone + ")."
       : "I'm still checking the saved booking result. I haven't confirmed it yet; please don't submit another booking." };
@@ -203,6 +267,26 @@ export async function handleBookingTurn(
     const prepared = await prepareBookingPreview(ctx, {
       draftId: existing!.id, expectedVersion: selected.draft.version,
     }, now);
+    await recordBookingTaskReceipt(
+      ctx,
+      existing!.id,
+      message.id,
+      "BOOK_APPOINTMENT",
+      {
+        draftId: existing!.id,
+        offerId,
+        previewId: prepared.preview.id,
+      },
+      {
+        kind: "pending_action",
+        data: {
+          pendingActionId: prepared.preview.id,
+          type: "BOOK_APPOINTMENT",
+          ...prepared.preview.content,
+        },
+      },
+      `booking-preview:${prepared.preview.id}`,
+    );
     return { reply: previewReply(prepared.preview), preview: {
       draftId: existing!.id, previewId: prepared.preview.id, version: selected.draft.version,
     } };
@@ -229,6 +313,30 @@ export async function handleBookingTurn(
         if (result.state === "CONFIRMED") {
           const state = await getBookingOutcome(ctx, existing.id);
           const appointment = state.appointment;
+          if (appointment) {
+            await recordBookingTaskReceipt(
+              ctx,
+              existing.id,
+              message.id,
+              "BOOK_APPOINTMENT",
+              {
+                draftId: existing.id,
+                previewId: preview.id,
+              },
+              {
+                kind: "booking",
+                data: {
+                  appointmentId: appointment.id,
+                  title: appointment.title,
+                  startsAt: appointment.startsAt.toISOString(),
+                  endsAt: appointment.endsAt.toISOString(),
+                  timezone: appointment.timezone,
+                  status: appointment.status,
+                },
+              },
+              `booking-confirmed:${appointment.id}`,
+            );
+          }
           return {
             reply: appointment
               ? "Your " + appointment.title + " appointment is confirmed for " +
@@ -237,6 +345,21 @@ export async function handleBookingTurn(
               : "I'm still verifying the appointment receipt. I can't confirm that it's booked yet.",
           };
         }
+        await recordBookingTaskReceipt(
+          ctx,
+          existing.id,
+          message.id,
+          "BOOK_APPOINTMENT",
+          {
+            draftId: existing.id,
+            previewId: preview.id,
+          },
+          {
+            kind: "booking",
+            data: { state: result.state, status: result.state },
+          },
+          `booking-outcome:${existing.id}:${result.state}:${message.id}`,
+        );
         return { reply: result.state === "FAILED"
           ? "I could not complete the appointment. I haven't booked another time."
           : "I'm checking the final booking status. Please don't submit the appointment again; I can check its saved result." };
@@ -345,6 +468,31 @@ export async function handleBookingTurn(
         draftId: draft.id, expectedVersion: current.version,
         period: decision.range as BookingSearchPeriod,
       }, now);
+      await recordBookingTaskReceipt(
+        ctx,
+        draft.id,
+        message.id,
+        "CHECK_AVAILABILITY",
+        {
+          draftId: draft.id,
+          period: decision.range,
+          version: current.version,
+        },
+        {
+          kind: "availability",
+          data: {
+            timezone: current.customerTimezone ?? tz,
+            state: ranged.state,
+            slots: ranged.offers.map((offer) => ({
+              offerId: offer.id,
+              startsAt: offer.startsAt.toISOString(),
+              endsAt: offer.endsAt.toISOString(),
+              timezone: offer.timezone,
+            })),
+          },
+        },
+        `availability-range:${draft.id}:${current.version}:${decision.range}:${message.id}`,
+      );
       if (!ranged.offers.length) {
         return { reply: "I checked that time range and found no available appointment slots. Would you like another date or time range?" };
       }
@@ -361,6 +509,30 @@ export async function handleBookingTurn(
     const found = await searchBookingAvailability(ctx, {
       draftId: draft.id, expectedVersion: current.version,
     }, now);
+    await recordBookingTaskReceipt(
+      ctx,
+      draft.id,
+      message.id,
+      "CHECK_AVAILABILITY",
+      {
+        draftId: draft.id,
+        version: current.version,
+      },
+      {
+        kind: "availability",
+        data: {
+          timezone: current.customerTimezone ?? tz,
+          state: found.state,
+          slots: found.offers.map((offer) => ({
+            offerId: offer.id,
+            startsAt: offer.startsAt.toISOString(),
+            endsAt: offer.endsAt.toISOString(),
+            timezone: offer.timezone,
+          })),
+        },
+      },
+      `availability-exact:${draft.id}:${current.version}:${message.id}`,
+    );
     if (!found.offers.length) {
       return { reply: "I checked the calendar and that exact time is unavailable. Would you like to try another date or time?" };
     }
@@ -371,6 +543,26 @@ export async function handleBookingTurn(
     const prepared = await prepareBookingPreview(ctx, {
       draftId: draft.id, expectedVersion: selected.draft.version,
     }, now);
+    await recordBookingTaskReceipt(
+      ctx,
+      draft.id,
+      message.id,
+      "BOOK_APPOINTMENT",
+      {
+        draftId: draft.id,
+        offerId: selected.offer.id,
+        previewId: prepared.preview.id,
+      },
+      {
+        kind: "pending_action",
+        data: {
+          pendingActionId: prepared.preview.id,
+          type: "BOOK_APPOINTMENT",
+          ...prepared.preview.content,
+        },
+      },
+      `booking-preview:${prepared.preview.id}`,
+    );
     return { reply: previewReply(prepared.preview),
       preview: { draftId: draft.id, previewId: prepared.preview.id,
         version: selected.draft.version } };

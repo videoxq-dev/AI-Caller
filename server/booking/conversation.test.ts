@@ -1,8 +1,8 @@
 import { randomUUID } from "node:crypto";
 import { afterAll, beforeEach, describe, expect, it, vi } from "vitest";
-import { eq } from "drizzle-orm";
+import { asc, eq } from "drizzle-orm";
 import { closeDatabase, db } from "@/db";
-import { aiAgents, appointments, bookingDrafts, bookingOffers, services, webchatSessions, workspaces } from "@/db/schema";
+import { agentTaskRuns, agentTaskSteps, aiAgents, appointments, bookingDrafts, bookingOffers, services, webchatSessions, workspaces } from "@/db/schema";
 import { saveBusinessSetup } from "@/server/domain/onboarding/repository";
 import { createOrResumeWebchatSession, ensureWebchatWidget } from "@/server/webchat/repository";
 import { generateAIWithUsage } from "@/server/orchestrator/usage";
@@ -68,6 +68,24 @@ describe("booking conversation through the authenticated widget (disposable Post
     expect(rows[0].startsAt.toISOString()).toBe("2037-09-25T10:00:00.000Z");
     expect(rows[0].endsAt.toISOString()).toBe("2037-09-25T14:00:00.000Z");
     expect(rows[0].notes).toBe("Sheridan");
+    const [draft] = await db.select().from(bookingDrafts);
+    const [task] = await db.select().from(agentTaskRuns)
+      .where(eq(agentTaskRuns.taskKey, `booking:${draft.id}`));
+    const steps = await db.select().from(agentTaskSteps)
+      .where(eq(agentTaskSteps.runId, task.id))
+      .orderBy(asc(agentTaskSteps.sequence));
+    expect(task.status).toBe("COMPLETED");
+    expect(steps.map(step => step.action)).toEqual([
+      "CHECK_AVAILABILITY",
+      "BOOK_APPOINTMENT",
+      "BOOK_APPOINTMENT",
+    ]);
+    expect(steps[0].result).toMatchObject({ kind: "availability" });
+    expect(steps[1].result).toMatchObject({ kind: "pending_action" });
+    expect(steps[2].result).toMatchObject({
+      kind: "booking",
+      data: { appointmentId: rows[0].id, status: "CONFIRMED" },
+    });
     expect(generateAIWithUsage).toHaveBeenCalledTimes(3);
   });
 

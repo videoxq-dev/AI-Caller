@@ -16,6 +16,7 @@ const MAX_OPENING_AUDIO_BYTES = 256 * 1024;
 const MAX_AUDIO_DELTA_BYTES = 128 * 1024;
 const AUDIO_PACKET_BYTES = 160; // 20 ms of 8-kHz PCMU
 const MAX_OUTPUT_PACKETS = 1500; // 30 seconds of queued AI speech
+const MAX_BUSINESS_TOOLS_PER_CALLER_TURN = 5;
 const MAX_CALL_MS = 10 * 60 * 1000;
 const OPENAI_READY_MS = 15_000;
 const OPENING_WAIT_MS = 30_000;
@@ -77,6 +78,7 @@ export function attachRealtimeMedia({ telnyx, identity, streamId }: BridgeOption
   let budgetHangupRequested = false;
   let toolSerial = Promise.resolve();
   const responseToolCounts = new Map<string, number>();
+  const businessToolCallsByEpoch = new Map<number, number>();
   const completedToolResponses = new Set<string>();
   const resumedToolResponses = new Set<string>();
   const responseStatuses = new Map<string, string>();
@@ -318,13 +320,34 @@ export function attachRealtimeMedia({ telnyx, identity, streamId }: BridgeOption
     if (item.type !== "function_call" || typeof item.call_id !== "string"
       || typeof item.name !== "string" || typeof item.arguments !== "string") return;
     if (epoch !== callerSpeechEpoch) return;
+    const usedTools = businessToolCallsByEpoch.get(epoch) ?? 0;
+    if (usedTools >= MAX_BUSINESS_TOOLS_PER_CALLER_TURN) {
+      logger.warn(
+        { workspaceId, callId, epoch, tool: item.name, usedTools },
+        "Realtime caller turn reached the business-tool action budget",
+      );
+      sendOpenAI({ type: "conversation.item.create", item: {
+        type: "function_call_output",
+        call_id: item.call_id,
+        output: JSON.stringify({
+          ok: false,
+          code: "AGENT_TASK_ACTION_BUDGET",
+          reason: "The safe action limit for this caller turn was reached. Do not call another business tool until the caller speaks again; explain what was completed and ask how they want to continue.",
+        }),
+      } });
+      return;
+    }
+    businessToolCallsByEpoch.set(epoch, usedTools + 1);
     const call = await getVoiceCall(workspaceId, callId);
     if (!call || !open || !ready || epoch !== callerSpeechEpoch
       || call.status !== "ACTIVE" || call.metadata.realtimeStreamId !== streamId
       || call.metadata.voiceTechnology !== "REALTIME") return;
     const result = await runRealtimeBusinessTool({
       workspaceId, callId, streamId, conversationId: call.conversationId, contactId: call.contactId,
-      name: item.name, arguments: item.arguments, sourceEventId: item.call_id,
+      name: item.name,
+      arguments: item.arguments,
+      sourceEventId: item.call_id,
+      taskKey: `realtime:${callId}:epoch:${epoch}`,
       isCurrentTurn: () => open && epoch === callerSpeechEpoch,
     });
     const response = result ?? {
@@ -380,6 +403,7 @@ export function attachRealtimeMedia({ telnyx, identity, streamId }: BridgeOption
           ) }, "Realtime caller activity interrupted assistant playback");
       }
       callerSpeechEpoch += 1;
+      businessToolCallsByEpoch.clear();
       for (const id of pendingResponses) interruptedResponseIds.add(id);
       for (const id of responsesAwaitingAudioDrain) interruptedResponseIds.add(id);
       clearAudio();
