@@ -16,6 +16,7 @@ type CalendlyEventType = {
   slug?: string;
   uri?: string;
   scheduling_url?: string;
+  duration?: number;
 };
 
 type CalendlyInvitee = {
@@ -58,7 +59,7 @@ function scheduledEventIdFromInvitee(response: CalendlyCreateInviteeResponse) {
 export class CalendlyCalendarProvider implements CalendarProvider {
   private readonly credentials: Credentials;
   private readonly settings: RuntimeSettings;
-  private resolvedEventTypeUri?: string;
+  private resolvedEventType?: { uri: string; duration: number };
 
   constructor(input: CalendarInput, private readonly fetcher: typeof fetch = fetch) {
     this.credentials = decryptCredentials(input);
@@ -77,12 +78,22 @@ export class CalendlyCalendarProvider implements CalendarProvider {
   }
 
   private async eventType() {
-    if (this.resolvedEventTypeUri) return this.resolvedEventTypeUri;
+    if (this.resolvedEventType) return this.resolvedEventType;
 
     const configured = stringSetting(this.settings, "eventTypeUri", "eventType");
     if (configured?.startsWith("https://api.calendly.com/event_types/")) {
-      this.resolvedEventTypeUri = configured;
-      return configured;
+      const event = await providerJson<{ resource?: CalendlyEventType }>(
+        configured,
+        { headers: this.headers() },
+        this.fetcher,
+      );
+      const duration = event.resource?.duration;
+      if (event.resource?.active === false || !event.resource?.uri ||
+        !Number.isSafeInteger(duration) || !duration || duration < 1 || duration > 720) {
+        throw new Error("The configured Calendly event type is inactive or has no valid duration.");
+      }
+      this.resolvedEventType = { uri: event.resource.uri, duration };
+      return this.resolvedEventType;
     }
 
     const me = await providerJson<{ resource?: { uri?: string } }>(
@@ -111,13 +122,18 @@ export class CalendlyCalendarProvider implements CalendarProvider {
         return [item.name, item.slug, schedulingSlug, item.uri, uriId].some((value) => normalized(value) === target);
       });
       if (!selected) throw new Error(`No active Calendly event type matched "${configured}".`);
-    } else {
+    } else if (active.length === 1) {
       selected = active[0];
+    } else {
+      throw new Error("Choose a Calendly event type before using calendar booking.");
     }
 
-    if (!selected?.uri) throw new Error("Calendly event type could not be resolved.");
-    this.resolvedEventTypeUri = selected.uri;
-    return selected.uri;
+    if (!selected?.uri || !Number.isSafeInteger(selected.duration) ||
+      !selected.duration || selected.duration < 1 || selected.duration > 720) {
+      throw new Error("Calendly event type could not be resolved with a valid duration.");
+    }
+    this.resolvedEventType = { uri: selected.uri, duration: selected.duration };
+    return this.resolvedEventType;
   }
 
   private async createInvitee(input: { eventType: string; startsAt: Date; timezone: string; attendeeName?: string; attendeeEmail: string }) {
@@ -148,8 +164,12 @@ export class CalendlyCalendarProvider implements CalendarProvider {
   }
 
   async getAvailability(input: { startsAt: Date; endsAt: Date; timezone: string; durationMinutes?: number }) {
+    const eventType = await this.eventType();
+    if (input.durationMinutes !== undefined && input.durationMinutes !== eventType.duration) {
+      throw new Error("Calendly event type duration does not match the requested service duration.");
+    }
     const query = new URLSearchParams({
-      event_type: await this.eventType(),
+      event_type: eventType.uri,
       start_time: input.startsAt.toISOString(),
       end_time: input.endsAt.toISOString(),
     });
@@ -158,25 +178,50 @@ export class CalendlyCalendarProvider implements CalendarProvider {
       { headers: this.headers() },
       this.fetcher,
     );
-    const durationMs = (input.durationMinutes ?? numberSetting(this.settings, "meetingDurationMinutes", 30)) * 60_000;
+    const durationMs = eventType.duration * 60_000;
     return (response.collection ?? [])
       .filter((slot) => slot.status === "available" && slot.start_time)
       .map((slot) => {
         const startsAt = new Date(slot.start_time!);
+        if (!Number.isFinite(startsAt.getTime())) {
+          throw new Error("Calendly returned an invalid available start time.");
+        }
         return { startsAt, endsAt: new Date(startsAt.getTime() + durationMs) };
       });
   }
 
   async book(input: { startsAt: Date; endsAt: Date; timezone: string; title: string; attendeeName?: string; attendeeEmail?: string }) {
     if (!input.attendeeEmail) throw new Error("Calendly requires an attendee email address to create a booking.");
+    const eventType = await this.eventType();
+    const requestedDuration = (input.endsAt.getTime() - input.startsAt.getTime()) / 60_000;
+    if (!Number.isSafeInteger(requestedDuration) || requestedDuration !== eventType.duration) {
+      throw new Error("Calendly event type duration does not match the requested booking.");
+    }
     const externalId = await this.createInvitee({
-      eventType: await this.eventType(),
+      eventType: eventType.uri,
       startsAt: input.startsAt,
       timezone: input.timezone,
       attendeeName: input.attendeeName,
       attendeeEmail: input.attendeeEmail,
     });
-    return { externalId, startsAt: input.startsAt, endsAt: input.endsAt };
+    const event = await providerJson<{ resource?: {
+      uri?: string; status?: string; start_time?: string; end_time?: string;
+    } }>(
+      `https://api.calendly.com/scheduled_events/${encodeURIComponent(externalId)}`,
+      { headers: this.headers() },
+      this.fetcher,
+    );
+    if (!event.resource?.start_time || !event.resource.end_time ||
+      event.resource.status === "canceled") {
+      throw new Error("Calendly did not return a complete confirmed scheduled event.");
+    }
+    const startsAt = new Date(event.resource.start_time);
+    const endsAt = new Date(event.resource.end_time);
+    if (!Number.isFinite(startsAt.getTime()) || !Number.isFinite(endsAt.getTime()) ||
+      endsAt <= startsAt) {
+      throw new Error("Calendly returned invalid confirmed scheduled event times.");
+    }
+    return { externalId, startsAt, endsAt };
   }
 
   async reschedule(input: { externalId: string; startsAt: Date; endsAt: Date; timezone: string }) {
