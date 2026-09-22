@@ -684,7 +684,10 @@ export async function updateNativeAppointmentAfterReschedule(
       } : {}),
       status: "CONFIRMED", updatedAt: new Date(),
     }).where(and(eq(appointments.workspaceId, workspaceId), eq(appointments.id, appointmentId),
-      expectedUpdatedAt ? eq(appointments.updatedAt, expectedUpdatedAt) : undefined)).returning();
+      expectedUpdatedAt ? and(
+        gte(appointments.updatedAt, expectedUpdatedAt),
+        lt(appointments.updatedAt, new Date(expectedUpdatedAt.getTime() + 1)),
+      ) : undefined)).returning();
     if (!appointment) throw new AppError("APPOINTMENT_CHANGED", "That appointment changed before rescheduling.", 409);
     await tx.insert(automationEvents).values({
       workspaceId, type: "APPOINTMENT_RESCHEDULED",
@@ -716,7 +719,10 @@ export async function updateAppointmentAfterReschedule(
       status: "CONFIRMED",
       updatedAt: new Date(),
     }).where(and(eq(appointments.workspaceId, workspaceId), eq(appointments.id, appointmentId),
-      expectedUpdatedAt ? eq(appointments.updatedAt, expectedUpdatedAt) : undefined)).returning();
+      expectedUpdatedAt ? and(
+        gte(appointments.updatedAt, expectedUpdatedAt),
+        lt(appointments.updatedAt, new Date(expectedUpdatedAt.getTime() + 1)),
+      ) : undefined)).returning();
     if (!appointment) throw new AppError("APPOINTMENT_CHANGED", "That appointment changed before rescheduling.", 409);
     await tx.insert(automationEvents).values({
       workspaceId,
@@ -744,7 +750,10 @@ export async function setAppointmentStatus(
   return db.transaction(async (tx) => {
     const [appointment] = await tx.update(appointments).set({ status, updatedAt: new Date() })
       .where(and(eq(appointments.workspaceId, workspaceId), eq(appointments.id, appointmentId),
-        expectedUpdatedAt ? eq(appointments.updatedAt, expectedUpdatedAt) : undefined)).returning();
+        expectedUpdatedAt ? and(
+        gte(appointments.updatedAt, expectedUpdatedAt),
+        lt(appointments.updatedAt, new Date(expectedUpdatedAt.getTime() + 1)),
+      ) : undefined)).returning();
     if (!appointment) throw new AppError("APPOINTMENT_CHANGED", "That appointment changed before its status could be updated.", 409);
     if (status === "CANCELLED") {
       await tx.insert(automationEvents).values({
