@@ -35,6 +35,7 @@ export function AppointmentsDataPage() {
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [showBook, setShowBook] = useState(false);
   const [showReschedule, setShowReschedule] = useState(false);
+  const [savingReschedule, setSavingReschedule] = useState(false);
   const [rescheduleDraft, setRescheduleDraft] = useState({
     startsAt: "", endsAt: "",
   });
@@ -67,6 +68,7 @@ export function AppointmentsDataPage() {
   }, [selectedId, status]);
 
   useEffect(() => { void load(); }, [load]);
+  useEffect(() => { setShowReschedule(false); }, [selectedId]);
 
   const selected = useMemo(() => rows.find((row) => row.appointment.id === selectedId) ?? null, [rows, selectedId]);
   const todayCount = useMemo(() => rows.filter(({ appointment }) => new Date(appointment.startsAt).toDateString() === new Date().toDateString()).length, [rows]);
@@ -124,22 +126,30 @@ export function AppointmentsDataPage() {
       setError("Choose a future start and an end after the start.");
       return;
     }
-    const response = await fetch(`/api/appointments/${appointmentId}/reschedule`, {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({
-        startsAt: startsAt.toISOString(),
-        endsAt: endsAt.toISOString(),
-        timezone: Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC",
-      }),
-    });
-    if (!response.ok) {
-      const data = await response.json().catch(() => null) as { error?: { message?: string } } | null;
-      setError(data?.error?.message ?? "Unable to reschedule appointment.");
-      return;
+    if (savingReschedule) return;
+    setSavingReschedule(true);
+    try {
+      const response = await fetch(`/api/appointments/${appointmentId}/reschedule`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          startsAt: startsAt.toISOString(),
+          endsAt: endsAt.toISOString(),
+          timezone: Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC",
+        }),
+      });
+      if (!response.ok) {
+        const data = await response.json().catch(() => null) as { error?: { message?: string } } | null;
+        setError(data?.error?.message ?? "Unable to reschedule appointment.");
+        return;
+      }
+      setShowReschedule(false);
+      await load();
+    } catch {
+      setError("The appointment update could not be verified. Check the current appointment before retrying.");
+    } finally {
+      setSavingReschedule(false);
     }
-    setShowReschedule(false);
-    await load();
   }
 
   return (
@@ -198,8 +208,9 @@ export function AppointmentsDataPage() {
                 onChange={event => setRescheduleDraft(previous => ({
                   ...previous, endsAt: event.target.value,
                 }))} /></label>
-              <button type="button" onClick={() => void reschedule(selected.appointment.id)}>
-                Confirm reschedule
+              <button type="button" disabled={savingReschedule}
+                onClick={() => void reschedule(selected.appointment.id)}>
+                {savingReschedule ? "Saving reschedule…" : "Confirm reschedule"}
               </button>
             </div>}
           {selected.appointment.status !== "CANCELLED" &&
