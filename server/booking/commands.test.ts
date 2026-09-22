@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import { afterAll, beforeEach, describe, expect, it } from "vitest";
 import { eq } from "drizzle-orm";
 import { closeDatabase, db } from "@/db";
@@ -209,7 +210,7 @@ describe("durable native appointment command (disposable PostgreSQL)", () => {
       provider: "calendly",
       state: "COMMITTING",
       providerAttemptedAt: later(2100),
-      leaseOwner: "abandoned-worker",
+      leaseOwner: randomUUID(),
       leaseExpiresAt: new Date(now.getTime() - 1000),
       attemptCount: 1,
     }).where(eq(bookingCommands.id, commandId));
