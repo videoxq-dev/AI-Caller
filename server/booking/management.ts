@@ -277,9 +277,8 @@ async function finishRequest(ctx: BookingContext, row: RequestRow, sourceMessage
     eq(appointmentManagementRequests.previewDeliveredAt, row.previewDeliveredAt))).returning();
   if (!claimed) return { reply: "This appointment change is already being processed. Please ask for its status before trying again." };
   try {
-    let updated: Appointment;
     if (row.intent === "CANCEL") {
-      updated = await calendarBookingService.cancel(
+      await calendarBookingService.cancel(
         ctx.workspaceId, appointment.id, row.originalUpdatedAt ?? undefined,
       );
     } else {
@@ -298,11 +297,14 @@ async function finishRequest(ctx: BookingContext, row: RequestRow, sourceMessage
           "The requested service is no longer available.", 409);
       }
       await availableForReschedule(ctx, appointment, row.proposedStartsAt, row.proposedEndsAt, now);
-      updated = await calendarBookingService.reschedule(ctx.workspaceId, appointment.id, {
+      await calendarBookingService.reschedule(ctx.workspaceId, appointment.id, {
         startsAt: row.proposedStartsAt, endsAt: row.proposedEndsAt, timezone: row.timezone ?? appointment.timezone,
       }, row.originalUpdatedAt ?? undefined,
       serviceChange ? { serviceId: serviceChange.id, title: serviceChange.name } : undefined);
     }
+    const updated = await findOwnedAppointment(ctx, appointment.id);
+    if (!updated) throw new AppError("APPOINTMENT_NOT_FOUND",
+      "The saved appointment could not be verified after its change.", 503);
     await db.update(appointmentManagementRequests).set({
       status: "COMPLETED", completedAt: new Date(), updatedAt: new Date(),
     }).where(eq(appointmentManagementRequests.id, row.id));
