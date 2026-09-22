@@ -265,6 +265,21 @@ export async function executeBookingCommand(workspaceId: string, commandId: stri
   }
 }
 
+async function deferReconciliationRead(command: Command, now: Date) {
+  const ageMinutes = Math.max(0, Math.floor((now.getTime() - command.createdAt.getTime()) / 60_000));
+  const exponent = Math.min(5, Math.floor(ageMinutes / 5));
+  const delayMs = Math.min(60 * 60_000, 60_000 * (2 ** exponent));
+  await db.update(bookingCommands).set({
+    state: "RECONCILING",
+    nextAttemptAt: new Date(now.getTime() + delayMs),
+    updatedAt: now,
+  }).where(and(
+    eq(bookingCommands.id, command.id),
+    eq(bookingCommands.workspaceId, command.workspaceId),
+    eq(bookingCommands.state, "RECONCILING"),
+  ));
+}
+
 export async function recoverBookingCommands(limit = 50, now = new Date()) {
   const work = await db.select().from(bookingCommands).where(or(
     eq(bookingCommands.state, "PENDING"),
@@ -314,7 +329,14 @@ export async function recoverBookingCommands(limit = 50, now = new Date()) {
       }
       // Outlook has transactionId but no verified read-by-key adapter here.
       // Cal.com and Calendly lack the same proven key contract. Do not blindly
-      // reissue ambiguous external creates or free protected capacity.
+      // reissue ambiguous external creates or free protected capacity. Reads
+      // are paced with bounded backoff so an unresolved command cannot become
+      // an unbounded hot polling loop.
+      const [latest] = await db.select().from(bookingCommands).where(and(
+        eq(bookingCommands.id, command.id),
+        eq(bookingCommands.workspaceId, command.workspaceId),
+      )).limit(1);
+      if (latest?.state === "RECONCILING") await deferReconciliationRead(latest, now);
       unresolved++;
     } catch (error) {
       logger.error({ err: error, workspaceId: command.workspaceId, commandId: command.id },
