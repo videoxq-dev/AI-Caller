@@ -118,6 +118,52 @@ describe("agent task execution persistence", () => {
     expect(steps[0].result).toEqual({ kind: result.kind, data: result.data });
   });
 
+  it("uses an explicit live-channel task identity for replay scope", async () => {
+    const result: OrchestratorToolResult = {
+      kind: "qualification",
+      data: { qualified: true, score: 100, missingRequired: [] },
+    };
+    const executor = vi.fn(async () => result);
+    const tracked = createTrackedActionExecutor(executor);
+    const envelope: OrchestratorEnvelope = {
+      action: {
+        type: "QUALIFY_LEAD",
+        answers: [{ criterionId: "budget", answer: "Yes" }],
+      },
+    };
+    const identity = {
+      taskKey: "realtime:call-1:epoch:7",
+      sourceMessageId: null,
+      objective: "Handle live caller request",
+      metadata: { channel: "PHONE", voiceCallId: "call-1" },
+    };
+
+    expect(await tracked(
+      workspaceId,
+      conversationId,
+      contactId,
+      envelope,
+      identity,
+    )).toEqual(result);
+    expect(await tracked(
+      workspaceId,
+      conversationId,
+      contactId,
+      envelope,
+      identity,
+    )).toEqual(result);
+
+    expect(executor).toHaveBeenCalledOnce();
+    const [run] = await db.select().from(agentTaskRuns);
+    expect(run).toMatchObject({
+      taskKey: identity.taskKey,
+      sourceMessageId: null,
+      objective: identity.objective,
+      metadata: identity.metadata,
+    });
+    expect(await db.select().from(agentTaskSteps)).toHaveLength(1);
+  });
+
   it("returns a persisted authoritative result instead of repeating the same action", async () => {
     const result: OrchestratorToolResult = {
       kind: "qualification",
