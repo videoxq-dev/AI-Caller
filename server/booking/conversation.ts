@@ -2,7 +2,9 @@ import { and, desc, eq, inArray } from "drizzle-orm";
 import { z } from "zod";
 import { db } from "@/db";
 import { bookingDrafts, bookingPreviews, messages, services } from "@/db/schema";
-import { requireActiveWorkspaceAgent } from "@/server/agent/service";
+import { getWorkspaceAgent, requireActiveWorkspaceAgent } from "@/server/agent/service";
+import { capabilitiesFromBehaviorSettings } from "@/server/agent/capabilities";
+import { escalateConversationIssue } from "@/server/collaboration/service";
 import { getBusinessSetup } from "@/server/domain/onboarding/repository";
 import { AppError } from "@/server/http/errors";
 import { logger } from "@/server/observability/logger";
@@ -39,6 +41,37 @@ function errorReply(error: unknown) {
   if (error instanceof AppError && error.status < 500) return error.message;
   logger.error({ err: error }, "Booking conversation failed without a confirmed result");
   return "I couldn't complete that appointment request right now. I haven't confirmed a new booking.";
+}
+
+const CUSTOMER_RECOVERABLE_BOOKING_ERRORS = new Set([
+  "BOOKING_INTENT_UNCLEAR", "BOOKING_DETAILS_REQUIRED", "BOOKING_SERVICE_REQUIRED",
+  "BOOKING_SERVICE_UNAVAILABLE", "BOOKING_STALE_VERSION", "BOOKING_DRAFT_NOT_EDITABLE",
+  "BOOKING_PREVIEW_STALE", "BOOKING_OFFER_STALE", "BOOKING_CONFIRMATION_REQUIRED",
+  "BOOKING_CONFIRMATION_EVIDENCE_REQUIRED", "BOOKING_CONFIRMATION_SESSION_MISMATCH",
+  "APPOINTMENT_SLOT_UNAVAILABLE", "BOOKING_SOURCE_EVENT_CONFLICT",
+]);
+
+async function bookingFailureReply(context: BookingContext, error: unknown) {
+  const reply = errorReply(error);
+  const code = error instanceof AppError ? error.code : "BOOKING_OPERATIONAL_FAILURE";
+  if (CUSTOMER_RECOVERABLE_BOOKING_ERRORS.has(code) || !context.conversationId) return reply;
+  try {
+    const agent = await getWorkspaceAgent(context.workspaceId);
+    if (!agent || !/escalate/i.test(agent.whenUnsure)) return reply;
+    const capabilities = capabilitiesFromBehaviorSettings(agent.behaviorSettings);
+    if (!capabilities.ESCALATE) return reply;
+    await escalateConversationIssue({
+      workspaceId: context.workspaceId,
+      conversationId: context.conversationId,
+      reason: "Appointment booking needs staff follow-up (" + code.slice(0, 80) + ").",
+    });
+    return reply + " I've flagged this appointment issue for staff follow-up. I can keep helping with anything else.";
+  } catch (escalationError) {
+    logger.error({ err: escalationError, workspaceId: context.workspaceId,
+      conversationId: context.conversationId },
+    "Booking failed and configured staff follow-up could not be recorded");
+    return reply;
+  }
 }
 
 function previewReply(preview: typeof bookingPreviews.$inferSelect) {
@@ -152,7 +185,7 @@ export async function handleBookingTurn(
           ? "I could not complete the appointment. I haven't booked another time."
           : "I'm checking the final booking status. Please don't submit the appointment again; I can check its saved result." };
       } catch (error) {
-        return { reply: errorReply(error) };
+        return { reply: await bookingFailureReply(ctx, error) };
       }
     }
   }
@@ -172,7 +205,7 @@ export async function handleBookingTurn(
     parsed = await classifyBookingTurn(ctx, message.body, existing,
       business.profile?.timezone ?? "UTC");
   } catch (error) {
-    return { reply: errorReply(error) };
+    return { reply: await bookingFailureReply(ctx, error) };
   }
   const decision = parsed.intent;
   if (isCurrentTurn && !await isCurrentTurn()) return { reply: "I heard a correction; let me use your latest request." };
@@ -202,7 +235,7 @@ export async function handleBookingTurn(
         draftId: existing.id, expectedVersion: existing.version, sourceEventId: message.id,
       }, now);
       return { reply: "I've cancelled the unfinished appointment request. No appointment was created." };
-    } catch (error) { return { reply: errorReply(error) }; }
+    } catch (error) { return { reply: await bookingFailureReply(ctx, error) }; }
   }
   try {
     await requireActiveWorkspaceAgent(ctx.workspaceId, "CHECK_AVAILABILITY");
@@ -280,6 +313,6 @@ export async function handleBookingTurn(
       preview: { draftId: draft.id, previewId: prepared.preview.id,
         version: selected.draft.version } };
   } catch (error) {
-    return { reply: errorReply(error) };
+    return { reply: await bookingFailureReply(ctx, error) };
   }
 }
