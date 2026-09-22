@@ -68,6 +68,7 @@ function bookingExecutionProtected(envelope: OrchestratorEnvelope) {
 function taskStatusForResult(result: OrchestratorToolResult): AgentTaskRunStatus {
   if (result.kind === "pending_action") return "WAITING_CONFIRMATION";
   if (result.kind === "availability") return "WAITING_CUSTOMER";
+  if (result.kind === "sms" && result.data.sent !== true) return "FAILED";
   if (result.kind === "booking"
     && ["COMMITTING", "RECONCILING"].includes(String(result.data.status ?? result.data.state ?? ""))) {
     return "WAITING_SYSTEM";
@@ -85,14 +86,22 @@ function taskStatusForResult(result: OrchestratorToolResult): AgentTaskRunStatus
   return "COMPLETED";
 }
 
-function storedToolResult(value: unknown): OrchestratorToolResult | null {
-  if (!value || typeof value !== "object" || Array.isArray(value)) return null;
-  const record = value as Record<string, unknown>;
-  if (typeof record.kind !== "string"
-    || !record.data
-    || typeof record.data !== "object"
-    || Array.isArray(record.data)) return null;
-  return record as OrchestratorToolResult;
+function replayActionType(action: RegisteredAgentActionName): OrchestratorEnvelope["action"]["type"] {
+  if (action === "ANSWER_INQUIRY" || action === "UPDATE_CONTACT" || action === "UPDATE_LEAD") {
+    return "NONE";
+  }
+  return action;
+}
+
+function storedToolResult(
+  action: RegisteredAgentActionName,
+  value: unknown,
+): OrchestratorToolResult | null {
+  if (value == null) return null;
+  return validateOrchestratorToolResultForAction(
+    replayActionType(action),
+    value,
+  );
 }
 
 async function latestCustomerMessageId(workspaceId: string, conversationId: string) {
@@ -301,7 +310,7 @@ export async function recordExternalTaskReceipt(input: {
       input.idempotencyKey,
     );
     if (started.reused) {
-      const saved = storedToolResult(started.step.result);
+      const saved = storedToolResult(input.action, started.step.result);
       if (started.step.status === "COMPLETED" && saved) {
         await finishTaskRun(run.id, taskStatusForResult(saved));
         return { run, step: started.step, result: saved, reused: true as const };
@@ -355,7 +364,7 @@ export function createTrackedActionExecutor(executor: ActionExecutor): ActionExe
     );
 
     if (started.reused) {
-      const saved = storedToolResult(started.step.result);
+      const saved = storedToolResult(action, started.step.result);
       if (started.step.status === "COMPLETED" && saved) {
         await finishTaskRun(run.id, taskStatusForResult(saved));
         return saved;
