@@ -363,7 +363,8 @@ export function createSmsWebhookService(dependencies: SmsServiceDependencies) {
             metadata: {
               inReplyToProviderEventId: job.webhookEventId,
               ...(managementTurn?.preview
-                ? { appointmentManagementRequestId: managementTurn.preview.requestId }
+                ? { appointmentManagementRequestId: managementTurn.preview.requestId,
+                    appointmentManagementVersion: managementTurn.preview.version }
                 : {}),
               ...(bookingTurn?.preview ? {
                 bookingPreviewId: bookingTurn.preview.previewId,
@@ -375,6 +376,7 @@ export function createSmsWebhookService(dependencies: SmsServiceDependencies) {
           if (managementTurn?.preview) {
             await recordAppointmentManagementPreviewDelivery(
               bookingContext, managementTurn.preview.requestId, outbound.id,
+              managementTurn.preview.version,
             );
           }
           if (bookingTurn?.preview) {
