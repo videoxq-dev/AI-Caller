@@ -4,6 +4,7 @@ CREATE TABLE "agent_task_runs" (
   "conversation_id" uuid NOT NULL REFERENCES "conversations"("id") ON DELETE CASCADE,
   "contact_id" uuid NOT NULL REFERENCES "contacts"("id") ON DELETE CASCADE,
   "source_message_id" uuid,
+  "task_key" text NOT NULL,
   "status" text NOT NULL DEFAULT 'RUNNING'
     CHECK ("status" IN ('RUNNING','WAITING_CUSTOMER','WAITING_CONFIRMATION','COMPLETED','FAILED')),
   "objective" text,
@@ -14,9 +15,10 @@ CREATE TABLE "agent_task_runs" (
   "updated_at" timestamptz NOT NULL DEFAULT now()
 );
 
-CREATE UNIQUE INDEX "agent_task_runs_source_message_uq"
-  ON "agent_task_runs" ("workspace_id","conversation_id","source_message_id")
-  WHERE "source_message_id" IS NOT NULL;
+CREATE UNIQUE INDEX "agent_task_runs_task_key_uq"
+  ON "agent_task_runs" ("workspace_id","conversation_id","task_key");
+CREATE INDEX "agent_task_runs_source_message_idx"
+  ON "agent_task_runs" ("workspace_id","conversation_id","source_message_id");
 CREATE INDEX "agent_task_runs_workspace_status_idx"
   ON "agent_task_runs" ("workspace_id","status","started_at");
 CREATE INDEX "agent_task_runs_conversation_idx"
