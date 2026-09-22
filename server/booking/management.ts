@@ -256,7 +256,9 @@ async function finishRequest(ctx: BookingContext, row: RequestRow, sourceMessage
   try {
     let updated: Appointment;
     if (row.intent === "CANCEL") {
-      updated = await calendarBookingService.cancel(ctx.workspaceId, appointment.id);
+      updated = await calendarBookingService.cancel(
+        ctx.workspaceId, appointment.id, row.originalUpdatedAt ?? undefined,
+      );
     } else {
       if (!row.proposedStartsAt || !row.proposedEndsAt) {
         throw new AppError("APPOINTMENT_CHANGE_INCOMPLETE", "Please choose a new date and time.", 422);
@@ -264,7 +266,7 @@ async function finishRequest(ctx: BookingContext, row: RequestRow, sourceMessage
       await availableForReschedule(ctx, appointment, row.proposedStartsAt, row.proposedEndsAt, now);
       updated = await calendarBookingService.reschedule(ctx.workspaceId, appointment.id, {
         startsAt: row.proposedStartsAt, endsAt: row.proposedEndsAt, timezone: row.timezone ?? appointment.timezone,
-      });
+      }, row.originalUpdatedAt ?? undefined);
     }
     await db.update(appointmentManagementRequests).set({
       status: "COMPLETED", completedAt: new Date(), updatedAt: new Date(),
