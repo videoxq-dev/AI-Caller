@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import { z } from "zod";
 import { and, desc, eq, sql } from "drizzle-orm";
 import { db } from "@/db";
@@ -493,7 +494,7 @@ export async function runRealtimeBusinessTool(input: {
     // The model's words can help gather a proposal, but only a persisted
     // same-call caller utterance can approve a consequential change.
     const body = parsed.data.message;
-    const sourceId = utterance?.id ?? input.sourceEventId ?? input.callId;
+    const sourceId = utterance?.id ?? randomUUID();
     const turn = await handleAppointmentManagementTurn(ctx, { id: sourceId, body });
     if (!turn) return { ok: false as const, reason: "No existing appointment-management request matched. Continue the normal conversation." };
     if (!input.isCurrentTurn()) {
