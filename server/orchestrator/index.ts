@@ -887,7 +887,7 @@ export function createResponseOrchestrator(dependencies: OrchestratorDependencie
           const outcome = await runBoundedTaskChain({
             initialEnvelope: first,
             initialResult: toolResult,
-            maxActions: 3,
+            maxActions: 5,
             replan: async (previous, result, actionCount) => {
               const response = await dependencies.generate(
                 workspaceId,
