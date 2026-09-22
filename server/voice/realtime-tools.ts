@@ -435,12 +435,26 @@ export async function runRealtimeBusinessTool(input: {
     || call.metadata.realtimeStreamId !== input.streamId) {
     return { ok: false, reason: "The call is no longer authorized for AI actions." };
   }
-  // A disabled capability should produce a tool denial, not crash an active call.
+  // Re-check current capability policy at execution time. Realtime session
+  // tool definitions can be stale after an owner changes permissions mid-call.
+  // The server execution boundary is authoritative.
   try {
     const policy = await requireActiveWorkspaceAgent(input.workspaceId, "ANSWER_INQUIRY");
-    if (input.name === "capture_booking_details") {
-      assertAgentActionAllowed(policy.capabilities,
-        policy.capabilities.CHECK_AVAILABILITY ? "CHECK_AVAILABILITY" : "BOOK_APPOINTMENT");
+    if (input.name in {
+      capture_booking_details: true,
+      check_availability: true,
+      book_appointment: true,
+      escalate_to_staff: true,
+      qualify_lead: true,
+    } && !realtimeBusinessToolAllowed(
+      input.name as RealtimeBusinessToolName,
+      policy.capabilities,
+    )) {
+      throw new AppError(
+        "AGENT_ACTION_DISABLED",
+        `The agent is not permitted to perform ${input.name}.`,
+        403,
+      );
     }
   } catch (error) {
     if (error instanceof AppError && error.status < 500) {
