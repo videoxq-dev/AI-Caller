@@ -142,6 +142,22 @@ describe("durable native appointment command (disposable PostgreSQL)", () => {
     expect(await db.select().from(appointments)).toHaveLength(0);
   });
 
+  it("will not treat a bare yes to an unrelated AI question as booking approval", async () => {
+    const preview = await previewFor();
+    await db.insert(messages).values({
+      workspaceId, conversationId, channel: "WEBCHAT", direction: "OUTBOUND",
+      senderType: "AI", contentType: "TEXT",
+      body: "Would you like to hear about our other services?",
+      createdAt: later(1500),
+    });
+    const sourceEventId = await confirmMessage("Yes, please.");
+    await expect(confirmAndExecuteBooking(context, {
+      ...preview, expectedVersion: preview.version, sourceEventId,
+    }, later(2000))).rejects.toMatchObject({ code: "BOOKING_CONFIRMATION_REQUIRED" });
+    expect(await db.select().from(bookingCommands)).toHaveLength(0);
+    expect(await db.select().from(appointments)).toHaveLength(0);
+  });
+
   it("prevents two customers from reserving the same one-capacity interval", async () => {
     const first = await previewFor();
     const [other] = await db.insert(contacts).values({ workspaceId, name: "Second caller" }).returning();
