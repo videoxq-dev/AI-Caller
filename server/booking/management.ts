@@ -30,7 +30,7 @@ const ACTIVE = ["COLLECTING", "AWAITING_CONFIRMATION", "EXECUTING"];
 const EDITABLE_APPOINTMENT = ["PENDING", "CONFIRMED"] as const;
 const REQUEST_TTL_MS = 30 * 60_000;
 const DATE_PATTERN = /\b(?:\d{4}-\d{2}-\d{2}|(?:jan(?:uary)?|feb(?:ruary)?|mar(?:ch)?|apr(?:il)?|may|jun(?:e)?|jul(?:y)?|aug(?:ust)?|sep(?:tember)?|sept|oct(?:ober)?|nov(?:ember)?|dec(?:ember)?)\s+\d{1,2}(?:st|nd|rd|th)?(?:,?\s+\d{4})?|today|tomorrow|next\s+(?:monday|tuesday|wednesday|thursday|friday|saturday|sunday))\b/i;
-const TIME_PATTERN = /\b(\d{1,2}(?::\d{2})?\s*(?:am|pm)(?:\s*\([^()]{1,80}\)|\s+UTC)?|\d{1,2}:\d{2}(?:\s*\([^()]{1,80}\)|\s+UTC)?)\b/i;
+const TIME_PATTERN = /\b(\d{1,2}(?::\d{2})?\s*(?:am|pm)(?:\s*\([^()]{1,80}\)|\s+UTC)?|\d{1,2}:\d{2}(?:\s*\([^()]{1,80}\)|\s+UTC)?)(?=\s|$|[,!?])/i;
 
 export function appointmentManagementIntent(text: string): Intent | null {
   const hasAppointment = /\b(?:appointment|booking|reservation)\b/i.test(text);
@@ -299,6 +299,12 @@ export async function handleAppointmentManagementTurn(
   if (!ctx.conversationId) return null;
   const initialIntent = appointmentManagementIntent(message.body);
   let active = await currentRequest(ctx, now);
+  if (/\b(?:don['’]t|do not|not)\s+cancel\b/i.test(message.body)) {
+    if (active && active.status !== "EXECUTING") {
+      await saveRequest(active, { status: "ABANDONED" }, now);
+    }
+    return { reply: "Understood. I haven't cancelled or changed your appointment." };
+  }
   // An explicit new booking must not inherit a completed or collecting edit.
   if (active && /\b(?:book|schedule|reserve)\s+(?:a|an|another|new)\b/i.test(message.body)) {
     if (active.status !== "EXECUTING") await saveRequest(active, { status: "ABANDONED" }, now);
@@ -326,8 +332,7 @@ export async function handleAppointmentManagementTurn(
     return { reply: statusReply(await linkedAppointments(ctx, now, true)) };
   }
   if (active?.status === "EXECUTING") return finishRequest(ctx, active, message.id, now);
-  if (active && /\b(?:no|never mind|nevermind|stop|don't|do not)\b/i.test(message.body) &&
-    !/\b(?:don't cancel|do not cancel)\b/i.test(message.body)) {
+  if (active && /\b(?:no|never mind|nevermind|stop|don['’]t|do not)\b/i.test(message.body)) {
     await saveRequest(active, { status: "ABANDONED" }, now);
     return { reply: "I've stopped the appointment-change request. Your existing appointment has not been changed." };
   }
@@ -356,7 +361,10 @@ export async function handleAppointmentManagementTurn(
   }
   const candidates = await linkedAppointments(ctx, now);
   if (!active.appointmentId) {
-    if (!candidates.length || candidates.length > 5) return { reply: chooseReply(candidates) };
+    if (!candidates.length || candidates.length > 5) {
+      await saveRequest(active, { status: "ABANDONED" }, now);
+      return { reply: chooseReply(candidates) };
+    }
     const selected = selectAppointment(candidates, message.body);
     if (!selected) return { reply: chooseReply(candidates) };
     active = await saveRequest(active, {
