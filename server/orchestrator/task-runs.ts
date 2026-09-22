@@ -10,6 +10,7 @@ import {
 } from "./action-registry";
 import {
   executeValidatedOrchestratorTools,
+  validateOrchestratorToolResultForAction,
   type OrchestratorEnvelope,
   type OrchestratorToolResult,
 } from "./tools";
@@ -271,13 +272,17 @@ export async function recordExternalTaskReceipt(input: {
   taskKey: string;
   sourceMessageId?: string | null;
   objective?: string | null;
-  action: RegisteredAgentActionName;
+  action: "CHECK_AVAILABILITY" | "BOOK_APPOINTMENT";
   actionInput: Record<string, unknown>;
   result: OrchestratorToolResult;
   idempotencyKey: string;
   metadata?: Record<string, unknown>;
 }) {
   try {
+    const validatedResult = validateOrchestratorToolResultForAction(
+      input.action,
+      input.result,
+    );
     const run = await ensureTaskRun(
       input.workspaceId,
       input.conversationId,
@@ -304,9 +309,9 @@ export async function recordExternalTaskReceipt(input: {
       return { run, step: started.step, result: null, reused: true as const };
     }
 
-    await completeTaskStep(started.step.id, input.result);
-    await finishTaskRun(run.id, taskStatusForResult(input.result));
-    return { run, step: started.step, result: input.result, reused: false as const };
+    await completeTaskStep(started.step.id, validatedResult);
+    await finishTaskRun(run.id, taskStatusForResult(validatedResult));
+    return { run, step: started.step, result: validatedResult, reused: false as const };
   } catch (error) {
     // Booking and other protected domain engines must never fail because the
     // cross-channel task audit trail could not be written after the fact.
