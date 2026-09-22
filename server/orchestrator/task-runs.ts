@@ -339,4 +339,4 @@ export function createTrackedActionExecutor(executor: ActionExecutor): ActionExe
 }
 
 export const executeTrackedOrchestratorTools =
-  createTrackedActionExecutor(executeOrchestratorTools);
+  createTrackedActionExecutor(executeValidatedOrchestratorTools);
