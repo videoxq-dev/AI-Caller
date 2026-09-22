@@ -2,7 +2,6 @@ import type { CalendarProvider } from "../contracts";
 import { providerJson } from "../http";
 import {
   decryptCredentials,
-  numberSetting,
   requireCredential,
   stringSetting,
   type CalendarInput,
