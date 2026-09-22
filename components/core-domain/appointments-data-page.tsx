@@ -181,12 +181,18 @@ export function AppointmentsDataPage() {
               <small>Enter times in your device's timezone ({Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC"}). The existing appointment remains unchanged until saved.</small>
               <label>New start <input aria-label="New appointment start" type="datetime-local"
                 value={rescheduleDraft.startsAt}
-                onChange={event => setRescheduleDraft(previous => ({
-                  ...previous, startsAt: event.target.value,
-                  endsAt: new Date(new Date(event.target.value).getTime() +
-                    (new Date(selected.appointment.endsAt).getTime() -
-                    new Date(selected.appointment.startsAt).getTime())).toISOString().slice(0, 16),
-                }))} /></label>
+                onChange={event => setRescheduleDraft(previous => {
+                  const start = new Date(event.target.value);
+                  const duration = new Date(selected.appointment.endsAt).getTime() -
+                    new Date(selected.appointment.startsAt).getTime();
+                  return {
+                    ...previous,
+                    startsAt: event.target.value,
+                    endsAt: Number.isFinite(start.getTime())
+                      ? toLocalInput(new Date(start.getTime() + duration))
+                      : previous.endsAt,
+                  };
+                })} /></label>
               <label>New end <input aria-label="New appointment end" type="datetime-local"
                 value={rescheduleDraft.endsAt}
                 onChange={event => setRescheduleDraft(previous => ({
