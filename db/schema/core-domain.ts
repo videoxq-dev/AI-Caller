@@ -150,6 +150,7 @@ export const appointments = pgTable(
     conversationId: uuid("conversation_id").references(() => conversations.id, { onDelete: "set null" }),
     integrationId: uuid("integration_id").references(() => integrations.id, { onDelete: "set null" }),
     externalEventId: text("external_event_id"),
+    bookingCommandId: uuid("booking_command_id"),
     serviceId: uuid("service_id").references(() => services.id, { onDelete: "set null" }),
     title: text("title").notNull(),
     startsAt: timestamp("starts_at", { withTimezone: true, mode: "date" }).notNull(),
@@ -166,5 +167,6 @@ export const appointments = pgTable(
     index("appointments_workspace_created_idx").on(table.workspaceId, table.createdAt),
     index("appointments_contact_start_idx").on(table.contactId, table.startsAt),
     uniqueIndex("appointments_integration_external_uq").on(table.integrationId, table.externalEventId),
+    uniqueIndex("appointments_booking_command_uq").on(table.bookingCommandId).where(sql`${table.bookingCommandId} is not null`),
   ],
 );

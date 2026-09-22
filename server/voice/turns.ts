@@ -1,4 +1,8 @@
 import { createHash } from "node:crypto";
+import { and, eq } from "drizzle-orm";
+import { db } from "@/db";
+import { messages } from "@/db/schema";
+import { handleBookingTurn } from "@/server/booking/conversation";
 import { appendMessage, getConversationById } from "@/server/domain/core/repository";
 import { logger } from "@/server/observability/logger";
 import { responseOrchestrator } from "@/server/orchestrator";
@@ -47,9 +51,28 @@ export async function processVoiceTurn(input: { workspaceId: string; callId: str
       return { status: "SUPPRESSED" as const };
     }
 
-    const result = await responseOrchestrator.respond(workspaceId, call.conversationId, {
-      beforeTools: () => isVoiceTurnCurrent(workspaceId, callId, eventId),
-    });
+    const inbound = call.bookingEngineVersion === "v2"
+      ? (await db.select().from(messages).where(and(
+        eq(messages.workspaceId, workspaceId),
+        eq(messages.conversationId, call.conversationId),
+        eq(messages.channel, "PHONE"),
+        eq(messages.senderType, "CUSTOMER"),
+        eq(messages.provider, "telnyx-voice"),
+        eq(messages.externalMessageId, eventId),
+      )).limit(1))[0]
+      : null;
+    const bookingTurn = inbound && await isVoiceTurnCurrent(workspaceId, callId, eventId)
+      ? await handleBookingTurn({
+        workspaceId, conversationId: call.conversationId,
+        contactId: call.contactId, channel: "PHONE", sessionKey: callId,
+      }, { id: inbound.id, body: inbound.body }, new Date(),
+      () => isVoiceTurnCurrent(workspaceId, callId, eventId))
+      : null;
+    const result = bookingTurn
+      ? { reply: bookingTurn.reply, handlingMode: "AI" as const }
+      : await responseOrchestrator.respond(workspaceId, call.conversationId, {
+        beforeTools: () => isVoiceTurnCurrent(workspaceId, callId, eventId),
+      });
     const orchestrationMs = Date.now() - startedAt;
 
     // A later final chunk may arrive during the LLM or a tool finalizer.
@@ -111,7 +134,7 @@ export async function processVoiceTurn(input: { workspaceId: string; callId: str
       endedMs,
       externalEventId: `${eventId}:ai`,
     });
-    await appendMessage(workspaceId, call.conversationId, {
+    const savedReply = await appendMessage(workspaceId, call.conversationId, {
       channel: "PHONE",
       direction: "OUTBOUND",
       senderType: "AI",
@@ -120,8 +143,27 @@ export async function processVoiceTurn(input: { workspaceId: string; callId: str
       provider: "telnyx-voice",
       externalMessageId: `${eventId}:ai`,
       status: "SENT",
-      metadata: { voiceCallId: call.id, transcriptSegmentId: segment.id, voiceMode: call.mode, startedMs, endedMs },
+      metadata: {
+        voiceCallId: call.id, transcriptSegmentId: segment.id, voiceMode: call.mode, startedMs, endedMs,
+        ...(bookingTurn?.preview ? {
+          bookingPreviewId: bookingTurn.preview.previewId,
+          bookingDraftId: bookingTurn.preview.draftId,
+          bookingVersion: bookingTurn.preview.version,
+        } : {}),
+      },
     });
+    if (bookingTurn?.preview) {
+      const { updateVoiceCall } = await import("./repository");
+      await updateVoiceCall(workspaceId, callId, {}, {
+        bookingAwaitingVoiceDelivery: {
+          draftId: bookingTurn.preview.draftId,
+          previewId: bookingTurn.preview.previewId,
+          version: bookingTurn.preview.version,
+          eventId,
+          messageId: savedReply.id,
+        },
+      });
+    }
     logger.info({
       workspaceId, callId: call.id, transcriptionEventId: eventId,
       orchestrationMs, voiceTurnMs: Date.now() - startedAt,

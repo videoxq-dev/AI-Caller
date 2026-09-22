@@ -13,6 +13,8 @@ import {
 } from "@/server/domain/core/repository";
 import { normalizePhone } from "@/server/domain/core/schemas";
 import { getBusinessSetup } from "@/server/domain/onboarding/repository";
+import { isBookingV2Enabled } from "@/server/booking/rollout";
+import { recordBookingPreviewDelivery } from "@/server/booking/offers";
 import { getEnv } from "@/server/env";
 import { AppError } from "@/server/http/errors";
 import { getWorkspaceAgent } from "@/server/agent/service";
@@ -296,6 +298,7 @@ export function createVoiceWebhookService(dependencies: VoiceServiceDependencies
         toNumber: normalizePhone(event.to),
         mode,
         recordingDisclosureVersion: DISCLOSURE_VERSION,
+        bookingEngineVersion: await isBookingV2Enabled(workspaceId) ? "v2" : "v1",
         metadata: {
           phase: answeringEnabled ? "AWAITING_ANSWER" : "AWAITING_UNAVAILABLE_ANSWER",
           voiceTechnology: preference?.technology ?? "STANDARD",
@@ -438,6 +441,33 @@ export function createVoiceWebhookService(dependencies: VoiceServiceDependencies
         return;
       }
       if (currentPhase === "AI_SPEAKING") {
+        // A queued Telnyx speak is not customer delivery. Only the matching
+        // carrier speech-completed event can enable preview confirmation.
+        const pendingPreview = call.metadata.bookingAwaitingVoiceDelivery;
+        if (pendingPreview && typeof pendingPreview === "object") {
+          const data = pendingPreview as Record<string, unknown>;
+          if (typeof data.draftId === "string" &&
+              typeof data.previewId === "string" &&
+              typeof data.version === "number" &&
+              typeof data.messageId === "string" &&
+              call.metadata.respondingVoiceTurnEventId === data.eventId &&
+              !call.metadata.pendingVoiceTurnEventId) {
+            try {
+              await recordBookingPreviewDelivery({
+                workspaceId, contactId: call.contactId, conversationId: call.conversationId,
+                channel: "PHONE", sessionKey: call.id,
+              }, {
+                draftId: data.draftId, previewId: data.previewId,
+                expectedVersion: data.version, deliveryChannel: "PHONE",
+                deliveryReference: data.messageId,
+              });
+            } catch (error) {
+              logger.warn({ err: error, workspaceId, callId: call.id },
+                "Voice readback was not accepted as booking confirmation delivery");
+            }
+          }
+          await updateVoiceCall(workspaceId, call.id, {}, { bookingAwaitingVoiceDelivery: null });
+        }
         const pending = await releaseVoiceSpeech(workspaceId, call.id);
         if (pending) await scheduleVoiceTurn(workspaceId, call.id, pending, "after-speak");
         const requestedAt = call.metadata.voiceSpeechRequestedAt;

@@ -1,9 +1,9 @@
 import { escalateConversationIssue } from "@/server/collaboration/service";
 import { assertAgentActionAllowed } from "@/server/agent/capabilities";
 import { requireActiveWorkspaceAgent } from "@/server/agent/service";
-import { and, desc, eq } from "drizzle-orm";
+import { and, desc, eq, inArray } from "drizzle-orm";
 import { db } from "@/db";
-import { messages } from "@/db/schema";
+import { bookingDrafts, messages, voiceCalls, webchatSessions } from "@/db/schema";
 import { AppError } from "@/server/http/errors";
 import { logger } from "@/server/observability/logger";
 import {
@@ -17,6 +17,7 @@ import { sendSmsConversationTextWithRuntime } from "@/server/sms/outbound";
 import { z } from "zod";
 import { evaluateQualification, getQualificationConfig } from "./qualification";
 import { calendarBookingService } from "@/server/domain/core/calendar-booking";
+import { isBookingV2Enabled } from "@/server/booking/rollout";
 import { updateContactProfile } from "@/server/domain/core/contact-profile";
 import { getActiveConversationChannel, type ConversationChannel } from "@/server/domain/core/conversation-channels";
 import {
@@ -302,6 +303,63 @@ async function verifyVoiceConsent(
   return { customer, consentStatement: question + " Customer: " + customer.body };
 }
 
+async function legacyBookingBlockedForCurrentChannel(
+  workspaceId: string,
+  conversationId: string,
+  contactId: string,
+) {
+  const [latestCustomer] = await db.select({
+    metadata: messages.metadata,
+    channel: messages.channel,
+  }).from(messages).where(and(
+    eq(messages.workspaceId, workspaceId),
+    eq(messages.conversationId, conversationId),
+    eq(messages.senderType, "CUSTOMER"),
+  )).orderBy(desc(messages.createdAt), desc(messages.id)).limit(1);
+  if (!latestCustomer) return false;
+
+  if (latestCustomer.channel === "WEBCHAT") {
+    const sessionId = latestCustomer.metadata?.sessionId;
+    if (typeof sessionId !== "string") return false;
+    const [session] = await db.select({ version: webchatSessions.bookingEngineVersion })
+      .from(webchatSessions).where(and(
+        eq(webchatSessions.id, sessionId),
+        eq(webchatSessions.workspaceId, workspaceId),
+        eq(webchatSessions.contactId, contactId),
+        eq(webchatSessions.conversationId, conversationId),
+      )).limit(1);
+    return session?.version === "v2";
+  }
+
+  if (latestCustomer.channel === "PHONE") {
+    const callId = latestCustomer.metadata?.voiceCallId;
+    if (typeof callId !== "string") return false;
+    const [call] = await db.select({ version: voiceCalls.bookingEngineVersion })
+      .from(voiceCalls).where(and(
+        eq(voiceCalls.id, callId),
+        eq(voiceCalls.workspaceId, workspaceId),
+        eq(voiceCalls.contactId, contactId),
+        eq(voiceCalls.conversationId, conversationId),
+      )).limit(1);
+    return call?.version === "v2";
+  }
+
+  if (latestCustomer.channel === "SMS" || latestCustomer.channel === "WHATSAPP") {
+    const [activeDraft] = await db.select({ id: bookingDrafts.id }).from(bookingDrafts).where(and(
+      eq(bookingDrafts.workspaceId, workspaceId),
+      eq(bookingDrafts.contactId, contactId),
+      eq(bookingDrafts.conversationId, conversationId),
+      eq(bookingDrafts.channel, latestCustomer.channel),
+      inArray(bookingDrafts.status, [
+        "COLLECTING", "AVAILABILITY_CHECKED", "AWAITING_CONFIRMATION",
+        "COMMITTING", "RECONCILING",
+      ]),
+    )).limit(1);
+    return Boolean(activeDraft) || isBookingV2Enabled(workspaceId);
+  }
+  return false;
+}
+
 export async function executeOrchestratorTools(
   workspaceId: string,
   conversationId: string,
@@ -323,6 +381,15 @@ export async function executeOrchestratorTools(
   if (!currentConversation) throw new AppError("CONVERSATION_NOT_FOUND", "Conversation not found.", 404);
   if (currentConversation.handlingMode === "HUMAN") {
     throw new AppError("CONVERSATION_HUMAN_HANDLING", "Staff now controls this conversation.", 409);
+  }
+  if ((envelope.action.type === "BOOK_APPOINTMENT" ||
+      envelope.action.type === "CHECK_AVAILABILITY") &&
+      await legacyBookingBlockedForCurrentChannel(workspaceId, conversationId, contactId)) {
+    // Once a server-owned channel/session is pinned to v2, the generic legacy
+    // planner may still answer unrelated questions but cannot execute a second
+    // scheduling engine from old transcript context.
+    throw new AppError("BOOKING_ENGINE_VERSION_CONFLICT",
+      "This conversation uses the durable booking flow. Continue with the current booking request instead.", 409);
   }
   const channel = await getActiveConversationChannel(workspaceId, conversationId) ?? "WEBCHAT";
   const needsQualificationConfig = envelope.action.type === "QUALIFY_LEAD" || envelope.lead?.status === "QUALIFIED";

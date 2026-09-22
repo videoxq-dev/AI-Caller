@@ -20,6 +20,31 @@ export function createE2EAIProvider(): AIProvider {
       const lastUser = lastUserMessage.toLowerCase();
       const toolResult = [...messages].reverse().find((message) => message.role === "system" && message.content.includes("SERVER TOOL RESULT"))?.content;
 
+      if (system.includes("Extract the customer's latest booking intent")) {
+        // Deterministic CI fixture. This does not establish live-model quality.
+        const match = system.match(/Services: (\[[^\n]*\])/);
+        const services = match ? JSON.parse(match[1]) as Array<{ id: string; name: string }> : [];
+        const office = services.find((service) => service.name === "Office Cleaning");
+        if (/\b(?:how long|duration)\b/i.test(lastUser)) {
+          return { text: JSON.stringify({ action: "QUESTION", question: lastUserMessage }) };
+        }
+        const patch: Record<string, unknown> = { action: "PATCH" };
+        if (/office cleaning/i.test(lastUser) && office) patch.serviceId = office.id;
+        if (/\b(?:tomorrow)\b/i.test(lastUser)) patch.dateExpression = "tomorrow";
+        else if (/sep(?:tember)?\s+23/i.test(lastUser)) patch.dateExpression = "Sep 23, 2026";
+        else if (/sep(?:tember)?\s+30/i.test(lastUser)) patch.dateExpression = "September 30, 2026";
+        if (/\b11\s*(?::00)?\s*am/i.test(lastUser)) {
+          patch.timeExpression = lastUser.includes("lagos")
+            ? "11 AM (Africa/Lagos)" : "11 AM UTC";
+        } else if (/\b10\s*(?::00)?\s*am/i.test(lastUser)) {
+          patch.timeExpression = lastUser.includes("utc")
+            ? "10 AM UTC" : "10 AM";
+        }
+        if (/\bcancel\b/i.test(lastUser)) patch.action = "CANCEL";
+        if (/\bbooking status|is it booked\b/i.test(lastUser)) patch.action = "STATUS";
+        return { text: JSON.stringify(patch) };
+      }
+
       if (system.includes("Classify an outbound business SMS")) {
         let body = "";
         try {

@@ -70,7 +70,7 @@ describe("web chat persistence", () => {
 
     await completeWebchatTurn(workspaceId, first.turnId, "Cached response");
     const completed = await claimWebchatTurn(workspaceId, session.sessionId, clientMessageId);
-    expect(completed).toEqual({ state: "completed", turnId: first.turnId, responseText: "Cached response" });
+    expect(completed).toEqual({ state: "completed", turnId: first.turnId, responseText: "Cached response", responseMetadata: {} });
   });
 
   it("fails closed for failed or lease-expired turns instead of re-executing them", async () => {

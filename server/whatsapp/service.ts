@@ -3,6 +3,9 @@ import { AppError } from "@/server/http/errors";
 import { enqueueUniqueJob } from "@/server/jobs";
 import { WHATSAPP_INBOUND_RESPONSE, whatsappInboundResponseJobSchema, type WhatsAppInboundResponseJob } from "@/server/jobs/queues";
 import { responseOrchestrator } from "@/server/orchestrator";
+import { handleBookingTurn } from "@/server/booking/conversation";
+import { recordBookingPreviewDelivery } from "@/server/booking/offers";
+import { shouldUseBookingV2 } from "@/server/booking/rollout";
 import type { NormalizedWhatsAppEvent, WhatsAppWebhookInput } from "@/server/providers/contracts";
 import { normalizeMetaWhatsAppWebhook, verifyMetaWhatsAppWebhook } from "@/server/providers/whatsapp/meta-cloud";
 import {
@@ -33,7 +36,7 @@ type WhatsAppServiceDependencies = {
   sendText: (
     workspaceId: string,
     conversationId: string,
-    input: { senderType: "AI" | "USER"; text: string },
+    input: { senderType: "AI" | "USER"; text: string; metadata?: Record<string, unknown> },
   ) => Promise<unknown>;
   enqueueResponseJob: (job: WhatsAppInboundResponseJob) => Promise<string | null>;
 };
@@ -207,7 +210,7 @@ export function createWhatsAppWebhookService(dependencies: WhatsAppServiceDepend
 
         const contact = await resolveWhatsAppContact(job.workspaceId, job.customerWaId, job.profileName);
         const conversation = await getOrCreateOpenConversation(job.workspaceId, contact.id);
-        await appendMessage(job.workspaceId, conversation.id, {
+        const inbound = await appendMessage(job.workspaceId, conversation.id, {
           channel: "WHATSAPP",
           direction: "INBOUND",
           senderType: "CUSTOMER",
@@ -223,20 +226,50 @@ export function createWhatsAppWebhookService(dependencies: WhatsAppServiceDepend
           },
         });
 
-        // The orchestrator may execute irreversible calendar/provider tools. Once it begins,
-        // retries must fail closed rather than replaying the same customer turn.
+        // The durable booking engine and the legacy orchestrator are both
+        // consequential. Once either begins, a provider retry must not replay
+        // the same inbound turn as a fresh action.
         failClosed = true;
-        const orchestrated = await dependencies.respond(job.workspaceId, conversation.id);
-        if (!orchestrated.reply) {
+        const bookingContext = {
+          workspaceId: job.workspaceId, contactId: contact.id,
+          conversationId: conversation.id, channel: "WHATSAPP" as const,
+          sessionKey: `WHATSAPP:${conversation.id}`,
+        };
+        const bookingTurn = conversation.handlingMode === "AI" &&
+          await shouldUseBookingV2(bookingContext)
+          ? await handleBookingTurn(bookingContext, { id: inbound.id, body: job.text })
+          : null;
+        const orchestrated = bookingTurn ? null
+          : await dependencies.respond(job.workspaceId, conversation.id);
+        const reply = bookingTurn?.reply ?? orchestrated?.reply ?? null;
+        if (!reply) {
           await completeProviderWebhookEvent(job.workspaceId, job.webhookEventId);
           return { skipped: false as const, replied: false as const };
         }
 
         try {
-          await dependencies.sendText(job.workspaceId, conversation.id, {
+          const outbound = await dependencies.sendText(job.workspaceId, conversation.id, {
             senderType: "AI",
-            text: orchestrated.reply,
+            text: reply,
+            metadata: bookingTurn?.preview ? {
+              bookingPreviewId: bookingTurn.preview.previewId,
+              bookingDraftId: bookingTurn.preview.draftId,
+              bookingVersion: bookingTurn.preview.version,
+            } : undefined,
           });
+          if (bookingTurn?.preview) {
+            const messageId = outbound && typeof outbound === "object" &&
+              "id" in outbound && typeof (outbound as { id?: unknown }).id === "string"
+                ? (outbound as { id: string }).id : null;
+            if (!messageId) throw new AppError("BOOKING_DELIVERY_NOT_VERIFIED",
+              "WhatsApp accepted no durable message receipt for the booking preview.", 503);
+            await recordBookingPreviewDelivery(bookingContext, {
+              draftId: bookingTurn.preview.draftId,
+              previewId: bookingTurn.preview.previewId,
+              expectedVersion: bookingTurn.preview.version,
+              deliveryChannel: "WHATSAPP", deliveryReference: messageId,
+            });
+          }
         } catch (error) {
           if (error instanceof AppError && error.code === "AI_HANDLING_PAUSED") {
             await completeProviderWebhookEvent(job.workspaceId, job.webhookEventId);

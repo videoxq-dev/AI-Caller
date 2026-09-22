@@ -34,7 +34,7 @@ export function isExplicitActionConfirmation(text: string) {
     .replace(/[,;:]+/g, " ")
     .replace(/\s+/g, " ");
   if (!normalized || /\b(?:no|not|don't|do not|cancel|wait|hold on|instead|change)\b/i.test(normalized)) return false;
-  return /^(?:yes|yes please|yep|yeah|sure|okay|ok|absolutely|please do|do it|go ahead|go ahead and do it|book it|confirm it|confirm|confirmed|approved|i approve|i confirm|yes i approve|yes approved|yes book it|yes go ahead|that works|sounds good|looks good|send it)$/i
+  return /^(?:yes|yes please|yep|yeah|sure|okay|ok|absolutely|please do|do it|go ahead|go ahead and do it|book it|confirm it|confirm|confirmed|approved|i approve|i confirm|yes i approve|yes approved|yes confirm it|yes book it|yes go ahead|that works|sounds good|looks good|send it)$/i
     .test(normalized);
 }
 

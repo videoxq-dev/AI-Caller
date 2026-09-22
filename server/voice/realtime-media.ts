@@ -1,9 +1,10 @@
 import WebSocket from "ws";
 import { appendMessage } from "@/server/domain/core/repository";
+import { recordBookingPreviewDelivery } from "@/server/booking/offers";
 import { releaseCreditReservation } from "@/server/credits/service";
 import { getEnv } from "@/server/env";
 import { logger } from "@/server/observability/logger";
-import { getVoiceCall, appendVoiceTranscriptSegment, claimRealtimeStream, finishRealtimeStream } from "./repository";
+import { getVoiceCall, appendVoiceTranscriptSegment, claimRealtimeStream, finishRealtimeStream, updateVoiceCall } from "./repository";
 import { recordRealtimeResponse, settleRealtimeCall } from "./realtime-usage";
 import { realtimeSessionContext, runRealtimeBusinessTool } from "./realtime-tools";
 import { realtimeCreditBudgetReached } from "./realtime-usage";
@@ -85,6 +86,8 @@ export function attachRealtimeMedia({ telnyx, identity, streamId }: BridgeOption
   let callerSpeechEpoch = 0;
   let callerLastSpeechStoppedAt: number | null = null;
   const measuredResponses = new Set<string>();
+  const assistantMessageByResponseId = new Map<string, Promise<string | null>>();
+  const responsesAwaitingAudioDrain = new Set<string>();
   let priorConversation = "";
   let historyInjected = false;
   let openingMessage = "How can I help you today?";
@@ -225,21 +228,77 @@ export function attachRealtimeMedia({ telnyx, identity, streamId }: BridgeOption
     const transcript = typeof raw.transcript === "string" ? raw.transcript.trim() : "";
     const id = typeof raw.response_id === "string" ? raw.response_id : "";
     const itemId = typeof raw.item_id === "string" ? raw.item_id : "";
-    if (!transcript || !id || !itemId) return;
+    if (!transcript || !id || !itemId) return null;
     const call = await getVoiceCall(workspaceId, callId);
-    if (!call || call.metadata.voiceTechnology !== "REALTIME") return;
+    if (!call || call.metadata.voiceTechnology !== "REALTIME") return null;
+    const pending = call.bookingEngineVersion === "v2" &&
+      call.metadata.bookingAwaitingRealtimeDelivery &&
+      typeof call.metadata.bookingAwaitingRealtimeDelivery === "object"
+        ? call.metadata.bookingAwaitingRealtimeDelivery as Record<string, unknown> : null;
     const eventId = `${id}:${itemId}:ai`;
     const segment = await appendVoiceTranscriptSegment(workspaceId, callId, {
       speaker: "AI", text: transcript, externalEventId: eventId,
     });
-    await appendMessage(workspaceId, call.conversationId, {
+    const saved = await appendMessage(workspaceId, call.conversationId, {
       channel: "PHONE", direction: "OUTBOUND", senderType: "AI",
       contentType: "CALL_TRANSCRIPT", body: transcript,
       provider: "openai-realtime", externalMessageId: eventId, status: "SENT",
       metadata: { voiceCallId: callId, transcriptSegmentId: segment.id,
         voiceMode: call.mode, realtimeModel: call.metadata.realtimeModel,
-        potentiallyInterrupted: interruptedResponseIds.has(id) },
+        potentiallyInterrupted: interruptedResponseIds.has(id),
+        ...(pending && typeof pending.draftId === "string" &&
+          typeof pending.previewId === "string" && typeof pending.version === "number" ? {
+          bookingDraftId: pending.draftId,
+          bookingPreviewId: pending.previewId,
+          bookingVersion: pending.version,
+        } : {}) },
     });
+    return saved.id;
+  }
+
+  async function finalizeRealtimePreviewDelivery(responseId: string) {
+    const messagePromise = assistantMessageByResponseId.get(responseId);
+    if (!messagePromise || interruptedResponseIds.has(responseId)) return;
+    const epoch = responseEpochs.get(responseId);
+    const until = Date.now() + 20_000;
+    responsesAwaitingAudioDrain.add(responseId);
+    while (open && Date.now() < until &&
+      (outboundPackets.length > 0 || outputTail.length > 0)) {
+      if (interruptedResponseIds.has(responseId) ||
+        (epoch !== undefined && epoch !== callerSpeechEpoch)) {
+        responsesAwaitingAudioDrain.delete(responseId);
+        return;
+      }
+      await new Promise(resolve => setTimeout(resolve, 25));
+    }
+    responsesAwaitingAudioDrain.delete(responseId);
+    if (!open || interruptedResponseIds.has(responseId) ||
+      outboundPackets.length > 0 || outputTail.length > 0) return;
+    const messageId = await messagePromise;
+    if (!messageId) return;
+    const call = await getVoiceCall(workspaceId, callId);
+    const pending = call?.metadata.bookingAwaitingRealtimeDelivery;
+    if (!call || call.bookingEngineVersion !== "v2" ||
+      !pending || typeof pending !== "object") return;
+    const data = pending as Record<string, unknown>;
+    if (typeof data.draftId !== "string" || typeof data.previewId !== "string" ||
+      typeof data.version !== "number") return;
+    try {
+      await recordBookingPreviewDelivery({
+        workspaceId, contactId: call.contactId, conversationId: call.conversationId,
+        channel: "PHONE", sessionKey: call.id,
+      }, {
+        draftId: data.draftId, previewId: data.previewId,
+        expectedVersion: data.version, deliveryChannel: "PHONE",
+        deliveryReference: messageId,
+      });
+      await updateVoiceCall(workspaceId, callId, {}, {
+        bookingAwaitingRealtimeDelivery: null,
+      });
+    } catch (err) {
+      logger.warn({ err, workspaceId, callId, responseId },
+        "Realtime booking readback did not qualify as delivered confirmation context");
+    }
   }
 
   function resumeAfterTools(responseId: string, epoch: number) {
@@ -265,16 +324,19 @@ export function attachRealtimeMedia({ telnyx, identity, streamId }: BridgeOption
       || call.metadata.voiceTechnology !== "REALTIME") return;
     const result = await runRealtimeBusinessTool({
       workspaceId, callId, streamId, conversationId: call.conversationId, contactId: call.contactId,
-      name: item.name, arguments: item.arguments,
+      name: item.name, arguments: item.arguments, sourceEventId: item.call_id,
       isCurrentTurn: () => open && epoch === callerSpeechEpoch,
     });
-    logger.info({ workspaceId, callId, tool: item.name, ok: result.ok,
-      kind: "kind" in result ? result.kind : undefined,
-      code: "code" in result ? result.code : undefined,
+    const response = result ?? {
+      ok: false as const, reason: "This action is unavailable. Please continue the conversation.",
+    };
+    logger.info({ workspaceId, callId, tool: item.name, ok: response.ok,
+      kind: "kind" in response ? response.kind : undefined,
+      code: "code" in response ? response.code : undefined,
     }, "Realtime business tool completed");
     if (!open) return;
     sendOpenAI({ type: "conversation.item.create", item: {
-      type: "function_call_output", call_id: item.call_id, output: JSON.stringify(result),
+      type: "function_call_output", call_id: item.call_id, output: JSON.stringify(response),
     } });
   }
 
@@ -319,6 +381,7 @@ export function attachRealtimeMedia({ telnyx, identity, streamId }: BridgeOption
       }
       callerSpeechEpoch += 1;
       for (const id of pendingResponses) interruptedResponseIds.add(id);
+      for (const id of responsesAwaitingAudioDrain) interruptedResponseIds.add(id);
       clearAudio();
       return;
     }
@@ -349,10 +412,14 @@ export function attachRealtimeMedia({ telnyx, identity, streamId }: BridgeOption
       return;
     }
     if (event.type === "response.output_audio_transcript.done") {
-      track(saveAssistantTranscript(event).catch(err => {
+      const responseId = typeof event.response_id === "string" ? event.response_id : "";
+      const save = saveAssistantTranscript(event).catch(err => {
         logger.error({ err, workspaceId, callId },
           "Unable to archive Realtime assistant transcript; call billing remains independent");
-      }));
+        return null;
+      });
+      if (responseId) assistantMessageByResponseId.set(responseId, save);
+      track(save);
       return;
     }
     if (event.type === "response.output_item.done") {
@@ -433,6 +500,12 @@ export function attachRealtimeMedia({ telnyx, identity, streamId }: BridgeOption
       pendingResponses.delete(responseId);
       responseStatuses.set(responseId, status);
       const epoch = responseEpochs.get(responseId);
+      if (status === "completed" && assistantMessageByResponseId.has(responseId)) {
+        track(finalizeRealtimePreviewDelivery(responseId).catch(err => {
+          logger.warn({ err, workspaceId, callId, responseId },
+            "Realtime booking delivery finalizer failed");
+        }));
+      }
       responseEpochs.delete(responseId);
       if (responseWithTools.has(responseId)) {
         completedToolResponses.add(responseId);

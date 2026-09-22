@@ -73,4 +73,29 @@ describe("Cal.com current API contracts", () => {
     expect(body).not.toHaveProperty("rescheduleReason");
     expect(result.externalId).toBe("replacement");
   });
+  it("rejects incomplete slots and booking receipts instead of fabricating times", async () => {
+    const missingEnd = provider((async () => new Response(JSON.stringify({
+      status: "success", data: { "2030-09-23": [{ start: "2030-09-23T10:00:00.000Z" }] },
+    }), { status: 200 })) as typeof fetch);
+    await expect(missingEnd.getAvailability({
+      startsAt: new Date("2030-09-23T09:00:00.000Z"),
+      endsAt: new Date("2030-09-23T12:00:00.000Z"),
+      timezone: "UTC", durationMinutes: 30,
+    })).rejects.toThrow(/incomplete available slot/);
+
+    const incompleteBooking = provider((async (_input: RequestInfo | URL, init?: RequestInit) => {
+      if ((init?.method ?? "GET") === "POST") {
+        return new Response(JSON.stringify({
+          status: "success", data: { uid: "B1", start: "2030-09-23T10:00:00.000Z" },
+        }), { status: 201 });
+      }
+      throw new Error("Unexpected request");
+    }) as typeof fetch);
+    await expect(incompleteBooking.book({
+      startsAt: new Date("2030-09-23T10:00:00.000Z"),
+      endsAt: new Date("2030-09-23T10:30:00.000Z"),
+      timezone: "UTC", title: "Consultation", attendeeEmail: "ada@example.com",
+    })).rejects.toThrow(/complete confirmed booking/);
+  });
+
 });

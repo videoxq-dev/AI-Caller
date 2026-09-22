@@ -31,6 +31,7 @@ jobs:
       PG_BOSS_SCHEMA: pgboss
       LOG_LEVEL: silent
       AI_CALLER_E2E_FIXTURES: "1"
+      AI_CALLER_BOOKING_V2: "enabled"
       HOSTED_TELNYX_API_KEY: ci-managed-telnyx-api-key
       HOSTED_TELNYX_WEBHOOK_PUBLIC_KEY: S5YG8mnUcwIiUkm8C8qHrHXRDMR0gIKJBNGj3GZyWb0=
       STRIPE_RESTRICTED_API_KEY: rk_test_ci_milestone10
@@ -204,6 +205,18 @@ jobs:
 
       - name: Phase 1 AI Agent browser acceptance verification
         run: npm run test:browser:phase1
+
+      - name: Booking remediation browser acceptance verification
+        run: npm run test:browser:booking
+
+      - name: Upload booking remediation browser screenshots
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: booking-remediation-browser-verification
+          path: artifacts/booking-remediation
+          if-no-files-found: warn
+          retention-days: 14
 
       - name: Upload Phase 1 AI Agent browser screenshots
         if: always()

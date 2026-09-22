@@ -138,6 +138,15 @@ try {
      ON CONFLICT (workspace_id) DO UPDATE SET business_name = EXCLUDED.business_name, industry = EXCLUDED.industry, timezone = EXCLUDED.timezone, summary = EXCLUDED.summary, updated_at = now()`,
     [workspaceId],
   );
+  // External calendars are also constrained by the workspace's configured
+  // business hours. A fixture without hours must not advertise free slots.
+  await pool.query(
+    `INSERT INTO business_hours (workspace_id, day_of_week, enabled, open_time, close_time)
+     SELECT $1, n, true, '08:00', '19:00' FROM generate_series(0, 6) n
+     ON CONFLICT (workspace_id, day_of_week) DO UPDATE
+       SET enabled = true, open_time = '08:00', close_time = '19:00', updated_at = now()`,
+    [workspaceId],
+  );
   await pool.query(
     `INSERT INTO ai_agents (workspace_id, name, status, tone, primary_goal, when_unsure, opening_message, escalation_message)
      VALUES ($1, 'SMS QA Assistant', 'ACTIVE', 'Friendly & professional', 'Book appointments', 'Escalate to a human', 'Hi! How can I help?', 'I will connect you with the team.')

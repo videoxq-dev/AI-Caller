@@ -48,21 +48,52 @@ export class OutlookCalendarProvider implements CalendarProvider {
       endDateTime: input.endsAt.toISOString(),
       "$select": "start,end,isCancelled,showAs",
     });
-    const response = await providerJson<{ value?: Array<{ isCancelled?: boolean; showAs?: string; start?: { dateTime?: string }; end?: { dateTime?: string } }> }>(
-      `https://graph.microsoft.com/v1.0${this.calendarViewPath()}?${query.toString()}`,
-      { headers: { authorization: `Bearer ${token}`, Prefer: 'outlook.timezone="UTC"' } },
-      this.fetcher,
-    );
-    const busy = (response.value ?? [])
-      .filter((event) => !event.isCancelled && event.showAs !== "free")
-      .map((event) => ({
-        startsAt: parseDate(event.start?.dateTime, input.startsAt),
-        endsAt: parseDate(event.end?.dateTime, input.endsAt),
-      }));
+    type OutlookEvent = {
+      isCancelled?: boolean;
+      showAs?: string;
+      start?: { dateTime?: string };
+      end?: { dateTime?: string };
+    };
+    type OutlookPage = { value?: OutlookEvent[]; "@odata.nextLink"?: string };
+    let url: string | null = `https://graph.microsoft.com/v1.0${this.calendarViewPath()}?${query.toString()}`;
+    const busy: Array<{ startsAt: Date; endsAt: Date }> = [];
+    const visited = new Set<string>();
+    for (let page = 0; url !== null; page++) {
+      if (page >= 30 || visited.has(url)) throw new Error("Microsoft Calendar availability response was incomplete.");
+      visited.add(url);
+      const response: OutlookPage = await providerJson<OutlookPage>(
+        url,
+        { headers: { authorization: `Bearer ${token}`, Prefer: 'outlook.timezone="UTC"' } },
+        this.fetcher,
+      );
+      if (!Array.isArray(response.value)) throw new Error("Microsoft Calendar did not return a complete availability response.");
+      for (const event of response.value) {
+        if (event.isCancelled || event.showAs === "free") continue;
+        const start = event.start?.dateTime, end = event.end?.dateTime;
+        if (!start || !end) throw new Error("Microsoft Calendar returned an event without a valid time range.");
+        const startsAt = parseDate(start, new Date(NaN));
+        const endsAt = parseDate(end, new Date(NaN));
+        if (!Number.isFinite(startsAt.getTime()) || !Number.isFinite(endsAt.getTime()) || endsAt <= startsAt) {
+          throw new Error("Microsoft Calendar returned an invalid event interval.");
+        }
+        busy.push({ startsAt, endsAt });
+        if (busy.length > 10_000) throw new Error("Microsoft Calendar returned too many events to check availability safely.");
+      }
+      if (!response["@odata.nextLink"]) {
+        url = null;
+      } else {
+        const next = new URL(response["@odata.nextLink"]);
+        if (next.origin !== "https://graph.microsoft.com" ||
+          !next.pathname.startsWith("/v1.0/me/")) {
+          throw new Error("Microsoft Calendar returned an invalid pagination URL.");
+        }
+        url = next.toString();
+      }
+    }
     return slotize(input.startsAt, input.endsAt, busy, input.durationMinutes ?? numberSetting(this.settings, "meetingDurationMinutes", 30));
   }
 
-  async book(input: { startsAt: Date; endsAt: Date; timezone: string; title: string; attendeeName?: string; attendeeEmail?: string }) {
+  async book(input: { startsAt: Date; endsAt: Date; timezone: string; title: string; attendeeName?: string; attendeeEmail?: string; location?: string; idempotencyKey?: string }) {
     const token = await this.token();
     const response = await providerJson<{ id?: string; start?: { dateTime?: string }; end?: { dateTime?: string } }>(
       `https://graph.microsoft.com/v1.0${this.eventsPath()}`,
@@ -71,6 +102,8 @@ export class OutlookCalendarProvider implements CalendarProvider {
         headers: { authorization: `Bearer ${token}`, "content-type": "application/json", Prefer: 'outlook.timezone="UTC"' },
         body: JSON.stringify({
           subject: input.title,
+          ...(input.idempotencyKey ? { transactionId: input.idempotencyKey } : {}),
+          ...(input.location ? { location: { displayName: input.location } } : {}),
           start: { dateTime: toUtcLocalString(input.startsAt), timeZone: "UTC" },
           end: { dateTime: toUtcLocalString(input.endsAt), timeZone: "UTC" },
           ...(input.attendeeEmail ? {
@@ -84,11 +117,12 @@ export class OutlookCalendarProvider implements CalendarProvider {
       this.fetcher,
     );
     if (!response.id) throw new Error("Microsoft Graph did not return an event ID.");
-    return {
-      externalId: response.id,
-      startsAt: parseDate(response.start?.dateTime, input.startsAt),
-      endsAt: parseDate(response.end?.dateTime, input.endsAt),
-    };
+    const startsAt = parseDate(response.start?.dateTime, new Date(NaN));
+    const endsAt = parseDate(response.end?.dateTime, new Date(NaN));
+    if (!Number.isFinite(startsAt.getTime()) || !Number.isFinite(endsAt.getTime()) || endsAt <= startsAt) {
+      throw new Error("Microsoft Calendar did not return valid confirmed event times.");
+    }
+    return { externalId: response.id, startsAt, endsAt };
   }
 
   async reschedule(input: { externalId: string; startsAt: Date; endsAt: Date; timezone: string }) {

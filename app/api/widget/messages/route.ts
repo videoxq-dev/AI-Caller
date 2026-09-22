@@ -1,3 +1,6 @@
+import { getBookingPreviewCard } from "@/server/booking/cards";
+import { handleBookingTurn } from "@/server/booking/conversation";
+import { recordBookingPreviewDelivery } from "@/server/booking/offers";
 import { appendMessage, getConversationById } from "@/server/domain/core/repository";
 import { AppError, toErrorResponse } from "@/server/http/errors";
 import { parseInput } from "@/server/http/validation";
@@ -41,6 +44,11 @@ export async function POST(request: Request) {
     const body = await request.json();
     const input = parseInput(webchatMessageInputSchema, body);
     const workspaceId = resolved.session.workspaceId;
+    const bookingContext = {
+      workspaceId, contactId: resolved.session.contactId,
+      conversationId: resolved.session.conversationId,
+      channel: "WEBCHAT" as const, sessionKey: resolved.session.id,
+    };
     const claim = await claimWebchatTurn(workspaceId, resolved.session.id, input.clientMessageId);
     if (claim.state === "in_progress") {
       throw new AppError("WEBCHAT_TURN_IN_PROGRESS", "This message is already being processed.", 409);
@@ -71,13 +79,15 @@ export async function POST(request: Request) {
                 controller.enqueue(event("notice", { message: "This message did not receive an automatic reply. Please try again later or contact the business directly." }));
               }
             }
+
+            if (claim.responseMetadata.bookingCard) controller.enqueue(event("booking", claim.responseMetadata.bookingCard));
             controller.enqueue(event("done", { cached: true, agentAvailable: Boolean(claim.responseText) }));
             controller.close();
             return;
           }
 
           const externalBase = `${resolved.session.id}:${input.clientMessageId}`;
-          await appendMessage(workspaceId, resolved.session.conversationId, {
+          const inbound = await appendMessage(workspaceId, resolved.session.conversationId, {
             channel: "WEBCHAT",
             direction: "INBOUND",
             senderType: "CUSTOMER",
@@ -91,14 +101,38 @@ export async function POST(request: Request) {
 
           const existingReply = await findWebchatAIResponse(workspaceId, `${externalBase}:reply`);
           if (existingReply) {
-            await completeWebchatTurn(workspaceId, claim.turnId, existingReply.body);
+
+            const recoveredCard = existingReply.metadata.bookingCard;
+            if (typeof existingReply.metadata.bookingPreviewId === "string") {
+              await recordBookingPreviewDelivery(bookingContext, {
+                draftId: String(existingReply.metadata.bookingDraftId),
+                previewId: existingReply.metadata.bookingPreviewId,
+                expectedVersion: Number(existingReply.metadata.bookingVersion),
+                deliveryChannel: "WEBCHAT", deliveryReference: existingReply.id,
+              });
+            }
+            await completeWebchatTurn(workspaceId, claim.turnId, existingReply.body,
+              recoveredCard && typeof recoveredCard === "object"
+                ? { bookingCard: recoveredCard } : {});
             enqueueReply(controller, existingReply.body);
+            if (recoveredCard) controller.enqueue(event("booking", recoveredCard));
             controller.enqueue(event("done", { cached: true }));
             controller.close();
             return;
           }
 
-          const result = await responseOrchestrator.respond(workspaceId, resolved.session.conversationId);
+          const conversationBefore = await getConversationById(workspaceId, resolved.session.conversationId);
+          const bookingTurn = resolved.session.bookingEngineVersion === "v2" &&
+            conversationBefore?.handlingMode === "AI"
+              ? await handleBookingTurn(bookingContext, { id: inbound.id, body: input.message })
+              : null;
+          const result = bookingTurn
+            ? {
+              reply: bookingTurn.reply, handlingMode: "AI" as const,
+              action: { type: "NONE" as const },
+              toolResult: { kind: "none" as const, data: {} },
+            }
+            : await responseOrchestrator.respond(workspaceId, resolved.session.conversationId);
           if (!result.reply) {
             await completeWebchatTurn(workspaceId, claim.turnId, null);
             if (result.handlingMode === "HUMAN") {
@@ -124,6 +158,9 @@ export async function POST(request: Request) {
             return;
           }
 
+          const bookingCard = bookingTurn?.preview
+            ? await getBookingPreviewCard(bookingContext, bookingTurn.preview.previewId)
+            : null;
           const saved = await appendMessage(workspaceId, resolved.session.conversationId, {
             channel: "WEBCHAT",
             direction: "OUTBOUND",
@@ -133,11 +170,29 @@ export async function POST(request: Request) {
             provider: "webchat-ai",
             externalMessageId: `${externalBase}:reply`,
             status: "DELIVERED",
-            metadata: { action: result.action.type, toolResult: result.toolResult.kind },
+            metadata: {
+              action: result.action.type, toolResult: result.toolResult.kind,
+              ...(bookingTurn?.preview ? {
+                bookingPreviewId: bookingTurn.preview.previewId,
+                bookingDraftId: bookingTurn.preview.draftId,
+                bookingVersion: bookingTurn.preview.version,
+                bookingCard,
+              } : {}),
+            },
           });
 
-          await completeWebchatTurn(workspaceId, claim.turnId, saved.body);
+          if (bookingTurn?.preview) {
+            await recordBookingPreviewDelivery(bookingContext, {
+              draftId: bookingTurn.preview.draftId,
+              previewId: bookingTurn.preview.previewId,
+              expectedVersion: bookingTurn.preview.version,
+              deliveryChannel: "WEBCHAT", deliveryReference: saved.id,
+            });
+          }
+          await completeWebchatTurn(workspaceId, claim.turnId, saved.body,
+            bookingCard ? { bookingCard } : {});
           enqueueReply(controller, saved.body);
+          if (bookingCard) controller.enqueue(event("booking", bookingCard));
           controller.enqueue(event("done", { handlingMode: "AI" }));
           controller.close();
         } catch (error) {

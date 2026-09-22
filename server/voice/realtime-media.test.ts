@@ -37,9 +37,13 @@ vi.mock("@/server/voice/repository", () => ({
   finishRealtimeStream: vi.fn(async () => true),
   appendVoiceTranscriptSegment: vi.fn(async () => ({ id: "segment-id" })),
 }));
-vi.mock("@/server/domain/core/repository", () => ({
-  appendMessage: vi.fn(async () => ({})),
-}));
+vi.mock("@/server/domain/core/repository", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/server/domain/core/repository")>();
+  return {
+    ...actual,
+    appendMessage: vi.fn(async () => ({})),
+  };
+});
 vi.mock("@/server/voice/realtime-tools", () => ({
   realtimeSessionContext: vi.fn(async () => ({ instructions: "Answer the caller.", history: "", tools: [] })),
   realtimeTools: [],

@@ -17,9 +17,14 @@ vi.mock("./repository", () => ({
   restoreVoiceTurn: vi.fn(),
 }));
 vi.mock("@/server/orchestrator", () => ({ responseOrchestrator: { respond: vi.fn() } }));
-vi.mock("@/server/domain/core/repository", () => ({
-  getConversationById: vi.fn(), appendMessage: vi.fn(),
-}));
+vi.mock("@/server/domain/core/repository", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/server/domain/core/repository")>();
+  return {
+    ...actual,
+    getConversationById: vi.fn(),
+    appendMessage: vi.fn(),
+  };
+});
 vi.mock("@/server/jobs", () => ({ enqueueUniqueJobAt: vi.fn() }));
 vi.mock("@/server/providers/voice/runtime", () => ({ resolveVoiceRuntime: vi.fn() }));
 vi.mock("./config", () => ({
