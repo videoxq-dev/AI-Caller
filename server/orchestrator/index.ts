@@ -11,6 +11,7 @@ import {
   type OrchestratorToolResult,
 } from "./tools";
 import { generateAIWithUsage } from "./usage";
+import { executeTrackedOrchestratorTools } from "./task-runs";
 import {
   getAwaitingPendingAction,
   isExplicitActionConfirmation,
@@ -895,7 +896,7 @@ export function createResponseOrchestrator(dependencies: OrchestratorDependencie
 
 export const responseOrchestrator = createResponseOrchestrator({
   buildContext: buildConversationContext,
-  executeTools: executeOrchestratorTools,
+  executeTools: executeTrackedOrchestratorTools,
   generate: async (workspaceId, referenceId, messages) => {
     const response = await generateAIWithUsage(workspaceId, referenceId, messages);
     return { text: response.text };
