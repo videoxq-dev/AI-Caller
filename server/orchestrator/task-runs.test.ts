@@ -12,7 +12,7 @@ import {
   getOrCreateOpenConversation,
 } from "@/server/domain/core/repository";
 import type { OrchestratorEnvelope, OrchestratorToolResult } from "./tools";
-import { createTrackedActionExecutor, ensureConversationTurnTaskRun } from "./task-runs";
+import { createTrackedActionExecutor, ensureConversationTurnTaskRun, taskActionForEnvelope } from "./task-runs";
 
 describe("agent task execution persistence", () => {
   let workspaceId: string;
@@ -43,6 +43,28 @@ describe("agent task execution persistence", () => {
   });
 
   afterAll(closeDatabase);
+
+  it("does not misclassify a lead metadata hint as qualification", async () => {
+    const envelope: OrchestratorEnvelope = {
+      lead: { status: "QUALIFIED", intent: "Office cleaning" },
+      action: { type: "NONE" },
+    };
+    expect(taskActionForEnvelope(envelope)).toBe("UPDATE_LEAD");
+
+    const result: OrchestratorToolResult = { kind: "none", data: {} };
+    const executor = vi.fn(async () => result);
+    const tracked = createTrackedActionExecutor(executor);
+
+    expect(await tracked(workspaceId, conversationId, contactId, envelope)).toEqual(result);
+    expect(await tracked(workspaceId, conversationId, contactId, envelope)).toEqual(result);
+    expect(executor).toHaveBeenCalledOnce();
+
+    const [step] = await db.select().from(agentTaskSteps);
+    expect(step).toMatchObject({
+      action: "UPDATE_LEAD",
+      status: "COMPLETED",
+    });
+  });
 
   it("closes a usage-only turn until a server action actually begins", async () => {
     const run = await ensureConversationTurnTaskRun(
