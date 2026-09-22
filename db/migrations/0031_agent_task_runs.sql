@@ -6,7 +6,7 @@ CREATE TABLE "agent_task_runs" (
   "source_message_id" uuid,
   "task_key" text NOT NULL,
   "status" text NOT NULL DEFAULT 'RUNNING'
-    CHECK ("status" IN ('RUNNING','WAITING_CUSTOMER','WAITING_CONFIRMATION','COMPLETED','FAILED')),
+    CHECK ("status" IN ('RUNNING','WAITING_CUSTOMER','WAITING_CONFIRMATION','WAITING_SYSTEM','COMPLETED','FAILED')),
   "objective" text,
   "termination_reason" text,
   "metadata" jsonb NOT NULL DEFAULT '{}'::jsonb,
