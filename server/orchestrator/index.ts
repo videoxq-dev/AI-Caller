@@ -11,7 +11,7 @@ import {
 } from "./tools";
 import { generateAIWithUsage } from "./usage";
 import { ensureConversationTurnTaskRun, executeTrackedOrchestratorTools } from "./task-runs";
-import { runBoundedTaskChain } from "./bounded-task-runner";
+import { runBoundedTaskChain, stepAllowsSameTurnContinuation } from "./bounded-task-runner";
 import {
   getAwaitingPendingAction,
   isExplicitActionConfirmation,
@@ -881,7 +881,7 @@ export function createResponseOrchestrator(dependencies: OrchestratorDependencie
         return { reply: bookingFallback(toolResult),
           handlingMode: "AI" as const, action: first.action, toolResult };
       }
-      if (toolResult.kind === "qualification") {
+      if (stepAllowsSameTurnContinuation(first, toolResult)) {
         let followUpActionType: OrchestratorEnvelope["action"]["type"] = first.action.type;
         try {
           const outcome = await runBoundedTaskChain({
@@ -903,11 +903,15 @@ export function createResponseOrchestrator(dependencies: OrchestratorDependencie
                   { workspaceId, conversationId, validationIssues: error.validationIssues },
                   "Bounded task continuation was invalid; stopping after authoritative result",
                 );
-                const qualified = result.data.qualified === true;
-                return {
-                  reply: qualified
+                const fallbackReply = result.kind === "qualification"
+                  ? result.data.qualified === true
                     ? "Thanks. I've recorded your qualification details."
-                    : "Thanks. I've recorded those details. I still need more information before qualification is complete.",
+                    : "Thanks. I've recorded those details. I still need more information before qualification is complete."
+                  : result.kind === "contact"
+                    ? "Thanks. I've updated the contact details you provided."
+                    : "Thanks. I've recorded those details.";
+                return {
+                  reply: fallbackReply,
                   action: { type: "NONE" },
                 };
               }
