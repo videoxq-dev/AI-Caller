@@ -184,7 +184,7 @@ export function createCalendarBookingService(dependencies: BookingDependencies) 
         return dependencies.updateNativeAppointmentAfterReschedule(workspaceId, appointmentId, {
           ...input,
           timezone: validated.timezone,
-        }, validated);
+        }, validated, expectedUpdatedAt, serviceChange);
       }
       if (!appointment.integrationId || !appointment.externalEventId) {
         throw new AppError("APPOINTMENT_NOT_SYNCED", "This appointment has an incomplete external calendar link.", 409);
