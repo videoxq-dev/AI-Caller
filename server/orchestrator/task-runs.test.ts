@@ -11,7 +11,7 @@ import {
   getOrCreateOpenConversation,
 } from "@/server/domain/core/repository";
 import type { OrchestratorEnvelope, OrchestratorToolResult } from "./tools";
-import { createTrackedActionExecutor } from "./task-runs";
+import { createTrackedActionExecutor, ensureConversationTurnTaskRun } from "./task-runs";
 
 describe("agent task execution persistence", () => {
   let workspaceId: string;
@@ -42,6 +42,22 @@ describe("agent task execution persistence", () => {
   });
 
   afterAll(closeDatabase);
+
+  it("closes a usage-only turn until a server action actually begins", async () => {
+    const run = await ensureConversationTurnTaskRun(
+      workspaceId,
+      conversationId,
+      contactId,
+    );
+    const [stored] = await db.select().from(agentTaskRuns);
+    expect(run.id).toBe(stored.id);
+    expect(stored).toMatchObject({
+      status: "COMPLETED",
+      terminationReason: "NO_SERVER_ACTION_YET",
+    });
+    expect(stored.completedAt).not.toBeNull();
+    expect(await db.select().from(agentTaskSteps)).toHaveLength(0);
+  });
 
   it("persists a validated action step and authoritative result", async () => {
     const result: OrchestratorToolResult = {
