@@ -86,6 +86,6 @@ describe("server-owned booking date/time resolution", () => {
       localDate: "2026-09-21", timezone: "Asia/Kathmandu", period: "NEXT_AVAILABLE",
     }, fixed);
     expect(next.endsAt.getTime() - next.startsAt.getTime()).toBeLessThan(7 * 24 * 60 * 60_000);
-    expect(next.endsAt).toBeGreaterThan(next.startsAt);
+    expect(next.endsAt.getTime()).toBeGreaterThan(next.startsAt.getTime());
   });
 });
