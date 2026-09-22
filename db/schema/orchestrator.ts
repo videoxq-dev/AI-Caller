@@ -126,6 +126,7 @@ export const agentTaskRuns = pgTable(
     conversationId: uuid("conversation_id").notNull().references(() => conversations.id, { onDelete: "cascade" }),
     contactId: uuid("contact_id").notNull().references(() => contacts.id, { onDelete: "cascade" }),
     sourceMessageId: uuid("source_message_id"),
+    taskKey: text("task_key").notNull(),
     status: text("status").default("RUNNING").notNull(),
     objective: text("objective"),
     terminationReason: text("termination_reason"),
@@ -135,9 +136,10 @@ export const agentTaskRuns = pgTable(
     updatedAt: timestamp("updated_at", { withTimezone: true, mode: "date" }).defaultNow().notNull(),
   },
   (table) => [
-    uniqueIndex("agent_task_runs_source_message_uq")
-      .on(table.workspaceId, table.conversationId, table.sourceMessageId)
-      .where(sql`${table.sourceMessageId} is not null`),
+    uniqueIndex("agent_task_runs_task_key_uq")
+      .on(table.workspaceId, table.conversationId, table.taskKey),
+    index("agent_task_runs_source_message_idx")
+      .on(table.workspaceId, table.conversationId, table.sourceMessageId),
     index("agent_task_runs_workspace_status_idx").on(table.workspaceId, table.status, table.startedAt),
     index("agent_task_runs_conversation_idx").on(table.conversationId, table.startedAt),
   ],
