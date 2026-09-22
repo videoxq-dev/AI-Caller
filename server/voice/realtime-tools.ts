@@ -6,6 +6,7 @@ import { AppError } from "@/server/http/errors";
 import { requireActiveWorkspaceAgent } from "@/server/agent/service";
 import { assertAgentActionAllowed, type AgentCapabilities } from "@/server/agent/capabilities";
 import { realtimeBusinessToolAllowed, type RealtimeBusinessToolName } from "@/server/orchestrator/action-registry";
+import { recordExternalTaskReceipt } from "@/server/orchestrator/task-runs";
 import { buildConversationContext } from "@/server/orchestrator/context";
 import { executeOrchestratorTools, orchestratorActionSchema } from "@/server/orchestrator/tools";
 import { isExplicitActionConfirmation, stagePendingActionProposal } from "@/server/orchestrator/pending-actions";
@@ -87,6 +88,40 @@ function bookingContext(input: {
     channel: "PHONE",
     sessionKey: input.callId,
   };
+}
+
+async function recordRealtimeBookingReceipt(input: {
+  workspaceId: string;
+  conversationId: string;
+  contactId: string;
+  callId: string;
+  sourceEventId: string;
+  draftId: string;
+  action: "CHECK_AVAILABILITY" | "BOOK_APPOINTMENT";
+  actionInput: Record<string, unknown>;
+  result: {
+    kind: "availability" | "booking" | "pending_action";
+    data: Record<string, unknown>;
+  };
+  idempotencyKey: string;
+}) {
+  await recordExternalTaskReceipt({
+    workspaceId: input.workspaceId,
+    conversationId: input.conversationId,
+    contactId: input.contactId,
+    taskKey: `booking:${input.draftId}`,
+    objective: "Book appointment",
+    action: input.action,
+    actionInput: input.actionInput,
+    result: input.result,
+    idempotencyKey: input.idempotencyKey,
+    metadata: {
+      channel: "PHONE",
+      voiceCallId: input.callId,
+      bookingDraftId: input.draftId,
+      realtimeSourceEventId: input.sourceEventId,
+    },
+  });
 }
 
 async function activeRealtimeDraft(context: BookingContext) {
@@ -211,8 +246,7 @@ async function runRealtimeBookingV2(input: {
     if (!input.isCurrentTurn()) {
       return { ok: false as const, reason: "The caller corrected the request; recheck the latest details." };
     }
-    return {
-      ok: true as const,
+    const availabilityResult = {
       kind: "availability" as const,
       data: {
         available: result.state === "SLOTS_AVAILABLE",
@@ -223,6 +257,21 @@ async function runRealtimeBookingV2(input: {
           timezone: offer.timezone,
         })),
       },
+    };
+    await recordRealtimeBookingReceipt({
+      ...input,
+      draftId: draft.id,
+      action: "CHECK_AVAILABILITY",
+      actionInput: {
+        draftId: draft.id,
+        version: draft.version,
+      },
+      result: availabilityResult,
+      idempotencyKey: `realtime-availability:${input.sourceEventId}`,
+    });
+    return {
+      ok: true as const,
+      ...availabilityResult,
       spokenInstruction: result.offers.length
         ? "Use only these verified times. Do not change or convert the appointment yourself."
         : "Tell the caller the exact requested time is unavailable and ask for another date or time.",
@@ -255,16 +304,51 @@ async function runRealtimeBookingV2(input: {
         previewId: preview.id, sourceEventId: confirmation.id,
       });
       const outcome = await getBookingOutcome(context, current.id);
-      return result.state === "CONFIRMED" && outcome.appointment
-        ? { ok: true as const, kind: "booking" as const,
-            data: { appointmentId: outcome.appointment.id, status: "CONFIRMED",
-              startsAt: outcome.appointment.startsAt.toISOString(),
-              endsAt: outcome.appointment.endsAt.toISOString(),
-              timezone: outcome.appointment.timezone },
-            spokenInstruction: "The appointment is confirmed. State only the persisted receipt details." }
-        : { ok: true as const, kind: "booking_pending" as const,
-            data: { state: result.state },
-            spokenInstruction: "The booking is still being verified. Do not claim it is confirmed and do not create another booking." };
+      if (result.state === "CONFIRMED" && outcome.appointment) {
+        const bookingResult = {
+          kind: "booking" as const,
+          data: {
+            appointmentId: outcome.appointment.id,
+            status: "CONFIRMED",
+            startsAt: outcome.appointment.startsAt.toISOString(),
+            endsAt: outcome.appointment.endsAt.toISOString(),
+            timezone: outcome.appointment.timezone,
+          },
+        };
+        await recordRealtimeBookingReceipt({
+          ...input,
+          draftId: current.id,
+          action: "BOOK_APPOINTMENT",
+          actionInput: {
+            draftId: current.id,
+            previewId: preview.id,
+          },
+          result: bookingResult,
+          idempotencyKey: `booking-confirmed:${outcome.appointment.id}`,
+        });
+        return {
+          ok: true as const,
+          ...bookingResult,
+          spokenInstruction: "The appointment is confirmed. State only the persisted receipt details.",
+        };
+      }
+      await recordRealtimeBookingReceipt({
+        ...input,
+        draftId: current.id,
+        action: "BOOK_APPOINTMENT",
+        actionInput: {
+          draftId: current.id,
+          previewId: preview.id,
+        },
+        result: {
+          kind: "booking",
+          data: { state: result.state, status: result.state },
+        },
+        idempotencyKey: `realtime-booking-outcome:${input.sourceEventId}:${result.state}`,
+      });
+      return { ok: true as const, kind: "booking_pending" as const,
+        data: { state: result.state },
+        spokenInstruction: "The booking is still being verified. Do not claim it is confirmed and do not create another booking." };
     }
 
     if (current.status !== "AVAILABILITY_CHECKED" || !current.currentSearchId) {
@@ -290,6 +374,28 @@ async function runRealtimeBookingV2(input: {
         draftId: current.id, previewId: prepared.preview.id,
         version: selected.draft.version,
       },
+    });
+    const pendingResult = {
+      kind: "pending_action" as const,
+      data: {
+        draftId: current.id,
+        previewId: prepared.preview.id,
+        version: selected.draft.version,
+        type: "BOOK_APPOINTMENT",
+        ...prepared.preview.content,
+      },
+    };
+    await recordRealtimeBookingReceipt({
+      ...input,
+      draftId: current.id,
+      action: "BOOK_APPOINTMENT",
+      actionInput: {
+        draftId: current.id,
+        offerId: offer.id,
+        previewId: prepared.preview.id,
+      },
+      result: pendingResult,
+      idempotencyKey: `booking-preview:${prepared.preview.id}`,
     });
     return {
       ok: true as const,
