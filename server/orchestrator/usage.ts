@@ -84,6 +84,7 @@ export async function generateAIWithUsage(
   workspaceId: string,
   referenceId: string,
   messages: AIMessage[],
+  tracking: { taskRunId?: string | null } = {},
 ) {
   const route = await resolveProviderRoute(workspaceId, "AI_TEXT");
   if (!route) throw new Error("No AI provider route is configured.");
@@ -186,6 +187,7 @@ export async function generateAIWithUsage(
       pricingDetails,
       referenceType: "CONVERSATION",
       referenceId,
+      taskRunId: tracking.taskRunId ?? null,
     });
   } catch (error) {
     logger.error(
