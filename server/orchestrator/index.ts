@@ -10,7 +10,7 @@ import {
   type OrchestratorToolResult,
 } from "./tools";
 import { generateAIWithUsage } from "./usage";
-import { executeTrackedOrchestratorTools } from "./task-runs";
+import { ensureConversationTurnTaskRun, executeTrackedOrchestratorTools } from "./task-runs";
 import { runBoundedTaskChain } from "./bounded-task-runner";
 import {
   getAwaitingPendingAction,
@@ -53,7 +53,12 @@ type OrchestratorDependencies = {
     contactId: string,
     envelope: OrchestratorEnvelope,
   ) => Promise<OrchestratorToolResult>;
-  generate: (workspaceId: string, referenceId: string, messages: AIMessage[]) => Promise<{ text: string }>;
+  generate: (
+    workspaceId: string,
+    referenceId: string,
+    messages: AIMessage[],
+    tracking?: { taskRunId?: string | null },
+  ) => Promise<{ text: string }>;
   getAwaitingAction?: typeof getAwaitingPendingAction;
 };
 
@@ -649,7 +654,18 @@ export function createResponseOrchestrator(dependencies: OrchestratorDependencie
         }
       }
 
-      const firstResponse = await dependencies.generate(workspaceId, conversationId, plannerMessages(context));
+      const turnTask = await ensureConversationTurnTaskRun(
+        workspaceId,
+        conversationId,
+        context.contact.id,
+      );
+      const taskTracking = { taskRunId: turnTask.id };
+      const firstResponse = await dependencies.generate(
+        workspaceId,
+        conversationId,
+        plannerMessages(context),
+        taskTracking,
+      );
       let planned: OrchestratorEnvelope;
       try {
         planned = parseOrchestratorEnvelope(firstResponse.text);
@@ -659,7 +675,10 @@ export function createResponseOrchestrator(dependencies: OrchestratorDependencie
           "AI provider returned invalid orchestration output; requesting one correction");
         try {
           const repaired = await dependencies.generate(
-            workspaceId, conversationId, repairMessages(context, firstResponse.text, error),
+            workspaceId,
+            conversationId,
+            repairMessages(context, firstResponse.text, error),
+            taskTracking,
           );
           planned = parseOrchestratorEnvelope(repaired.text);
         } catch (repairError) {
@@ -691,6 +710,7 @@ export function createResponseOrchestrator(dependencies: OrchestratorDependencie
             workspaceId,
             conversationId,
             resumedTurnCorrectionMessages(context, planned, lastUserMessage),
+            taskTracking,
           );
           planned = parseOrchestratorEnvelope(resumed.text);
         } catch (resumeError) {
@@ -866,6 +886,7 @@ export function createResponseOrchestrator(dependencies: OrchestratorDependencie
                 workspaceId,
                 conversationId,
                 continuationMessages(context, previous, result, actionCount),
+                taskTracking,
               );
               try {
                 return parseOrchestratorEnvelope(response.text);
@@ -1055,6 +1076,7 @@ export function createResponseOrchestrator(dependencies: OrchestratorDependencie
             workspaceId,
             conversationId,
             finalizerMessages(context, first, toolResult),
+            taskTracking,
           );
           const finalEnvelope = parseOrchestratorEnvelope(finalResponse.text);
           if (!finalEnvelope.reply) throw new Error("AI provider did not return a customer-facing response after the tool call.");
@@ -1120,8 +1142,13 @@ export function createResponseOrchestrator(dependencies: OrchestratorDependencie
 export const responseOrchestrator = createResponseOrchestrator({
   buildContext: buildConversationContext,
   executeTools: executeTrackedOrchestratorTools,
-  generate: async (workspaceId, referenceId, messages) => {
-    const response = await generateAIWithUsage(workspaceId, referenceId, messages);
+  generate: async (workspaceId, referenceId, messages, tracking) => {
+    const response = await generateAIWithUsage(
+      workspaceId,
+      referenceId,
+      messages,
+      tracking,
+    );
     return { text: response.text };
   },
   getAwaitingAction: getAwaitingPendingAction,
