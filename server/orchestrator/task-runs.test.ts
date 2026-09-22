@@ -79,6 +79,32 @@ describe("agent task execution persistence", () => {
     expect(steps[0].result).toEqual({ kind: result.kind, data: result.data });
   });
 
+  it("returns a persisted authoritative result instead of repeating the same action", async () => {
+    const result: OrchestratorToolResult = {
+      kind: "qualification",
+      data: { qualified: true, score: 100, missingRequired: [] },
+    };
+    const executor = vi.fn(async () => result);
+    const tracked = createTrackedActionExecutor(executor);
+    const envelope: OrchestratorEnvelope = {
+      action: {
+        type: "QUALIFY_LEAD",
+        answers: [{ criterionId: "budget", answer: "Yes" }],
+      },
+    };
+
+    expect(await tracked(workspaceId, conversationId, contactId, envelope)).toEqual(result);
+    expect(await tracked(workspaceId, conversationId, contactId, envelope)).toEqual(result);
+
+    expect(executor).toHaveBeenCalledOnce();
+    const runs = await db.select().from(agentTaskRuns);
+    const steps = await db.select().from(agentTaskSteps);
+    expect(runs).toHaveLength(1);
+    expect(runs[0].taskKey).toMatch(/^turn:/);
+    expect(steps).toHaveLength(1);
+    expect(steps[0].idempotencyKey).toContain("orchestrator:QUALIFY_LEAD:");
+  });
+
   it("keeps a task waiting when a consequential action requires confirmation", async () => {
     const result: OrchestratorToolResult = {
       kind: "pending_action",
