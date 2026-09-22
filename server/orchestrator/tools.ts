@@ -1,5 +1,6 @@
 import { escalateConversationIssue } from "@/server/collaboration/service";
 import { assertAgentActionAllowed } from "@/server/agent/capabilities";
+import { capabilityForOrchestratorAction } from "./action-registry";
 import { requireActiveWorkspaceAgent } from "@/server/agent/service";
 import { and, desc, eq, inArray } from "drizzle-orm";
 import { db } from "@/db";
@@ -371,10 +372,11 @@ export async function executeOrchestratorTools(
   if (envelope.contact) assertAgentActionAllowed(agent.capabilities, "UPDATE_CONTACT");
   if (envelope.lead) assertAgentActionAllowed(agent.capabilities, "UPDATE_LEAD");
   if (envelope.lead?.status === "QUALIFIED") assertAgentActionAllowed(agent.capabilities, "QUALIFY_LEAD");
-  if (envelope.action.type !== "NONE") {
+  const actionCapability = capabilityForOrchestratorAction(envelope.action.type);
+  if (actionCapability) {
     // Revocation must remain available even when new opt-ins have been disabled.
     if (!(envelope.action.type === "RECORD_SMS_CONSENT" && envelope.action.status === "OPTED_OUT")) {
-      assertAgentActionAllowed(agent.capabilities, envelope.action.type);
+      assertAgentActionAllowed(agent.capabilities, actionCapability);
     }
   }
   const currentConversation = await getConversationById(workspaceId, conversationId);
