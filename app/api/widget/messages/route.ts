@@ -114,6 +114,7 @@ export async function POST(request: Request) {
             if (typeof existingReply.metadata.appointmentManagementRequestId === "string") {
               await recordAppointmentManagementPreviewDelivery(
                 bookingContext, existingReply.metadata.appointmentManagementRequestId, existingReply.id,
+                Number(existingReply.metadata.appointmentManagementVersion),
               );
             }
             if (typeof existingReply.metadata.bookingPreviewId === "string") {
@@ -192,7 +193,8 @@ export async function POST(request: Request) {
             metadata: {
               action: result.action.type, toolResult: result.toolResult.kind,
               ...(managementTurn?.preview
-                ? { appointmentManagementRequestId: managementTurn.preview.requestId }
+                ? { appointmentManagementRequestId: managementTurn.preview.requestId,
+                    appointmentManagementVersion: managementTurn.preview.version }
                 : {}),
               ...(bookingTurn?.preview ? {
                 bookingPreviewId: bookingTurn.preview.previewId,
@@ -206,6 +208,7 @@ export async function POST(request: Request) {
           if (managementTurn?.preview) {
             await recordAppointmentManagementPreviewDelivery(
               bookingContext, managementTurn.preview.requestId, saved.id,
+              managementTurn.preview.version,
             );
           }
           if (bookingTurn?.preview) {
