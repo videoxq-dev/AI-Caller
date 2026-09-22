@@ -1,7 +1,7 @@
 import { and, asc, desc, eq, gt, inArray, lt, ne, sql } from "drizzle-orm";
 import { db } from "@/db";
 import {
-  appointmentManagementRequests, appointments, bookingReservations, messages, services,
+  appointmentManagementRequests, appointments, bookingDrafts, bookingReservations, messages, services,
 } from "@/db/schema";
 import { capabilitiesFromBehaviorSettings, type AgentCapability } from "@/server/agent/capabilities";
 import { getWorkspaceAgent } from "@/server/agent/service";
@@ -119,6 +119,21 @@ async function currentRequest(ctx: BookingContext, now: Date) {
     return null;
   }
   return row;
+}
+
+async function hasUnfinishedBooking(ctx: BookingContext) {
+  const [draft] = await db.select({ id: bookingDrafts.id })
+    .from(bookingDrafts).where(and(
+      eq(bookingDrafts.workspaceId, ctx.workspaceId),
+      eq(bookingDrafts.contactId, ctx.contactId),
+      eq(bookingDrafts.channel, ctx.channel),
+      eq(bookingDrafts.sessionKey, ctx.sessionKey),
+      inArray(bookingDrafts.status, [
+        "COLLECTING", "AVAILABILITY_CHECKED", "AWAITING_CONFIRMATION",
+        "COMMITTING", "RECONCILING",
+      ]),
+    )).limit(1);
+  return Boolean(draft);
 }
 
 async function openRequest(ctx: BookingContext, intent: "RESCHEDULE" | "CANCEL", now: Date) {
@@ -338,6 +353,11 @@ export async function handleAppointmentManagementTurn(
   if (active && !initialIntent &&
     /\b(?:what services|what do you offer|opening hours|how much|price)\b/i.test(message.body)) return null;
   if (active && !initialIntent && /^(?:thanks|thank you|hello|hi|goodbye|bye)[.! ]*$/i.test(message.body.trim())) return null;
+  if (isExplicitActionConfirmation(message.body) &&
+    active?.status !== "AWAITING_CONFIRMATION" &&
+    await hasUnfinishedBooking(ctx)) {
+    return null; // A live V2 booking confirmation takes precedence over stale edits.
+  }
   if (!active && !initialIntent) {
     if (isExplicitActionConfirmation(message.body)) {
       const [last] = await db.select().from(appointmentManagementRequests)
@@ -353,6 +373,7 @@ export async function handleAppointmentManagementTurn(
     return null;
   }
   if (!active && initialIntent === "STATUS") {
+    if (await hasUnfinishedBooking(ctx)) return null;
     return { reply: statusReply(await linkedAppointments(ctx, now, true)) };
   }
   if (active?.status === "EXECUTING") {
@@ -375,6 +396,7 @@ export async function handleAppointmentManagementTurn(
   if (active && initialIntent && initialIntent !== active.intent) {
     active = await saveRequest(active, {
       intent: initialIntent, status: "COLLECTING",
+      proposedServiceId: null,
       proposedStartsAt: null, proposedEndsAt: null,
       previewDeliveredAt: null, previewDeliveryReference: null,
       localDate: null, localTime: null,
