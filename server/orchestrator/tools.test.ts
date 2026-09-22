@@ -242,6 +242,39 @@ describe("orchestrator lead updates", () => {
     })).toThrow("A business action returned an invalid result");
   });
 
+  it("rejects a booking result without a persisted receipt or reconciliation state", () => {
+    expect(() => validateOrchestratorToolResult({
+      action: {
+        type: "BOOK_APPOINTMENT",
+        startsAt: "2037-09-23T10:00:00Z",
+        endsAt: "2037-09-23T11:00:00Z",
+        timezone: "UTC",
+        title: "Office Cleaning",
+      },
+    }, {
+      kind: "booking",
+      data: {},
+    })).toThrow("A business action returned an invalid result");
+  });
+
+  it("accepts an explicit booking reconciliation state without claiming confirmation", () => {
+    expect(validateOrchestratorToolResult({
+      action: {
+        type: "BOOK_APPOINTMENT",
+        startsAt: "2037-09-23T10:00:00Z",
+        endsAt: "2037-09-23T11:00:00Z",
+        timezone: "UTC",
+        title: "Office Cleaning",
+      },
+    }, {
+      kind: "booking",
+      data: { state: "RECONCILING", status: "RECONCILING" },
+    })).toMatchObject({
+      kind: "booking",
+      data: { state: "RECONCILING" },
+    });
+  });
+
   it("accepts a server-backed pending booking receipt", () => {
     expect(validateOrchestratorToolResult({
       action: {
