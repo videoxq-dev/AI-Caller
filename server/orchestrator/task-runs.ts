@@ -108,6 +108,7 @@ async function ensureTaskRun(
   conversationId: string,
   contactId: string,
   identity: TaskIdentity = {},
+  resume = true,
 ) {
   const sourceMessageId = identity.sourceMessageId === undefined
     ? await latestCustomerMessageId(workspaceId, conversationId)
@@ -121,6 +122,7 @@ async function ensureTaskRun(
     eq(agentTaskRuns.taskKey, taskKey),
   )).limit(1);
   if (existing) {
+    if (!resume) return existing;
     const [resumed] = await db.update(agentTaskRuns).set({
       status: "RUNNING",
       terminationReason: null,
@@ -149,7 +151,21 @@ export async function ensureConversationTurnTaskRun(
   conversationId: string,
   contactId: string,
 ) {
-  return ensureTaskRun(workspaceId, conversationId, contactId);
+  const run = await ensureTaskRun(
+    workspaceId,
+    conversationId,
+    contactId,
+    {},
+    false,
+  );
+  if (run.status !== "RUNNING") return run;
+  const [step] = await db.select({ id: agentTaskSteps.id })
+    .from(agentTaskSteps)
+    .where(eq(agentTaskSteps.runId, run.id))
+    .limit(1);
+  if (step) return run;
+  await finishTaskRun(run.id, "COMPLETED", "NO_SERVER_ACTION_YET");
+  return { ...run, status: "COMPLETED", terminationReason: "NO_SERVER_ACTION_YET" };
 }
 
 async function beginTaskStep(
