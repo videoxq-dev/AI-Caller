@@ -1,5 +1,8 @@
 import { getBookingPreviewCard } from "@/server/booking/cards";
 import { handleBookingTurn } from "@/server/booking/conversation";
+import {
+  handleAppointmentManagementTurn, recordAppointmentManagementPreviewDelivery,
+} from "@/server/booking/management";
 import { upgradeWebchatBookingSession } from "@/server/booking/rollout";
 import { recordBookingPreviewDelivery } from "@/server/booking/offers";
 import { appendMessage, getConversationById } from "@/server/domain/core/repository";
@@ -108,6 +111,11 @@ export async function POST(request: Request) {
           if (existingReply) {
 
             const recoveredCard = existingReply.metadata.bookingCard;
+            if (typeof existingReply.metadata.appointmentManagementRequestId === "string") {
+              await recordAppointmentManagementPreviewDelivery(
+                bookingContext, existingReply.metadata.appointmentManagementRequestId, existingReply.id,
+              );
+            }
             if (typeof existingReply.metadata.bookingPreviewId === "string") {
               await recordBookingPreviewDelivery(bookingContext, {
                 draftId: String(existingReply.metadata.bookingDraftId),
@@ -127,13 +135,19 @@ export async function POST(request: Request) {
           }
 
           const conversationBefore = await getConversationById(workspaceId, resolved.session.conversationId);
-          const bookingTurn = resolved.session.bookingEngineVersion === "v2" &&
+          const managementTurn = conversationBefore?.handlingMode === "AI"
+            ? await handleAppointmentManagementTurn(
+                bookingContext, { id: inbound.id, body: input.message },
+              )
+            : null;
+          const bookingTurn = !managementTurn &&
+            resolved.session.bookingEngineVersion === "v2" &&
             conversationBefore?.handlingMode === "AI"
               ? await handleBookingTurn(bookingContext, { id: inbound.id, body: input.message })
               : null;
-          const result = bookingTurn
+          const result = managementTurn || bookingTurn
             ? {
-              reply: bookingTurn.reply, handlingMode: "AI" as const,
+              reply: (managementTurn ?? bookingTurn)!.reply, handlingMode: "AI" as const,
               action: { type: "NONE" as const },
               toolResult: { kind: "none" as const, data: {} },
             }
@@ -177,6 +191,9 @@ export async function POST(request: Request) {
             status: "DELIVERED",
             metadata: {
               action: result.action.type, toolResult: result.toolResult.kind,
+              ...(managementTurn?.preview
+                ? { appointmentManagementRequestId: managementTurn.preview.requestId }
+                : {}),
               ...(bookingTurn?.preview ? {
                 bookingPreviewId: bookingTurn.preview.previewId,
                 bookingDraftId: bookingTurn.preview.draftId,
@@ -186,6 +203,11 @@ export async function POST(request: Request) {
             },
           });
 
+          if (managementTurn?.preview) {
+            await recordAppointmentManagementPreviewDelivery(
+              bookingContext, managementTurn.preview.requestId, saved.id,
+            );
+          }
           if (bookingTurn?.preview) {
             await recordBookingPreviewDelivery(bookingContext, {
               draftId: bookingTurn.preview.draftId,
