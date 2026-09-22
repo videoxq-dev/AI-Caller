@@ -23,7 +23,7 @@ type Intent = "RESCHEDULE" | "CANCEL" | "STATUS";
 
 export type AppointmentManagementTurn = {
   reply: string;
-  preview?: { requestId: string };
+  preview?: { requestId: string; version: number };
 };
 
 const ACTIVE = ["COLLECTING", "AWAITING_CONFIRMATION", "EXECUTING"];
@@ -135,8 +135,9 @@ async function openRequest(ctx: BookingContext, intent: "RESCHEDULE" | "CANCEL",
 
 async function saveRequest(row: RequestRow, patch: Partial<RequestRow>, now: Date) {
   const [updated] = await db.update(appointmentManagementRequests)
-    .set({ ...patch, updatedAt: now })
+    .set({ ...patch, version: sql`${appointmentManagementRequests.version} + 1`, updatedAt: now })
     .where(and(eq(appointmentManagementRequests.id, row.id),
+      eq(appointmentManagementRequests.version, row.version),
       eq(appointmentManagementRequests.status, row.status))).returning();
   if (!updated) throw new AppError("APPOINTMENT_MANAGEMENT_CHANGED",
     "The appointment request changed. Please ask for its current status.", 409);
@@ -247,6 +248,7 @@ async function finishRequest(ctx: BookingContext, row: RequestRow, sourceMessage
   const [claimed] = await db.update(appointmentManagementRequests).set({
     status: "EXECUTING", sourceEventId: sourceMessageId, updatedAt: now,
   }).where(and(eq(appointmentManagementRequests.id, row.id),
+    eq(appointmentManagementRequests.version, row.version),
     eq(appointmentManagementRequests.status, "AWAITING_CONFIRMATION"),
     eq(appointmentManagementRequests.previewDeliveredAt, row.previewDeliveredAt))).returning();
   if (!claimed) return { reply: "This appointment change is already being processed. Please ask for its status before trying again." };
@@ -281,11 +283,13 @@ async function finishRequest(ctx: BookingContext, row: RequestRow, sourceMessage
 
 export async function recordAppointmentManagementPreviewDelivery(
   ctx: BookingContext, requestId: string, deliveryReference: string,
+  expectedVersion: number,
 ) {
   await db.update(appointmentManagementRequests).set({
     previewDeliveredAt: new Date(),
     previewDeliveryReference: deliveryReference,
   }).where(and(owned(ctx), eq(appointmentManagementRequests.id, requestId),
+    eq(appointmentManagementRequests.version, expectedVersion),
     eq(appointmentManagementRequests.status, "AWAITING_CONFIRMATION")));
 }
 
@@ -376,7 +380,7 @@ export async function handleAppointmentManagementTurn(
     return {
       reply: "Please confirm: cancel your existing " + appointmentLabel(appointment) +
         " appointment? Reply YES to cancel the appointment, or NO to leave it unchanged.",
-      preview: { requestId: active.id },
+      preview: { requestId: active.id, version: active.version },
     };
   }
   if (!await agentAllows(ctx, "CHECK_AVAILABILITY")) {
@@ -434,6 +438,6 @@ export async function handleAppointmentManagementTurn(
       humanTime(proposed.startsAt, timezone) + "–" +
       new Intl.DateTimeFormat("en-US", { timeZone: timezone, timeStyle: "short" }).format(proposed.endsAt) +
       "? Reply YES to reschedule, or tell me another date/time. No new appointment will be created.",
-    preview: { requestId: active.id },
+    preview: { requestId: active.id, version: active.version },
   };
 }
