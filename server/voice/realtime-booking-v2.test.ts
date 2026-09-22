@@ -61,9 +61,10 @@ describe("Realtime voice booking v2 uses durable booking authority", () => {
       data: { date: "2030-09-23", time: "11:00", timezone: "Africa/Lagos" } });
 
     const checked = await run("check_availability", {}, "tool-check");
+    if (!checked) throw new Error("Availability tool returned no result.");
     expect(checked.ok).toBe(true);
     expect("data" in checked && checked.data).toMatchObject({ available: true });
-    if (!checked || !("data" in checked) || !checked.data || !Array.isArray((checked.data as Record<string, unknown>).slots)) {
+    if (!("data" in checked) || !checked.data || !Array.isArray((checked.data as Record<string, unknown>).slots)) {
       throw new Error("Expected verified slots.");
     }
     const slots = (checked.data as { slots: Array<{ startsAt: string; endsAt: string }> }).slots;
