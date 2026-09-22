@@ -86,7 +86,7 @@ describe("existing appointment management (isolated from V2 booking)", () => {
 
   it("requires delivered readback and explicit confirmation to reschedule exactly one existing appointment", async () => {
     await turn("I'd like to update my appointment");
-    const preview = await turn("September 24 at 10 AM");
+    const preview = await turn("September 24, 2037 at 10 AM");
     expect(preview?.reply).toContain("move your existing");
     expect(preview?.reply).toContain("No new appointment will be created");
     expect(preview?.preview).toBeDefined();
