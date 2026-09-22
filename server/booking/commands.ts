@@ -47,7 +47,8 @@ async function assertAgentPermission(
 
 async function assertCustomerConfirmation(
   tx: Parameters<Parameters<typeof db.transaction>[0]>[0],
-  context: BookingContext, sourceEventId: string, deliveredAt: Date,
+  context: BookingContext, sourceEventId: string,
+  preview: typeof bookingPreviews.$inferSelect,
 ) {
   if (!context.conversationId) {
     throw new AppError("BOOKING_CONFIRMATION_EVIDENCE_REQUIRED", "Confirmation needs a current customer message.", 409);
@@ -58,10 +59,34 @@ async function assertCustomerConfirmation(
     eq(messages.channel, context.channel), eq(messages.senderType, "CUSTOMER"),
     inArray(messages.contentType, ["TEXT", "CALL_TRANSCRIPT"]),
   )).orderBy(desc(messages.createdAt), desc(messages.id)).limit(1);
-  if (!latest || latest.id !== sourceEventId || latest.createdAt < deliveredAt ||
+  if (!latest || latest.id !== sourceEventId || latest.createdAt < preview.deliveredAt! ||
     !isExplicitActionConfirmation(latest.body)) {
     throw new AppError("BOOKING_CONFIRMATION_REQUIRED",
       "Please explicitly confirm the current appointment preview.", 409);
+  }
+  // A bare "yes" may answer an unrelated follow-up question. Accept the
+  // widget's authenticated confirmation action directly, but for ambiguous
+  // verbal/text assent require that the last AI reply was this exact preview.
+  const isWidgetCardConfirmation = context.channel === "WEBCHAT" &&
+    latest.provider === "webchat-booking-confirm" &&
+    latest.metadata.bookingPreviewId === preview.id;
+  if (!isWidgetCardConfirmation &&
+    /^(?:yes|yes please|yep|yeah|sure|okay|ok|absolutely|please do|that works|sounds good|looks good)[.!?]*$/i
+      .test(latest.body.trim())) {
+    const [lastAI] = await tx.select({
+      id: messages.id, metadata: messages.metadata,
+    }).from(messages).where(and(
+      eq(messages.workspaceId, context.workspaceId),
+      eq(messages.conversationId, context.conversationId),
+      eq(messages.channel, context.channel),
+      eq(messages.direction, "OUTBOUND"),
+      eq(messages.senderType, "AI"),
+    )).orderBy(desc(messages.createdAt), desc(messages.id)).limit(1);
+    if (!lastAI || lastAI.id !== preview.deliveryReference ||
+      lastAI.metadata.bookingPreviewId !== preview.id) {
+      throw new AppError("BOOKING_CONFIRMATION_REQUIRED",
+        "Please explicitly confirm the appointment itself, including the current date and time.", 409);
+    }
   }
   if (context.channel === "PHONE" && latest.metadata.voiceCallId !== context.sessionKey) {
     throw new AppError("BOOKING_CONFIRMATION_SESSION_MISMATCH", "This confirmation belongs to another call.", 409);
@@ -153,7 +178,7 @@ export async function confirmBookingPreview(
       throw new AppError("BOOKING_PREVIEW_STALE", "The appointment details have changed.", 409);
     }
     await assertAgentPermission(tx, context);
-    await assertCustomerConfirmation(tx, context, sourceEventId, preview.deliveredAt!);
+    await assertCustomerConfirmation(tx, context, sourceEventId, preview);
     const [existingEvent] = await tx.select().from(bookingSourceEvents).where(and(
       eq(bookingSourceEvents.workspaceId, context.workspaceId),
       eq(bookingSourceEvents.sessionKey, context.sessionKey),
