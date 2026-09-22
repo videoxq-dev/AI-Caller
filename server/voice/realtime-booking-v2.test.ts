@@ -63,7 +63,7 @@ describe("Realtime voice booking v2 uses durable booking authority", () => {
     const checked = await run("check_availability", {}, "tool-check");
     expect(checked.ok).toBe(true);
     expect("data" in checked && checked.data).toMatchObject({ available: true });
-    if (!("data" in checked) || !checked.data || !Array.isArray((checked.data as Record<string, unknown>).slots)) {
+    if (!checked || !("data" in checked) || !checked.data || !Array.isArray((checked.data as Record<string, unknown>).slots)) {
       throw new Error("Expected verified slots.");
     }
     const slots = (checked.data as { slots: Array<{ startsAt: string; endsAt: string }> }).slots;
@@ -76,7 +76,7 @@ describe("Realtime voice booking v2 uses durable booking authority", () => {
 
     const staged = await run("book_appointment", {}, "tool-stage");
     expect(staged).toMatchObject({ ok: true, kind: "pending_action" });
-    if (!("data" in staged)) throw new Error("Expected preview IDs.");
+    if (!staged || !("data" in staged)) throw new Error("Expected preview IDs.");
     const data = staged.data as { draftId: string; previewId: string; version: number };
 
     const [readback] = await db.insert(messages).values({
