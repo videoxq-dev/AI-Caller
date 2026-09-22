@@ -1,6 +1,6 @@
 import { sql } from "drizzle-orm";
 import { index, integer, pgTable, text, timestamp, uniqueIndex, uuid } from "drizzle-orm/pg-core";
-import { workspaces } from "./core";
+import { services, workspaces } from "./core";
 import { appointments, contactChannel, contacts, conversations } from "./core-domain";
 
 // This is intentionally separate from booking_drafts. An existing appointment
@@ -19,6 +19,7 @@ export const appointmentManagementRequests = pgTable("appointment_management_req
   originalStartsAt: timestamp("original_starts_at", { withTimezone: true, mode: "date" }),
   originalEndsAt: timestamp("original_ends_at", { withTimezone: true, mode: "date" }),
   originalUpdatedAt: timestamp("original_updated_at", { withTimezone: true, mode: "date" }),
+  proposedServiceId: uuid("proposed_service_id").references(() => services.id, { onDelete: "set null" }),
   proposedStartsAt: timestamp("proposed_starts_at", { withTimezone: true, mode: "date" }),
   proposedEndsAt: timestamp("proposed_ends_at", { withTimezone: true, mode: "date" }),
   localDate: text("local_date"),
