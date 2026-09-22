@@ -60,6 +60,11 @@ type OrchestratorDependencies = {
     tracking?: { taskRunId?: string | null },
   ) => Promise<{ text: string }>;
   getAwaitingAction?: typeof getAwaitingPendingAction;
+  ensureTaskRun?: (
+    workspaceId: string,
+    conversationId: string,
+    contactId: string,
+  ) => Promise<{ id: string }>;
 };
 
 const ACTION_PROTOCOL = `
@@ -654,12 +659,14 @@ export function createResponseOrchestrator(dependencies: OrchestratorDependencie
         }
       }
 
-      const turnTask = await ensureConversationTurnTaskRun(
-        workspaceId,
-        conversationId,
-        context.contact.id,
-      );
-      const taskTracking = { taskRunId: turnTask.id };
+      const turnTask = dependencies.ensureTaskRun
+        ? await dependencies.ensureTaskRun(
+            workspaceId,
+            conversationId,
+            context.contact.id,
+          )
+        : null;
+      const taskTracking = turnTask ? { taskRunId: turnTask.id } : undefined;
       const firstResponse = await dependencies.generate(
         workspaceId,
         conversationId,
@@ -1152,4 +1159,5 @@ export const responseOrchestrator = createResponseOrchestrator({
     return { text: response.text };
   },
   getAwaitingAction: getAwaitingPendingAction,
+  ensureTaskRun: ensureConversationTurnTaskRun,
 });
