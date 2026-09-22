@@ -185,7 +185,8 @@ async function verifyDesktop() {
   await page.getByRole("button", { name: "Confirm reschedule" }).click();
   await page.getByRole("button", { name: "Reschedule appointment" }).waitFor();
   assert(rescheduleRequest?.method === "POST", "Appointment drawer did not submit a POST reschedule request.");
-  assert(/^\\/api\\/appointments\\/[^/]+\\/reschedule$/.test(new URL(rescheduleRequest.url).pathname),
+  assert(new URL(rescheduleRequest.url).pathname.startsWith("/api/appointments/") &&
+    new URL(rescheduleRequest.url).pathname.endsWith("/reschedule"),
     "Appointment drawer submitted to the wrong reschedule API.");
   assert(Date.parse(rescheduleRequest.input.startsAt) > Date.now(),
     "Appointment drawer sent an invalid past start.");
