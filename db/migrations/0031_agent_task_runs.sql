@@ -35,6 +35,7 @@ CREATE TABLE "agent_task_steps" (
     CHECK ("status" IN ('RUNNING','COMPLETED','FAILED')),
   "input" jsonb NOT NULL DEFAULT '{}'::jsonb,
   "input_hash" text NOT NULL,
+  "idempotency_key" text,
   "result" jsonb,
   "error_code" text,
   "started_at" timestamptz NOT NULL DEFAULT now(),
@@ -43,5 +44,8 @@ CREATE TABLE "agent_task_steps" (
 
 CREATE UNIQUE INDEX "agent_task_steps_run_sequence_uq"
   ON "agent_task_steps" ("run_id","sequence");
+CREATE UNIQUE INDEX "agent_task_steps_run_idempotency_uq"
+  ON "agent_task_steps" ("run_id","idempotency_key")
+  WHERE "idempotency_key" IS NOT NULL;
 CREATE INDEX "agent_task_steps_workspace_action_idx"
   ON "agent_task_steps" ("workspace_id","action","started_at");
