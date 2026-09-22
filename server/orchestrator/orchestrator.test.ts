@@ -1267,4 +1267,65 @@ describe("orchestrator response protocol", () => {
     expect(executeTools).toHaveBeenCalledOnce();
   });
 
+
+  it("reapplies When Unsure when bounded replanning becomes unresolved", async () => {
+    const generate = vi.fn()
+      .mockResolvedValueOnce({ text: JSON.stringify({
+        action: {
+          type: "QUALIFY_LEAD",
+          answers: [{ criterionId: "budget", answer: "Yes" }],
+        },
+      }) })
+      .mockResolvedValueOnce({ text: JSON.stringify({
+        reply: "I can't verify the requested warranty exception from approved information.",
+        unresolved: { reason: "The warranty exception requires staff review." },
+        action: { type: "NONE" },
+      }) });
+    const executeTools = vi.fn(async (
+      _workspaceId: string,
+      _conversationId: string,
+      _contactId: string,
+      envelope: { action: { type: string } },
+    ) => envelope.action.type === "QUALIFY_LEAD"
+      ? {
+          kind: "qualification" as const,
+          data: { qualified: true, score: 100, missingRequired: [] },
+        }
+      : {
+          kind: "escalation" as const,
+          data: { handlingMode: "AI", scope: "ISSUE", issueCaseId: "issue-1" },
+        });
+
+    const orchestrator = createResponseOrchestrator({
+      buildContext: vi.fn(async () => ({
+        ...fakeContext(),
+        source: "INBOUND_TURN" as const,
+        messages: [{ role: "user" as const,
+          content: "My budget is approved. Can you also approve this warranty exception?" }],
+        agent: {
+          id: "agent-1",
+          status: "ACTIVE" as const,
+          whenUnsure: "Escalate to a human",
+          escalationMessage: null,
+          behaviorSettings: {
+            capabilities: { ...defaultAgentCapabilities, ESCALATE: true },
+          },
+        },
+      })),
+      executeTools,
+      generate,
+    });
+
+    const result = await orchestrator.respond("workspace", "conversation");
+
+    expect(result.handlingMode).toBe("AI");
+    expect(result.reply).toContain("warranty exception");
+    expect(result.reply).toContain("flagged this issue for staff follow-up");
+    expect(generate).toHaveBeenCalledTimes(2);
+    expect(executeTools).toHaveBeenCalledTimes(2);
+    expect(executeTools.mock.calls[1]?.[3]).toMatchObject({
+      action: { type: "ESCALATE" },
+    });
+  });
+
 });
