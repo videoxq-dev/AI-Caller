@@ -246,16 +246,19 @@ export async function handleBookingTurn(
     const draft = opened.draft;
     const patch: BookingPatch = {};
     if (decision.serviceId !== undefined) patch.serviceId = decision.serviceId;
-    const tz = decision.timezone ?? draft.customerTimezone ??
+    // Interpret relative dates in the timezone explicitly spoken alongside
+    // the new time, not the stale business/default zone from an earlier turn.
+    const parsedTime = decision.timeExpression
+      ? parseBookingTime(decision.timeExpression) : null;
+    const tz = decision.timezone ?? parsedTime?.timezone ?? draft.customerTimezone ??
       (await getBusinessSetup(ctx.workspaceId)).profile?.timezone ?? "UTC";
     if (decision.dateExpression) {
       patch.localDate = parseBookingDate(decision.dateExpression, tz, now);
       patch.originalDateExpression = decision.dateExpression;
     }
-    if (decision.timeExpression) {
-      const time = parseBookingTime(decision.timeExpression);
-      patch.localTime = time.localTime;
-      if (time.timezone) patch.customerTimezone = time.timezone;
+    if (parsedTime) {
+      patch.localTime = parsedTime.localTime;
+      if (parsedTime.timezone) patch.customerTimezone = parsedTime.timezone;
     }
     if (decision.timezone) patch.customerTimezone = decision.timezone;
     if (decision.location !== undefined) patch.requiredLocation = decision.location;
