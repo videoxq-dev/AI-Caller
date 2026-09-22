@@ -13,6 +13,9 @@ import { enqueueUniqueJob } from "@/server/jobs";
 import { SMS_INBOUND_RESPONSE, smsInboundResponseJobSchema, type SmsInboundResponseJob } from "@/server/jobs/queues";
 import { responseOrchestrator } from "@/server/orchestrator";
 import { handleBookingTurn } from "@/server/booking/conversation";
+import {
+  handleAppointmentManagementTurn, recordAppointmentManagementPreviewDelivery,
+} from "@/server/booking/management";
 import { recordBookingPreviewDelivery } from "@/server/booking/offers";
 import { shouldUseBookingV2 } from "@/server/booking/rollout";
 import type { NormalizedSmsEvent, SmsWebhookInput } from "@/server/providers/contracts";
@@ -334,13 +337,18 @@ export function createSmsWebhookService(dependencies: SmsServiceDependencies) {
           conversationId: conversation.id, channel: "SMS" as const,
           sessionKey: `SMS:${conversation.id}`,
         };
-        const bookingTurn = conversation.handlingMode === "AI" &&
+        const managementTurn = conversation.handlingMode === "AI"
+          ? await handleAppointmentManagementTurn(
+              bookingContext, { id: inbound.id, body: job.text },
+            )
+          : null;
+        const bookingTurn = !managementTurn && conversation.handlingMode === "AI" &&
           await shouldUseBookingV2(bookingContext)
           ? await handleBookingTurn(bookingContext, { id: inbound.id, body: job.text })
           : null;
-        const orchestrated = bookingTurn ? null
+        const orchestrated = managementTurn || bookingTurn ? null
           : await dependencies.respond(job.workspaceId, conversation.id);
-        const reply = bookingTurn?.reply ?? orchestrated?.reply ?? null;
+        const reply = managementTurn?.reply ?? bookingTurn?.reply ?? orchestrated?.reply ?? null;
         if (!reply) {
           await completeProviderWebhookEvent(job.workspaceId, job.webhookEventId);
           return { skipped: false as const, replied: false as const };
@@ -354,6 +362,9 @@ export function createSmsWebhookService(dependencies: SmsServiceDependencies) {
             idempotencyKey: job.webhookEventId,
             metadata: {
               inReplyToProviderEventId: job.webhookEventId,
+              ...(managementTurn?.preview
+                ? { appointmentManagementRequestId: managementTurn.preview.requestId }
+                : {}),
               ...(bookingTurn?.preview ? {
                 bookingPreviewId: bookingTurn.preview.previewId,
                 bookingDraftId: bookingTurn.preview.draftId,
@@ -361,6 +372,11 @@ export function createSmsWebhookService(dependencies: SmsServiceDependencies) {
               } : {}),
             },
           });
+          if (managementTurn?.preview) {
+            await recordAppointmentManagementPreviewDelivery(
+              bookingContext, managementTurn.preview.requestId, outbound.id,
+            );
+          }
           if (bookingTurn?.preview) {
             await recordBookingPreviewDelivery(bookingContext, {
               draftId: bookingTurn.preview.draftId,
