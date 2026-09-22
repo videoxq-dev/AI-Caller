@@ -62,9 +62,16 @@ export class CalComCalendarProvider implements CalendarProvider {
       this.fetcher,
     );
     const durationMs = duration * 60_000;
-    return Object.values(response.data ?? {}).flat().filter((slot) => slot.start).map((slot) => {
-      const startsAt = new Date(slot.start!);
-      const endsAt = slot.end ? new Date(slot.end) : new Date(startsAt.getTime() + durationMs);
+    return Object.values(response.data ?? {}).flat().map((slot) => {
+      if (!slot.start || !slot.end) {
+        throw new Error("Cal.com returned an incomplete available slot.");
+      }
+      const startsAt = new Date(slot.start);
+      const endsAt = new Date(slot.end);
+      if (!Number.isFinite(startsAt.getTime()) || !Number.isFinite(endsAt.getTime()) ||
+        endsAt.getTime() - startsAt.getTime() !== durationMs) {
+        throw new Error("Cal.com returned an available slot with an unexpected duration.");
+      }
       return { startsAt, endsAt };
     });
   }
@@ -86,12 +93,16 @@ export class CalComCalendarProvider implements CalendarProvider {
         },
       }),
     }, this.fetcher);
-    if (!response.data?.uid) throw new Error("Cal.com did not return a booking UID.");
-    return {
-      externalId: response.data.uid,
-      startsAt: parseDate(response.data.start, input.startsAt),
-      endsAt: parseDate(response.data.end, input.endsAt),
-    };
+    if (!response.data?.uid || !response.data.start || !response.data.end) {
+      throw new Error("Cal.com did not return a complete confirmed booking.");
+    }
+    const startsAt = parseDate(response.data.start, new Date(NaN));
+    const endsAt = parseDate(response.data.end, new Date(NaN));
+    if (!Number.isFinite(startsAt.getTime()) || !Number.isFinite(endsAt.getTime()) ||
+      endsAt <= startsAt) {
+      throw new Error("Cal.com returned invalid confirmed booking times.");
+    }
+    return { externalId: response.data.uid, startsAt, endsAt };
   }
 
   async reschedule(input: { externalId: string; startsAt: Date; endsAt: Date; timezone: string }) {
