@@ -24,6 +24,8 @@ export const appointmentManagementRequests = pgTable("appointment_management_req
   localTime: text("local_time"),
   timezone: text("timezone"),
   sourceEventId: text("source_event_id"),
+  previewDeliveredAt: timestamp("preview_delivered_at", { withTimezone: true, mode: "date" }),
+  previewDeliveryReference: text("preview_delivery_reference"),
   expiresAt: timestamp("expires_at", { withTimezone: true, mode: "date" }).notNull(),
   completedAt: timestamp("completed_at", { withTimezone: true, mode: "date" }),
   createdAt: timestamp("created_at", { withTimezone: true, mode: "date" }).defaultNow().notNull(),
