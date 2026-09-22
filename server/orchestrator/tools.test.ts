@@ -5,7 +5,7 @@ import { aiAgents, contacts, conversationHumanCases, conversations, leads, pendi
 import { listAppointments } from "@/server/domain/core/repository";
 import { saveBusinessSetup } from "@/server/domain/onboarding/repository";
 import { appendMessage, getOrCreateOpenConversation } from "@/server/domain/core/repository";
-import { executeOrchestratorTools } from "./tools";
+import { executeOrchestratorTools, validateOrchestratorToolResult } from "./tools";
 import { setWorkspaceAgentCapabilities } from "@/server/agent/service";
 import { defaultAgentCapabilities } from "@/server/agent/capabilities";
 
@@ -214,6 +214,53 @@ describe("orchestrator lead updates", () => {
     })).rejects.toMatchObject({ code: "AGENT_ACTION_DISABLED", status: 403 });
     const [contact] = await db.select().from(contacts).where(eq(contacts.id, contactId));
     expect(contact.name).toBe("Ada");
+  });
+
+  it("rejects a malformed authoritative availability result", () => {
+    expect(() => validateOrchestratorToolResult({
+      action: {
+        type: "CHECK_AVAILABILITY",
+        startsAt: "2037-09-23T10:00:00Z",
+        endsAt: "2037-09-23T12:00:00Z",
+        timezone: "UTC",
+      },
+    }, {
+      kind: "availability",
+      data: {
+        timezone: "UTC",
+        slots: [{ startsAt: "not-a-date", endsAt: "2037-09-23T10:30:00Z" }],
+      },
+    })).toThrowError(expect.objectContaining({ code: "AGENT_TOOL_RESULT_INVALID" }));
+  });
+
+  it("rejects a valid result kind returned for the wrong action", () => {
+    expect(() => validateOrchestratorToolResult({
+      action: { type: "ESCALATE", reason: "Needs staff" },
+    }, {
+      kind: "sms",
+      data: { sent: true, messageId: "message-1" },
+    })).toThrowError(expect.objectContaining({ code: "AGENT_TOOL_RESULT_INVALID" }));
+  });
+
+  it("accepts a server-backed pending booking receipt", () => {
+    expect(validateOrchestratorToolResult({
+      action: {
+        type: "BOOK_APPOINTMENT",
+        startsAt: "2037-09-23T10:00:00Z",
+        endsAt: "2037-09-23T11:00:00Z",
+        timezone: "UTC",
+        title: "Office Cleaning",
+      },
+    }, {
+      kind: "pending_action",
+      data: {
+        pendingActionId: "pending-1",
+        type: "BOOK_APPOINTMENT",
+      },
+    })).toMatchObject({
+      kind: "pending_action",
+      data: { type: "BOOK_APPOINTMENT" },
+    });
   });
 
   it("denies metadata updates when contact permission is disabled", async () => {
