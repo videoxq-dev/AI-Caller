@@ -121,6 +121,16 @@ try {
   }
   assert(workspaceId, "Default workspace was not created for the Milestone 7 browser user.");
 
+  // Retain explicit legacy/rollback coverage. The durable production default is
+  // verified separately by booking-remediation-browser-smoke.mjs.
+  await pool.query(
+    `INSERT INTO workspace_entitlements (workspace_id, key, value)
+     VALUES ($1, 'BOOKING_ENGINE_VERSION', '"v1"'::jsonb)
+     ON CONFLICT (workspace_id, key) DO UPDATE SET value = EXCLUDED.value`,
+    [workspaceId],
+  );
+
+
   await pool.query(
     `INSERT INTO business_profiles (workspace_id, business_name, industry, timezone, summary)
      VALUES ($1, 'Milestone Seven Auto Spa', 'Auto detailing', 'UTC', 'A test business used to verify the inbound voice orchestrator flow.')

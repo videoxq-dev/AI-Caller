@@ -9,6 +9,9 @@ import type { SmsRuntime } from "@/server/providers/sms/runtime";
 import { createSmsWebhookService } from "./service";
 
 vi.mock("./classification", () => ({ classifySmsPurpose: vi.fn(async () => "TRANSACTIONAL") }));
+// Transport/retry tests inject a legacy responder; durable booking has its own
+// widget-to-database coverage in server/booking/conversation.test.ts.
+vi.mock("@/server/booking/rollout", () => ({ shouldUseBookingV2: vi.fn(async () => false) }));
 
 function request(body = "{}") {
   return new Request("https://app.example.com/api/webhooks/sms/twilio/11111111-1111-4111-8111-111111111111", {
