@@ -49,6 +49,10 @@ export function stepAllowsSameTurnContinuation(
   envelope: OrchestratorEnvelope,
   result: OrchestratorToolResult,
 ) {
+  // A metadata-only mutation that already carries a customer-facing reply is
+  // complete. Replanning it can repeat the same update and manufacture a
+  // false cycle. Explicit business actions may still need a dependent step.
+  if (envelope.action.type === "NONE" && envelope.reply) return false;
   if (result.kind === "qualification" || result.kind === "contact") return true;
   return result.kind === "none"
     && envelope.action.type === "NONE"
