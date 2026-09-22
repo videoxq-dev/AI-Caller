@@ -8,7 +8,7 @@ import { assertAgentActionAllowed, type AgentCapabilities } from "@/server/agent
 import { realtimeBusinessToolAllowed, type RealtimeBusinessToolName } from "@/server/orchestrator/action-registry";
 import { recordExternalTaskReceipt } from "@/server/orchestrator/task-runs";
 import { buildConversationContext } from "@/server/orchestrator/context";
-import { executeOrchestratorTools, orchestratorActionSchema } from "@/server/orchestrator/tools";
+import { executeValidatedOrchestratorTools, orchestratorActionSchema } from "@/server/orchestrator/tools";
 import { isExplicitActionConfirmation, stagePendingActionProposal } from "@/server/orchestrator/pending-actions";
 import { getConversationById } from "@/server/domain/core/repository";
 import { confirmAndExecuteBooking, getBookingOutcome } from "@/server/booking/commands";
