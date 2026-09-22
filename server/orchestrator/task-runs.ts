@@ -20,6 +20,7 @@ type ActionExecutor = (
   conversationId: string,
   contactId: string,
   envelope: OrchestratorEnvelope,
+  taskIdentity?: AgentTaskIdentity,
 ) => Promise<OrchestratorToolResult>;
 
 export type AgentTaskRunStatus =
@@ -30,7 +31,7 @@ export type AgentTaskRunStatus =
   | "COMPLETED"
   | "FAILED";
 
-type TaskIdentity = {
+export type AgentTaskIdentity = {
   taskKey?: string;
   sourceMessageId?: string | null;
   objective?: string | null;
@@ -118,7 +119,7 @@ async function ensureTaskRun(
   workspaceId: string,
   conversationId: string,
   contactId: string,
-  identity: TaskIdentity = {},
+  identity: AgentTaskIdentity = {},
   resume = true,
 ) {
   const sourceMessageId = identity.sourceMessageId === undefined
@@ -340,7 +341,7 @@ export async function recordExternalTaskReceipt(input: {
 }
 
 export function createTrackedActionExecutor(executor: ActionExecutor): ActionExecutor {
-  return async (workspaceId, conversationId, contactId, envelope) => {
+  return async (workspaceId, conversationId, contactId, envelope, taskIdentity = {}) => {
     // Phase 2 must not become a second booking engine. Availability and booking
     // continue through the proven booking subsystem. Their authoritative
     // receipts are attached separately after the booking domain succeeds.
@@ -356,7 +357,12 @@ export function createTrackedActionExecutor(executor: ActionExecutor): ActionExe
       ...(envelope.unresolved ? { unresolved: envelope.unresolved } : {}),
     };
     const hash = hashInput(trackedInput);
-    const run = await ensureTaskRun(workspaceId, conversationId, contactId);
+    const run = await ensureTaskRun(
+      workspaceId,
+      conversationId,
+      contactId,
+      taskIdentity,
+    );
     const started = await beginTaskStep(
       run,
       action,
