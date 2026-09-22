@@ -25,6 +25,7 @@ import {
   conversations,
   leads,
   messages,
+  services,
 } from "@/db/schema";
 import { AppError } from "@/server/http/errors";
 import {
@@ -627,6 +628,7 @@ export async function updateNativeAppointmentAfterReschedule(
   input: AppointmentRescheduleInput,
   policy: NativeBookingPolicy,
   expectedUpdatedAt?: Date,
+  serviceChange?: { serviceId: string; title: string },
 ) {
   return db.transaction(async tx => {
     await tx.execute(sql`SELECT pg_advisory_xact_lock(hashtext(${workspaceId}))`);
@@ -639,6 +641,19 @@ export async function updateNativeAppointmentAfterReschedule(
     }
     if (expectedUpdatedAt && previous.updatedAt.getTime() !== expectedUpdatedAt.getTime()) {
       throw new AppError("APPOINTMENT_CHANGED", "That appointment changed. Please review its current time before rescheduling.", 409);
+    }
+    if (serviceChange) {
+      const [service] = await tx.select().from(services).where(and(
+        eq(services.workspaceId, workspaceId),
+        eq(services.id, serviceChange.serviceId),
+        eq(services.active, true),
+      )).limit(1);
+      const duration = (input.endsAt.getTime() - input.startsAt.getTime()) / 60_000;
+      if (!service || service.name !== serviceChange.title ||
+        service.durationMinutes !== duration) {
+        throw new AppError("APPOINTMENT_SERVICE_CHANGED",
+          "The service or its configured duration changed. Please review the appointment again.", 409);
+      }
     }
     const existing = await tx.select({
       startsAt: appointments.startsAt,
@@ -663,6 +678,10 @@ export async function updateNativeAppointmentAfterReschedule(
     assertNativePolicyAvailability(input, [...existing, ...reservations], policy);
     const [appointment] = await tx.update(appointments).set({
       startsAt: input.startsAt, endsAt: input.endsAt, timezone: input.timezone,
+      ...(serviceChange ? {
+        serviceId: serviceChange.serviceId,
+        title: serviceChange.title,
+      } : {}),
       status: "CONFIRMED", updatedAt: new Date(),
     }).where(and(eq(appointments.workspaceId, workspaceId), eq(appointments.id, appointmentId),
       expectedUpdatedAt ? eq(appointments.updatedAt, expectedUpdatedAt) : undefined)).returning();
