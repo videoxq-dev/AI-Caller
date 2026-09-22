@@ -34,6 +34,10 @@ export function AppointmentsDataPage() {
   const [status, setStatus] = useState("all");
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [showBook, setShowBook] = useState(false);
+  const [showReschedule, setShowReschedule] = useState(false);
+  const [rescheduleDraft, setRescheduleDraft] = useState({
+    startsAt: "", endsAt: "",
+  });
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [draft, setDraft] = useState({ contactId: "", title: "Consultation", startsAt: toLocalInput(new Date(Date.now() + 86_400_000)), endsAt: toLocalInput(new Date(Date.now() + 88_200_000)), timezone: Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC" });
@@ -91,12 +95,50 @@ export function AppointmentsDataPage() {
   }
 
   async function cancel(appointmentId: string) {
+    if (!window.confirm("Cancel this appointment? This will notify the calendar and cannot be undone.")) return;
+    setError(null);
     const response = await fetch(`/api/appointments/${appointmentId}/cancel`, { method: "POST" });
     if (!response.ok) {
       const data = await response.json().catch(() => null) as { error?: { message?: string } } | null;
       setError(data?.error?.message ?? "Unable to cancel appointment.");
       return;
     }
+    await load();
+  }
+
+  function openReschedule(appointment: Appointment) {
+    setError(null);
+    setShowReschedule(true);
+    setRescheduleDraft({
+      startsAt: toLocalInput(new Date(appointment.startsAt)),
+      endsAt: toLocalInput(new Date(appointment.endsAt)),
+    });
+  }
+
+  async function reschedule(appointmentId: string) {
+    setError(null);
+    const startsAt = new Date(rescheduleDraft.startsAt);
+    const endsAt = new Date(rescheduleDraft.endsAt);
+    if (!Number.isFinite(startsAt.getTime()) || !Number.isFinite(endsAt.getTime()) ||
+      startsAt <= new Date() || endsAt <= startsAt) {
+      setError("Choose a future start and an end after the start.");
+      return;
+    }
+    const response = await fetch(`/api/appointments/${appointmentId}/reschedule`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        startsAt: startsAt.toISOString(),
+        endsAt: endsAt.toISOString(),
+        timezone: Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC",
+      }),
+    });
+    if (!response.ok) {
+      const data = await response.json().catch(() => null) as { error?: { message?: string } } | null;
+      setError(data?.error?.message ?? "Unable to reschedule appointment.");
+      return;
+    }
+    setShowReschedule(false);
     await load();
   }
 
@@ -127,7 +169,38 @@ export function AppointmentsDataPage() {
           </tbody></table></div></div></section>
         </div>
 
-        {selected && <aside className="appointmentDrawer"><div className="drawerHeader"><div><h2>{selected.appointment.title}</h2><span className={`appointmentBadge ${selected.appointment.status.toLowerCase()}`}>{selected.appointment.status}</span></div><button type="button" className="drawerClose" onClick={() => setSelectedId(null)}>×</button></div><section className="drawerSection"><h3>Appointment</h3><div className="drawerDetails"><div><span>Contact</span><strong>{selected.contact.name ?? "Unnamed contact"}</strong></div><div><span>Starts</span><strong>{displayDate(selected.appointment.startsAt)}</strong></div><div><span>Ends</span><strong>{displayDate(selected.appointment.endsAt)}</strong></div><div><span>Timezone</span><strong>{selected.appointment.timezone}</strong></div><div><span>Notes</span><strong>{selected.appointment.notes ?? "—"}</strong></div></div></section><div className="drawerQuickActions"><button type="button"><CalendarIcon size={15} />Reschedule via conversation</button>{selected.appointment.status !== "CANCELLED" && <button type="button" onClick={() => void cancel(selected.appointment.id)}>Cancel appointment</button>}</div></aside>}
+        {selected && <aside className="appointmentDrawer"><div className="drawerHeader"><div><h2>{selected.appointment.title}</h2><span className={`appointmentBadge ${selected.appointment.status.toLowerCase()}`}>{selected.appointment.status}</span></div><button type="button" className="drawerClose" onClick={() => setSelectedId(null)}>×</button></div><section className="drawerSection"><h3>Appointment</h3><div className="drawerDetails"><div><span>Contact</span><strong>{selected.contact.name ?? "Unnamed contact"}</strong></div><div><span>Starts</span><strong>{displayDate(selected.appointment.startsAt)}</strong></div><div><span>Ends</span><strong>{displayDate(selected.appointment.endsAt)}</strong></div><div><span>Timezone</span><strong>{selected.appointment.timezone}</strong></div><div><span>Notes</span><strong>{selected.appointment.notes ?? "—"}</strong></div></div></section><div className="drawerQuickActions">
+          {["PENDING", "CONFIRMED"].includes(selected.appointment.status) &&
+            <button type="button" onClick={() => showReschedule
+              ? setShowReschedule(false) : openReschedule(selected.appointment)}>
+              <CalendarIcon size={15} />{showReschedule ? "Close rescheduling" : "Reschedule appointment"}
+            </button>}
+          {showReschedule && ["PENDING", "CONFIRMED"].includes(selected.appointment.status) &&
+            <div className="drawerSection" style={{ display: "grid", gap: 8 }}>
+              <strong>Change existing appointment</strong>
+              <small>Enter times in your device's timezone ({Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC"}). The existing appointment remains unchanged until saved.</small>
+              <label>New start <input aria-label="New appointment start" type="datetime-local"
+                value={rescheduleDraft.startsAt}
+                onChange={event => setRescheduleDraft(previous => ({
+                  ...previous, startsAt: event.target.value,
+                  endsAt: new Date(new Date(event.target.value).getTime() +
+                    (new Date(selected.appointment.endsAt).getTime() -
+                    new Date(selected.appointment.startsAt).getTime())).toISOString().slice(0, 16),
+                }))} /></label>
+              <label>New end <input aria-label="New appointment end" type="datetime-local"
+                value={rescheduleDraft.endsAt}
+                onChange={event => setRescheduleDraft(previous => ({
+                  ...previous, endsAt: event.target.value,
+                }))} /></label>
+              <button type="button" onClick={() => void reschedule(selected.appointment.id)}>
+                Confirm reschedule
+              </button>
+            </div>}
+          {selected.appointment.status !== "CANCELLED" &&
+            <button type="button" onClick={() => void cancel(selected.appointment.id)}>
+              Cancel appointment
+            </button>}
+        </div></aside>}
       </section>
     </main>
   );
