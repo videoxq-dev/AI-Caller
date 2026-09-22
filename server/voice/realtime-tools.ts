@@ -246,9 +246,14 @@ async function runRealtimeBookingV2(input: {
     if (!input.isCurrentTurn()) {
       return { ok: false as const, reason: "The caller corrected the request; recheck the latest details." };
     }
+    const availabilityTimezone = result.offers[0]?.timezone
+      ?? draft.customerTimezone
+      ?? (await getBusinessSetup(input.workspaceId)).profile?.timezone
+      ?? "UTC";
     const availabilityResult = {
       kind: "availability" as const,
       data: {
+        timezone: availabilityTimezone,
         available: result.state === "SLOTS_AVAILABLE",
         slots: result.offers.map((offer) => ({
           offerId: offer.id,
