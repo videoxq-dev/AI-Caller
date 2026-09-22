@@ -583,7 +583,7 @@ export async function runRealtimeBusinessTool(input: {
     if (parsed.data.type === "CHECK_AVAILABILITY" && !bookingSnapshot) {
       return { ok: false, reason: "Record the caller's service, location, date and time before checking availability." };
     }
-    const result = await executeOrchestratorTools(input.workspaceId,
+    const result = await executeValidatedOrchestratorTools(input.workspaceId,
       input.conversationId, input.contactId, { action: parsed.data });
     if (parsed.data.type === "CHECK_AVAILABILITY") {
       const start = parsed.data.startsAt;
