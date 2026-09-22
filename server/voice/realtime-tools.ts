@@ -383,6 +383,7 @@ async function runRealtimeBookingV2(input: {
     const pendingResult = {
       kind: "pending_action" as const,
       data: {
+        pendingActionId: prepared.preview.id,
         draftId: current.id,
         previewId: prepared.preview.id,
         version: selected.draft.version,
