@@ -157,6 +157,7 @@ export const agentTaskSteps = pgTable(
     status: text("status").default("RUNNING").notNull(),
     input: jsonb("input").$type<Record<string, unknown>>().default({}).notNull(),
     inputHash: text("input_hash").notNull(),
+    idempotencyKey: text("idempotency_key"),
     result: jsonb("result").$type<Record<string, unknown> | null>(),
     errorCode: text("error_code"),
     startedAt: timestamp("started_at", { withTimezone: true, mode: "date" }).defaultNow().notNull(),
@@ -164,6 +165,9 @@ export const agentTaskSteps = pgTable(
   },
   (table) => [
     uniqueIndex("agent_task_steps_run_sequence_uq").on(table.runId, table.sequence),
+    uniqueIndex("agent_task_steps_run_idempotency_uq")
+      .on(table.runId, table.idempotencyKey)
+      .where(sql`${table.idempotencyKey} is not null`),
     index("agent_task_steps_workspace_action_idx").on(table.workspaceId, table.action, table.startedAt),
   ],
 );
