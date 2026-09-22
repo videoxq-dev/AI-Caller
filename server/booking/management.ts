@@ -362,7 +362,7 @@ export async function handleAppointmentManagementTurn(
     if (isExplicitActionConfirmation(message.body)) {
       const [last] = await db.select().from(appointmentManagementRequests)
         .where(and(owned(ctx), eq(appointmentManagementRequests.status, "COMPLETED"),
-          gt(appointmentManagementRequests.completedAt, new Date(now.getTime() - 5 * 60_000))))
+          gt(appointmentManagementRequests.completedAt, new Date(Date.now() - 5 * 60_000))))
         .orderBy(desc(appointmentManagementRequests.completedAt)).limit(1);
       if (last?.appointmentId) {
         const appointment = await findOwnedAppointment(ctx, last.appointmentId);
