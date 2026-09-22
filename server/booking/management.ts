@@ -315,6 +315,7 @@ export async function handleAppointmentManagementTurn(
   // prior appointment-management request.
   if (active && !initialIntent &&
     /\b(?:what services|what do you offer|opening hours|how much|price)\b/i.test(message.body)) return null;
+  if (active && !initialIntent && /^(?:thanks|thank you|hello|hi|goodbye|bye)[.! ]*$/i.test(message.body.trim())) return null;
   if (!active && !initialIntent) {
     if (isExplicitActionConfirmation(message.body)) {
       const [last] = await db.select().from(appointmentManagementRequests)
@@ -332,7 +333,11 @@ export async function handleAppointmentManagementTurn(
   if (!active && initialIntent === "STATUS") {
     return { reply: statusReply(await linkedAppointments(ctx, now, true)) };
   }
-  if (active?.status === "EXECUTING") return finishRequest(ctx, active, message.id, now);
+  if (active?.status === "EXECUTING") {
+    return initialIntent || isExplicitActionConfirmation(message.body)
+      ? finishRequest(ctx, active, message.id, now)
+      : null;
+  }
   if (active && /\b(?:no|never mind|nevermind|stop|don['’]t|do not)\b/i.test(message.body)) {
     await saveRequest(active, { status: "ABANDONED" }, now);
     return { reply: "I've stopped the appointment-change request. Your existing appointment has not been changed." };
