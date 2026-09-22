@@ -1181,4 +1181,90 @@ describe("orchestrator response protocol", () => {
     });
   });
 
+
+  it("continues from a contact mutation into a dependent availability action", async () => {
+    const generate = vi.fn()
+      .mockResolvedValueOnce({ text: JSON.stringify({
+        contact: { phone: "+13074453684" },
+        action: { type: "NONE" },
+      }) })
+      .mockResolvedValueOnce({ text: JSON.stringify({
+        action: {
+          type: "CHECK_AVAILABILITY",
+          startsAt: "2037-09-23T10:00:00Z",
+          endsAt: "2037-09-23T12:00:00Z",
+          timezone: "UTC",
+          durationMinutes: 30,
+        },
+      }) });
+    const executeTools = vi.fn(async (
+      _workspaceId: string,
+      _conversationId: string,
+      _contactId: string,
+      envelope: { action: { type: string }; contact?: unknown },
+    ) => envelope.contact
+      ? { kind: "contact" as const, data: {
+          contactId: "person",
+          updatedFields: ["phone"],
+        } }
+      : { kind: "availability" as const, data: {
+          timezone: "UTC",
+          slots: [{
+            startsAt: "2037-09-23T10:00:00.000Z",
+            endsAt: "2037-09-23T10:30:00.000Z",
+          }],
+        } });
+
+    const orchestrator = createResponseOrchestrator({
+      buildContext: vi.fn(async () => ({
+        ...fakeContext(),
+        timezone: "UTC",
+        messages: [{ role: "user" as const,
+          content: "My number is +1 307 445 3684. Check September 23, 2037 at 10 AM." }],
+      })),
+      executeTools,
+      generate,
+    });
+
+    const result = await orchestrator.respond("workspace", "conversation");
+
+    expect(result.reply).toContain("Available times include");
+    expect(result.toolResult.kind).toBe("availability");
+    expect(generate).toHaveBeenCalledTimes(2);
+    expect(executeTools).toHaveBeenCalledTimes(2);
+  });
+
+  it("continues a lead-only mutation to a final reply without inventing another action", async () => {
+    const generate = vi.fn()
+      .mockResolvedValueOnce({ text: JSON.stringify({
+        lead: { status: "NEW", intent: "Office cleaning" },
+        action: { type: "NONE" },
+      }) })
+      .mockResolvedValueOnce({ text: JSON.stringify({
+        reply: "Thanks. I've recorded your office cleaning interest.",
+        action: { type: "NONE" },
+      }) });
+    const executeTools = vi.fn(async () => ({
+      kind: "none" as const,
+      data: {},
+    }));
+
+    const orchestrator = createResponseOrchestrator({
+      buildContext: vi.fn(async () => ({
+        ...fakeContext(),
+        messages: [{ role: "user" as const,
+          content: "I'm interested in office cleaning." }],
+      })),
+      executeTools,
+      generate,
+    });
+
+    const result = await orchestrator.respond("workspace", "conversation");
+
+    expect(result.reply).toContain("recorded your office cleaning interest");
+    expect(result.toolResult.kind).toBe("none");
+    expect(generate).toHaveBeenCalledTimes(2);
+    expect(executeTools).toHaveBeenCalledOnce();
+  });
+
 });
