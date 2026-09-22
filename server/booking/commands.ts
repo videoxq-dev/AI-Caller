@@ -70,9 +70,11 @@ async function assertCustomerConfirmation(
   const isWidgetCardConfirmation = context.channel === "WEBCHAT" &&
     latest.provider === "webchat-booking-confirm" &&
     latest.metadata.bookingPreviewId === preview.id;
+  const assent = latest.body.trim().toLowerCase()
+    .replace(/[.!?]+$/g, "").replace(/[,;:]+/g, " ").replace(/\s+/g, " ");
   if (!isWidgetCardConfirmation &&
-    /^(?:yes|yes please|yep|yeah|sure|okay|ok|absolutely|please do|that works|sounds good|looks good)[.!?]*$/i
-      .test(latest.body.trim())) {
+    /^(?:yes|yes please|yep|yeah|sure|okay|ok|absolutely|please do|that works|sounds good|looks good)$/
+      .test(assent)) {
     const [lastAI] = await tx.select({
       id: messages.id, metadata: messages.metadata,
     }).from(messages).where(and(
