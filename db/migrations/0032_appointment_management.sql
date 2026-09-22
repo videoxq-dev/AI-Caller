@@ -13,6 +13,7 @@ CREATE TABLE "appointment_management_requests" (
   "original_starts_at" timestamptz,
   "original_ends_at" timestamptz,
   "original_updated_at" timestamptz,
+  "proposed_service_id" uuid REFERENCES "services"("id") ON DELETE SET NULL,
   "proposed_starts_at" timestamptz,
   "proposed_ends_at" timestamptz,
   "local_date" text,
