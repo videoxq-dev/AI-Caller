@@ -10,6 +10,8 @@ import { createWhatsAppOutboundService } from "./outbound";
 import { createWhatsAppWebhookService } from "./service";
 
 const APP_SECRET = "whatsapp-test-secret";
+// Test the injected responder's transport failures independently of rollout.
+vi.mock("@/server/booking/rollout", () => ({ shouldUseBookingV2: vi.fn(async () => false) }));
 
 function signedRequest(body: string) {
   const signature = createHmac("sha256", APP_SECRET).update(body).digest("hex");

@@ -1,5 +1,6 @@
 import { getBookingPreviewCard } from "@/server/booking/cards";
 import { handleBookingTurn } from "@/server/booking/conversation";
+import { upgradeWebchatBookingSession } from "@/server/booking/rollout";
 import { recordBookingPreviewDelivery } from "@/server/booking/offers";
 import { appendMessage, getConversationById } from "@/server/domain/core/repository";
 import { AppError, toErrorResponse } from "@/server/http/errors";
@@ -86,6 +87,10 @@ export async function POST(request: Request) {
             return;
           }
 
+          resolved.session = await upgradeWebchatBookingSession(resolved.session, input.message, claim.turnId);
+          logger.info({ workspaceId, sessionId: resolved.session.id,
+            conversationId: resolved.session.conversationId,
+            bookingEngineVersion: resolved.session.bookingEngineVersion }, "Web chat turn booking engine selected");
           const externalBase = `${resolved.session.id}:${input.clientMessageId}`;
           const inbound = await appendMessage(workspaceId, resolved.session.conversationId, {
             channel: "WEBCHAT",

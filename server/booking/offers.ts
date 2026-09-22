@@ -209,6 +209,9 @@ export async function selectBookingOffer(
     }
     const [updated] = await tx.update(bookingDrafts).set({
       selectedOfferId: offerId, currentPreviewId: null,
+      localDate: displayBookingInstant(offer.startsAt, offer.timezone).localDate,
+      localTime: displayBookingInstant(offer.startsAt, offer.timezone).localTime,
+      customerTimezone: offer.timezone,
       version: version + 1, status: "AVAILABILITY_CHECKED", updatedAt: now,
     }).where(and(owned(context, draftId), eq(bookingDrafts.version, version))).returning();
     if (!updated) throw new AppError("BOOKING_STALE_VERSION", "The booking has changed.", 409);

@@ -49,6 +49,16 @@ try {
   const workspaceId = owners.rows[0]?.workspace_id;
   assert(workspaceId, "Workspace was not provisioned.");
 
+  // Retain explicit legacy/rollback coverage. The durable production default is
+  // verified separately by booking-remediation-browser-smoke.mjs.
+  await pool.query(
+    `INSERT INTO workspace_entitlements (workspace_id, key, value)
+     VALUES ($1, 'BOOKING_ENGINE_VERSION', '"v1"'::jsonb)
+     ON CONFLICT (workspace_id, key) DO UPDATE SET value = EXCLUDED.value`,
+    [workspaceId],
+  );
+
+
   const additional = await api(context, "PUT", "/api/workspaces", {
     name: "Phase One Second Workspace",
   }, "create an additional workspace", 201);

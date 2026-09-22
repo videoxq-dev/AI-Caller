@@ -35,7 +35,7 @@ export function createE2EAIProvider(): AIProvider {
         else if (/sep(?:tember)?\s+30/i.test(lastUser)) patch.dateExpression = "September 30, 2026";
         if (/\b11\s*(?::00)?\s*am/i.test(lastUser)) {
           patch.timeExpression = lastUser.includes("lagos")
-            ? "11 AM (Africa/Lagos)" : "11 AM UTC";
+            ? "11 AM (Africa/Lagos)" : lastUser.includes("utc") ? "11 AM UTC" : "11 AM";
         } else if (/\b10\s*(?::00)?\s*am/i.test(lastUser)) {
           patch.timeExpression = lastUser.includes("utc")
             ? "10 AM UTC" : "10 AM";

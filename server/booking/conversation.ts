@@ -1,7 +1,7 @@
-import { and, desc, eq, inArray } from "drizzle-orm";
+import { and, asc, desc, eq, inArray } from "drizzle-orm";
 import { z } from "zod";
 import { db } from "@/db";
-import { bookingDrafts, bookingPreviews, messages, services } from "@/db/schema";
+import { bookingDrafts, bookingOffers, bookingPreviews, messages, services } from "@/db/schema";
 import { getWorkspaceAgent, requireActiveWorkspaceAgent } from "@/server/agent/service";
 import { capabilitiesFromBehaviorSettings } from "@/server/agent/capabilities";
 import { escalateConversationIssue } from "@/server/collaboration/service";
@@ -16,7 +16,8 @@ import { prepareBookingPreview, searchBookingAvailability, searchBookingRangeAva
 import { displayBookingInstant, parseBookingDate, parseBookingTime, type BookingSearchPeriod } from "./time";
 
 const intent = z.object({
-  action: z.enum(["PATCH", "CANCEL", "QUESTION", "UNRELATED", "STATUS", "CHECK"]),
+  action: z.enum(["PATCH", "CANCEL", "QUESTION", "UNRELATED", "STATUS", "CHECK", "SELECT"]),
+  offerId: z.string().uuid().optional(),
   serviceId: z.string().uuid().nullable().optional(),
   dateExpression: z.string().trim().min(1).max(200).optional(),
   timeExpression: z.string().trim().min(1).max(100).optional(),
@@ -49,6 +50,9 @@ const CUSTOMER_RECOVERABLE_BOOKING_ERRORS = new Set([
   "BOOKING_PREVIEW_STALE", "BOOKING_OFFER_STALE", "BOOKING_CONFIRMATION_REQUIRED",
   "BOOKING_CONFIRMATION_EVIDENCE_REQUIRED", "BOOKING_CONFIRMATION_SESSION_MISMATCH",
   "APPOINTMENT_SLOT_UNAVAILABLE", "BOOKING_SOURCE_EVENT_CONFLICT",
+  "BOOKING_DATE_INVALID", "BOOKING_DATE_UNRECOGNIZED", "BOOKING_DATE_AMBIGUOUS",
+  "BOOKING_TIME_INVALID", "BOOKING_TIME_UNRECOGNIZED", "BOOKING_WEEKDAY_MISMATCH",
+  "BOOKING_LOCAL_TIME_NONEXISTENT", "BOOKING_LOCAL_TIME_AMBIGUOUS", "APPOINTMENT_IN_PAST",
 ]);
 
 async function bookingFailureReply(context: BookingContext, error: unknown) {
@@ -94,6 +98,7 @@ function previewReply(preview: typeof bookingPreviews.$inferSelect) {
 async function classifyBookingTurn(
   context: BookingContext, message: string, draft: typeof bookingDrafts.$inferSelect | null,
   timezone: string,
+  offers: typeof bookingOffers.$inferSelect[] = [],
 ) {
   const list = await db.select({ id: services.id, name: services.name,
     durationMinutes: services.durationMinutes, priceText: services.priceText })
@@ -101,7 +106,7 @@ async function classifyBookingTurn(
       eq(services.active, true))).limit(30);
   const system = [
     "Extract the customer's latest booking intent. Output ONLY one JSON object; no markdown or extra keys.",
-    'Shape: {"action":"PATCH|CANCEL|QUESTION|UNRELATED|STATUS|CHECK"}. Add only present fields: serviceId, dateExpression, timeExpression, timezone, location, question, range.',
+    'Shape: {"action":"PATCH|CANCEL|QUESTION|UNRELATED|STATUS|CHECK|SELECT"}. Add only present fields: serviceId, dateExpression, timeExpression, timezone, location, question, range, offerId.',
     "Omit fields not supplied. Never invent dates or timezones. Never turn a question or a yes-but-correction into booking consent.",
     "A bare yes after a question about checking is not a booking confirmation.",
     "Use PATCH for newly supplied service/date/time/location or corrections. CHECK if the customer requests availability of an unchanged draft.",
@@ -109,9 +114,13 @@ async function classifyBookingTurn(
     "Use QUESTION for a side question. Use UNRELATED when there is no booking intent and no booking field or question.",
     "Use STATUS for an inquiry about an existing booking outcome. CANCEL cancels only an unfinished draft.",
     "Return a serviceId only for one clearly identified service. Otherwise omit it and let the backend clarify.",
+    "Use SELECT with an offerId from the offered list when the customer chooses an offered time or ordinal. Selection is not consent to commit. Do not reconstruct a selected slot's dates or times.",
     "Preserve expressions exactly as spoken: 'Sep 23, 2026', '11 AM (Africa/Lagos)', '10 am UTC' are separate valid date/time expressions.",
     "Business timezone is " + timezone + ". Never calculate UTC or service duration.",
     "Services: " + JSON.stringify(list),
+    "Offered times (in display order): " + JSON.stringify(offers.map(offer => ({
+      offerId: offer.id, ...displayBookingInstant(offer.startsAt, offer.timezone),
+    }))),
     "Stored draft (trusted): " + JSON.stringify(draft && {
       serviceId: draft.serviceId, localDate: draft.localDate, localTime: draft.localTime,
       customerTimezone: draft.customerTimezone, requiredLocation: draft.requiredLocation,
@@ -127,6 +136,11 @@ async function classifyBookingTurn(
     const raw = generated.text.trim().replace(/^```(?:json)?\s*/i, "").replace(/\s*```$/,"");
     let decoded: unknown;
     try { decoded = JSON.parse(raw); } catch { continue; }
+    // Models commonly fill optional keys with null. Treat these as absent, not
+    // as requests to erase previously captured date, service or timezone.
+    if (decoded && typeof decoded === "object" && !Array.isArray(decoded)) {
+      decoded = Object.fromEntries(Object.entries(decoded).filter(([, value]) => value !== null));
+    }
     const parsed = intent.safeParse(decoded);
     if (parsed.success) return { intent: parsed.data, services: list };
   }
@@ -152,10 +166,52 @@ export async function handleBookingTurn(
   isCurrentTurn?: () => Promise<boolean>,
 ): Promise<BookingTurn | null> {
   if (isCurrentTurn && !await isCurrentTurn()) return { reply: "I heard a correction; let me use your latest request." };
+  const agent = await getWorkspaceAgent(ctx.workspaceId);
+  if (!agent || agent.status !== "ACTIVE" ||
+    !capabilitiesFromBehaviorSettings(agent.behaviorSettings).ANSWER_INQUIRY) return null;
   const active = await activeDraft(ctx);
-  const existing = active && active.expiresAt > now ? active : null;
+  const existing = active && (active.expiresAt > now || active.bookingCommandId) ? active : null;
+  const approval = isExplicitActionConfirmation(message.body);
+  const statusQuestion = /\b(?:is it booked|did you book|booking status|appointment status|is it confirmed)\b/i.test(message.body);
+  // A completed draft must remain reachable. Falling back to the legacy model
+  // after success loses the receipt and can propose a second appointment.
+  const [completed] = !existing && (approval || statusQuestion) ? await db.select().from(bookingDrafts).where(and(
+    eq(bookingDrafts.workspaceId, ctx.workspaceId), eq(bookingDrafts.contactId, ctx.contactId),
+    eq(bookingDrafts.sessionKey, ctx.sessionKey), eq(bookingDrafts.channel, ctx.channel),
+    eq(bookingDrafts.status, "CONFIRMED"),
+  )).orderBy(desc(bookingDrafts.createdAt)).limit(1) : [];
+  const receiptDraft = completed ?? (existing?.bookingCommandId ? existing : null);
+  if (receiptDraft && (approval || statusQuestion)) {
+    const result = await getBookingOutcome(ctx, receiptDraft.id);
+    const appointment = result.appointment;
+    const timezone = receiptDraft.customerTimezone ?? appointment?.timezone ?? "UTC";
+    return { reply: appointment
+      ? "Your " + appointment.title + " appointment is confirmed for " + humanTime(appointment.startsAt, timezone) + " (" + timezone + ")."
+      : "I'm still checking the saved booking result. I haven't confirmed it yet; please don't submit another booking." };
+  }
   const isBookingRequest = /\b(?:book(?:ing)?|appointment|schedule|availability|available|reserve|reschedule)\b/i.test(message.body);
   if (!existing && !isBookingRequest) return null;
+  const offers = existing?.currentSearchId && !existing.currentPreviewId
+    ? await db.select().from(bookingOffers).where(and(
+      eq(bookingOffers.workspaceId, ctx.workspaceId), eq(bookingOffers.draftId, existing.id),
+      eq(bookingOffers.searchId, existing.currentSearchId),
+    )).orderBy(asc(bookingOffers.startsAt), asc(bookingOffers.id)).limit(5) : [];
+  const selectedReply = async (offerId: string): Promise<BookingTurn> => {
+    const selected = await selectBookingOffer(ctx, {
+      draftId: existing!.id, expectedVersion: existing!.version, offerId,
+    }, now);
+    const prepared = await prepareBookingPreview(ctx, {
+      draftId: existing!.id, expectedVersion: selected.draft.version,
+    }, now);
+    return { reply: previewReply(prepared.preview), preview: {
+      draftId: existing!.id, previewId: prepared.preview.id, version: selected.draft.version,
+    } };
+  };
+  if (offers.length && approval) {
+    if (offers.length > 1) return { reply: "Which of the offered times would you like? You can say the first one or give its date and time." };
+    try { return await selectedReply(offers[0].id); }
+    catch (error) { return { reply: await bookingFailureReply(ctx, error) }; }
+  }
   // A no/yes answer to unrelated questions is not authority to commit.
   if (existing?.currentPreviewId && isExplicitActionConfirmation(message.body)) {
     if (isCurrentTurn && !await isCurrentTurn()) return { reply: "The booking changed; I haven't confirmed it." };
@@ -203,12 +259,19 @@ export async function handleBookingTurn(
   try {
     const business = await getBusinessSetup(ctx.workspaceId);
     parsed = await classifyBookingTurn(ctx, message.body, existing,
-      business.profile?.timezone ?? "UTC");
+      business.profile?.timezone ?? "UTC", offers);
   } catch (error) {
     return { reply: await bookingFailureReply(ctx, error) };
   }
   const decision = parsed.intent;
   if (isCurrentTurn && !await isCurrentTurn()) return { reply: "I heard a correction; let me use your latest request." };
+  if (decision.action === "SELECT") {
+    if (!existing || !offers.some(offer => offer.id === decision.offerId)) {
+      return { reply: "Please choose one of the current offered times, or tell me the date and time you'd prefer." };
+    }
+    try { return await selectedReply(decision.offerId!); }
+    catch (error) { return { reply: await bookingFailureReply(ctx, error) }; }
+  }
   if (decision.action === "UNRELATED" || decision.action === "QUESTION") {
     const service = parsed.services.find((item) => item.id === existing?.serviceId);
     if (service && /\b(?:how long|duration)\b/i.test(message.body)) {
@@ -261,6 +324,7 @@ export async function handleBookingTurn(
       if (parsedTime.timezone) patch.customerTimezone = parsedTime.timezone;
     }
     if (decision.timezone) patch.customerTimezone = decision.timezone;
+    if (!draft.customerTimezone && !patch.customerTimezone) patch.customerTimezone = tz;
     if (decision.location !== undefined) patch.requiredLocation = decision.location;
     if (decision.range === "NEXT_AVAILABLE" && !decision.dateExpression && !draft.localDate) {
       patch.localDate = displayBookingInstant(now, tz).localDate;
@@ -292,13 +356,8 @@ export async function handleBookingTurn(
         ". Tell me the start time you prefer and I'll prepare the exact appointment for confirmation." };
     }
     if (!current.localTime) return { reply: "What start time would you prefer?" };
-    if (current.status === "AWAITING_CONFIRMATION" && current.currentPreviewId) {
-      const [preview] = await db.select().from(bookingPreviews).where(and(
-        eq(bookingPreviews.id, current.currentPreviewId),
-        eq(bookingPreviews.workspaceId, ctx.workspaceId),
-      )).limit(1);
-      if (preview && preview.expiresAt > now) return { reply: previewReply(preview) };
-    }
+    // Rechecking also renews the offer/version and delivery evidence. Never
+    // resend an old preview with a different outbound confirmation question.
     const found = await searchBookingAvailability(ctx, {
       draftId: draft.id, expectedVersion: current.version,
     }, now);
