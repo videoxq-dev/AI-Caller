@@ -6,9 +6,9 @@ import { AppError } from "@/server/http/errors";
 import { requireActiveWorkspaceAgent } from "@/server/agent/service";
 import { assertAgentActionAllowed, type AgentCapabilities } from "@/server/agent/capabilities";
 import { realtimeBusinessToolAllowed, type RealtimeBusinessToolName } from "@/server/orchestrator/action-registry";
-import { recordExternalTaskReceipt } from "@/server/orchestrator/task-runs";
+import { executeTrackedOrchestratorTools, recordExternalTaskReceipt } from "@/server/orchestrator/task-runs";
 import { buildConversationContext } from "@/server/orchestrator/context";
-import { executeValidatedOrchestratorTools, orchestratorActionSchema } from "@/server/orchestrator/tools";
+import { orchestratorActionSchema } from "@/server/orchestrator/tools";
 import { isExplicitActionConfirmation, stagePendingActionProposal } from "@/server/orchestrator/pending-actions";
 import { getConversationById } from "@/server/domain/core/repository";
 import { confirmAndExecuteBooking, getBookingOutcome } from "@/server/booking/commands";
@@ -583,7 +583,7 @@ export async function runRealtimeBusinessTool(input: {
     if (parsed.data.type === "CHECK_AVAILABILITY" && !bookingSnapshot) {
       return { ok: false, reason: "Record the caller's service, location, date and time before checking availability." };
     }
-    const result = await executeValidatedOrchestratorTools(input.workspaceId,
+    const result = await executeTrackedOrchestratorTools(input.workspaceId,
       input.conversationId, input.contactId, { action: parsed.data });
     if (parsed.data.type === "CHECK_AVAILABILITY") {
       const start = parsed.data.startsAt;
