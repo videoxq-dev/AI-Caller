@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import {
   envelopeHasServerWork,
-  resultAllowsSameTurnContinuation,
+  stepAllowsSameTurnContinuation,
   runBoundedTaskChain,
 } from "./bounded-task-runner";
 
@@ -90,6 +90,46 @@ describe("bounded task runner", () => {
     expect(execute).not.toHaveBeenCalled();
   });
 
+  it("continues after a lead-only mutation and then finalizes naturally", async () => {
+    const execute = vi.fn(async () => ({
+      kind: "none" as const,
+      data: {},
+    }));
+    const replan = vi.fn()
+      .mockResolvedValueOnce({
+        lead: {
+          status: "NEW" as const,
+          intent: "Office cleaning",
+        },
+        action: { type: "NONE" as const },
+      })
+      .mockResolvedValueOnce({
+        reply: "I recorded your lead details and finished the task.",
+        action: { type: "NONE" as const },
+      });
+
+    const outcome = await runBoundedTaskChain({
+      initialEnvelope: {
+        action: {
+          type: "QUALIFY_LEAD",
+          answers: [{ criterionId: "budget", answer: "Yes" }],
+        },
+      },
+      initialResult: {
+        kind: "qualification",
+        data: { qualified: true, missingRequired: [] },
+      },
+      replan,
+      execute,
+    });
+
+    expect(outcome.stopReason).toBe("COMPLETE");
+    expect(outcome.steps).toHaveLength(2);
+    expect(outcome.finalEnvelope.reply).toContain("finished the task");
+    expect(execute).toHaveBeenCalledOnce();
+    expect(replan).toHaveBeenCalledTimes(2);
+  });
+
   it("caps same-turn action execution even when every result asks to continue", async () => {
     let index = 0;
     const execute = vi.fn(async () => ({
@@ -113,11 +153,12 @@ describe("bounded task runner", () => {
   });
 
   it("treats confirmation and calendar results as hard execution boundaries", () => {
-    expect(resultAllowsSameTurnContinuation({ kind: "pending_action", data: {} })).toBe(false);
-    expect(resultAllowsSameTurnContinuation({ kind: "availability", data: {} })).toBe(false);
-    expect(resultAllowsSameTurnContinuation({ kind: "booking", data: {} })).toBe(false);
-    expect(resultAllowsSameTurnContinuation({ kind: "sms", data: {} })).toBe(false);
-    expect(resultAllowsSameTurnContinuation({ kind: "escalation", data: {} })).toBe(false);
+    const envelope = { action: { type: "NONE" as const } };
+    expect(stepAllowsSameTurnContinuation(envelope, { kind: "pending_action", data: {} })).toBe(false);
+    expect(stepAllowsSameTurnContinuation(envelope, { kind: "availability", data: {} })).toBe(false);
+    expect(stepAllowsSameTurnContinuation(envelope, { kind: "booking", data: {} })).toBe(false);
+    expect(stepAllowsSameTurnContinuation(envelope, { kind: "sms", data: {} })).toBe(false);
+    expect(stepAllowsSameTurnContinuation(envelope, { kind: "escalation", data: {} })).toBe(false);
     expect(envelopeHasServerWork({ reply: "Done", action: { type: "NONE" } })).toBe(false);
   });
 });
