@@ -1,4 +1,7 @@
 import WebSocket from "ws";
+import { and, eq } from "drizzle-orm";
+import { db } from "@/db";
+import { messages } from "@/db/schema";
 import { appendMessage } from "@/server/domain/core/repository";
 import { recordBookingPreviewDelivery } from "@/server/booking/offers";
 import { recordAppointmentManagementPreviewDelivery } from "@/server/booking/management";
@@ -303,8 +306,8 @@ export function attachRealtimeMedia({ telnyx, identity, streamId }: BridgeOption
             eq(messages.channel, "PHONE"),
           )).limit(1);
         // Do not accept an unrelated response as a delivered approval preview.
-        if (spoken && /\\bconfirm\\b/i.test(spoken.body) &&
-          /\\bappointment\\b/i.test(spoken.body)) {
+        if (spoken && /\bconfirm\b/i.test(spoken.body) &&
+          /\bappointment\b/i.test(spoken.body)) {
           try {
             await recordAppointmentManagementPreviewDelivery({
               workspaceId, contactId: call.contactId,
