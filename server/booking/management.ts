@@ -225,11 +225,19 @@ async function finishRequest(ctx: BookingContext, row: RequestRow, sourceMessage
   if (row.status !== "AWAITING_CONFIRMATION" || !row.previewDeliveredAt) {
     return { reply: "I haven't delivered a confirmed appointment-change preview yet. Please ask for the details again." };
   }
-  const [source] = await db.select({ createdAt: messages.createdAt })
-    .from(messages).where(and(eq(messages.workspaceId, ctx.workspaceId),
-      eq(messages.conversationId, ctx.conversationId!), eq(messages.id, sourceMessageId),
-      eq(messages.senderType, "CUSTOMER"))).limit(1);
-  if (!source || source.createdAt <= row.previewDeliveredAt) {
+  const [source] = await db.select({
+    createdAt: messages.createdAt, body: messages.body,
+  }).from(messages).where(and(eq(messages.workspaceId, ctx.workspaceId),
+    eq(messages.conversationId, ctx.conversationId!), eq(messages.id, sourceMessageId),
+    eq(messages.channel, ctx.channel),
+    eq(messages.senderType, "CUSTOMER"),
+    inArray(messages.contentType, ["TEXT", "CALL_TRANSCRIPT"]),
+    ctx.channel === "PHONE"
+      ? sql`${messages.metadata}->>'voiceCallId' = ${ctx.sessionKey}`
+      : undefined,
+  )).limit(1);
+  if (!source || !isExplicitActionConfirmation(source.body)
+    || source.createdAt <= row.previewDeliveredAt) {
     return { reply: "Please confirm only after I've shown the appointment change. No change was made." };
   }
   if (!await agentAllows(ctx, row.intent === "CANCEL" ? "CANCEL_APPOINTMENT" : "RESCHEDULE_APPOINTMENT")) {
