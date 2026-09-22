@@ -110,7 +110,7 @@ export function createCalendarBookingService(dependencies: BookingDependencies) 
         return dependencies.insertNativeAppointment(workspaceId, {
           ...input,
           timezone: validated.timezone,
-        }, validated, expectedUpdatedAt);
+        }, validated, expectedUpdatedAt, serviceChange);
       }
       const { integrationId, provider } = current;
       if (dependencies.filterAvailability) {
@@ -166,7 +166,8 @@ export function createCalendarBookingService(dependencies: BookingDependencies) 
     },
 
     async reschedule(workspaceId: string, appointmentId: string, input: AppointmentRescheduleInput,
-      expectedUpdatedAt?: Date) {
+      expectedUpdatedAt?: Date,
+      serviceChange?: { serviceId: string; title: string }) {
       const appointment = await dependencies.getAppointment(workspaceId, appointmentId);
       if (!appointment) throw new AppError("APPOINTMENT_NOT_FOUND", "Appointment not found.", 404);
       if (!["PENDING", "CONFIRMED"].includes(appointment.status)) {
@@ -187,6 +188,10 @@ export function createCalendarBookingService(dependencies: BookingDependencies) 
       }
       if (!appointment.integrationId || !appointment.externalEventId) {
         throw new AppError("APPOINTMENT_NOT_SYNCED", "This appointment has an incomplete external calendar link.", 409);
+      }
+      if (serviceChange) {
+        throw new AppError("APPOINTMENT_SERVICE_CHANGE_UNSUPPORTED",
+          "Changing the service on an external calendar appointment needs staff review to keep both calendars consistent.", 409);
       }
 
       const provider = await dependencies.resolveForIntegration(workspaceId, appointment.integrationId);
