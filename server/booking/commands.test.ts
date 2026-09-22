@@ -215,6 +215,31 @@ describe("durable native appointment command (disposable PostgreSQL)", () => {
     expect((await db.select().from(bookingReservations))[0].state).toBe("RELEASED");
   });
 
+  it("recovers an expired native execution lease without creating a second appointment", async () => {
+    const preview = await previewFor();
+    const sourceEventId = await confirmMessage();
+    const accepted = await confirmBookingPreview(context, {
+      ...preview, expectedVersion: preview.version, sourceEventId,
+    }, later(2000));
+    const commandId = accepted.command.id;
+    await db.update(bookingCommands).set({
+      state: "COMMITTING", leaseOwner: randomUUID(),
+      leaseExpiresAt: new Date(now.getTime() - 1000), attemptCount: 1,
+    }).where(eq(bookingCommands.id, commandId));
+
+    const first = await recoverBookingCommands(50, later(3000));
+    expect(first.confirmed).toBe(1);
+    expect(await db.select().from(appointments)).toHaveLength(1);
+    expect((await db.select().from(bookingCommands))[0].state).toBe("CONFIRMED");
+    expect((await db.select().from(bookingReservations))[0].state).toBe("RELEASED");
+    const second = await recoverBookingCommands(50, later(4000));
+    expect(second.checked).toBe(0);
+    expect(await db.select().from(appointments)).toHaveLength(1);
+    expect((await db.select().from(automationEvents).where(eq(
+      automationEvents.type, "APPOINTMENT_CONFIRMED",
+    )))).toHaveLength(1);
+  });
+
   it("does not reissue an uncertain external create merely because an execution lease expired", async () => {
     const preview = await previewFor();
     const sourceEventId = await confirmMessage();
