@@ -207,6 +207,18 @@ describe("existing appointment management (isolated from V2 booking)", () => {
     expect(selected?.reply).toContain("I found your existing Industrial Cleaning");
   });
 
+  it("does not intercept confirmation for an existing V2 booking draft", async () => {
+    await db.insert(bookingDrafts).values({
+      workspaceId: ctx.workspaceId, contactId: ctx.contactId,
+      conversationId: ctx.conversationId, sessionKey: ctx.sessionKey,
+      channel: "WEBCHAT", status: "AWAITING_CONFIRMATION",
+      expiresAt: new Date("2038-09-22T00:00:00.000Z"),
+    });
+    const result = await turn("Yes");
+    expect(result).toBeNull();
+    expect((await db.select().from(appointments))[0].status).toBe("CONFIRMED");
+  });
+
   it("reads appointment status without creating an edit request", async () => {
     const result = await turn("What's the status of my appointment?");
     expect(result?.reply).toContain("confirmed");
