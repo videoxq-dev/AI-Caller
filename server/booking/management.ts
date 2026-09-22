@@ -14,7 +14,7 @@ import { logger } from "@/server/observability/logger";
 import { isExplicitActionConfirmation } from "@/server/orchestrator/pending-actions";
 import { resolveCalendarProviderForIntegration } from "@/server/providers/registry";
 import {
-  parseBookingDate, parseBookingTime, resolveBookingLocalTime,
+  displayBookingInstant, parseBookingDate, parseBookingTime, resolveBookingLocalTime,
 } from "./time";
 import type { BookingContext } from "./drafts";
 
@@ -497,11 +497,20 @@ export async function handleAppointmentManagementTurn(
   const rawTime = changes.time ? parseBookingTime(changes.time) : null;
   const timezone = rawTime?.timezone ?? active.timezone ?? appointment.timezone;
   let localDate = active.localDate;
+  let localTime = rawTime?.localTime ?? active.localTime;
+  // Changing a service does not imply changing the customer's chosen slot.
+  // Retain the time only when the customer expressly asks to keep it.
+  if (selectedService && !changes.date && !changes.time &&
+    /\b(?:keep|retain|same|current|original)\b/i.test(message.body) &&
+    /\b(?:date|time|slot|schedule|appointment)\b/i.test(message.body)) {
+    const existingTime = displayBookingInstant(appointment.startsAt, timezone);
+    localDate = existingTime.localDate;
+    localTime = existingTime.localTime;
+  }
   if (changes.date) {
     try { localDate = parseBookingDate(changes.date, timezone, now); }
     catch (error) { return { reply: errorMessage(error) }; }
   }
-  const localTime = rawTime?.localTime ?? active.localTime;
   if (!localDate || !localTime) {
     active = await saveRequest(active, {
       status: "COLLECTING", localDate, localTime, timezone,
