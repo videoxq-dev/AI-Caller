@@ -68,7 +68,10 @@ describe("existing appointment management (isolated from V2 booking)", () => {
       channel: "WEBCHAT", direction: "OUTBOUND", senderType: "AI",
       contentType: "TEXT", body: text, status: "DELIVERED",
     });
-    await recordAppointmentManagementPreviewDelivery(ctx, requestId, reply.id);
+    await recordAppointmentManagementPreviewDelivery(ctx, requestId, reply.id,
+      (await db.select().from(appointmentManagementRequests)
+        .where(eq(appointmentManagementRequests.id, requestId)))[0].version,
+    );
     await new Promise(resolve => setTimeout(resolve, 15));
   }
 
