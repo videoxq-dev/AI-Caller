@@ -3,7 +3,6 @@ import { capabilitiesFromBehaviorSettings } from "@/server/agent/capabilities";
 import { logger } from "@/server/observability/logger";
 import { buildConversationContext, type OrchestratorContext } from "./context";
 import {
-  executeOrchestratorTools,
   OrchestratorOutputError,
   orchestratorActionSchema,
   parseOrchestratorEnvelope,
