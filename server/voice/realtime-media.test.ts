@@ -498,7 +498,15 @@ describe("Realtime Telnyx/OpenAI media contract", () => {
     vi.mocked(runRealtimeBusinessTool).mockResolvedValue({
       ok: true,
       kind: "booking_state",
-      data: { saved: true },
+      data: {
+        draftId: "draft-1",
+        version: 1,
+        serviceId: null,
+        date: "2026-09-26",
+        time: "10:00",
+        timezone: "UTC",
+        location: null,
+      },
     } as Awaited<ReturnType<typeof runRealtimeBusinessTool>>);
     const telnyx = telnyxSocket();
     const bridge = attachRealtimeMedia({
