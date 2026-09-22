@@ -3,6 +3,7 @@ import { defaultAgentCapabilities } from "@/server/agent/capabilities";
 import {
   agentActionRegistry,
   capabilityForOrchestratorAction,
+  isRealtimeBusinessToolName,
   realtimeBusinessToolAllowed,
 } from "./action-registry";
 
@@ -26,6 +27,13 @@ describe("agent action registry", () => {
     expect(capabilityForOrchestratorAction("CHECK_AVAILABILITY")).toBe("CHECK_AVAILABILITY");
     expect(capabilityForOrchestratorAction("BOOK_APPOINTMENT")).toBe("BOOK_APPOINTMENT");
     expect(capabilityForOrchestratorAction("ESCALATE")).toBe("ESCALATE");
+  });
+
+  it("rejects inherited or unknown Realtime tool names at the registry boundary", () => {
+    expect(isRealtimeBusinessToolName("toString")).toBe(false);
+    expect(isRealtimeBusinessToolName("__proto__")).toBe(false);
+    expect(isRealtimeBusinessToolName("not_a_business_tool")).toBe(false);
+    expect(isRealtimeBusinessToolName("book_appointment")).toBe(true);
   });
 
   it("uses the same capability policy for realtime tool exposure", () => {
