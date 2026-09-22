@@ -3,6 +3,7 @@ import { and, desc, eq, sql } from "drizzle-orm";
 import { db } from "@/db";
 import { agentTaskRuns, agentTaskSteps, messages } from "@/db/schema";
 import { AppError } from "@/server/http/errors";
+import { logger } from "@/server/observability/logger";
 import {
   agentActionRegistry,
   type RegisteredAgentActionName,
@@ -27,6 +28,13 @@ export type AgentTaskRunStatus =
   | "COMPLETED"
   | "FAILED";
 
+type TaskIdentity = {
+  taskKey?: string;
+  sourceMessageId?: string | null;
+  objective?: string | null;
+  metadata?: Record<string, unknown>;
+};
+
 function stableJson(value: unknown): string {
   if (Array.isArray(value)) return `[${value.map(stableJson).join(",")}]`;
   if (value && typeof value === "object") {
@@ -38,7 +46,7 @@ function stableJson(value: unknown): string {
   return JSON.stringify(value);
 }
 
-function inputHash(value: Record<string, unknown>) {
+function hashInput(value: Record<string, unknown>) {
   return createHash("sha256").update(stableJson(value)).digest("hex");
 }
 
@@ -67,6 +75,16 @@ function taskStatusForResult(result: OrchestratorToolResult): AgentTaskRunStatus
   return "COMPLETED";
 }
 
+function storedToolResult(value: unknown): OrchestratorToolResult | null {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return null;
+  const record = value as Record<string, unknown>;
+  if (typeof record.kind !== "string"
+    || !record.data
+    || typeof record.data !== "object"
+    || Array.isArray(record.data)) return null;
+  return record as OrchestratorToolResult;
+}
+
 async function latestCustomerMessageId(workspaceId: string, conversationId: string) {
   const [message] = await db.select({ id: messages.id }).from(messages).where(and(
     eq(messages.workspaceId, workspaceId),
@@ -80,23 +98,29 @@ async function ensureTaskRun(
   workspaceId: string,
   conversationId: string,
   contactId: string,
+  identity: TaskIdentity = {},
 ) {
-  const sourceMessageId = await latestCustomerMessageId(workspaceId, conversationId);
-  if (sourceMessageId) {
-    const [existing] = await db.select().from(agentTaskRuns).where(and(
-      eq(agentTaskRuns.workspaceId, workspaceId),
-      eq(agentTaskRuns.conversationId, conversationId),
-      eq(agentTaskRuns.sourceMessageId, sourceMessageId),
-    )).limit(1);
-    if (existing) {
-      const [resumed] = await db.update(agentTaskRuns).set({
-        status: "RUNNING",
-        terminationReason: null,
-        completedAt: null,
-        updatedAt: new Date(),
-      }).where(eq(agentTaskRuns.id, existing.id)).returning();
-      return resumed;
-    }
+  const sourceMessageId = identity.sourceMessageId === undefined
+    ? await latestCustomerMessageId(workspaceId, conversationId)
+    : identity.sourceMessageId;
+  const taskKey = identity.taskKey
+    ?? (sourceMessageId ? `turn:${sourceMessageId}` : `conversation:${conversationId}`);
+
+  const [existing] = await db.select().from(agentTaskRuns).where(and(
+    eq(agentTaskRuns.workspaceId, workspaceId),
+    eq(agentTaskRuns.conversationId, conversationId),
+    eq(agentTaskRuns.taskKey, taskKey),
+  )).limit(1);
+  if (existing) {
+    const [resumed] = await db.update(agentTaskRuns).set({
+      status: "RUNNING",
+      terminationReason: null,
+      completedAt: null,
+      updatedAt: new Date(),
+      ...(identity.objective !== undefined ? { objective: identity.objective } : {}),
+      ...(identity.metadata ? { metadata: { ...existing.metadata, ...identity.metadata } } : {}),
+    }).where(eq(agentTaskRuns.id, existing.id)).returning();
+    return resumed;
   }
 
   const [created] = await db.insert(agentTaskRuns).values({
@@ -104,6 +128,9 @@ async function ensureTaskRun(
     conversationId,
     contactId,
     sourceMessageId,
+    taskKey,
+    objective: identity.objective ?? null,
+    metadata: identity.metadata ?? {},
   }).returning();
   return created;
 }
@@ -112,9 +139,19 @@ async function beginTaskStep(
   run: typeof agentTaskRuns.$inferSelect,
   action: RegisteredAgentActionName,
   input: Record<string, unknown>,
+  idempotencyKey?: string | null,
 ) {
   return db.transaction(async (tx) => {
     await tx.execute(sql`SELECT pg_advisory_xact_lock(hashtext(${run.id}))`);
+
+    if (idempotencyKey) {
+      const [existing] = await tx.select().from(agentTaskSteps).where(and(
+        eq(agentTaskSteps.runId, run.id),
+        eq(agentTaskSteps.idempotencyKey, idempotencyKey),
+      )).limit(1);
+      if (existing) return { step: existing, reused: true as const };
+    }
+
     const [latest] = await tx.select({ sequence: agentTaskSteps.sequence })
       .from(agentTaskSteps)
       .where(eq(agentTaskSteps.runId, run.id))
@@ -128,9 +165,10 @@ async function beginTaskStep(
       action,
       risk: definition.risk,
       input,
-      inputHash: inputHash(input),
+      inputHash: hashInput(input),
+      idempotencyKey: idempotencyKey ?? null,
     }).returning();
-    return step;
+    return { step, reused: false as const };
   });
 }
 
@@ -169,17 +207,75 @@ async function finishTaskRun(
   }).where(eq(agentTaskRuns.id, runId));
 }
 
+export async function recordExternalTaskReceipt(input: {
+  workspaceId: string;
+  conversationId: string;
+  contactId: string;
+  taskKey: string;
+  sourceMessageId?: string | null;
+  objective?: string | null;
+  action: RegisteredAgentActionName;
+  actionInput: Record<string, unknown>;
+  result: OrchestratorToolResult;
+  idempotencyKey: string;
+  metadata?: Record<string, unknown>;
+}) {
+  try {
+    const run = await ensureTaskRun(
+      input.workspaceId,
+      input.conversationId,
+      input.contactId,
+      {
+        taskKey: input.taskKey,
+        sourceMessageId: input.sourceMessageId,
+        objective: input.objective,
+        metadata: input.metadata,
+      },
+    );
+    const started = await beginTaskStep(
+      run,
+      input.action,
+      input.actionInput,
+      input.idempotencyKey,
+    );
+    if (started.reused) {
+      const saved = storedToolResult(started.step.result);
+      if (started.step.status === "COMPLETED" && saved) {
+        await finishTaskRun(run.id, taskStatusForResult(saved));
+        return { run, step: started.step, result: saved, reused: true as const };
+      }
+      return { run, step: started.step, result: null, reused: true as const };
+    }
+
+    await completeTaskStep(started.step.id, input.result);
+    await finishTaskRun(run.id, taskStatusForResult(input.result));
+    return { run, step: started.step, result: input.result, reused: false as const };
+  } catch (error) {
+    // Booking and other protected domain engines must never fail because the
+    // cross-channel task audit trail could not be written after the fact.
+    logger.error(
+      {
+        err: error,
+        workspaceId: input.workspaceId,
+        conversationId: input.conversationId,
+        taskKey: input.taskKey,
+        action: input.action,
+      },
+      "Unable to persist external agent task receipt",
+    );
+    return null;
+  }
+}
+
 export function createTrackedActionExecutor(executor: ActionExecutor): ActionExecutor {
   return async (workspaceId, conversationId, contactId, envelope) => {
-    // Phase 2 must not become a second booking engine. Until the task runner
-    // consumes booking receipts directly, availability and booking continue
-    // through the already-proven booking path without an added persistence
-    // dependency at this boundary.
+    // Phase 2 must not become a second booking engine. Availability and booking
+    // continue through the proven booking subsystem. Their authoritative
+    // receipts are attached separately after the booking domain succeeds.
     if (bookingExecutionProtected(envelope)) {
       return executor(workspaceId, conversationId, contactId, envelope);
     }
 
-    const run = await ensureTaskRun(workspaceId, conversationId, contactId);
     const action = taskActionForEnvelope(envelope);
     const trackedInput: Record<string, unknown> = {
       action: envelope.action,
@@ -187,15 +283,42 @@ export function createTrackedActionExecutor(executor: ActionExecutor): ActionExe
       ...(envelope.lead ? { lead: envelope.lead } : {}),
       ...(envelope.unresolved ? { unresolved: envelope.unresolved } : {}),
     };
-    const step = await beginTaskStep(run, action, trackedInput);
+    const hash = hashInput(trackedInput);
+    const run = await ensureTaskRun(workspaceId, conversationId, contactId);
+    const started = await beginTaskStep(
+      run,
+      action,
+      trackedInput,
+      `orchestrator:${action}:${hash}`,
+    );
+
+    if (started.reused) {
+      const saved = storedToolResult(started.step.result);
+      if (started.step.status === "COMPLETED" && saved) {
+        await finishTaskRun(run.id, taskStatusForResult(saved));
+        return saved;
+      }
+      if (started.step.status === "FAILED") {
+        throw new AppError(
+          "AGENT_TASK_STEP_PREVIOUSLY_FAILED",
+          "This action already failed for the current customer turn.",
+          409,
+        );
+      }
+      throw new AppError(
+        "AGENT_TASK_STEP_IN_PROGRESS",
+        "This action is already being processed for the current customer turn.",
+        409,
+      );
+    }
 
     try {
       const result = await executor(workspaceId, conversationId, contactId, envelope);
-      await completeTaskStep(step.id, result);
+      await completeTaskStep(started.step.id, result);
       await finishTaskRun(run.id, taskStatusForResult(result));
       return result;
     } catch (error) {
-      await failTaskStep(step.id, error);
+      await failTaskStep(started.step.id, error);
       await finishTaskRun(
         run.id,
         "FAILED",
