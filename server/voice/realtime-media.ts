@@ -327,14 +327,16 @@ export function attachRealtimeMedia({ telnyx, identity, streamId }: BridgeOption
       name: item.name, arguments: item.arguments, sourceEventId: item.call_id,
       isCurrentTurn: () => open && epoch === callerSpeechEpoch,
     });
-    if (!result) return;
-    logger.info({ workspaceId, callId, tool: item.name, ok: result.ok,
-      kind: "kind" in result ? result.kind : undefined,
-      code: "code" in result ? result.code : undefined,
+    const response = result ?? {
+      ok: false as const, reason: "This action is unavailable. Please continue the conversation.",
+    };
+    logger.info({ workspaceId, callId, tool: item.name, ok: response.ok,
+      kind: "kind" in response ? response.kind : undefined,
+      code: "code" in response ? response.code : undefined,
     }, "Realtime business tool completed");
     if (!open) return;
     sendOpenAI({ type: "conversation.item.create", item: {
-      type: "function_call_output", call_id: item.call_id, output: JSON.stringify(result),
+      type: "function_call_output", call_id: item.call_id, output: JSON.stringify(response),
     } });
   }
 
