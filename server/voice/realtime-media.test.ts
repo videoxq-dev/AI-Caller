@@ -382,8 +382,11 @@ describe("Realtime Telnyx/OpenAI media contract", () => {
     })));
     await vi.waitFor(() => expect(runRealtimeBusinessTool).toHaveBeenCalledTimes(1));
     expect(vi.mocked(runRealtimeBusinessTool).mock.calls[0]?.[0]).toMatchObject({
-      workspaceId: "ws", callId: "call-id", streamId: "stream",
+      workspaceId: "ws",
+      callId: "call-id",
+      streamId: "stream",
       name: "capture_booking_details",
+      taskKey: "realtime:call-id:epoch:1",
     });
     // Never create the next response while the tool-only provider response is
     // still active; wait for response.done and the completed tool output.
