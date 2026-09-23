@@ -10,3 +10,6 @@
 @media(max-width:620px){.customAutomationHeader{align-items:flex-start}.customAutomationCard{grid-template-columns:36px 1fr 16px}.customAutomationRuns{display:none}.starterGrid{grid-template-columns:1fr}}
 
 .customAutomationMore{display:block;min-width:118px;height:35px;margin:12px auto 0;padding:0 14px;border:1px solid #d2dfea;border-radius:8px;color:#1769ee;background:#fff;font-size:10px;font-weight:750;cursor:pointer}.customAutomationMore:disabled{opacity:.55;cursor:not-allowed}
+
+/* Phase 4 Home: readable list and starter text at desktop and mobile widths. */
+.customAutomationHeader h2{font-size:16px}.customAutomationHeader span{font-size:12px}.createAutomationButton{font-size:13px}.customAutomationNameRow strong{font-size:14px}.customAutomationCopy small{font-size:12px}.customAutomationStatus{font-size:11px}.customAutomationRuns{font-size:12px}.starterDialogHeader h2{font-size:19px}.starterGrid strong{font-size:14px}.starterGrid span{font-size:12px}.customAutomationMore{font-size:13px}
