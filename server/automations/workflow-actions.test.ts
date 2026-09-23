@@ -2,6 +2,7 @@ import { afterAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { and, eq } from "drizzle-orm";
 import { closeDatabase, db } from "@/db";
 import {
+  appointments,
   automationDeliveries,
   automationEvents,
   automationRuns,
@@ -320,6 +321,65 @@ describe("Phase 3C durable workflow actions", () => {
     expect(after.map(action => action.attemptCount)).toEqual([1, 1]);
     const notices = await db.select().from(notifications);
     expect(notices.map(notice => notice.title).sort()).toEqual(["Already completed", "Resume here"]);
+  });
+
+  it("suppresses stale appointment SMS after a revision change without contacting the provider", async () => {
+    const { contact, conversation } = await leadContext();
+    const startsAt = new Date("2038-05-04T14:00:00Z");
+    const [appointment] = await db.insert(appointments).values({
+      workspaceId,
+      contactId: contact.id,
+      conversationId: conversation.id,
+      title: "Office cleaning",
+      timezone: "UTC",
+      startsAt,
+      endsAt: new Date("2038-05-04T15:00:00Z"),
+      status: "CONFIRMED",
+      revision: 0,
+    }).returning();
+    const definition = await createWorkflowDraft(workspaceId, "Appointment SMS", {
+      trigger: "APPOINTMENT_RESCHEDULED",
+      conditions: [],
+      actions: [{
+        type: "SEND_CUSTOMER_SMS",
+        message: "Hi {{name}}, your {{service}} is {{appointment_date}} at {{appointment_time}}.",
+      }],
+    });
+    const version = await publishWorkflow(workspaceId, definition.id);
+    const stored = await getWorkflowVersion(workspaceId, version.id);
+    if (!stored) throw new Error("Published workflow missing");
+    const [event] = await db.insert(automationEvents).values({
+      workspaceId,
+      type: "APPOINTMENT_RESCHEDULED",
+      aggregateType: "APPOINTMENT",
+      aggregateId: appointment.id,
+      payload: {
+        appointmentId: appointment.id,
+        startsAt: startsAt.toISOString(),
+        revision: 0,
+      },
+    }).returning();
+    const run = await createWorkflowRun({
+      workspaceId, eventId: event.id, workflowVersionId: version.id,
+      actions: stored.snapshot.actions,
+    });
+    if (!run) throw new Error("Workflow unexpectedly inactive");
+
+    await db.update(appointments).set({
+      revision: 1,
+      startsAt: new Date("2038-05-05T14:00:00Z"),
+      endsAt: new Date("2038-05-05T15:00:00Z"),
+    }).where(eq(appointments.id, appointment.id));
+    await expect(executeAutomationRun(workspaceId, run.id)).resolves.toMatchObject({
+      status: "SKIPPED",
+    });
+    const [action] = await listWorkflowActionRuns(workspaceId, run.id);
+    expect(action).toMatchObject({
+      status: "SKIPPED",
+      errorCode: "APPOINTMENT_REVISION_CHANGED",
+    });
+    expect(await db.select().from(automationDeliveries)).toHaveLength(0);
+    expect(vi.mocked(sendPreclassifiedAutomationSms)).not.toHaveBeenCalled();
   });
 
   it("allows two intentional SMS actions to the same conversation without delivery identity collisions", async () => {
