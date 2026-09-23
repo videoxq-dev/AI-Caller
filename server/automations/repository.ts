@@ -144,6 +144,26 @@ export async function createWorkflowRun(input: {
     )).limit(1);
     if (!event) throw new AppError("AUTOMATION_EVENT_NOT_FOUND", "Automation event not found.", 404);
 
+    // Serialize against publish/pause/archive. If pause wins the lock, no new
+    // queued run is created. If dispatch wins, the later pause sweep sees and
+    // cancels this run before it can start.
+    const [activeVersion] = await tx.select({
+      versionId: workflowVersions.id,
+      status: workflowDefinitions.status,
+    }).from(workflowVersions)
+      .innerJoin(workflowDefinitions, and(
+        eq(workflowDefinitions.workspaceId, workflowVersions.workspaceId),
+        eq(workflowDefinitions.id, workflowVersions.definitionId),
+      ))
+      .where(and(
+        eq(workflowVersions.workspaceId, input.workspaceId),
+        eq(workflowVersions.id, input.workflowVersionId),
+      )).for("update").limit(1);
+    if (!activeVersion) {
+      throw new AppError("WORKFLOW_VERSION_INVALID", "Workflow version does not belong to this workspace.", 409);
+    }
+    if (activeVersion.status !== "PUBLISHED") return null;
+
     const [created] = await tx.insert(automationRuns).values({
       workspaceId: input.workspaceId,
       eventId: input.eventId,
