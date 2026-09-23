@@ -305,9 +305,11 @@ describe("automation executor safety", () => {
     }).returning();
     const run = await createWorkflowRun({
       workspaceId, eventId: event.id, workflowVersionId: firstVersion.id,
+      actions: original.actions,
     });
     expect((await createWorkflowRun({
       workspaceId, eventId: event.id, workflowVersionId: firstVersion.id,
+      actions: original.actions,
     })).id).toBe(run.id);
 
     await updateWorkflowDraft(workspaceId, definition.id, "High-scoring leads", {
