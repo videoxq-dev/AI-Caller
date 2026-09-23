@@ -107,13 +107,13 @@ try {
   assert(JSON.stringify(latestSubmission.samples) === JSON.stringify(["Ada", "Thursday at 10 AM"]),
     "Template variable examples were not submitted in placeholder order.");
   const card = page.locator(".waTemplateCard").filter({ hasText: "meeting reminder" });
-  await card.locator(".waStatus").getByText("Pending").waitFor();
+  await card.locator(".waStatus").filter({ hasText: "Pending" }).waitFor();
 
   await noOverflow(page, "desktop WhatsApp templates");
   await page.screenshot({ path: path.join(outputDir, "templates-desktop.png"), fullPage: true });
   approved = true;
   await page.getByRole("button", { name: "Refresh status" }).click();
-  await card.locator(".waStatus").getByText("Approved").waitFor();
+  await card.locator(".waStatus").filter({ hasText: "Approved" }).waitFor();
   await page.setViewportSize({ width: 390, height: 844 });
   await noOverflow(page, "mobile WhatsApp templates");
   await page.screenshot({ path: path.join(outputDir, "templates-mobile.png"), fullPage: true });
