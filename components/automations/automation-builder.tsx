@@ -653,7 +653,7 @@ function TestPanel({
     </div>
     {result && <div className={`testResult ${result.matches ? "matched" : "notMatched"}`}>
       <strong>{result.matches ? "Automation would run" : "Automation would not run"}</strong>
-      {result.conditions.map((condition, index) => <div className="testCondition" key={index}><span>{condition.matched ? "✓" : "×"}</span>{condition.field} {condition.actual} {condition.operator} {condition.expected}</div>)}
+      {result.conditions.map((condition, index) => <div className="testCondition" key={index}><span>{condition.matched ? "✓" : "×"}</span>{condition.field} {String(condition.actual ?? "")} {condition.operator} {String(condition.expected ?? "")}</div>)}
       {result.matches && <div className="testActions">
         {result.actions.map((action, index) => <div key={index}><b>{index + 1}</b><span>{action.label}{action.userId !== undefined ? ` · ${memberName(action.userId)}` : ""}</span></div>)}
       </div>}
