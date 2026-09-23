@@ -7,6 +7,7 @@ import {
   workflowVersions,
 } from "@/db/schema";
 import { AppError } from "@/server/http/errors";
+import { parseInput } from "@/server/http/validation";
 import { validateWorkflowActionsForPublication } from "./action-registry";
 import {
   actionLabel,
@@ -21,6 +22,10 @@ import {
   workflowDefinitionSchema,
   type WorkflowDefinition,
 } from "./workflows";
+
+export function parseBuilderWorkflowId(id: string) {
+  return parseInput(z.string().uuid(), id);
+}
 
 export type BuilderWorkflowStatus = "DRAFT" | "ACTIVE" | "PAUSED";
 
@@ -207,7 +212,7 @@ export async function testBuilderWorkflow(
   input: unknown,
 ) {
   const workflow = await getBuilderWorkflow(workspaceId, definitionId);
-  const parsed = dryRunInputSchema.parse(input);
+  const parsed = parseInput(dryRunInputSchema, input);
   const draft = parsed.draft ?? workflow.draft;
   const sample = parsed.sample;
   await validateWorkflowActionsForPublication({
