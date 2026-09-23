@@ -1,5 +1,8 @@
+import { sql } from "drizzle-orm";
 import {
   boolean,
+  foreignKey,
+  integer,
   index,
   jsonb,
   pgEnum,
@@ -84,13 +87,54 @@ export const automationEvents = pgTable(
   ],
 );
 
+export const workflowDefinitions = pgTable(
+  "workflow_definitions",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    workspaceId: uuid("workspace_id").notNull().references(() => workspaces.id, { onDelete: "cascade" }),
+    name: text("name").notNull(),
+    status: text("status").$type<"DRAFT" | "PUBLISHED" | "PAUSED" | "ARCHIVED">().default("DRAFT").notNull(),
+    draft: jsonb("draft").$type<Record<string, unknown>>().default({}).notNull(),
+    publishedVersion: integer("published_version"),
+    createdAt: timestamp("created_at", { withTimezone: true, mode: "date" }).defaultNow().notNull(),
+    updatedAt: timestamp("updated_at", { withTimezone: true, mode: "date" }).defaultNow().notNull(),
+  },
+  (table) => [
+    uniqueIndex("workflow_definitions_id_workspace_uq").on(table.id, table.workspaceId),
+    index("workflow_definitions_workspace_status_idx").on(table.workspaceId, table.status),
+  ],
+);
+
+export const workflowVersions = pgTable(
+  "workflow_versions",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    workspaceId: uuid("workspace_id").notNull().references(() => workspaces.id, { onDelete: "cascade" }),
+    definitionId: uuid("definition_id").notNull(),
+    version: integer("version").notNull(),
+    snapshot: jsonb("snapshot").$type<Record<string, unknown>>().notNull(),
+    publishedAt: timestamp("published_at", { withTimezone: true, mode: "date" }).defaultNow().notNull(),
+  },
+  (table) => [
+    foreignKey({
+      name: "workflow_versions_definition_workspace_fk",
+      columns: [table.definitionId, table.workspaceId],
+      foreignColumns: [workflowDefinitions.id, workflowDefinitions.workspaceId],
+    }).onDelete("cascade"),
+    uniqueIndex("workflow_versions_definition_version_uq").on(table.definitionId, table.version),
+    uniqueIndex("workflow_versions_workspace_id_uq").on(table.workspaceId, table.id),
+    index("workflow_versions_workspace_definition_idx").on(table.workspaceId, table.definitionId, table.version),
+  ],
+);
+
 export const automationRuns = pgTable(
   "automation_runs",
   {
     id: uuid("id").defaultRandom().primaryKey(),
     workspaceId: uuid("workspace_id").notNull().references(() => workspaces.id, { onDelete: "cascade" }),
     eventId: uuid("event_id").notNull().references(() => automationEvents.id, { onDelete: "cascade" }),
-    key: automationKey("key").notNull(),
+    key: automationKey("key"),
+    workflowVersionId: uuid("workflow_version_id"),
     occurrenceKey: text("occurrence_key").default("default").notNull(),
     status: automationRunStatus("status").default("PENDING").notNull(),
     scheduledFor: timestamp("scheduled_for", { withTimezone: true, mode: "date" }),
@@ -103,6 +147,15 @@ export const automationRuns = pgTable(
   },
   (table) => [
     uniqueIndex("automation_runs_event_key_occurrence_uq").on(table.eventId, table.key, table.occurrenceKey),
+    foreignKey({
+      name: "automation_runs_workflow_version_workspace_fk",
+      columns: [table.workspaceId, table.workflowVersionId],
+      foreignColumns: [workflowVersions.workspaceId, workflowVersions.id],
+    }),
+    uniqueIndex("automation_runs_event_workflow_occurrence_uq")
+      .on(table.eventId, table.workflowVersionId, table.occurrenceKey)
+      .where(sql`${table.workflowVersionId} is not null`),
+
     index("automation_runs_workspace_created_idx").on(table.workspaceId, table.createdAt),
     index("automation_runs_scheduled_idx").on(table.status, table.scheduledFor),
   ],

@@ -6,10 +6,13 @@ import {
   automationRuns,
   automationSettings,
   memberships,
+  notifications,
   user,
   workspaces,
 } from "@/db/schema";
 import { dispatchAutomationEvent } from "./dispatcher";
+import { executeAutomationRun } from "./executor";
+import { createWorkflowDraft, publishWorkflow } from "./workflows";
 
 vi.mock("@/server/jobs", () => ({
   enqueueUniqueJob: vi.fn(async () => "job"),
@@ -123,6 +126,43 @@ describe("automation dispatcher", () => {
     const [run] = await db.select().from(automationRuns);
     expect(run.metadata.expectedAppointmentRevision).toBe(7);
     expect(run.metadata.expectedStartsAt).toBe(startsAt);
+  });
+
+  it("matches a published threshold workflow without duplicating runs or changing legacy recipes", async () => {
+    const definition = await createWorkflowDraft(workspaceId, "Lead threshold", {
+      trigger: "LEAD_QUALIFIED",
+      conditions: [{ field: "qualificationScore", operator: "GTE", value: 75 }],
+      actions: [{ type: "NOTIFY_STAFF", title: "Lead ready", message: "Contact the customer." }],
+    });
+    const version = await publishWorkflow(workspaceId, definition.id);
+    const [high, low, historic] = await db.insert(automationEvents).values([
+      { workspaceId, type: "LEAD_QUALIFIED", aggregateType: "LEAD",
+        aggregateId: "high", payload: { qualificationScore: 85 } },
+      { workspaceId, type: "LEAD_QUALIFIED", aggregateType: "LEAD",
+        aggregateId: "low", payload: { qualificationScore: 40 } },
+      { workspaceId, type: "LEAD_QUALIFIED", aggregateType: "LEAD",
+        aggregateId: "historic", payload: { qualificationScore: 95 },
+        occurredAt: new Date(Date.now() - 60_000) },
+    ]).returning();
+
+    await Promise.all([
+      dispatchAutomationEvent(workspaceId, high.id),
+      dispatchAutomationEvent(workspaceId, high.id),
+    ]);
+    await dispatchAutomationEvent(workspaceId, low.id);
+    await dispatchAutomationEvent(workspaceId, historic.id);
+    const runs = await db.select().from(automationRuns);
+    expect(runs).toHaveLength(1);
+    expect(runs[0]).toMatchObject({
+      eventId: high.id, workflowVersionId: version.id, key: null,
+    });
+    await expect(executeAutomationRun(workspaceId, runs[0].id)).resolves.toMatchObject({
+      claimed: true, status: "COMPLETED",
+    });
+    const notices = await db.select().from(notifications);
+    expect(notices).toHaveLength(1);
+    expect(notices[0].title).toBe("Lead ready");
+    expect(notices[0].body).toBe("Contact the customer.");
   });
 
   it("leaves an event recoverable if enqueue fails after the run is committed", async () => {

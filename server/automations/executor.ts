@@ -31,6 +31,7 @@ import {
   listAutomationDeliveries,
   releaseAutomationRunForRetry,
 } from "./repository";
+import { getWorkflowVersion } from "./workflows";
 import type {
   AppointmentConfirmationConfig,
   AppointmentReminderConfig,
@@ -456,15 +457,28 @@ export async function executeAutomationRun(workspaceId: string, runId: string) {
     const event = await getAutomationEvent(workspaceId, run.eventId);
     if (!event) throw new AppError("AUTOMATION_EVENT_NOT_FOUND", "Automation event not found.", 404);
 
-    const setting = await getAutomationSetting(workspaceId, run.key as AutomationKey);
-    if (!setting.enabled) {
+    const setting = run.key ? await getAutomationSetting(workspaceId, run.key as AutomationKey) : null;
+    if (run.key && !setting?.enabled) {
       await completeAutomationRun(workspaceId, runId, "SKIPPED", { reason: "AUTOMATION_DISABLED" });
       return { claimed: true as const, status: "SKIPPED" as const };
     }
 
     let summary: DeliverySummary = { sent: 0, skipped: 0, failed: 0 };
-    if (run.key === "MISSED_INQUIRY_RECOVERY") {
-      summary = await executeMissedInquiry(workspaceId, runId, event, setting.config as MissedInquiryConfig);
+    if (run.workflowVersionId) {
+      const version = await getWorkflowVersion(workspaceId, run.workflowVersionId);
+      if (!version || version.snapshot.trigger !== event.type) {
+        throw new AppError("WORKFLOW_VERSION_INVALID", "The published workflow version is unavailable or incompatible.", 409);
+      }
+      const [action] = version.snapshot.actions;
+      // Only registered and validated deterministic actions reach this boundary.
+      if (action.type === "NOTIFY_STAFF") {
+        summary = await deliverInApp({
+          workspaceId, runId, userId: null, title: action.title, body: action.message,
+          metadata: { workflowVersionId: version.id, workflowDefinitionId: version.definitionId },
+        });
+      }
+    } else if (run.key === "MISSED_INQUIRY_RECOVERY") {
+      summary = await executeMissedInquiry(workspaceId, runId, event, setting?.config as MissedInquiryConfig);
     } else if (run.key === "QUALIFIED_LEAD_ASSIGNMENT") {
       summary = await executeQualifiedLead(workspaceId, runId, event);
     } else if (run.key === "APPOINTMENT_CONFIRMATION") {
@@ -473,7 +487,7 @@ export async function executeAutomationRun(workspaceId: string, runId: string) {
         runId,
         event,
         run.key,
-        setting.config as AppointmentConfirmationConfig,
+        setting?.config as AppointmentConfirmationConfig,
       );
     } else if (run.key === "APPOINTMENT_REMINDER") {
       const expectedStartsAt = typeof run.metadata.expectedStartsAt === "string" ? run.metadata.expectedStartsAt : null;
@@ -488,7 +502,7 @@ export async function executeAutomationRun(workspaceId: string, runId: string) {
         runId,
         event,
         run.key,
-        setting.config as AppointmentReminderConfig,
+        setting?.config as AppointmentReminderConfig,
         expectedStartsAt,
         expectedRevision,
       );

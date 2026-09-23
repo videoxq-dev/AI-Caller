@@ -3,11 +3,13 @@ import { enqueueUniqueJob, enqueueUniqueJobAt } from "@/server/jobs";
 import { AUTOMATION_EXECUTE_RUN } from "@/server/jobs/queues";
 import {
   createAutomationRun,
+  createWorkflowRun,
   getAutomationEvent,
   getAutomationSetting,
   markAutomationEventDispatched,
 } from "./repository";
 import type { AutomationKey } from "./schemas";
+import { listPublishedWorkflowVersions, matchesWorkflow } from "./workflows";
 
 const appointmentPayloadSchema = z.object({
   appointmentId: z.string().uuid(),
@@ -89,6 +91,18 @@ export async function dispatchAutomationEvent(workspaceId: string, eventId: stri
       await createAndEnqueue({ workspaceId, eventId, key: "HUMAN_ESCALATION" });
       runs += 1;
     }
+  }
+
+  // One dispatcher owns both legacy recipes and published custom workflows.
+  // Replays may enqueue the same run again, but its version/event identity is unique.
+  const published = await listPublishedWorkflowVersions(workspaceId, eventId);
+  for (const version of published) {
+    if (!matchesWorkflow(version.snapshot, event)) continue;
+    const run = await createWorkflowRun({
+      workspaceId, eventId, workflowVersionId: version.id,
+    });
+    await enqueueRun(run);
+    runs += 1;
   }
 
   await markAutomationEventDispatched(workspaceId, eventId);

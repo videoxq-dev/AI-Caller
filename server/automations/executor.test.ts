@@ -18,7 +18,8 @@ import {
   workspaces,
 } from "@/db/schema";
 import { executeAutomationRun } from "./executor";
-import { createAutomationRun } from "./repository";
+import { createAutomationRun, createWorkflowRun } from "./repository";
+import { createWorkflowDraft, publishWorkflow, updateWorkflowDraft } from "./workflows";
 
 let workspaceId = "";
 let ownerId = "executor-owner";
@@ -288,5 +289,44 @@ describe("automation executor safety", () => {
       status: "SKIPPED",
     });
     expect(await db.select().from(automationDeliveries)).toHaveLength(0);
+  });
+
+  it("executes an immutable workflow version once, even after its draft is changed", async () => {
+    const original = {
+      trigger: "LEAD_QUALIFIED",
+      conditions: [{ field: "qualificationScore", operator: "GTE", value: 80 }],
+      actions: [{ type: "NOTIFY_STAFF", title: "Qualified lead", message: "Original published message." }],
+    };
+    const definition = await createWorkflowDraft(workspaceId, "High-scoring leads", original);
+    const firstVersion = await publishWorkflow(workspaceId, definition.id);
+    const [event] = await db.insert(automationEvents).values({
+      workspaceId, type: "LEAD_QUALIFIED", aggregateType: "LEAD",
+      aggregateId: "custom-lead", payload: { qualificationScore: 95 },
+    }).returning();
+    const run = await createWorkflowRun({
+      workspaceId, eventId: event.id, workflowVersionId: firstVersion.id,
+    });
+    expect((await createWorkflowRun({
+      workspaceId, eventId: event.id, workflowVersionId: firstVersion.id,
+    })).id).toBe(run.id);
+
+    await updateWorkflowDraft(workspaceId, definition.id, "High-scoring leads", {
+      ...original, actions: [{ type: "NOTIFY_STAFF", title: "New message", message: "New published message." }],
+    });
+    const nextVersion = await publishWorkflow(workspaceId, definition.id);
+    expect(nextVersion.version).toBe(2);
+
+    await expect(executeAutomationRun(workspaceId, run.id)).resolves.toMatchObject({
+      claimed: true, status: "COMPLETED",
+    });
+    expect(await executeAutomationRun(workspaceId, run.id)).toMatchObject({ claimed: false });
+    const notices = await db.select().from(notifications);
+    expect(notices).toHaveLength(2);
+    expect(notices.map(notice => notice.body)).toEqual([
+      "Original published message.", "Original published message.",
+    ]);
+    expect(await db.select().from(automationDeliveries)).toHaveLength(1);
+    const [recorded] = await db.select().from(automationRuns);
+    expect(recorded.workflowVersionId).toBe(firstVersion.id);
   });
 });
