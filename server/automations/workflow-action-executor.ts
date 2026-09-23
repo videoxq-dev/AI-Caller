@@ -303,6 +303,14 @@ async function executeNotifyStaff(input: {
           .where(eq(memberships.workspaceId, input.workspaceId)))
         .map(row => row.userId);
 
+    if (input.action.userId && recipients.length === 0) {
+      throw new AppError(
+        "WORKFLOW_STAFF_INVALID",
+        "Configured notification recipient is no longer part of this workspace.",
+        409,
+      );
+    }
+
     const recipientKey = input.action.userId ?? "workspace";
     const [delivery] = await tx.insert(automationDeliveries).values({
       workspaceId: input.workspaceId,
@@ -502,7 +510,7 @@ async function executeCustomerSms(input: {
     const errorCode = error instanceof AppError ? error.code : "SMS_DELIVERY_UNCERTAIN";
     const errorMessage = error instanceof Error ? error.message : "SMS delivery did not complete.";
     await finishAutomationDelivery(input.workspaceId, claimed.delivery.id, {
-      status: status === "COMPLETED" ? "SENT" : status,
+      status,
       errorCode,
       errorMessage,
     });
