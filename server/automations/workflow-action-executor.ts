@@ -180,7 +180,8 @@ async function executeAssignLead(input: {
   action: Extract<WorkflowAction, { type: "ASSIGN_LEAD" }>;
   context: CustomerContext;
 }) {
-  if (!input.context.leadId) {
+  const leadId = input.context.leadId;
+  if (!leadId) {
     await finishWorkflowActionRun(input.workspaceId, input.actionRunId, {
       status: "SKIPPED",
       errorCode: "LEAD_CONTEXT_UNAVAILABLE",
@@ -204,7 +205,7 @@ async function executeAssignLead(input: {
 
     const [lead] = await tx.select().from(leads).where(and(
       eq(leads.workspaceId, input.workspaceId),
-      eq(leads.id, input.context.leadId),
+      eq(leads.id, leadId),
     )).for("update").limit(1);
     if (!lead || lead.status !== "QUALIFIED") {
       await tx.update(workflowActionRuns).set({
