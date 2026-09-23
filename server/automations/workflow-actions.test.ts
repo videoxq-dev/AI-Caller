@@ -17,13 +17,18 @@ import {
   workspaces,
 } from "@/db/schema";
 import { AppError } from "@/server/http/errors";
-import { sendSmsConversationText } from "@/server/sms/outbound";
+import { classifySmsPurpose } from "@/server/sms/classification";
+import { sendPreclassifiedAutomationSms } from "@/server/sms/outbound";
 import { executeAutomationRun } from "./executor";
 import { createWorkflowRun, listAutomationActivity, listWorkflowActionRuns } from "./repository";
 import { createWorkflowDraft, getWorkflowVersion, publishWorkflow } from "./workflows";
 
+vi.mock("@/server/sms/classification", () => ({
+  classifySmsPurpose: vi.fn(),
+}));
+
 vi.mock("@/server/sms/outbound", () => ({
-  sendSmsConversationText: vi.fn(),
+  sendPreclassifiedAutomationSms: vi.fn(),
 }));
 
 const ownerId = "phase3c-owner";
@@ -108,6 +113,7 @@ async function eventAndRun(
 describe("Phase 3C durable workflow actions", () => {
   beforeEach(async () => {
     vi.resetAllMocks();
+    vi.mocked(classifySmsPurpose).mockResolvedValue("TRANSACTIONAL");
     await clean();
     await db.insert(user).values([
       { id: ownerId, name: "Owner", email: "phase3c-owner@example.com", emailVerified: true },
@@ -125,6 +131,20 @@ describe("Phase 3C durable workflow actions", () => {
     await closeDatabase();
   });
 
+  it("refuses to publish an SMS workflow when server-side purpose classification is uncertain", async () => {
+    vi.mocked(classifySmsPurpose).mockResolvedValueOnce("UNCERTAIN");
+    const definition = await createWorkflowDraft(workspaceId, "Unclear SMS", {
+      trigger: "LEAD_QUALIFIED",
+      conditions: [],
+      actions: [{ type: "SEND_CUSTOMER_SMS", message: "Hi {{name}}, we have something for you." }],
+    });
+
+    await expect(publishWorkflow(workspaceId, definition.id)).rejects.toMatchObject({
+      code: "WORKFLOW_SMS_PURPOSE_UNCERTAIN",
+    });
+    expect(vi.mocked(sendPreclassifiedAutomationSms)).not.toHaveBeenCalled();
+  });
+
   it("executes assign, notify, then SMS exactly once even when two workers race", async () => {
     const { lead, conversation } = await leadContext();
     const { version, snapshot } = await publishedWorkflow([
@@ -132,9 +152,15 @@ describe("Phase 3C durable workflow actions", () => {
       { type: "NOTIFY_STAFF", userId: staffId, title: "Lead assigned", message: "Follow up now." },
       { type: "SEND_CUSTOMER_SMS", message: "Hi {{name}}, our team will follow up shortly." },
     ]);
+    expect(snapshot.actions[2]).toMatchObject({
+      type: "SEND_CUSTOMER_SMS",
+      classifiedPurpose: "TRANSACTIONAL",
+    });
+    const classificationCallsAfterPublish = vi.mocked(classifySmsPurpose).mock.calls.length;
+    expect(classificationCallsAfterPublish).toBe(1);
     const { run } = await eventAndRun(lead, version, snapshot.actions);
 
-    vi.mocked(sendSmsConversationText).mockImplementation(async (_workspaceId, _conversationId, input) => {
+    vi.mocked(sendPreclassifiedAutomationSms).mockImplementation(async (_workspaceId, _conversationId, input) => {
       const [storedLead] = await db.select().from(leads);
       expect(storedLead.assignedUserId).toBe(staffId);
       expect(await db.select().from(notifications)).toHaveLength(1);
@@ -168,7 +194,11 @@ describe("Phase 3C durable workflow actions", () => {
     expect(deliveries).toHaveLength(2);
     expect(deliveries.every(delivery => delivery.actionRunId !== null)).toBe(true);
     expect(new Set(deliveries.map(delivery => delivery.channel))).toEqual(new Set(["IN_APP", "SMS"]));
-    expect(vi.mocked(sendSmsConversationText)).toHaveBeenCalledTimes(1);
+    expect(vi.mocked(sendPreclassifiedAutomationSms)).toHaveBeenCalledTimes(1);
+    expect(vi.mocked(sendPreclassifiedAutomationSms).mock.calls[0]?.[2]).toMatchObject({
+      classifiedPurpose: "TRANSACTIONAL",
+    });
+    expect(vi.mocked(classifySmsPurpose)).toHaveBeenCalledTimes(classificationCallsAfterPublish);
     expect(await db.select().from(conversationHandlingEvents)).toHaveLength(1);
 
     const [activity] = await listAutomationActivity(workspaceId, 10);
@@ -187,7 +217,7 @@ describe("Phase 3C durable workflow actions", () => {
       { type: "NOTIFY_STAFF", userId: staffId, title: "SMS suppressed", message: "Follow up manually." },
     ]);
     const { run } = await eventAndRun(lead, version, snapshot.actions);
-    vi.mocked(sendSmsConversationText).mockRejectedValue(
+    vi.mocked(sendPreclassifiedAutomationSms).mockRejectedValue(
       new AppError("SMS_CONSENT_REQUIRED", "Customer opted out.", 409),
     );
 
@@ -211,14 +241,14 @@ describe("Phase 3C durable workflow actions", () => {
       { type: "NOTIFY_STAFF", userId: staffId, title: "Should not run", message: "Do not create this." },
     ]);
     const { run } = await eventAndRun(lead, version, snapshot.actions);
-    vi.mocked(sendSmsConversationText).mockRejectedValue(new Error("connection reset after send"));
+    vi.mocked(sendPreclassifiedAutomationSms).mockRejectedValue(new Error("connection reset after send"));
 
     await expect(executeAutomationRun(workspaceId, run.id)).resolves.toMatchObject({
       claimed: true,
       status: "FAILED",
     });
     expect(await executeAutomationRun(workspaceId, run.id)).toMatchObject({ claimed: false });
-    expect(vi.mocked(sendSmsConversationText)).toHaveBeenCalledTimes(1);
+    expect(vi.mocked(sendPreclassifiedAutomationSms)).toHaveBeenCalledTimes(1);
 
     const actions = await listWorkflowActionRuns(workspaceId, run.id);
     expect(actions.map(action => action.status)).toEqual(["UNKNOWN", "PENDING"]);
@@ -253,7 +283,7 @@ describe("Phase 3C durable workflow actions", () => {
       errorCode: "WORKFLOW_STAFF_INVALID",
     });
     expect(actions.map(item => item.status)).toEqual(["FAILED", "PENDING"]);
-    expect(vi.mocked(sendSmsConversationText)).not.toHaveBeenCalled();
+    expect(vi.mocked(sendPreclassifiedAutomationSms)).not.toHaveBeenCalled();
   });
 
   it("resumes after an already-completed action without repeating its side effect", async () => {
@@ -304,7 +334,7 @@ describe("Phase 3C durable workflow actions", () => {
       "33333333-3333-4333-8333-333333333333",
     ];
     let index = 0;
-    vi.mocked(sendSmsConversationText).mockImplementation(async () => ({
+    vi.mocked(sendPreclassifiedAutomationSms).mockImplementation(async () => ({
       id: ids[index++],
       externalMessageId: `sms-phase3c-${index}`,
     } as never));
@@ -315,7 +345,7 @@ describe("Phase 3C durable workflow actions", () => {
     const deliveries = await db.select().from(automationDeliveries);
     expect(deliveries).toHaveLength(2);
     expect(new Set(deliveries.map(delivery => delivery.actionRunId)).size).toBe(2);
-    const keys = vi.mocked(sendSmsConversationText).mock.calls.map(call => call[2].idempotencyKey);
+    const keys = vi.mocked(sendPreclassifiedAutomationSms).mock.calls.map(call => call[2].idempotencyKey);
     expect(keys).toHaveLength(2);
     expect(new Set(keys).size).toBe(2);
   });
