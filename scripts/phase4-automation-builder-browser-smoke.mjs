@@ -245,8 +245,14 @@ try {
     return {
       navTop: nav?.getBoundingClientRect().top ?? null,
       footerBottom: footer?.getBoundingClientRect().bottom ?? null,
-      test: test?.getBoundingClientRect() ?? null,
-      save: save?.getBoundingClientRect() ?? null,
+      test: test ? {
+        top: test.getBoundingClientRect().top,
+        bottom: test.getBoundingClientRect().bottom,
+      } : null,
+      save: save ? {
+        top: save.getBoundingClientRect().top,
+        bottom: save.getBoundingClientRect().bottom,
+      } : null,
       viewport: window.innerHeight,
     };
   });
