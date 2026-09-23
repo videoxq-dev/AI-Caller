@@ -147,6 +147,20 @@ describe("Phase 4 automation builder service", () => {
     });
   });
 
+  it("dry-run rejects actions targeting someone outside the workspace", async () => {
+    const starter = builderStarter("HIGH_VALUE_LEAD_ALERT");
+    const created = await createWorkflowDraft(workspaceId, starter.name, starter.definition);
+    await expect(testBuilderWorkflow(workspaceId, created.id, {
+      draft: {
+        trigger: "LEAD_QUALIFIED",
+        match: "ALL",
+        conditions: [],
+        actions: [{ type: "ASSIGN_LEAD", userId: otherOwnerId }],
+      },
+      sample: {},
+    })).rejects.toMatchObject({ code: "WORKFLOW_STAFF_INVALID" });
+  });
+
   it("reports unpublished changes while the active automation remains active", async () => {
     const starter = builderStarter("HIGH_VALUE_LEAD_ALERT");
     const created = await createWorkflowDraft(workspaceId, starter.name, starter.definition);
