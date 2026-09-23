@@ -30,7 +30,8 @@
     "test:browser:m9": "node scripts/milestone9-browser-smoke.mjs",
     "test:browser:m10": "node scripts/milestone10-browser-smoke.mjs",
     "test:browser:phase1": "node scripts/phase1-agent-browser-smoke.mjs",
-    "test:browser:booking": "node scripts/booking-remediation-browser-smoke.mjs"
+    "test:browser:booking": "node scripts/booking-remediation-browser-smoke.mjs",
+    "test:browser:phase4": "node scripts/phase4-automation-builder-browser-smoke.mjs"
   },
   "dependencies": {
     "better-auth": "^1.7.5",
