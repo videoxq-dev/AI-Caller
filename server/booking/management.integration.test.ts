@@ -94,6 +94,19 @@ describe("existing appointment management (isolated from V2 booking)", () => {
     expect(current.status).toBe("CONFIRMED");
   });
 
+  it("does not let an expired collecting booking draft block appointment management", async () => {
+    await db.insert(bookingDrafts).values({
+      workspaceId: ctx.workspaceId, contactId: ctx.contactId,
+      conversationId: ctx.conversationId, channel: "WEBCHAT",
+      sessionKey: ctx.sessionKey,
+      expiresAt: new Date("2029-09-21T12:00:00.000Z"),
+    });
+    const result = await turn("Please reschedule my existing appointment");
+    expect(result?.reply).toContain("I found your existing Office Cleaning");
+    expect(await db.select().from(appointmentManagementRequests)).toHaveLength(1);
+    expect((await db.select().from(appointments))[0].status).toBe("CONFIRMED");
+  });
+
   it("routes existing appointment updates without entering new booking", async () => {
     expect(appointmentManagementIntent("I'd like to update my appointment")).toBe("RESCHEDULE");
     expect(appointmentManagementIntent("I want to book a new appointment")).toBeNull();
