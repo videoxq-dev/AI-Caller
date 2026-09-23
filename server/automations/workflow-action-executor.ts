@@ -66,19 +66,40 @@ export async function resolveWorkflowCustomerContext(
 
   if (event.type === "LEAD_QUALIFIED") {
     const leadId = typeof event.payload.leadId === "string" ? event.payload.leadId : null;
-    const contactId = typeof event.payload.contactId === "string" ? event.payload.contactId : null;
-    if (!leadId || !contactId) {
-      return { contactId, conversationId: null, leadId, variables: { name: "there", business_name: businessName } };
+    const payloadContactId = typeof event.payload.contactId === "string"
+      ? event.payload.contactId : null;
+    if (!leadId) {
+      return { contactId: null, conversationId: null, leadId: null, variables: { name: "there", business_name: businessName } };
     }
-    const [contact] = await db.select({ name: contacts.name }).from(contacts).where(and(
-      eq(contacts.workspaceId, workspaceId),
-      eq(contacts.id, contactId),
-    )).limit(1);
+    // Resolve the recipient from the persisted lead, never from an event's
+    // independently supplied contact ID: a mismatch could message the wrong person.
+    const [record] = await db.select({
+      contactId: leads.contactId,
+      name: contacts.name,
+    }).from(leads)
+      .innerJoin(contacts, and(
+        eq(contacts.workspaceId, workspaceId),
+        eq(contacts.id, leads.contactId),
+      ))
+      .where(and(
+        eq(leads.workspaceId, workspaceId),
+        eq(leads.id, leadId),
+      )).limit(1);
+    if (!record) {
+      return { contactId: null, conversationId: null, leadId: null, variables: { name: "there", business_name: businessName } };
+    }
+    if (payloadContactId && payloadContactId !== record.contactId) {
+      throw new AppError(
+        "WORKFLOW_EVENT_CONTACT_MISMATCH",
+        "Workflow lead event identifies a different contact than the persisted lead.",
+        409,
+      );
+    }
     return {
-      contactId,
-      conversationId: await openConversationForContact(workspaceId, contactId),
+      contactId: record.contactId,
+      conversationId: await openConversationForContact(workspaceId, record.contactId),
       leadId,
-      variables: { name: contact?.name ?? "there", business_name: businessName },
+      variables: { name: record.name ?? "there", business_name: businessName },
     };
   }
 
