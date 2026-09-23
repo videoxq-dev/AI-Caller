@@ -1,4 +1,4 @@
-import { and, asc, desc, eq, gt, inArray, lt, ne, sql } from "drizzle-orm";
+import { and, asc, desc, eq, gt, inArray, lt, ne, or, sql } from "drizzle-orm";
 import { db } from "@/db";
 import {
   appointmentManagementRequests, appointments, bookingDrafts, bookingReservations, messages, services,
@@ -149,17 +149,20 @@ async function unresolvedChange(ctx: BookingContext, appointment: Appointment) {
     "Please ask the business team to verify the calendar and resolve this appointment issue.";
 }
 
-async function hasUnfinishedBooking(ctx: BookingContext) {
+async function hasUnfinishedBooking(ctx: BookingContext, now: Date) {
   const [draft] = await db.select({ id: bookingDrafts.id })
     .from(bookingDrafts).where(and(
       eq(bookingDrafts.workspaceId, ctx.workspaceId),
       eq(bookingDrafts.contactId, ctx.contactId),
       eq(bookingDrafts.channel, ctx.channel),
       eq(bookingDrafts.sessionKey, ctx.sessionKey),
-      inArray(bookingDrafts.status, [
-        "COLLECTING", "AVAILABILITY_CHECKED", "AWAITING_CONFIRMATION",
-        "COMMITTING", "RECONCILING",
-      ]),
+      or(
+        inArray(bookingDrafts.status, ["COMMITTING", "RECONCILING"]),
+        and(
+          inArray(bookingDrafts.status, ["COLLECTING", "AVAILABILITY_CHECKED", "AWAITING_CONFIRMATION"]),
+          gt(bookingDrafts.expiresAt, now),
+        ),
+      ),
     )).limit(1);
   return Boolean(draft);
 }
@@ -393,7 +396,7 @@ export async function handleAppointmentManagementTurn(
   // The V2 booking engine owns every turn of an unfinished new booking,
   // including ambiguous "cancel my appointment" and subsequent approvals.
   // Do not turn draft-cancellation words into a destructive existing edit.
-  if (!active && await hasUnfinishedBooking(ctx)) return null;
+  if (!active && await hasUnfinishedBooking(ctx, now)) return null;
   if (!active && !initialIntent) {
     if (isExplicitActionConfirmation(message.body)) {
       const [last] = await db.select().from(appointmentManagementRequests)
