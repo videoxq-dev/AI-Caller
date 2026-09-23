@@ -29,10 +29,13 @@ import {
   completeAutomationRun,
   failAutomationRun,
   finishAutomationDelivery,
+  finishPendingAutomationDelivery,
+  finishWorkflowActionRun,
   getAutomationEvent,
   getAutomationRun,
   getAutomationSetting,
   listAutomationDeliveries,
+  listWorkflowActionDeliveries,
   listWorkflowActionRuns,
   releaseAutomationRunForRetry,
   releaseWorkflowActionRunForRetry,
@@ -456,6 +459,97 @@ async function executeEscalation(
   });
 }
 
+async function stopCustomWorkflowRun(
+  workspaceId: string,
+  runId: string,
+  reason: string,
+) {
+  const actions = await listWorkflowActionRuns(workspaceId, runId);
+  await cancelPendingWorkflowActions(workspaceId, runId, reason);
+  const running = actions.find(action => action.status === "RUNNING");
+  if (!running) {
+    await cancelAutomationRun(workspaceId, runId, reason);
+    return "CANCELLED" as const;
+  }
+
+  // A running action owns its side effect for the full worker job lease.
+  // Pause never interrupts it mid-flight; it only prevents subsequent actions.
+  const actionStaleBefore = Date.now() - 5 * 60_000;
+  if (running.startedAt && running.startedAt.getTime() >= actionStaleBefore) {
+    return "RUNNING" as const;
+  }
+
+  const deliveries = await listWorkflowActionDeliveries(workspaceId, running.id);
+  if (deliveries.length === 0) {
+    await finishWorkflowActionRun(workspaceId, running.id, {
+      status: "CANCELLED",
+      errorCode: "WORKFLOW_CANCELLED",
+      errorMessage: reason,
+    });
+    await cancelAutomationRun(workspaceId, runId, reason);
+    return "CANCELLED" as const;
+  }
+  if (deliveries.length !== 1) {
+    await failAutomationRun(
+      workspaceId,
+      runId,
+      new AppError(
+        "WORKFLOW_ACTION_DELIVERY_CONFLICT",
+        "A running workflow action has an unexpected number of deliveries.",
+        409,
+      ),
+      { actionRunId: running.id, deliveryCount: deliveries.length },
+    );
+    return "FAILED" as const;
+  }
+
+  let [delivery] = deliveries;
+  if (delivery.status === "PENDING") {
+    const reconciled = await finishPendingAutomationDelivery(workspaceId, delivery.id, {
+      status: "UNKNOWN",
+      errorCode: "INTERRUPTED_DELIVERY",
+      errorMessage: "Workflow was paused after an external delivery was claimed; outcome is uncertain.",
+    });
+    if (reconciled) delivery = reconciled;
+  }
+
+  if (delivery.status === "SENT" || delivery.status === "SKIPPED") {
+    await finishWorkflowActionRun(workspaceId, running.id, {
+      status: delivery.status === "SENT" ? "COMPLETED" : "SKIPPED",
+      errorCode: delivery.errorCode,
+      errorMessage: delivery.errorMessage,
+      result: {
+        deliveryId: delivery.id,
+        messageId: delivery.messageId,
+        providerExternalId: delivery.providerExternalId,
+        recoveredDuringCancellation: true,
+      },
+    });
+    await cancelAutomationRun(workspaceId, runId, reason);
+    return "CANCELLED" as const;
+  }
+
+  await finishWorkflowActionRun(workspaceId, running.id, {
+    status: delivery.status === "FAILED" ? "FAILED" : "UNKNOWN",
+    errorCode: delivery.errorCode ?? (delivery.status === "UNKNOWN" ? "INTERRUPTED_DELIVERY" : "WORKFLOW_ACTION_FAILED"),
+    errorMessage: delivery.errorMessage ?? "External workflow action did not complete safely.",
+    result: { deliveryId: delivery.id, recoveredDuringCancellation: true },
+  });
+  await failAutomationRun(
+    workspaceId,
+    runId,
+    new AppError(
+      delivery.status === "FAILED" ? "WORKFLOW_ACTION_FAILED" : "WORKFLOW_ACTION_UNKNOWN",
+      delivery.status === "FAILED"
+        ? "Workflow action failed before cancellation could complete."
+        : "Workflow action has an uncertain external outcome and will not be retried.",
+      502,
+    ),
+    { actionRunId: running.id, deliveryId: delivery.id },
+  );
+  return "FAILED" as const;
+}
+
 async function executeCustomWorkflowRun(
   workspaceId: string,
   run: NonNullable<Awaited<ReturnType<typeof claimAutomationRun>>>,
@@ -485,9 +579,8 @@ async function executeCustomWorkflowRun(
     const reason = version.definitionStatus === "PUBLISHED"
       ? "Workflow cancellation was requested before execution."
       : `Workflow is ${version.definitionStatus.toLowerCase()}.`;
-    await cancelPendingWorkflowActions(workspaceId, run.id, reason);
-    await cancelAutomationRun(workspaceId, run.id, reason);
-    return { claimed: true as const, status: "CANCELLED" as const };
+    const status = await stopCustomWorkflowRun(workspaceId, run.id, reason);
+    return { claimed: true as const, status };
   }
 
   const context = await resolveWorkflowCustomerContext(workspaceId, event);
@@ -498,9 +591,12 @@ async function executeCustomWorkflowRun(
     const latestRun = await getAutomationRun(workspaceId, run.id);
     if (!latestRun || latestRun.status === "CANCELLED" || latestRun.cancelRequestedAt) {
       const reason = "Workflow was paused or archived while this run was executing.";
-      await cancelPendingWorkflowActions(workspaceId, run.id, reason);
-      if (latestRun?.status === "RUNNING") await cancelAutomationRun(workspaceId, run.id, reason);
-      return { claimed: true as const, status: "CANCELLED" as const };
+      if (!latestRun) throw new AppError("AUTOMATION_RUN_NOT_FOUND", "Workflow run disappeared.", 409);
+      if (latestRun.status === "CANCELLED") {
+        return { claimed: true as const, status: "CANCELLED" as const };
+      }
+      const status = await stopCustomWorkflowRun(workspaceId, run.id, reason);
+      return { claimed: true as const, status };
     }
 
     const action = version.snapshot.actions[actionIndex];
