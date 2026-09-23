@@ -7,6 +7,7 @@ import {
   workflowVersions,
 } from "@/db/schema";
 import { AppError } from "@/server/http/errors";
+import { validateWorkflowActionsForPublication } from "./action-registry";
 import {
   actionLabel,
   builderCatalog,
@@ -198,6 +199,11 @@ export async function testBuilderWorkflow(
   const parsed = dryRunInputSchema.parse(input);
   const draft = parsed.draft ?? workflow.draft;
   const sample = parsed.sample;
+  await validateWorkflowActionsForPublication({
+    workspaceId,
+    trigger: draft.trigger,
+    actions: draft.actions,
+  });
   const payload: Record<string, unknown> = {};
 
   for (const condition of draft.conditions) {
