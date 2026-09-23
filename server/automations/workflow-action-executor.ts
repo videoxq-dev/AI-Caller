@@ -14,8 +14,8 @@ import {
 } from "@/db/schema";
 import { AppError } from "@/server/http/errors";
 import { ProviderRequestError } from "@/server/providers/http";
-import { sendSmsConversationText } from "@/server/sms/outbound";
-import type { WorkflowAction } from "./action-registry";
+import { sendPreclassifiedAutomationSms } from "@/server/sms/outbound";
+import type { PublishedWorkflowAction } from "./action-registry";
 import {
   claimAutomationDelivery,
   finishPendingAutomationDelivery,
@@ -178,7 +178,7 @@ async function executeAssignLead(input: {
   workspaceId: string;
   runId: string;
   actionRunId: string;
-  action: Extract<WorkflowAction, { type: "ASSIGN_LEAD" }>;
+  action: Extract<PublishedWorkflowAction, { type: "ASSIGN_LEAD" }>;
   context: CustomerContext;
 }) {
   const leadId = input.context.leadId;
@@ -292,7 +292,7 @@ async function executeNotifyStaff(input: {
   workspaceId: string;
   runId: string;
   actionRunId: string;
-  action: Extract<WorkflowAction, { type: "NOTIFY_STAFF" }>;
+  action: Extract<PublishedWorkflowAction, { type: "NOTIFY_STAFF" }>;
   context: CustomerContext;
 }) {
   return db.transaction(async tx => {
@@ -464,7 +464,7 @@ async function executeCustomerSms(input: {
   workspaceId: string;
   runId: string;
   actionRunId: string;
-  action: Extract<WorkflowAction, { type: "SEND_CUSTOMER_SMS" }>;
+  action: Extract<PublishedWorkflowAction, { type: "SEND_CUSTOMER_SMS" }>;
   context: CustomerContext;
 }) {
   if (!input.context.conversationId) {
@@ -489,9 +489,9 @@ async function executeCustomerSms(input: {
 
   const text = renderTemplate(input.action.message, input.context.variables);
   try {
-    const message = await sendSmsConversationText(input.workspaceId, input.context.conversationId, {
-      senderType: "SYSTEM",
+    const message = await sendPreclassifiedAutomationSms(input.workspaceId, input.context.conversationId, {
       text,
+      classifiedPurpose: input.action.classifiedPurpose,
       idempotencyKey: claimed.delivery.id,
       metadata: {
         automationRunId: input.runId,
@@ -546,7 +546,7 @@ export async function executeWorkflowAction(input: {
   runId: string;
   actionRunId: string;
   actionType: string;
-  action: WorkflowAction;
+  action: PublishedWorkflowAction;
   event: AutomationEvent;
   context: CustomerContext;
 }): Promise<WorkflowActionTerminalStatus> {
