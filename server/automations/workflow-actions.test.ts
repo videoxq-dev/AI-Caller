@@ -101,6 +101,7 @@ async function eventAndRun(
     workflowVersionId: version.id,
     actions,
   });
+  if (!run) throw new Error("Published workflow unexpectedly became inactive.");
   return { event, run };
 }
 
