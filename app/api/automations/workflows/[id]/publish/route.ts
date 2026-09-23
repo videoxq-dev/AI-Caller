@@ -1,6 +1,6 @@
 import { requireWorkspacePermission } from "@/server/auth/permissions";
 import { resolveWorkspaceContext } from "@/server/auth/workspace-context";
-import { getBuilderWorkflow } from "@/server/automations/builder-service";
+import { getBuilderWorkflow, parseBuilderWorkflowId } from "@/server/automations/builder-service";
 import { publishWorkflow } from "@/server/automations/workflows";
 import { toErrorResponse } from "@/server/http/errors";
 
@@ -11,7 +11,7 @@ export async function POST(
   try {
     const context = await resolveWorkspaceContext(request.headers);
     requireWorkspacePermission(context.membership.role, "automation.manage");
-    const { id } = await params;
+    const id = parseBuilderWorkflowId((await params).id);
     await publishWorkflow(context.workspace.id, id);
     return Response.json({ workflow: await getBuilderWorkflow(context.workspace.id, id) });
   } catch (error) {
