@@ -554,7 +554,7 @@ function ConditionRow({
   return <div className="conditionRow">
     <span className="conditionField">{spec.label}</span>
     <span className="conditionOperator">is</span>
-    <select disabled={disabled} value={condition.value} onChange={event => onChange({ value: event.target.value as Condition & never })}>
+    <select disabled={disabled} value={condition.value} onChange={event => onChange({ value: event.target.value as "PHONE" | "SMS" | "WHATSAPP" | "WEBCHAT" })}>
       {spec.options.map(option => <option key={option.id} value={option.id}>{option.label}</option>)}
     </select>
     {!disabled && <button className="removeButton" onClick={onRemove} aria-label="Remove condition">×</button>}
