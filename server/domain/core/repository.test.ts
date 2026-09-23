@@ -160,6 +160,7 @@ describe("core domain persistence", () => {
     const [stored] = await db.select().from(appointments);
     expect(stored.id).toBe(appointment.id);
     expect(stored.startsAt).toEqual(startsAt);
+    expect(stored.revision).toBe(2);
   });
 
 
@@ -190,6 +191,8 @@ describe("core domain persistence", () => {
     expect(events).toHaveLength(2);
     expect(new Set(events.map(event => event.occurrenceKey)).size).toBe(2);
     expect(events.every(event => event.aggregateId === appointment.id)).toBe(true);
+    const [stored] = await db.select().from(appointments);
+    expect(stored.revision).toBe(2);
   });
 
   it("emits cancellation only on a real transition, including concurrent retries", async () => {
@@ -215,5 +218,7 @@ describe("core domain persistence", () => {
     expect(events).toHaveLength(2);
     expect(new Set(events.map(event => event.occurrenceKey)).size).toBe(2);
     expect(events.every(event => event.type === "APPOINTMENT_CANCELLED")).toBe(true);
+    const [stored] = await db.select().from(appointments);
+    expect(stored.revision).toBe(3);
   });
 });
