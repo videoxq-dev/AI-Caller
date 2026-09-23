@@ -11,6 +11,7 @@ import {
   setConversationHandlingMode,
   setAppointmentStatus,
   updateAppointmentAfterReschedule,
+  updateNativeAppointmentAfterReschedule,
 } from "./repository";
 
 describe("core domain persistence", () => {
@@ -154,6 +155,32 @@ describe("core domain persistence", () => {
     const [stored] = await db.select().from(appointments);
     expect(stored.id).toBe(appointment.id);
     expect(stored.startsAt).toEqual(startsAt);
+  });
+
+
+  it("preserves both native appointment events after a round-trip reschedule", async () => {
+    const [contact] = await db.insert(contacts).values({ workspaceId, name: "Native Customer" }).returning();
+    const startsAt = new Date("2037-10-02T14:00:00.000Z");
+    const [appointment] = await db.insert(appointments).values({
+      workspaceId, contactId: contact.id, title: "Cleaning", timezone: "UTC",
+      startsAt, endsAt: new Date("2037-10-02T15:00:00.000Z"), status: "CONFIRMED",
+    }).returning();
+    const policy = {
+      timezone: "UTC", bufferBeforeMinutes: 0, bufferAfterMinutes: 0, maxBookingsPerDay: 8,
+    };
+
+    await updateNativeAppointmentAfterReschedule(workspaceId, appointment.id, {
+      startsAt: new Date("2037-10-03T14:00:00.000Z"),
+      endsAt: new Date("2037-10-03T15:00:00.000Z"), timezone: "UTC",
+    }, policy);
+    await updateNativeAppointmentAfterReschedule(workspaceId, appointment.id, {
+      startsAt, endsAt: new Date("2037-10-02T15:00:00.000Z"), timezone: "UTC",
+    }, policy);
+
+    const events = await db.select().from(automationEvents);
+    expect(events).toHaveLength(2);
+    expect(new Set(events.map(event => event.occurrenceKey)).size).toBe(2);
+    expect(events.every(event => event.aggregateId === appointment.id)).toBe(true);
   });
 
   it("emits cancellation only on a real transition, including concurrent retries", async () => {
