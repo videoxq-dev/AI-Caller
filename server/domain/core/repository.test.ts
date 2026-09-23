@@ -1,6 +1,6 @@
 import { afterAll, beforeEach, describe, expect, it } from "vitest";
 import { closeDatabase, db } from "@/db";
-import { workspaces } from "@/db/schema";
+import { appointments, automationEvents, contacts, workspaces } from "@/db/schema";
 import {
   appendMessage,
   createContact,
@@ -9,6 +9,8 @@ import {
   getOrCreateContactByIdentity,
   getOrCreateOpenConversation,
   setConversationHandlingMode,
+  setAppointmentStatus,
+  updateAppointmentAfterReschedule,
 } from "./repository";
 
 describe("core domain persistence", () => {
@@ -121,5 +123,61 @@ describe("core domain persistence", () => {
     const ai = await setConversationHandlingMode(workspaceId, conversation.id, "AI", null);
     expect(ai.handlingMode).toBe("AI");
     expect(ai.aiPausedAt).toBeNull();
+  });
+
+  it("records distinct committed reschedules when an appointment moves A to B and back to A", async () => {
+    const [contact] = await db.insert(contacts).values({ workspaceId, name: "Reschedule Customer" }).returning();
+    const startsAt = new Date("2037-10-02T14:00:00.000Z");
+    const [appointment] = await db.insert(appointments).values({
+      workspaceId, contactId: contact.id, title: "Cleaning", timezone: "UTC",
+      startsAt, endsAt: new Date("2037-10-02T15:00:00.000Z"), status: "CONFIRMED",
+    }).returning();
+
+    await updateAppointmentAfterReschedule(workspaceId, appointment.id, {
+      startsAt: new Date("2037-10-03T14:00:00.000Z"),
+      endsAt: new Date("2037-10-03T15:00:00.000Z"),
+      timezone: "UTC",
+    });
+    await updateAppointmentAfterReschedule(workspaceId, appointment.id, {
+      startsAt, endsAt: new Date("2037-10-02T15:00:00.000Z"), timezone: "UTC",
+    });
+
+    const events = await db.select().from(automationEvents);
+    expect(events).toHaveLength(2);
+    expect(events.every(event =>
+      event.type === "APPOINTMENT_RESCHEDULED" && event.aggregateId === appointment.id,
+    )).toBe(true);
+    expect(new Set(events.map(event => event.occurrenceKey)).size).toBe(2);
+    expect(events.map(event => event.payload.startsAt).sort()).toEqual([
+      "2037-10-02T14:00:00.000Z", "2037-10-03T14:00:00.000Z",
+    ]);
+    const [stored] = await db.select().from(appointments);
+    expect(stored.id).toBe(appointment.id);
+    expect(stored.startsAt).toEqual(startsAt);
+  });
+
+  it("emits cancellation only on a real transition, including concurrent retries", async () => {
+    const [contact] = await db.insert(contacts).values({ workspaceId, name: "Cancellation Customer" }).returning();
+    const [appointment] = await db.insert(appointments).values({
+      workspaceId, contactId: contact.id, title: "Cleaning", timezone: "UTC",
+      startsAt: new Date("2037-10-02T14:00:00.000Z"),
+      endsAt: new Date("2037-10-02T15:00:00.000Z"),
+      status: "CONFIRMED",
+    }).returning();
+
+    const [first, second] = await Promise.all([
+      setAppointmentStatus(workspaceId, appointment.id, "CANCELLED"),
+      setAppointmentStatus(workspaceId, appointment.id, "CANCELLED"),
+    ]);
+    expect(first.status).toBe("CANCELLED");
+    expect(second.status).toBe("CANCELLED");
+    expect((await db.select().from(automationEvents))).toHaveLength(1);
+
+    await setAppointmentStatus(workspaceId, appointment.id, "CONFIRMED");
+    await setAppointmentStatus(workspaceId, appointment.id, "CANCELLED");
+    const events = await db.select().from(automationEvents);
+    expect(events).toHaveLength(2);
+    expect(new Set(events.map(event => event.occurrenceKey)).size).toBe(2);
+    expect(events.every(event => event.type === "APPOINTMENT_CANCELLED")).toBe(true);
   });
 });
