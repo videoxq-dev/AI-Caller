@@ -161,8 +161,12 @@ try {
 
   // A paused automation can be edited and saved without reactivating.
   await page.locator(".conditionRow input[type='number']").first().fill("95");
+  const pausedSaveResponse = page.waitForResponse(response =>
+    response.url().endsWith(`/api/automations/workflows/${definitionId}`)
+      && response.request().method() === "PATCH");
   await page.getByRole("button", { name: "Save draft", exact: true }).click();
-  await page.getByText("Paused", { exact: true }).waitFor();
+  const savedWhilePaused = await pausedSaveResponse;
+  assert(savedWhilePaused.ok(), `Saving paused automation failed: ${await savedWhilePaused.text()}`);
   const pausedDraft = await pool.query(
     `SELECT status, draft FROM workflow_definitions WHERE workspace_id = $1 AND id = $2`,
     [workspaceId, definitionId],
