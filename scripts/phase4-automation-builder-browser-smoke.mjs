@@ -236,6 +236,34 @@ try {
   await page.reload({ waitUntil: "networkidle" });
   await page.getByRole("heading", { name: "WHEN", exact: true }).waitFor();
   await noOverflow(page, "Phase 4 builder mobile");
+  const mobileControls = await page.evaluate(() => {
+    const nav = document.querySelector(".appSidebar");
+    const footer = document.querySelector(".builderFooter");
+    const test = footer?.querySelector("button");
+    const save = [...(footer?.querySelectorAll("button") ?? [])]
+      .find(button => button.textContent?.trim() === "Save draft");
+    return {
+      navTop: nav?.getBoundingClientRect().top ?? null,
+      footerBottom: footer?.getBoundingClientRect().bottom ?? null,
+      test: test?.getBoundingClientRect() ?? null,
+      save: save?.getBoundingClientRect() ?? null,
+      viewport: window.innerHeight,
+    };
+  });
+  assert(mobileControls.navTop !== null && mobileControls.footerBottom !== null,
+    "Mobile navigation or Builder action bar is missing.");
+  assert(mobileControls.footerBottom <= mobileControls.navTop + 2,
+    "Builder action bar overlaps the mobile navigation.");
+  assert(mobileControls.test && mobileControls.test.top >= 0
+    && mobileControls.test.bottom <= mobileControls.viewport,
+    "Test automation is not visible on mobile.");
+  assert(mobileControls.save && mobileControls.save.top >= 0
+    && mobileControls.save.bottom <= mobileControls.viewport,
+    "Save draft is not visible on mobile.");
+  await page.getByRole("button", { name: "Test automation", exact: true }).click();
+  await page.getByRole("complementary", { name: "Test automation" }).waitFor();
+  await page.getByRole("complementary", { name: "Test automation" })
+    .getByRole("button", { name: "×" }).click();
   await page.screenshot({ path: path.join(outputDir, "builder-mobile.png"), fullPage: true });
 
   await page.setViewportSize({ width: 1440, height: 1000 });
