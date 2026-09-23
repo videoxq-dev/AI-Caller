@@ -9,6 +9,7 @@ import {
   workflowActionRuns,
   workflowDefinitions,
   workflowVersions,
+  workspaces,
 } from "@/db/schema";
 import { AppError } from "@/server/http/errors";
 import {
@@ -138,6 +139,12 @@ export async function createWorkflowRun(input: {
     throw new AppError("WORKFLOW_ACTION_LIMIT", "Workflow run requires between one and five actions.", 400);
   }
   return db.transaction(async tx => {
+    // Match publish/pause/archive lock order to avoid a workflow-definition /
+    // workspace foreign-key deadlock under concurrent dispatch and state change.
+    const [workspace] = await tx.select({ id: workspaces.id }).from(workspaces)
+      .where(eq(workspaces.id, input.workspaceId)).for("update").limit(1);
+    if (!workspace) throw new AppError("WORKSPACE_NOT_FOUND", "Workspace not found.", 404);
+
     const [event] = await tx.select({ id: automationEvents.id }).from(automationEvents).where(and(
       eq(automationEvents.workspaceId, input.workspaceId),
       eq(automationEvents.id, input.eventId),
