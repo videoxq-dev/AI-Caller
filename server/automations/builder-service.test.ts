@@ -113,6 +113,17 @@ describe("Phase 4 automation builder service", () => {
       conditions: [{ matched: false }],
     });
 
+    const unsavedDraft = {
+      ...starter.definition,
+      conditions: [{ field: "qualificationScore" as const, operator: "GTE" as const, value: 95 }],
+    };
+    await expect(testBuilderWorkflow(workspaceId, created.id, {
+      draft: unsavedDraft,
+      sample: { qualificationScore: 92 },
+    })).resolves.toMatchObject({ matches: false });
+    const persisted = await getBuilderWorkflow(workspaceId, created.id);
+    expect(persisted.draft.conditions[0]).toMatchObject({ value: 80 });
+
     expect(await db.select().from(automationEvents)).toHaveLength(0);
     expect(await db.select().from(automationRuns)).toHaveLength(0);
   });
@@ -121,7 +132,7 @@ describe("Phase 4 automation builder service", () => {
     const starter = builderStarter("HIGH_VALUE_LEAD_ALERT");
     const created = await createWorkflowDraft(workspaceId, starter.name, starter.definition);
 
-    await expect(testBuilderWorkflow(workspaceId, created.id, {})).rejects.toMatchObject({
+    await expect(testBuilderWorkflow(workspaceId, created.id, { sample: {} })).rejects.toMatchObject({
       code: "WORKFLOW_TEST_INPUT_REQUIRED",
     });
 
@@ -131,7 +142,7 @@ describe("Phase 4 automation builder service", () => {
       appointment.name,
       appointment.definition,
     );
-    await expect(testBuilderWorkflow(workspaceId, appointmentDraft.id, {})).resolves.toMatchObject({
+    await expect(testBuilderWorkflow(workspaceId, appointmentDraft.id, { sample: {} })).resolves.toMatchObject({
       matches: true,
     });
   });
