@@ -179,6 +179,17 @@ describe("Phase 4 automation builder service", () => {
     expect((await getBuilderWorkflow(workspaceId, created.id)).status).toBe("ACTIVE");
   });
 
+  it("archives draft automations without exposing them in the builder list", async () => {
+    const starter = builderStarter("HIGH_VALUE_LEAD_ALERT");
+    const created = await createWorkflowDraft(workspaceId, starter.name, starter.definition);
+    await setWorkflowStatus(workspaceId, created.id, "ARCHIVED");
+
+    expect(await listBuilderWorkflows(workspaceId)).toHaveLength(0);
+    await expect(getBuilderWorkflow(workspaceId, created.id)).rejects.toMatchObject({
+      code: "WORKFLOW_NOT_FOUND",
+    });
+  });
+
   it("never returns another workspace's automation", async () => {
     const starter = builderStarter("HIGH_VALUE_LEAD_ALERT");
     const created = await createWorkflowDraft(otherWorkspaceId, starter.name, starter.definition);
