@@ -629,7 +629,6 @@ function TestPanel({
   draft,
   result,
   inputs,
-  members,
   loading,
   onChange,
   onRun,
@@ -639,7 +638,6 @@ function TestPanel({
   draft: WorkflowDraft;
   result: TestResult | null;
   inputs: Record<string, string>;
-  members: TeamMember[];
   loading: boolean;
   onChange: (key: string, value: string) => void;
   onRun: () => void;
