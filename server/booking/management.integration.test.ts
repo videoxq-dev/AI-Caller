@@ -82,7 +82,7 @@ describe("existing appointment management (isolated from V2 booking)", () => {
       workspaceId: ctx.workspaceId, contactId: ctx.contactId,
       conversationId: ctx.conversationId, channel: "WEBCHAT",
       sessionKey: ctx.sessionKey,
-      expiresAt: new Date(Date.now() + 30 * 60_000),
+      expiresAt: new Date("2031-09-21T12:00:00.000Z"),
     });
     const cancelled = await turn("Cancel my appointment");
     expect(cancelled).toBeNull();
