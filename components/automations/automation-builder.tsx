@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useParams } from "next/navigation";
+import { useParams, useRouter } from "next/navigation";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { AppNav } from "@/components/core-domain/app-nav";
 import "@/app/dashboard/dashboard.css";
@@ -140,6 +140,7 @@ function actionOutcome(action: ActivityItem["actions"][number]) {
 
 export function AutomationBuilder() {
   const params = useParams<{ id: string }>();
+  const router = useRouter();
   const id = params.id;
   const [workflow, setWorkflow] = useState<BuilderWorkflow | null>(null);
   const [catalog, setCatalog] = useState<Catalog | null>(null);
@@ -152,6 +153,8 @@ export function AutomationBuilder() {
   const [activity, setActivity] = useState<ActivityItem[]>([]);
   const [activityLoaded, setActivityLoaded] = useState(false);
   const [testOpen, setTestOpen] = useState(false);
+  const [moreOpen, setMoreOpen] = useState(false);
+  const [archiveOpen, setArchiveOpen] = useState(false);
   const [testInputs, setTestInputs] = useState<Record<string, string>>({});
   const [testResult, setTestResult] = useState<TestResult | null>(null);
   const [loading, setLoading] = useState(true);
@@ -377,6 +380,25 @@ export function AutomationBuilder() {
     }
   }
 
+  async function archiveAutomation() {
+    if (!canManage) return;
+    setWorking("archive");
+    setError(null);
+    try {
+      const response = await fetch(`/api/automations/workflows/${id}/archive`, { method: "POST" });
+      const data = await response.json().catch(() => null) as { archived?: boolean } | null;
+      if (!response.ok || !data?.archived) {
+        throw new Error(responseMessage(data, "Unable to archive automation."));
+      }
+      router.push("/automations");
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Unable to archive automation.");
+      setArchiveOpen(false);
+    } finally {
+      setWorking(null);
+    }
+  }
+
   async function changeStatus(action: "pause" | "resume") {
     if (!canManage) return;
     setWorking(action);
@@ -430,7 +452,8 @@ export function AutomationBuilder() {
   const availableConditions = trigger?.conditions.filter(field =>
     !draft.conditions.some(condition => condition.field === field)) ?? [];
   const availableActions = catalog.actions.filter(action => trigger?.actions.includes(action.id));
-  const showPublish = workflow.status === "DRAFT"\n    || (workflow.status === "ACTIVE" && (dirty || workflow.hasUnpublishedChanges));
+  const showPublish = workflow.status === "DRAFT"
+    || (workflow.status === "ACTIVE" && (dirty || workflow.hasUnpublishedChanges));
   const memberName = (userId?: string | null) =>
     userId ? members.find(member => member.userId === userId)?.name ?? "Team member" : "Everyone";
 
@@ -464,9 +487,15 @@ export function AutomationBuilder() {
                 {workflow.status === "ACTIVE" && canManage && (
                   <button className="quietButton" disabled={working !== null} onClick={() => void changeStatus("pause")}>Pause</button>
                 )}
-                {workflow.status === "PAUSED" && canManage && !showPublish && (
-                  <button className="quietButton" disabled={working !== null} onClick={() => void changeStatus("resume")}>Resume</button>
+                {workflow.status === "PAUSED" && canManage && (
+                  <button className="quietButton" disabled={working !== null} onClick={() => void resumeLatest()}>Resume</button>
                 )}
+                {canManage && <div className="builderMore">
+                  <button className="builderMoreButton" aria-label="More automation actions" onClick={() => setMoreOpen(value => !value)}>⋯</button>
+                  {moreOpen && <div className="builderMoreMenu">
+                    <button onClick={() => { setMoreOpen(false); setArchiveOpen(true); }}>Archive automation</button>
+                  </div>}
+                </div>}
               </div>
             </div>
 
@@ -548,6 +577,17 @@ export function AutomationBuilder() {
             </footer>
           </div>
         )}
+
+        {archiveOpen && <div className="archiveBackdrop" onMouseDown={() => working !== "archive" && setArchiveOpen(false)}>
+          <div className="archiveDialog" role="dialog" aria-modal="true" aria-label="Archive automation" onMouseDown={event => event.stopPropagation()}>
+            <h2>Archive automation?</h2>
+            <p>This removes it from your automation list.</p>
+            <div>
+              <button className="secondaryButton" disabled={working === "archive"} onClick={() => setArchiveOpen(false)}>Cancel</button>
+              <button className="dangerButton" disabled={working === "archive"} onClick={() => void archiveAutomation()}>{working === "archive" ? "Archiving…" : "Archive"}</button>
+            </div>
+          </div>
+        </div>}
 
         {testOpen && (
           <TestPanel
