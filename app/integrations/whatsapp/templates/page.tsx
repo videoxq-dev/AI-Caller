@@ -109,7 +109,8 @@ export default function WhatsAppTemplatesPage() {
       setNotice(`“${data.template.name}” submitted to Meta. Current status: ${statusLabel(data.template.status)}. Refresh to check for approval.`);
       setCreating(false);
       setName(""); setBody(""); setFooter(""); setSamples([]);
-      await load();
+      try { await load(); }
+      catch { setError("Template submitted to Meta, but the list could not refresh. Use Refresh status to try again."); }
     } catch (err) {
       setError((err instanceof Error ? err.message : "Unable to submit template.")
         + " If the request timed out, refresh the list before trying again.");
