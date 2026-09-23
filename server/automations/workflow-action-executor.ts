@@ -404,6 +404,10 @@ const smsSuppressionCodes = new Set([
   "SMS_REGISTRATION_REQUIRED",
   "SMS_REGISTRATION_REJECTED",
   "SMS_CONSENT_REQUIRED",
+  "SMS_CAMPAIGN_PURPOSE_NOT_APPROVED",
+  "SMS_CAMPAIGN_LINKS_NOT_APPROVED",
+  "SMS_CAMPAIGN_REVIEW_REQUIRED",
+  "SMS_UNSAFE_LINK",
 ]);
 
 function classifySmsError(error: unknown): Exclude<WorkflowActionTerminalStatus, "COMPLETED"> {
@@ -460,13 +464,62 @@ async function finishActionFromExistingDelivery(
   return status;
 }
 
+async function appointmentSmsStaleness(
+  workspaceId: string,
+  event: AutomationEvent,
+): Promise<string | null> {
+  if (!["APPOINTMENT_CONFIRMED", "APPOINTMENT_RESCHEDULED", "APPOINTMENT_CANCELLED"]
+    .includes(event.type)) return null;
+
+  const appointmentId = typeof event.payload.appointmentId === "string"
+    ? event.payload.appointmentId : null;
+  if (!appointmentId) return "APPOINTMENT_CONTEXT_UNAVAILABLE";
+
+  const [appointment] = await db.select({
+    revision: appointments.revision,
+    status: appointments.status,
+    startsAt: appointments.startsAt,
+  }).from(appointments).where(and(
+    eq(appointments.workspaceId, workspaceId),
+    eq(appointments.id, appointmentId),
+  )).limit(1);
+  if (!appointment) return "APPOINTMENT_CONTEXT_UNAVAILABLE";
+
+  const originalRevision = event.payload.revision === undefined
+    ? 0 // Events recorded before appointment revision migration belong to zero.
+    : event.payload.revision;
+  if (typeof originalRevision !== "number" || !Number.isSafeInteger(originalRevision)
+    || originalRevision < 0 || appointment.revision !== originalRevision) {
+    return "APPOINTMENT_REVISION_CHANGED";
+  }
+  const requiredStatus = event.type === "APPOINTMENT_CANCELLED" ? "CANCELLED" : "CONFIRMED";
+  if (appointment.status !== requiredStatus) return "APPOINTMENT_STATE_CHANGED";
+
+  const originalStartsAt = event.payload.startsAt;
+  if (typeof originalStartsAt === "string"
+    && appointment.startsAt.toISOString() !== originalStartsAt) {
+    return "APPOINTMENT_TIME_CHANGED";
+  }
+  return null;
+}
+
 async function executeCustomerSms(input: {
   workspaceId: string;
   runId: string;
   actionRunId: string;
   action: Extract<PublishedWorkflowAction, { type: "SEND_CUSTOMER_SMS" }>;
   context: CustomerContext;
+  event: AutomationEvent;
 }) {
+  const stale = await appointmentSmsStaleness(input.workspaceId, input.event);
+  if (stale) {
+    await finishWorkflowActionRun(input.workspaceId, input.actionRunId, {
+      status: "SKIPPED",
+      errorCode: stale,
+      errorMessage: "Appointment state changed after the workflow event was recorded.",
+    });
+    return "SKIPPED" as const;
+  }
   if (!input.context.conversationId) {
     await finishWorkflowActionRun(input.workspaceId, input.actionRunId, {
       status: "SKIPPED",
