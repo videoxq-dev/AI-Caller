@@ -182,7 +182,7 @@ async function smsReplyContext(workspaceId: string, conversationId: string, reci
   };
 }
 
-export async function sendSmsConversationTextWithRuntime(
+async function sendSmsConversationTextWithRuntimeInternal(
   workspaceId: string,
   conversationId: string,
   runtime: SmsRuntime,
@@ -192,6 +192,7 @@ export async function sendSmsConversationTextWithRuntime(
     to?: string;
     idempotencyKey?: string;
     metadata?: Record<string, unknown>;
+    preclassifiedPurpose?: SmsPurpose;
   },
 ) {
   if (runtime.mode === "HOSTED" && !outboundSmsReady(runtime.messagingReadiness)) {
@@ -220,12 +221,16 @@ export async function sendSmsConversationTextWithRuntime(
   if (runtime.mode === "HOSTED") {
     const policy = await managedSmsPolicy(workspaceId, runtime.senderNumber);
     const reply = await smsReplyContext(workspaceId, conversationId, to);
+    const classifiedPurpose = input.preclassifiedPurpose ?? await classifySmsPurpose({
+      workspaceId,
+      referenceId: conversationId,
+      message: text,
+      campaignDescription: policy.description,
+      lastCustomerMessage: reply.lastCustomerMessage,
+    });
     actualPurpose = validateApprovedSmsMessage({
       policy,
-      classifiedPurpose: classifySmsForPolicy(text, await classifySmsPurpose({
-        workspaceId, referenceId: conversationId, message: text,
-        campaignDescription: policy.description, lastCustomerMessage: reply.lastCustomerMessage,
-      })),
+      classifiedPurpose: classifySmsForPolicy(text, classifiedPurpose),
       text,
     });
     const consent = await getSmsConsentStatus(workspaceId, to, actualPurpose);
@@ -334,11 +339,46 @@ export async function sendSmsConversationTextWithRuntime(
   }
 }
 
+export function sendSmsConversationTextWithRuntime(
+  workspaceId: string,
+  conversationId: string,
+  runtime: SmsRuntime,
+  input: {
+    senderType: "AI" | "USER" | "SYSTEM";
+    text: string;
+    to?: string;
+    idempotencyKey?: string;
+    metadata?: Record<string, unknown>;
+  },
+) {
+  return sendSmsConversationTextWithRuntimeInternal(workspaceId, conversationId, runtime, input);
+}
+
 export async function sendSmsConversationText(
   workspaceId: string,
   conversationId: string,
   input: { senderType: "AI" | "USER" | "SYSTEM"; text: string; idempotencyKey?: string; metadata?: Record<string, unknown> },
 ) {
   const runtime = await resolveSmsRuntimeForWorkspace(workspaceId);
-  return sendSmsConversationTextWithRuntime(workspaceId, conversationId, runtime, input);
+  return sendSmsConversationTextWithRuntimeInternal(workspaceId, conversationId, runtime, input);
+}
+
+export async function sendPreclassifiedAutomationSms(
+  workspaceId: string,
+  conversationId: string,
+  input: {
+    text: string;
+    classifiedPurpose: SmsPurpose;
+    idempotencyKey: string;
+    metadata?: Record<string, unknown>;
+  },
+) {
+  const runtime = await resolveSmsRuntimeForWorkspace(workspaceId);
+  return sendSmsConversationTextWithRuntimeInternal(workspaceId, conversationId, runtime, {
+    senderType: "SYSTEM",
+    text: input.text,
+    idempotencyKey: input.idempotencyKey,
+    metadata: input.metadata,
+    preclassifiedPurpose: input.classifiedPurpose,
+  });
 }
