@@ -13,6 +13,7 @@ import { builderCatalog, builderStarter } from "./builder-catalog";
 import {
   getBuilderWorkflow,
   listBuilderWorkflows,
+  parseBuilderWorkflowId,
   testBuilderWorkflow,
 } from "./builder-service";
 import {
@@ -57,6 +58,20 @@ describe("Phase 4 automation builder service", () => {
 
   afterAll(async () => {
     await closeDatabase();
+  });
+
+  it("rejects malformed route IDs and dry-run samples as client validation errors", async () => {
+    expect(() => parseBuilderWorkflowId("not-a-workflow-id")).toThrow();
+    try {
+      parseBuilderWorkflowId("not-a-workflow-id");
+    } catch (error) {
+      expect(error).toMatchObject({ code: "VALIDATION_ERROR", status: 422 });
+    }
+    const starter = builderStarter("HIGH_VALUE_LEAD_ALERT");
+    const created = await createWorkflowDraft(workspaceId, starter.name, starter.definition);
+    await expect(testBuilderWorkflow(workspaceId, created.id, {
+      sample: { qualificationScore: -1 },
+    })).rejects.toMatchObject({ code: "VALIDATION_ERROR", status: 422 });
   });
 
   it("exposes only business-facing builder conditions and hides appointment revision", () => {
