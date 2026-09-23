@@ -56,7 +56,6 @@ type Definition = {
   key: AutomationKey;
   title: string;
   description: string;
-  detail: string;
   tone: string;
   channels: string[];
 };
@@ -190,7 +189,7 @@ export default function AutomationsPage() {
     const counts = new Map<AutomationKey, number>();
     for (const item of activity) {
       if (new Date(item.run.createdAt).getTime() < cutoff) continue;
-      if (item.run.status !== "COMPLETED") continue;
+      if (item.run.status !== "COMPLETED" || !item.run.key) continue;
       counts.set(item.run.key, (counts.get(item.run.key) ?? 0) + 1);
     }
     return counts;
