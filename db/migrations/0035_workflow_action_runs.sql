@@ -17,7 +17,7 @@ CREATE TABLE "workflow_status_history" (
   "workspace_id" uuid NOT NULL REFERENCES "workspaces" ("id") ON DELETE CASCADE,
   "definition_id" uuid NOT NULL,
   "status" text NOT NULL CHECK ("status" IN ('PUBLISHED', 'PAUSED', 'ARCHIVED')),
-  "occurred_at" timestamptz NOT NULL DEFAULT now(),
+  "occurred_at" timestamptz NOT NULL DEFAULT clock_timestamp(),
   CONSTRAINT "workflow_status_history_definition_workspace_fk"
     FOREIGN KEY ("definition_id", "workspace_id")
     REFERENCES "workflow_definitions" ("id", "workspace_id") ON DELETE CASCADE
