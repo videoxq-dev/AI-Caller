@@ -4,7 +4,6 @@ import { db } from "@/db";
 import { automationEventType, memberships } from "@/db/schema";
 import { AppError } from "@/server/http/errors";
 import { classifySmsPurpose } from "@/server/sms/classification";
-import type { SmsPurpose } from "@/server/sms/policy";
 
 export const MAX_WORKFLOW_ACTIONS = 5;
 
@@ -66,7 +65,10 @@ const smsTriggers = new Set<AutomationEventType>([
   "CONVERSATION_ESCALATED",
 ]);
 
-export function actionAllowedForTrigger(trigger: AutomationEventType, action: WorkflowAction) {
+export function actionAllowedForTrigger(
+  trigger: AutomationEventType,
+  action: { type: WorkflowActionType },
+) {
   if (action.type === "NOTIFY_STAFF") return true;
   if (action.type === "ASSIGN_LEAD") return trigger === "LEAD_QUALIFIED";
   if (action.type === "SEND_CUSTOMER_SMS") return smsTriggers.has(trigger);
@@ -179,7 +181,7 @@ export async function prepareWorkflowActionsForPublication(input: {
     }
     return {
       ...action,
-      classifiedPurpose: classifiedPurpose satisfies SmsPurpose,
+      classifiedPurpose,
     };
   }));
 }
