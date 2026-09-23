@@ -1,4 +1,4 @@
-import { and, desc, eq, ne, sql } from "drizzle-orm";
+import { and, desc, eq, inArray, ne, sql } from "drizzle-orm";
 import { z } from "zod";
 import { db } from "@/db";
 import {
@@ -47,7 +47,8 @@ function sameDefinition(left: WorkflowDefinition, right: WorkflowDefinition) {
   return JSON.stringify(left) === JSON.stringify(right);
 }
 
-async function workflowRunCounts(workspaceId: string) {
+async function workflowRunCounts(workspaceId: string, definitionIds: string[]) {
+  if (!definitionIds.length) return new Map<string, number>();
   const rows = await db.select({
     definitionId: workflowVersions.definitionId,
     total: sql<number>`count(${automationRuns.id})::int`,
@@ -56,35 +57,45 @@ async function workflowRunCounts(workspaceId: string) {
       eq(automationRuns.workspaceId, workflowVersions.workspaceId),
       eq(automationRuns.workflowVersionId, workflowVersions.id),
     ))
-    .where(eq(workflowVersions.workspaceId, workspaceId))
+    .where(and(
+      eq(workflowVersions.workspaceId, workspaceId),
+      inArray(workflowVersions.definitionId, definitionIds),
+    ))
     .groupBy(workflowVersions.definitionId);
   return new Map(rows.map(row => [row.definitionId, row.total]));
 }
 
-export async function listBuilderWorkflows(workspaceId: string) {
-  const [definitions, counts] = await Promise.all([
-    db.select().from(workflowDefinitions).where(and(
-      eq(workflowDefinitions.workspaceId, workspaceId),
-      ne(workflowDefinitions.status, "ARCHIVED"),
-    )).orderBy(desc(workflowDefinitions.updatedAt)).limit(200),
-    workflowRunCounts(workspaceId),
-  ]);
+export async function listBuilderWorkflows(workspaceId: string, offset = 0, limit = 50) {
+  if (!Number.isSafeInteger(offset) || offset < 0
+    || !Number.isSafeInteger(limit) || limit < 1 || limit > 50) {
+    throw new AppError("WORKFLOW_PAGE_INVALID", "Invalid automation page.", 400);
+  }
+  const definitions = await db.select().from(workflowDefinitions).where(and(
+    eq(workflowDefinitions.workspaceId, workspaceId),
+    ne(workflowDefinitions.status, "ARCHIVED"),
+  )).orderBy(desc(workflowDefinitions.updatedAt), desc(workflowDefinitions.id))
+    .offset(offset).limit(limit);
+  if (!definitions.length) return [];
 
-  const publishedRows = definitions.some(item => item.publishedVersion)
-    ? await db.select({
-        definitionId: workflowVersions.definitionId,
-        snapshot: workflowVersions.snapshot,
-      }).from(workflowVersions)
-        .innerJoin(workflowDefinitions, and(
-          eq(workflowDefinitions.workspaceId, workflowVersions.workspaceId),
-          eq(workflowDefinitions.id, workflowVersions.definitionId),
-          eq(workflowDefinitions.publishedVersion, workflowVersions.version),
-        ))
-        .where(and(
-          eq(workflowVersions.workspaceId, workspaceId),
-          ne(workflowDefinitions.status, "ARCHIVED"),
-        ))
-    : [];
+  const definitionIds = definitions.map(item => item.id);
+  const [counts, publishedRows] = await Promise.all([
+    workflowRunCounts(workspaceId, definitionIds),
+    definitions.some(item => item.publishedVersion)
+      ? db.select({
+          definitionId: workflowVersions.definitionId,
+          snapshot: workflowVersions.snapshot,
+        }).from(workflowVersions)
+          .innerJoin(workflowDefinitions, and(
+            eq(workflowDefinitions.workspaceId, workflowVersions.workspaceId),
+            eq(workflowDefinitions.id, workflowVersions.definitionId),
+            eq(workflowDefinitions.publishedVersion, workflowVersions.version),
+          ))
+          .where(and(
+            eq(workflowVersions.workspaceId, workspaceId),
+            inArray(workflowDefinitions.id, definitionIds),
+          ))
+      : Promise.resolve([]),
+  ]);
   const publishedByDefinition = new Map(
     publishedRows.map(row => [row.definitionId, row.snapshot]),
   );
