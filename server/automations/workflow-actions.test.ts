@@ -247,12 +247,11 @@ describe("Phase 3C durable workflow actions", () => {
     });
     const [storedLead] = await db.select().from(leads);
     expect(storedLead.assignedUserId).toBeNull();
-    const [action] = await db.select().from(workflowActionRuns);
-    expect(action).toMatchObject({
+    const actions = await listWorkflowActionRuns(workspaceId, run.id);
+    expect(actions[0]).toMatchObject({
       status: "FAILED",
       errorCode: "WORKFLOW_STAFF_INVALID",
     });
-    const actions = await listWorkflowActionRuns(workspaceId, run.id);
     expect(actions.map(item => item.status)).toEqual(["FAILED", "PENDING"]);
     expect(vi.mocked(sendSmsConversationText)).not.toHaveBeenCalled();
   });
