@@ -333,6 +333,30 @@ export function AutomationBuilder() {
     }
   }
 
+  async function resumeLatest() {
+    if (!canManage) return;
+    const saved = dirty ? await saveDraft() : workflow;
+    if (!saved) return;
+    const endpoint = saved.hasUnpublishedChanges ? "publish" : "resume";
+    setWorking("resume");
+    setError(null);
+    try {
+      const response = await fetch(`/api/automations/workflows/${id}/${endpoint}`, { method: "POST" });
+      const data = await response.json().catch(() => null) as { workflow?: BuilderWorkflow } | null;
+      if (!response.ok || !data?.workflow) {
+        throw new Error(responseMessage(data, "Unable to resume automation."));
+      }
+      setWorkflow(data.workflow);
+      setName(data.workflow.name);
+      setDraft(data.workflow.draft);
+      setDirty(false);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Unable to resume automation.");
+    } finally {
+      setWorking(null);
+    }
+  }
+
   async function changeStatus(action: "pause" | "resume") {
     if (!canManage) return;
     setWorking(action);
@@ -386,7 +410,7 @@ export function AutomationBuilder() {
   const availableConditions = trigger?.conditions.filter(field =>
     !draft.conditions.some(condition => condition.field === field)) ?? [];
   const availableActions = catalog.actions.filter(action => trigger?.actions.includes(action.id));
-  const showPublish = workflow.status === "DRAFT" || dirty || workflow.hasUnpublishedChanges;
+  const showPublish = workflow.status === "DRAFT"\n    || (workflow.status === "ACTIVE" && (dirty || workflow.hasUnpublishedChanges));
   const memberName = (userId?: string | null) =>
     userId ? members.find(member => member.userId === userId)?.name ?? "Team member" : "Everyone";
 
@@ -500,7 +524,7 @@ export function AutomationBuilder() {
               <button className="secondaryButton" onClick={() => { setTestOpen(true); setTestResult(null); }}>Test automation</button>
               {canManage && <button className="secondaryButton" disabled={!dirty || working !== null} onClick={() => void saveDraft()}>{working === "save" ? "Saving…" : "Save draft"}</button>}
               {canManage && showPublish && <button className="primaryButton" disabled={working !== null || !name.trim()} onClick={() => void publish()}>{working === "publish" ? "Publishing…" : workflow.status === "DRAFT" ? "Publish" : "Publish changes"}</button>}
-              {canManage && workflow.status === "PAUSED" && !showPublish && <button className="primaryButton" disabled={working !== null} onClick={() => void changeStatus("resume")}>Resume</button>}
+              {canManage && workflow.status === "PAUSED" && <button className="primaryButton" disabled={working !== null || !name.trim()} onClick={() => void resumeLatest()}>{working === "resume" ? "Resuming…" : "Resume"}</button>}
             </footer>
           </div>
         )}
