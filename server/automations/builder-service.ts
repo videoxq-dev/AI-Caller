@@ -141,9 +141,14 @@ export async function getBuilderWorkflow(workspaceId: string, definitionId: stri
   };
 }
 
-const dryRunInputSchema = z.object({
+const dryRunSampleSchema = z.object({
   qualificationScore: z.number().finite().min(0).max(100).optional(),
   channel: z.enum(["PHONE", "SMS", "WHATSAPP", "WEBCHAT"]).optional(),
+}).strict();
+
+const dryRunInputSchema = z.object({
+  draft: workflowDefinitionSchema.optional(),
+  sample: dryRunSampleSchema.default({}),
 }).strict();
 
 function conditionOutcome(
@@ -190,10 +195,12 @@ export async function testBuilderWorkflow(
   input: unknown,
 ) {
   const workflow = await getBuilderWorkflow(workspaceId, definitionId);
-  const sample = dryRunInputSchema.parse(input);
+  const parsed = dryRunInputSchema.parse(input);
+  const draft = parsed.draft ?? workflow.draft;
+  const sample = parsed.sample;
   const payload: Record<string, unknown> = {};
 
-  for (const condition of workflow.draft.conditions) {
+  for (const condition of draft.conditions) {
     if (condition.field === "qualificationScore") {
       if (sample.qualificationScore === undefined) {
         throw new AppError("WORKFLOW_TEST_INPUT_REQUIRED", "Enter a qualification score.", 400);
@@ -206,11 +213,11 @@ export async function testBuilderWorkflow(
     }
   }
 
-  const event = { type: workflow.draft.trigger, payload } as const;
-  const conditionResults = workflow.draft.conditions.map(condition => conditionOutcome(condition, payload));
+  const event = { type: draft.trigger, payload } as const;
+  const conditionResults = draft.conditions.map(condition => conditionOutcome(condition, payload));
   return {
-    matches: matchesWorkflow(workflow.draft, event),
+    matches: matchesWorkflow(draft, event),
     conditions: conditionResults,
-    actions: workflow.draft.actions.map(actionPreview),
+    actions: draft.actions.map(actionPreview),
   };
 }
