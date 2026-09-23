@@ -241,6 +241,46 @@ describe("existing appointment management (isolated from V2 booking)", () => {
       .where(eq(automationEvents.type, "APPOINTMENT_RESCHEDULED")))).toHaveLength(0);
   });
 
+  it("serializes simultaneous confirmations from two sessions for the same appointment", async () => {
+    const otherSession = { ...ctx, sessionKey: "parallel-webchat-session" };
+    const secondTurn = async (body: string) => {
+      const message = await inbound(body);
+      return handleAppointmentManagementTurn(otherSession, { id: message.id, body },
+        new Date("2030-09-21T12:00:00.000Z"));
+    };
+    await turn("Reschedule my appointment");
+    await secondTurn("Reschedule my appointment");
+    const first = await turn("September 24, 2037 at 10 AM");
+    const second = await secondTurn("September 25, 2037 at 10 AM");
+    await delivered(first!.preview!.requestId, first!.reply);
+    const sent = await appendMessage(ctx.workspaceId, ctx.conversationId!, {
+      channel: "WEBCHAT", direction: "OUTBOUND", senderType: "AI",
+      contentType: "TEXT", body: second!.reply, status: "DELIVERED", metadata: {},
+    });
+    await recordAppointmentManagementPreviewDelivery(
+      otherSession, second!.preview!.requestId, sent.id, second!.preview!.version,
+    );
+    await new Promise(resolve => setTimeout(resolve, 20));
+    const a = await inbound("Yes");
+    const b = await inbound("Yes");
+    const results = await Promise.all([
+      handleAppointmentManagementTurn(ctx, { id: a.id, body: a.body },
+        new Date("2030-09-21T12:00:00.000Z")),
+      handleAppointmentManagementTurn(otherSession, { id: b.id, body: b.body },
+        new Date("2030-09-21T12:00:00.000Z")),
+    ]);
+    expect(results.filter(result => result?.reply.includes("rescheduled and confirmed")))
+      .toHaveLength(1);
+    expect(results.some(result => result?.reply.includes("changed before"))).toBe(true);
+    const [saved] = await db.select().from(appointments);
+    expect(saved.id).toBe(appointmentId);
+    expect(["2037-09-24T10:00:00.000Z", "2037-09-25T10:00:00.000Z"])
+      .toContain(saved.startsAt.toISOString());
+    expect((await db.select().from(automationEvents)
+      .where(eq(automationEvents.type, "APPOINTMENT_RESCHEDULED")))).toHaveLength(1);
+    expect(await db.select().from(bookingDrafts)).toHaveLength(0);
+  });
+
   it("prevents a second edit when a provider outcome is uncertain", async () => {
     await turn("Reschedule my appointment");
     const preview = await turn("September 24, 2037 at 10 AM");
