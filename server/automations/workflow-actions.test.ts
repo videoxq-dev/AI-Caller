@@ -323,6 +323,48 @@ describe("Phase 3C durable workflow actions", () => {
     expect(notices.map(notice => notice.title).sort()).toEqual(["Already completed", "Resume here"]);
   });
 
+  it("rejects an event whose claimed contact does not belong to the lead", async () => {
+    const { lead } = await leadContext();
+    const [otherContact] = await db.insert(contacts).values({
+      workspaceId,
+      name: "Unrelated Customer",
+      phone: "+12025550177",
+    }).returning();
+    await db.insert(conversations).values({
+      workspaceId,
+      contactId: otherContact.id,
+      status: "OPEN",
+    });
+    const { version, snapshot } = await publishedWorkflow([
+      { type: "SEND_CUSTOMER_SMS", message: "Hi {{name}}, here is your update." },
+    ]);
+    const [event] = await db.insert(automationEvents).values({
+      workspaceId,
+      type: "LEAD_QUALIFIED",
+      aggregateType: "LEAD",
+      aggregateId: lead.id,
+      payload: {
+        leadId: lead.id,
+        contactId: otherContact.id,
+        qualificationScore: lead.qualificationScore,
+      },
+    }).returning();
+    const run = await createWorkflowRun({
+      workspaceId,
+      eventId: event.id,
+      workflowVersionId: version.id,
+      actions: snapshot.actions,
+    });
+    if (!run) throw new Error("Workflow unexpectedly inactive");
+    await expect(executeAutomationRun(workspaceId, run.id)).resolves.toMatchObject({
+      status: "FAILED",
+    });
+    const [stored] = await db.select().from(automationRuns).where(eq(automationRuns.id, run.id));
+    expect(stored.errorCode).toBe("WORKFLOW_EVENT_CONTACT_MISMATCH");
+    expect(await db.select().from(automationDeliveries)).toHaveLength(0);
+    expect(vi.mocked(sendPreclassifiedAutomationSms)).not.toHaveBeenCalled();
+  });
+
   it("suppresses stale appointment SMS after a revision change without contacting the provider", async () => {
     const { contact, conversation } = await leadContext();
     const startsAt = new Date("2038-05-04T14:00:00Z");
