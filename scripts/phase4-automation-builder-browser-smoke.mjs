@@ -87,6 +87,17 @@ try {
 
   const score = page.locator(".conditionRow input[type='number']").first();
   await score.fill("90");
+  await page.getByRole("button", { name: "Add condition", exact: false }).click();
+  assert(await page.locator(".conditionRow").count() === 2,
+    "Add condition did not allow a second qualification-score condition.");
+  await page.locator(".conditionRow input[type='number']").nth(1).fill("95");
+  await page.locator(".conditionRow select").nth(1).selectOption("LTE");
+  const allConditions = page.getByRole("radio", { name: "All", exact: true });
+  const anyConditions = page.getByRole("radio", { name: "Any", exact: true });
+  assert(await allConditions.isChecked(), "The initial multiple-condition match must default to All.");
+  await anyConditions.check();
+  assert(await anyConditions.isChecked(), "Any condition radio cannot be selected.");
+  await allConditions.check();
 
   await page.getByRole("button", { name: "Test automation", exact: true }).click();
   const panel = page.getByRole("complementary", { name: "Test automation" });
@@ -98,6 +109,13 @@ try {
   await panel.getByLabel("Qualification score").fill("60");
   await panel.getByRole("button", { name: "Run test", exact: true }).click();
   await panel.getByText("Automation would not run", { exact: true }).waitFor();
+  await panel.getByLabel("Qualification score").fill("99");
+  await panel.getByRole("button", { name: "Run test", exact: true }).click();
+  await panel.getByText("Automation would not run", { exact: true }).waitFor();
+  await anyConditions.check();
+  await panel.getByRole("button", { name: "Run test", exact: true }).click();
+  await panel.getByText("Automation would run", { exact: true }).waitFor();
+  await allConditions.check();
   await panel.getByRole("button", { name: "×" }).click();
 
   await page.getByRole("button", { name: "Publish", exact: true }).click();
@@ -110,6 +128,10 @@ try {
   assert(persisted.rows[0]?.status === "PUBLISHED", "Publishing in the Builder did not activate the workflow.");
   assert(persisted.rows[0]?.draft?.conditions?.[0]?.value === 90,
     "Builder condition edit was not saved before publication.");
+  assert(persisted.rows[0]?.draft?.conditions?.[1]?.operator === "LTE"
+    && persisted.rows[0]?.draft?.conditions?.[1]?.value === 95
+    && persisted.rows[0]?.draft?.match === "ALL",
+    "Multiple conditions and the selected All/Any rule were not persisted.");
 
   const contact = await pool.query(
     `INSERT INTO contacts (workspace_id, name) VALUES ($1, 'Phase Four Lead') RETURNING id`,
