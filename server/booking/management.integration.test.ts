@@ -1,4 +1,4 @@
-import { afterAll, beforeEach, describe, expect, it } from "vitest";
+import { afterAll, afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { and, eq } from "drizzle-orm";
 import { closeDatabase, db } from "@/db";
 import {
@@ -7,6 +7,7 @@ import {
 } from "@/db/schema";
 import { appendMessage, getOrCreateOpenConversation } from "@/server/domain/core/repository";
 import { saveBusinessSetup } from "@/server/domain/onboarding/repository";
+import { calendarBookingService } from "@/server/domain/core/calendar-booking";
 import {
   appointmentManagementIntent, handleAppointmentManagementTurn,
   recordAppointmentManagementPreviewDelivery,
@@ -48,6 +49,7 @@ describe("existing appointment management (isolated from V2 booking)", () => {
   });
 
   afterAll(closeDatabase);
+  afterEach(() => vi.restoreAllMocks());
 
   async function inbound(body: string) {
     return appendMessage(ctx.workspaceId, ctx.conversationId!, {
@@ -224,6 +226,25 @@ describe("existing appointment management (isolated from V2 booking)", () => {
       .toBe(changed.toISOString());
     expect((await db.select().from(automationEvents)
       .where(eq(automationEvents.type, "APPOINTMENT_RESCHEDULED")))).toHaveLength(0);
+  });
+
+  it("prevents a second edit when a provider outcome is uncertain", async () => {
+    await turn("Reschedule my appointment");
+    const preview = await turn("September 24, 2037 at 10 AM");
+    await delivered(preview!.preview!.requestId, preview!.reply);
+    const provider = vi.spyOn(calendarBookingService, "reschedule")
+      .mockRejectedValueOnce(new Error("Provider connection dropped after dispatch"));
+    const uncertain = await turn("Yes");
+    expect(uncertain?.reply).toContain("haven't confirmed");
+    expect((await db.select().from(appointmentManagementRequests)
+      .where(eq(appointmentManagementRequests.appointmentId, appointmentId)))
+      .some(row => row.status === "RECONCILING")).toBe(true);
+    const retry = await turn("Reschedule my appointment");
+    expect(retry?.reply).toContain("unresolved calendar outcome");
+    expect(provider).toHaveBeenCalledTimes(1);
+    const [saved] = await db.select().from(appointments);
+    expect(saved.startsAt.toISOString()).toBe(oldStart.toISOString());
+    expect(await db.select().from(bookingDrafts)).toHaveLength(0);
   });
 
   it("does not disclose or modify another contact's appointment", async () => {
