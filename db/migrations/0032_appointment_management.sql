@@ -32,5 +32,8 @@ CREATE UNIQUE INDEX "appointment_management_one_active_session_uq"
   WHERE "status" IN ('COLLECTING', 'AWAITING_CONFIRMATION', 'EXECUTING');
 CREATE INDEX "appointment_management_owner_idx"
   ON "appointment_management_requests" ("workspace_id", "contact_id", "conversation_id", "updated_at");
+CREATE INDEX "appointment_management_unresolved_appointment_idx"
+  ON "appointment_management_requests" ("workspace_id", "contact_id", "appointment_id", "updated_at")
+  WHERE "status" IN ('EXECUTING', 'RECONCILING');
 CREATE INDEX "appointment_management_expiry_idx"
   ON "appointment_management_requests" ("status", "expires_at");
