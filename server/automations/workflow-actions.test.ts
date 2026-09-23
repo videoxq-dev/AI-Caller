@@ -19,7 +19,7 @@ import {
 import { AppError } from "@/server/http/errors";
 import { sendSmsConversationText } from "@/server/sms/outbound";
 import { executeAutomationRun } from "./executor";
-import { createWorkflowRun, listWorkflowActionRuns } from "./repository";
+import { createWorkflowRun, listAutomationActivity, listWorkflowActionRuns } from "./repository";
 import { createWorkflowDraft, getWorkflowVersion, publishWorkflow } from "./workflows";
 
 vi.mock("@/server/sms/outbound", () => ({
@@ -170,6 +170,14 @@ describe("Phase 3C durable workflow actions", () => {
     expect(new Set(deliveries.map(delivery => delivery.channel))).toEqual(new Set(["IN_APP", "SMS"]));
     expect(vi.mocked(sendSmsConversationText)).toHaveBeenCalledTimes(1);
     expect(await db.select().from(conversationHandlingEvents)).toHaveLength(1);
+
+    const [activity] = await listAutomationActivity(workspaceId, 10);
+    expect(activity.workflow).toMatchObject({
+      version: 1,
+      name: "Phase 3C workflow",
+    });
+    expect(activity.actions).toHaveLength(3);
+    expect(activity.deliveries).toHaveLength(2);
   });
 
   it("continues after a policy-suppressed SMS and completes a later staff notification", async () => {
@@ -225,6 +233,7 @@ describe("Phase 3C durable workflow actions", () => {
     const { lead } = await leadContext();
     const { version, snapshot } = await publishedWorkflow([
       { type: "ASSIGN_LEAD", userId: staffId },
+      { type: "SEND_CUSTOMER_SMS", message: "This must never send." },
     ]);
     const { run } = await eventAndRun(lead, version, snapshot.actions);
     await db.delete(memberships).where(and(
@@ -243,6 +252,45 @@ describe("Phase 3C durable workflow actions", () => {
       status: "FAILED",
       errorCode: "WORKFLOW_STAFF_INVALID",
     });
+    const actions = await listWorkflowActionRuns(workspaceId, run.id);
+    expect(actions.map(item => item.status)).toEqual(["FAILED", "PENDING"]);
+    expect(vi.mocked(sendSmsConversationText)).not.toHaveBeenCalled();
+  });
+
+  it("resumes after an already-completed action without repeating its side effect", async () => {
+    const { lead, contact } = await leadContext();
+    const { version, snapshot } = await publishedWorkflow([
+      { type: "NOTIFY_STAFF", userId: staffId, title: "Already completed", message: "First side effect." },
+      { type: "NOTIFY_STAFF", userId: staffId, title: "Resume here", message: "Second side effect." },
+    ]);
+    const { run } = await eventAndRun(lead, version, snapshot.actions);
+    const actionRows = await listWorkflowActionRuns(workspaceId, run.id);
+    await db.update(workflowActionRuns).set({
+      status: "COMPLETED",
+      attemptCount: 1,
+      completedAt: new Date(),
+      result: { simulatedPriorCommit: true },
+    }).where(eq(workflowActionRuns.id, actionRows[0].id));
+    await db.insert(notifications).values({
+      workspaceId,
+      userId: staffId,
+      type: "AUTOMATION_NOTIFICATION",
+      title: "Already completed",
+      body: "First side effect.",
+      contactId: contact.id,
+      metadata: {
+        automationRunId: run.id,
+        workflowActionRunId: actionRows[0].id,
+      },
+    });
+
+    await expect(executeAutomationRun(workspaceId, run.id)).resolves.toMatchObject({
+      status: "COMPLETED",
+    });
+    const after = await listWorkflowActionRuns(workspaceId, run.id);
+    expect(after.map(action => action.attemptCount)).toEqual([1, 1]);
+    const notices = await db.select().from(notifications);
+    expect(notices.map(notice => notice.title).sort()).toEqual(["Already completed", "Resume here"]);
   });
 
   it("allows two intentional SMS actions to the same conversation without delivery identity collisions", async () => {
