@@ -119,6 +119,32 @@ export async function createAutomationRun(input: {
   return existing;
 }
 
+export async function createWorkflowRun(input: {
+  workspaceId: string;
+  eventId: string;
+  workflowVersionId: string;
+}) {
+  // Event identity and version identity both belong to the workspace.
+  const event = await getAutomationEvent(input.workspaceId, input.eventId);
+  if (!event) throw new AppError("AUTOMATION_EVENT_NOT_FOUND", "Automation event not found.", 404);
+  const [created] = await db.insert(automationRuns).values({
+    workspaceId: input.workspaceId,
+    eventId: input.eventId,
+    key: null,
+    workflowVersionId: input.workflowVersionId,
+    occurrenceKey: "default",
+  }).onConflictDoNothing().returning();
+  if (created) return created;
+  const [existing] = await db.select().from(automationRuns).where(and(
+    eq(automationRuns.workspaceId, input.workspaceId),
+    eq(automationRuns.eventId, input.eventId),
+    eq(automationRuns.workflowVersionId, input.workflowVersionId),
+    eq(automationRuns.occurrenceKey, "default"),
+  )).limit(1);
+  if (!existing) throw new AppError("AUTOMATION_RUN_CONFLICT", "Workflow run could not be resolved.", 409);
+  return existing;
+}
+
 export async function markAutomationEventDispatched(workspaceId: string, eventId: string) {
   await db.update(automationEvents).set({ dispatchedAt: new Date() }).where(and(
     eq(automationEvents.workspaceId, workspaceId),
