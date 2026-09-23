@@ -182,14 +182,20 @@ export function AutomationBuilder() {
       if (!catalogResponse.ok || !catalogData?.catalog) {
         throw new Error(responseMessage(catalogData, "Unable to load automation options."));
       }
-      const teamData = await teamResponse.json().catch(() => null) as { members?: TeamMember[] } | null;
+      const teamData = await teamResponse.json().catch(() => null) as {
+        members?: TeamMember[];
+        error?: { message?: string };
+      } | null;
+      if (!teamResponse.ok) {
+        throw new Error(responseMessage(teamData, "Unable to load team members."));
+      }
 
       setWorkflow(workflowData.workflow);
       setName(workflowData.workflow.name);
       setDraft(workflowData.workflow.draft);
       setCatalog(catalogData.catalog);
       setCanManage(Boolean(workflowData.canManage));
-      setMembers(teamResponse.ok ? teamData?.members ?? [] : []);
+      setMembers(teamData?.members ?? []);
       setDirty(false);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Unable to load automation.");
@@ -422,7 +428,13 @@ export function AutomationBuilder() {
       if (!draft) return;
       const sample: Record<string, unknown> = {};
       if (draft.conditions.some(condition => condition.field === "qualificationScore")) {
-        sample.qualificationScore = Number(testInputs.qualificationScore ?? "90");
+        const rawScore = testInputs.qualificationScore ?? "90";
+        if (!rawScore.trim()) throw new Error("Enter a qualification score.");
+        const score = Number(rawScore);
+        if (!Number.isFinite(score) || score < 0 || score > 100) {
+          throw new Error("Qualification score must be between 0 and 100.");
+        }
+        sample.qualificationScore = score;
       }
       if (draft.conditions.some(condition => condition.field === "channel")) {
         sample.channel = testInputs.channel || "SMS";
