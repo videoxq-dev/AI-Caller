@@ -209,6 +209,9 @@ jobs:
       - name: Phase 4 Automation Builder browser acceptance verification
         run: npm run test:browser:phase4
 
+      - name: Phase 6A WhatsApp template management browser acceptance verification
+        run: npm run test:browser:phase6a
+
       - name: Booking remediation browser acceptance verification
         run: npm run test:browser:booking
 
@@ -218,6 +221,15 @@ jobs:
         with:
           name: phase4-automation-builder-verification
           path: artifacts/phase4-automation-builder
+          if-no-files-found: warn
+          retention-days: 14
+
+      - name: Upload Phase 6A WhatsApp template management screenshots
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: phase6a-whatsapp-template-verification
+          path: artifacts/phase6a-whatsapp-templates
           if-no-files-found: warn
           retention-days: 14
 
