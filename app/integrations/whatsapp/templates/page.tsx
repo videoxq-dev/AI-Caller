@@ -4,7 +4,7 @@ import Link from "next/link";
 import { useCallback, useEffect, useMemo, useState, type FormEvent } from "react";
 import { AppNav } from "@/components/core-domain/app-nav";
 import "../../integrations.css";
-import "../../../../dashboard/dashboard.css";
+import "../../../dashboard/dashboard.css";
 import "./templates.css";
 
 type Template = {
