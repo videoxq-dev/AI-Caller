@@ -112,11 +112,14 @@ try {
   await panel.getByLabel("Qualification score").fill("99");
   await panel.getByRole("button", { name: "Run test", exact: true }).click();
   await panel.getByText("Automation would not run", { exact: true }).waitFor();
+  await panel.getByRole("button", { name: "×" }).click();
   await anyConditions.check();
+  await page.getByRole("button", { name: "Test automation", exact: true }).click();
+  await panel.getByLabel("Qualification score").fill("99");
   await panel.getByRole("button", { name: "Run test", exact: true }).click();
   await panel.getByText("Automation would run", { exact: true }).waitFor();
-  await allConditions.check();
   await panel.getByRole("button", { name: "×" }).click();
+  await allConditions.check();
 
   await page.getByRole("button", { name: "Publish", exact: true }).click();
   await page.getByText("Active", { exact: true }).waitFor({ timeout: 15_000 });
