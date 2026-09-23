@@ -155,6 +155,8 @@ describe("versioned deterministic workflows", () => {
     }).returning();
 
     await setWorkflowStatus(workspaceId, draft.id, "PUBLISHED");
+    // Previously active but undispatched work must not resurrect after a pause.
+    expect(await listPublishedWorkflowVersions(workspaceId, queuedEvent.id)).toHaveLength(0);
     expect(await listPublishedWorkflowVersions(workspaceId, pausedEvent.id)).toHaveLength(0);
 
     const [futureEvent] = await db.insert(automationEvents).values({
