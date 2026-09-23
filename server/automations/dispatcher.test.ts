@@ -1,5 +1,6 @@
 import { afterAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { closeDatabase, db } from "@/db";
+import { enqueueUniqueJob } from "@/server/jobs";
 import {
   automationEvents,
   automationRuns,
@@ -96,5 +97,48 @@ describe("automation dispatcher", () => {
     const runs = await db.select().from(automationRuns);
     expect(runs.map((run) => run.occurrenceKey).sort()).toEqual(["before:120", "before:1440"]);
     expect(runs.every((run) => run.scheduledFor instanceof Date)).toBe(true);
+  });
+
+  it("leaves an event recoverable if enqueue fails after the run is committed", async () => {
+    await db.insert(automationSettings).values({
+      workspaceId,
+      key: "QUALIFIED_LEAD_ASSIGNMENT",
+      enabled: true,
+      config: { assignedUserId: null, notifyInApp: true },
+    });
+    const [event] = await db.insert(automationEvents).values({
+      workspaceId, type: "LEAD_QUALIFIED",
+      aggregateType: "LEAD", aggregateId: "lead-recovery",
+    }).returning();
+
+    vi.mocked(enqueueUniqueJob).mockRejectedValueOnce(new Error("queue unavailable"));
+    await expect(dispatchAutomationEvent(workspaceId, event.id)).rejects.toThrow("queue unavailable");
+    const [undispatched] = await db.select().from(automationEvents);
+    expect(undispatched.dispatchedAt).toBeNull();
+    expect(await db.select().from(automationRuns)).toHaveLength(1);
+
+    await dispatchAutomationEvent(workspaceId, event.id);
+    const [recovered] = await db.select().from(automationEvents);
+    expect(recovered.dispatchedAt).not.toBeNull();
+    expect(await db.select().from(automationRuns)).toHaveLength(1);
+  });
+
+  it("creates one run even when two workers dispatch the same event concurrently", async () => {
+    await db.insert(automationSettings).values({
+      workspaceId,
+      key: "QUALIFIED_LEAD_ASSIGNMENT",
+      enabled: true,
+      config: { assignedUserId: null, notifyInApp: true },
+    });
+    const [event] = await db.insert(automationEvents).values({
+      workspaceId, type: "LEAD_QUALIFIED",
+      aggregateType: "LEAD", aggregateId: "lead-concurrent",
+    }).returning();
+
+    await Promise.all([
+      dispatchAutomationEvent(workspaceId, event.id),
+      dispatchAutomationEvent(workspaceId, event.id),
+    ]);
+    expect(await db.select().from(automationRuns)).toHaveLength(1);
   });
 });
