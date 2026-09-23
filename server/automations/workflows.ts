@@ -415,19 +415,23 @@ export async function listPublishedWorkflowVersions(workspaceId: string, eventId
   if (!rows.length) return [];
 
   const definitionIds = rows.map(row => row.definitionId);
+  // The latest activation window—not merely historical status at event time—
+  // governs dispatch. A pause cancels even an earlier undispatched event; resume
+  // starts a NEW window and must never resurrect that backlog.
   const statuses = await db.selectDistinctOn([workflowStatusHistory.definitionId], {
     definitionId: workflowStatusHistory.definitionId,
     status: workflowStatusHistory.status,
+    startedBeforeEvent: sql<boolean>`${workflowStatusHistory.occurredAt} <= ${recordedAt}`,
   }).from(workflowStatusHistory).where(and(
     eq(workflowStatusHistory.workspaceId, workspaceId),
     inArray(workflowStatusHistory.definitionId, definitionIds),
-    lte(workflowStatusHistory.occurredAt, recordedAt),
   )).orderBy(workflowStatusHistory.definitionId, desc(workflowStatusHistory.occurredAt));
 
-  const activeAtOccurrence = new Set(
-    statuses.filter(row => row.status === "PUBLISHED").map(row => row.definitionId),
+  const eligible = new Set(
+    statuses.filter(row => row.status === "PUBLISHED" && row.startedBeforeEvent)
+      .map(row => row.definitionId),
   );
-  return rows.filter(row => activeAtOccurrence.has(row.definitionId)).map(row => ({
+  return rows.filter(row => eligible.has(row.definitionId)).map(row => ({
     ...row,
     snapshot: publishedWorkflowDefinitionSchema.parse(row.snapshot),
   }));
