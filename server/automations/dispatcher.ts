@@ -99,7 +99,10 @@ export async function dispatchAutomationEvent(workspaceId: string, eventId: stri
   for (const version of published) {
     if (!matchesWorkflow(version.snapshot, event)) continue;
     const run = await createWorkflowRun({
-      workspaceId, eventId, workflowVersionId: version.id,
+      workspaceId,
+      eventId,
+      workflowVersionId: version.id,
+      actions: version.snapshot.actions,
     });
     await enqueueRun(run);
     runs += 1;
