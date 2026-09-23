@@ -699,7 +699,7 @@ export async function updateNativeAppointmentAfterReschedule(
         conversationId: appointment.conversationId,
         startsAt: appointment.startsAt.toISOString(),
       },
-    }).onConflictDoNothing();
+    });
     return appointment;
   });
 }
@@ -737,7 +737,7 @@ export async function updateAppointmentAfterReschedule(
         conversationId: appointment.conversationId,
         startsAt: appointment.startsAt.toISOString(),
       },
-    }).onConflictDoNothing();
+    });
     return appointment;
   });
 }
