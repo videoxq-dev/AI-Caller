@@ -1,6 +1,7 @@
 import { afterAll, beforeEach, describe, expect, it } from "vitest";
 import { closeDatabase, db } from "@/db";
 import {
+  appointments,
   automationDeliveries,
   automationEvents,
   automationRuns,
@@ -251,6 +252,41 @@ describe("automation executor safety", () => {
     const run = await createAutomationRun({ workspaceId, eventId: event.id, key: "MISSED_INQUIRY_RECOVERY" });
 
     await expect(executeAutomationRun(workspaceId, run.id)).resolves.toMatchObject({ status: "SKIPPED" });
+    expect(await db.select().from(automationDeliveries)).toHaveLength(0);
+  });
+
+  it("does not resurrect the original reminder when an appointment returns to its old time", async () => {
+    const [contact] = await db.insert(contacts).values({ workspaceId, name: "Round-trip Customer" }).returning();
+    const [conversation] = await db.insert(conversations).values({
+      workspaceId, contactId: contact.id,
+    }).returning();
+    const startsAt = new Date("2037-10-02T14:00:00.000Z");
+    const [appointment] = await db.insert(appointments).values({
+      workspaceId, contactId: contact.id, conversationId: conversation.id,
+      title: "Cleaning", timezone: "UTC", startsAt,
+      endsAt: new Date("2037-10-02T15:00:00.000Z"),
+      status: "CONFIRMED", revision: 2,
+    }).returning();
+    await db.insert(automationSettings).values({
+      workspaceId,
+      key: "APPOINTMENT_REMINDER",
+      enabled: true,
+      config: { channels: ["SMS"], firstMinutesBefore: 1440, secondMinutesBefore: null,
+        message: "Reminder", whatsappTemplateName: null, whatsappTemplateLanguage: "en_US" },
+    });
+    const [event] = await db.insert(automationEvents).values({
+      workspaceId, type: "APPOINTMENT_CONFIRMED", aggregateType: "APPOINTMENT",
+      aggregateId: appointment.id,
+      payload: { appointmentId: appointment.id, startsAt: startsAt.toISOString(), revision: 0 },
+    }).returning();
+    const run = await createAutomationRun({
+      workspaceId, eventId: event.id, key: "APPOINTMENT_REMINDER",
+      metadata: { expectedStartsAt: startsAt.toISOString(), expectedAppointmentRevision: 0 },
+    });
+
+    await expect(executeAutomationRun(workspaceId, run.id)).resolves.toMatchObject({
+      status: "SKIPPED",
+    });
     expect(await db.select().from(automationDeliveries)).toHaveLength(0);
   });
 });
