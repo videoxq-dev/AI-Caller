@@ -276,6 +276,12 @@ try {
   await page.goto(`${baseUrl}/automations`, { waitUntil: "networkidle" });
   await page.getByText("High-value lead alert", { exact: true }).last().waitFor();
   await page.getByText("1 run", { exact: true }).waitFor();
+  await page.screenshot({ path: path.join(outputDir, "automation-home-desktop.png"), fullPage: true });
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.reload({ waitUntil: "networkidle" });
+  await page.getByRole("heading", { name: "Your automations" }).waitFor();
+  await noOverflow(page, "Phase 4 Automation Home mobile");
+  await page.screenshot({ path: path.join(outputDir, "automation-home-mobile.png"), fullPage: true });
 
   assert(errors.length === 0, `Browser errors: ${errors.join("; ")}`);
   console.log("Phase 4 automation builder acceptance passed: create, test, publish, execute once, audit, pause/resume, and responsive builder UI.");
