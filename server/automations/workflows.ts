@@ -160,7 +160,7 @@ export async function publishWorkflow(workspaceId: string, definitionId: string)
       }
     }
     const nextVersion = (definition.publishedVersion ?? 0) + 1;
-    const publishedAt = new Date();
+    const publishedAt = sql<Date>`clock_timestamp()`;
     const [version] = await tx.insert(workflowVersions).values({
       workspaceId, definitionId, version: nextVersion, snapshot, publishedAt,
     }).returning();
@@ -220,7 +220,7 @@ export async function setWorkflowStatus(
       workspaceId,
       definitionId,
       status,
-      occurredAt: now,
+      occurredAt: sql<Date>`clock_timestamp()`,
     });
 
     if (status !== "PUBLISHED") {
@@ -278,7 +278,10 @@ export async function listPublishedWorkflowVersions(workspaceId: string, eventId
   // PostgreSQL microseconds and can move a boundary event across a publish/pause edge.
   const occurrence = eventId
     ? sql<Date>`(SELECT ${automationEvents.occurredAt} FROM ${automationEvents} WHERE ${automationEvents.id} = ${eventId} AND ${automationEvents.workspaceId} = ${workspaceId})`
-    : sql<Date>`now()`;
+    : sql<Date>`clock_timestamp()`;
+  const recordedAt = eventId
+    ? sql<Date>`(SELECT ${automationEvents.createdAt} FROM ${automationEvents} WHERE ${automationEvents.id} = ${eventId} AND ${automationEvents.workspaceId} = ${workspaceId})`
+    : sql<Date>`clock_timestamp()`;
 
   const rows = await db.selectDistinctOn([workflowDefinitions.id], {
     id: workflowVersions.id,
@@ -307,7 +310,7 @@ export async function listPublishedWorkflowVersions(workspaceId: string, eventId
   }).from(workflowStatusHistory).where(and(
     eq(workflowStatusHistory.workspaceId, workspaceId),
     inArray(workflowStatusHistory.definitionId, definitionIds),
-    lte(workflowStatusHistory.occurredAt, occurrence),
+    lte(workflowStatusHistory.occurredAt, recordedAt),
   )).orderBy(workflowStatusHistory.definitionId, desc(workflowStatusHistory.occurredAt));
 
   const activeAtOccurrence = new Set(
