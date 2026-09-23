@@ -8,7 +8,7 @@ CREATE TABLE "appointment_management_requests" (
   "intent" text NOT NULL CHECK ("intent" IN ('RESCHEDULE', 'CANCEL')),
   "version" integer NOT NULL DEFAULT 1,
   "status" text NOT NULL DEFAULT 'COLLECTING'
-    CHECK ("status" IN ('COLLECTING', 'AWAITING_CONFIRMATION', 'EXECUTING', 'COMPLETED', 'ABANDONED', 'FAILED')),
+    CHECK ("status" IN ('COLLECTING', 'AWAITING_CONFIRMATION', 'EXECUTING', 'COMPLETED', 'ABANDONED', 'FAILED', 'RECONCILING')),
   "appointment_id" uuid REFERENCES "appointments"("id") ON DELETE SET NULL,
   "original_starts_at" timestamptz,
   "original_ends_at" timestamptz,
