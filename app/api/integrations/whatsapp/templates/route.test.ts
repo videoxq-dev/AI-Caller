@@ -54,7 +54,7 @@ describe("WhatsApp template API workspace permissions", () => {
   });
   it("permits an admin to submit a pending template without claiming approval", async () => {
     workspace("ADMIN");
-    const submit = vi.fn(async () => ({ id: "1", status: "PENDING", category: "UTILITY" }));
+    const submit = vi.fn(async () => ({ id: "1", name: "hello", language: "en_US", status: "PENDING", category: "UTILITY" }));
     vi.mocked(resolveWhatsAppTemplatesForWorkspace).mockResolvedValue({ list: vi.fn(), submit });
     const response = await POST(request("POST", template));
     expect(response.status).toBe(201);
