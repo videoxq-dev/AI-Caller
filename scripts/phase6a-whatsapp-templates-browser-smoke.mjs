@@ -100,6 +100,8 @@ try {
   await form.getByLabel("Example for {{1}}").fill("Ada");
   await form.getByLabel("Example for {{2}}").fill("Thursday at 10 AM");
   await form.getByLabel("Footer").fill("See you soon");
+  await noOverflow(page, "desktop WhatsApp template creation");
+  await page.screenshot({ path: path.join(outputDir, "template-form-desktop.png"), fullPage: true });
   await form.getByRole("button", { name: "Submit to Meta" }).click();
   await page.getByText(/meeting_reminder.*submitted to Meta/i).waitFor();
   assert(submitted.length === 1, "Template submission did not execute exactly once.");
@@ -117,6 +119,11 @@ try {
   await page.setViewportSize({ width: 390, height: 844 });
   await noOverflow(page, "mobile WhatsApp templates");
   await page.screenshot({ path: path.join(outputDir, "templates-mobile.png"), fullPage: true });
+  await page.getByRole("button", { name: "New template" }).click();
+  await page.locator(".waTemplateForm").getByLabel("Message body").fill("Hello {{1}}, thanks for contacting us.");
+  await page.locator(".waTemplateForm").getByLabel("Example for {{1}}").fill("Ada");
+  await noOverflow(page, "mobile WhatsApp template creation");
+  await page.screenshot({ path: path.join(outputDir, "template-form-mobile.png"), fullPage: true });
   assert(errors.length === 0, `Browser errors: ${errors.join("; ")}`);
   process.stdout.write("Phase 6A template management browser acceptance passed: navigation, pagination, submission, Meta status refresh, responsive UI.\\n");
 } finally {
