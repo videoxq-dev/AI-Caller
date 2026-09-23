@@ -139,6 +139,11 @@ describe("core domain persistence", () => {
       endsAt: new Date("2037-10-03T15:00:00.000Z"),
       timezone: "UTC",
     });
+    // A retried identical edit must not schedule a duplicate reminder.
+    await updateAppointmentAfterReschedule(workspaceId, appointment.id, {
+      startsAt: new Date("2037-10-03T14:00:00.000Z"),
+      endsAt: new Date("2037-10-03T15:00:00.000Z"), timezone: "UTC",
+    });
     await updateAppointmentAfterReschedule(workspaceId, appointment.id, {
       startsAt, endsAt: new Date("2037-10-02T15:00:00.000Z"), timezone: "UTC",
     });
@@ -169,6 +174,10 @@ describe("core domain persistence", () => {
       timezone: "UTC", bufferBeforeMinutes: 0, bufferAfterMinutes: 0, maxBookingsPerDay: 8,
     };
 
+    await updateNativeAppointmentAfterReschedule(workspaceId, appointment.id, {
+      startsAt: new Date("2037-10-03T14:00:00.000Z"),
+      endsAt: new Date("2037-10-03T15:00:00.000Z"), timezone: "UTC",
+    }, policy);
     await updateNativeAppointmentAfterReschedule(workspaceId, appointment.id, {
       startsAt: new Date("2037-10-03T14:00:00.000Z"),
       endsAt: new Date("2037-10-03T15:00:00.000Z"), timezone: "UTC",
