@@ -8,6 +8,7 @@ import {
   UsersIcon,
 } from "@/components/icons";
 import { AppNav } from "@/components/core-domain/app-nav";
+import { CustomAutomationHome } from "@/components/automations/custom-automation-home";
 import "../dashboard/dashboard.css";
 import "./automations.css";
 
@@ -34,7 +35,7 @@ type TeamMember = {
 type ActivityItem = {
   run: {
     id: string;
-    key: AutomationKey;
+    key: AutomationKey | null;
     status: "PENDING" | "RUNNING" | "COMPLETED" | "SKIPPED" | "FAILED";
     scheduledFor: string | null;
     completedAt: string | null;
@@ -42,6 +43,7 @@ type ActivityItem = {
     createdAt: string;
     occurrenceKey: string;
   };
+  workflow?: { name: string | null } | null;
   event: {
     type: string;
     aggregateType: string;
@@ -125,8 +127,9 @@ function configChannels(config: Record<string, unknown>, fallback: Array<"SMS" |
   return channels.length ? channels : fallback;
 }
 
-function humanKey(key: AutomationKey) {
-  return definitions.find((item) => item.key === key)?.title ?? key;
+function humanKey(key: AutomationKey | null, workflowName?: string | null) {
+  if (!key) return workflowName ?? "Custom automation";
+  return definitions.find((item) => item.key === key)?.title ?? "Automation";
 }
 
 function channelLabel(channel: string) {
@@ -240,10 +243,7 @@ export default function AutomationsPage() {
 
       <section className="appWorkspace automationWorkspace">
         <header className="automationTopbar">
-          <div className="automationTopbarCopy">
-            <strong>Reliable customer follow-up</strong>
-            <span>Predefined recipes only. Immediate AI replies remain owned by the conversation orchestrator.</span>
-          </div>
+          <div className="automationTopbarCopy"><strong>Automations</strong></div>
           <button type="button" className="activityLogButton" onClick={() => setActivityOpen((value) => !value)}>
             <ClockIcon size={16} />{activityOpen ? "Hide activity" : "View activity log"}
           </button>
@@ -251,7 +251,7 @@ export default function AutomationsPage() {
 
         <div className={`automationBody ${selected ? "drawerOpen" : ""}`}>
           <div className="automationTitleRow">
-            <div><h1>Automations</h1><p>Configure reliable follow-ups, team routing, confirmations, reminders, and escalation notifications.</p></div>
+            <div><h1>Automations</h1></div>
             {!canManage && !loading && <span className="automationReadOnly">View only · Owner/Admin can edit</span>}
           </div>
 
@@ -261,6 +261,7 @@ export default function AutomationsPage() {
             <ActivityLog items={activity} loading={loading} />
           )}
 
+          <div className="automationSectionHeading"><h2>Built-in automations</h2></div>
           <section className="automationList">
             {definitions.map((automation) => {
               const setting = settingsByKey.get(automation.key);
@@ -278,7 +279,6 @@ export default function AutomationsPage() {
                       {enabled ? <span className="activePill">Active</span> : <span className="inactivePill">Paused</span>}
                     </div>
                     <p>{automation.description}</p>
-                    <small>{automation.detail}</small>
                     <div className="automationChannels">
                       {automation.channels.map((channel) => <ChannelPill key={channel} channel={channel} />)}
                     </div>
@@ -313,6 +313,8 @@ export default function AutomationsPage() {
             })}
             {loading && <div className="automationLoading">Loading workspace automations…</div>}
           </section>
+
+          <CustomAutomationHome canManage={canManage} />
         </div>
 
         {selected && selectedSetting && (
@@ -623,7 +625,7 @@ function ActivityLog({ items, loading }: { items: ActivityItem[]; loading: boole
     {items.map((item) => (
       <div className="automationActivityRow" key={item.run.id}>
         <span className={`automationRunStatus ${item.run.status.toLowerCase()}`}>{item.run.status}</span>
-        <div><strong>{humanKey(item.run.key)}</strong><small>{item.event.type.replaceAll("_", " ")} · {new Date(item.run.createdAt).toLocaleString()}</small></div>
+        <div><strong>{humanKey(item.run.key, item.workflow?.name)}</strong><small>{item.event.type.replaceAll("_", " ")} · {new Date(item.run.createdAt).toLocaleString()}</small></div>
         <div className="automationActivityMeta">
           {item.run.scheduledFor && <small>Scheduled {new Date(item.run.scheduledFor).toLocaleString()}</small>}
           {item.run.errorMessage && <small className="automationActivityError">{item.run.errorMessage}</small>}
