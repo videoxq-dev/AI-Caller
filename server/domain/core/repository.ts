@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import {
   and,
   asc,
@@ -519,6 +520,7 @@ export async function insertAppointment(
           contactId: appointment.contactId,
           conversationId: appointment.conversationId,
           startsAt: appointment.startsAt.toISOString(),
+          revision: appointment.revision,
         },
       }).onConflictDoNothing();
     }
@@ -616,6 +618,7 @@ export async function insertNativeAppointment(
         appointmentId: appointment.id, contactId: appointment.contactId,
         conversationId: appointment.conversationId,
         startsAt: appointment.startsAt.toISOString(),
+        revision: appointment.revision,
       },
     }).onConflictDoNothing();
     return appointment;
@@ -655,6 +658,13 @@ export async function updateNativeAppointmentAfterReschedule(
           "The service or its configured duration changed. Please review the appointment again.", 409);
       }
     }
+    // A repeated approval of the already-applied edit is not a new business event.
+    if (previous.status === "CONFIRMED"
+      && previous.startsAt.getTime() === input.startsAt.getTime()
+      && previous.endsAt.getTime() === input.endsAt.getTime()
+      && previous.timezone === input.timezone
+      && (!serviceChange || (previous.serviceId === serviceChange.serviceId
+        && previous.title === serviceChange.title))) return previous;
     const existing = await tx.select({
       startsAt: appointments.startsAt,
       endsAt: appointments.endsAt,
@@ -683,6 +693,7 @@ export async function updateNativeAppointmentAfterReschedule(
         title: serviceChange.title,
       } : {}),
       status: "CONFIRMED", updatedAt: new Date(),
+      revision: sql`${appointments.revision} + 1`,
     }).where(and(eq(appointments.workspaceId, workspaceId), eq(appointments.id, appointmentId),
       expectedUpdatedAt ? and(
         gte(appointments.updatedAt, expectedUpdatedAt),
@@ -692,13 +703,14 @@ export async function updateNativeAppointmentAfterReschedule(
     await tx.insert(automationEvents).values({
       workspaceId, type: "APPOINTMENT_RESCHEDULED",
       aggregateType: "APPOINTMENT", aggregateId: appointment.id,
-      occurrenceKey: appointment.startsAt.toISOString(),
+      occurrenceKey: randomUUID(),
       payload: {
         appointmentId: appointment.id, contactId: appointment.contactId,
         conversationId: appointment.conversationId,
         startsAt: appointment.startsAt.toISOString(),
+        revision: appointment.revision,
       },
-    }).onConflictDoNothing();
+    });
     return appointment;
   });
 }
@@ -711,12 +723,25 @@ export async function updateAppointmentAfterReschedule(
   expectedUpdatedAt?: Date,
 ) {
   return db.transaction(async (tx) => {
+    const [previous] = await tx.select().from(appointments).where(and(
+      eq(appointments.workspaceId, workspaceId), eq(appointments.id, appointmentId),
+    )).limit(1).for("update");
+    if (!previous || (expectedUpdatedAt
+      && previous.updatedAt.getTime() !== expectedUpdatedAt.getTime())) {
+      throw new AppError("APPOINTMENT_CHANGED", "That appointment changed before rescheduling.", 409);
+    }
+    if (previous.status === "CONFIRMED"
+      && previous.startsAt.getTime() === input.startsAt.getTime()
+      && previous.endsAt.getTime() === input.endsAt.getTime()
+      && previous.timezone === input.timezone
+      && previous.externalEventId === (externalEventId ?? null)) return previous;
     const [appointment] = await tx.update(appointments).set({
       startsAt: input.startsAt,
       endsAt: input.endsAt,
       timezone: input.timezone,
       externalEventId: externalEventId,
       status: "CONFIRMED",
+      revision: sql`${appointments.revision} + 1`,
       updatedAt: new Date(),
     }).where(and(eq(appointments.workspaceId, workspaceId), eq(appointments.id, appointmentId),
       expectedUpdatedAt ? and(
@@ -729,14 +754,15 @@ export async function updateAppointmentAfterReschedule(
       type: "APPOINTMENT_RESCHEDULED",
       aggregateType: "APPOINTMENT",
       aggregateId: appointment.id,
-      occurrenceKey: appointment.startsAt.toISOString(),
+      occurrenceKey: randomUUID(),
       payload: {
         appointmentId: appointment.id,
         contactId: appointment.contactId,
         conversationId: appointment.conversationId,
         startsAt: appointment.startsAt.toISOString(),
+        revision: appointment.revision,
       },
-    }).onConflictDoNothing();
+    });
     return appointment;
   });
 }
@@ -748,21 +774,31 @@ export async function setAppointmentStatus(
   expectedUpdatedAt?: Date,
 ) {
   return db.transaction(async (tx) => {
-    const [appointment] = await tx.update(appointments).set({ status, updatedAt: new Date() })
+    const [appointment] = await tx.update(appointments).set({ status, revision: sql`${appointments.revision} + 1`, updatedAt: new Date() })
       .where(and(eq(appointments.workspaceId, workspaceId), eq(appointments.id, appointmentId),
+        ne(appointments.status, status),
         expectedUpdatedAt ? and(
-        gte(appointments.updatedAt, expectedUpdatedAt),
-        lt(appointments.updatedAt, new Date(expectedUpdatedAt.getTime() + 1)),
-      ) : undefined)).returning();
-    if (!appointment) throw new AppError("APPOINTMENT_CHANGED", "That appointment changed before its status could be updated.", 409);
+          gte(appointments.updatedAt, expectedUpdatedAt),
+          lt(appointments.updatedAt, new Date(expectedUpdatedAt.getTime() + 1)),
+        ) : undefined)).returning();
+    if (!appointment) {
+      const [current] = await tx.select().from(appointments).where(and(
+        eq(appointments.workspaceId, workspaceId), eq(appointments.id, appointmentId),
+      )).limit(1);
+      // An identical status request is a no-op, not a second business transition.
+      // Preserve the original change-conflict response for genuinely stale edits.
+      if (current?.status === status) return current;
+      throw new AppError("APPOINTMENT_CHANGED", "That appointment changed before its status could be updated.", 409);
+    }
     if (status === "CANCELLED") {
       await tx.insert(automationEvents).values({
         workspaceId,
         type: "APPOINTMENT_CANCELLED",
         aggregateType: "APPOINTMENT",
         aggregateId: appointment.id,
-        payload: { appointmentId: appointment.id, startsAt: appointment.startsAt.toISOString() },
-      }).onConflictDoNothing();
+        occurrenceKey: randomUUID(),
+        payload: { appointmentId: appointment.id, startsAt: appointment.startsAt.toISOString(), revision: appointment.revision },
+      });
     }
     return appointment;
   });

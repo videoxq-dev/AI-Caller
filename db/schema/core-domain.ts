@@ -157,6 +157,7 @@ export const appointments = pgTable(
     endsAt: timestamp("ends_at", { withTimezone: true, mode: "date" }).notNull(),
     timezone: text("timezone").notNull(),
     status: appointmentStatus("status").default("PENDING").notNull(),
+    revision: integer("revision").default(0).notNull(),
     bookingSource: text("booking_source"),
     notes: text("notes"),
     createdAt: timestamp("created_at", { withTimezone: true, mode: "date" }).defaultNow().notNull(),

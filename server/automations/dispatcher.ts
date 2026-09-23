@@ -12,6 +12,8 @@ import type { AutomationKey } from "./schemas";
 const appointmentPayloadSchema = z.object({
   appointmentId: z.string().uuid(),
   startsAt: z.string().datetime({ offset: true }),
+  // Legacy events were recorded before appointment revisions existed.
+  revision: z.number().int().nonnegative().default(0),
 });
 
 async function enqueueRun(run: {
@@ -119,7 +121,7 @@ async function scheduleAppointmentReminders(
       key: "APPOINTMENT_REMINDER",
       occurrenceKey: offset.key,
       scheduledFor,
-      metadata: { appointmentId: appointment.appointmentId, expectedStartsAt: appointment.startsAt, minutesBefore: offset.minutes },
+      metadata: { appointmentId: appointment.appointmentId, expectedStartsAt: appointment.startsAt, expectedAppointmentRevision: appointment.revision, minutesBefore: offset.minutes },
     });
     count += 1;
   }

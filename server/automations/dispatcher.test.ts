@@ -1,5 +1,6 @@
 import { afterAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { closeDatabase, db } from "@/db";
+import { enqueueUniqueJob } from "@/server/jobs";
 import {
   automationEvents,
   automationRuns,
@@ -96,5 +97,74 @@ describe("automation dispatcher", () => {
     const runs = await db.select().from(automationRuns);
     expect(runs.map((run) => run.occurrenceKey).sort()).toEqual(["before:120", "before:1440"]);
     expect(runs.every((run) => run.scheduledFor instanceof Date)).toBe(true);
+    expect(runs.every((run) => run.metadata.expectedAppointmentRevision === 0)).toBe(true);
+  });
+
+
+  it("persists the appointment revision with each scheduled reminder", async () => {
+    await db.insert(automationSettings).values({
+      workspaceId,
+      key: "APPOINTMENT_REMINDER",
+      enabled: true,
+      config: {
+        firstMinutesBefore: 1440, secondMinutesBefore: null,
+        channels: ["SMS"], message: "Reminder",
+        whatsappTemplateName: null, whatsappTemplateLanguage: "en_US",
+      },
+    });
+    const startsAt = new Date(Date.now() + 48 * 60 * 60 * 1000).toISOString();
+    const [event] = await db.insert(automationEvents).values({
+      workspaceId, type: "APPOINTMENT_RESCHEDULED",
+      aggregateType: "APPOINTMENT", aggregateId: "11111111-1111-4111-8111-111111111111",
+      payload: { appointmentId: "11111111-1111-4111-8111-111111111111", startsAt, revision: 7 },
+    }).returning();
+
+    await dispatchAutomationEvent(workspaceId, event.id);
+    const [run] = await db.select().from(automationRuns);
+    expect(run.metadata.expectedAppointmentRevision).toBe(7);
+    expect(run.metadata.expectedStartsAt).toBe(startsAt);
+  });
+
+  it("leaves an event recoverable if enqueue fails after the run is committed", async () => {
+    await db.insert(automationSettings).values({
+      workspaceId,
+      key: "QUALIFIED_LEAD_ASSIGNMENT",
+      enabled: true,
+      config: { assignedUserId: null, notifyInApp: true },
+    });
+    const [event] = await db.insert(automationEvents).values({
+      workspaceId, type: "LEAD_QUALIFIED",
+      aggregateType: "LEAD", aggregateId: "lead-recovery",
+    }).returning();
+
+    vi.mocked(enqueueUniqueJob).mockRejectedValueOnce(new Error("queue unavailable"));
+    await expect(dispatchAutomationEvent(workspaceId, event.id)).rejects.toThrow("queue unavailable");
+    const [undispatched] = await db.select().from(automationEvents);
+    expect(undispatched.dispatchedAt).toBeNull();
+    expect(await db.select().from(automationRuns)).toHaveLength(1);
+
+    await dispatchAutomationEvent(workspaceId, event.id);
+    const [recovered] = await db.select().from(automationEvents);
+    expect(recovered.dispatchedAt).not.toBeNull();
+    expect(await db.select().from(automationRuns)).toHaveLength(1);
+  });
+
+  it("creates one run even when two workers dispatch the same event concurrently", async () => {
+    await db.insert(automationSettings).values({
+      workspaceId,
+      key: "QUALIFIED_LEAD_ASSIGNMENT",
+      enabled: true,
+      config: { assignedUserId: null, notifyInApp: true },
+    });
+    const [event] = await db.insert(automationEvents).values({
+      workspaceId, type: "LEAD_QUALIFIED",
+      aggregateType: "LEAD", aggregateId: "lead-concurrent",
+    }).returning();
+
+    await Promise.all([
+      dispatchAutomationEvent(workspaceId, event.id),
+      dispatchAutomationEvent(workspaceId, event.id),
+    ]);
+    expect(await db.select().from(automationRuns)).toHaveLength(1);
   });
 });
