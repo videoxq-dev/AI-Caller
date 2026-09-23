@@ -114,7 +114,7 @@ try {
   approved = true;
   await page.getByRole("button", { name: "Refresh status" }).click();
   await card.locator(".waStatus").getByText("Approved").waitFor();
-  await context.setViewportSize({ width: 390, height: 844 });
+  await page.setViewportSize({ width: 390, height: 844 });
   await noOverflow(page, "mobile WhatsApp templates");
   await page.screenshot({ path: path.join(outputDir, "templates-mobile.png"), fullPage: true });
   assert(errors.length === 0, `Browser errors: ${errors.join("; ")}`);
