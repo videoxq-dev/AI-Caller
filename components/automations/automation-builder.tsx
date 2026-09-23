@@ -87,6 +87,7 @@ type ActivityItem = {
     actionIndex: number;
     actionType: Action["type"];
     status: "PENDING" | "RUNNING" | "COMPLETED" | "SKIPPED" | "FAILED" | "UNKNOWN" | "CANCELLED";
+    errorCode: string | null;
     errorMessage: string | null;
   }>;
 };
@@ -116,6 +117,25 @@ function runStatus(status: ActivityItem["run"]["status"]) {
   if (status === "CANCELLED") return "Cancelled";
   if (status === "RUNNING") return "Running";
   return "Pending";
+}
+
+function actionOutcome(action: ActivityItem["actions"][number]) {
+  if (action.status === "UNKNOWN" || action.errorCode === "INTERRUPTED_DELIVERY") {
+    return "Could not confirm delivery. It was not sent again automatically.";
+  }
+  if (action.errorCode === "SMS_CONSENT_REQUIRED") return "Customer has not opted in to SMS.";
+  if (action.errorCode?.startsWith("SMS_CAMPAIGN_")
+    || action.errorCode === "SMS_REGISTRATION_REQUIRED"
+    || action.errorCode === "SMS_REGISTRATION_REJECTED") {
+    return "SMS is not available for this message.";
+  }
+  if (action.errorCode === "WORKFLOW_STAFF_INVALID") return "Team member is no longer available.";
+  if (action.errorCode === "LEAD_NOT_QUALIFIED") return "Lead is no longer qualified.";
+  if (action.errorCode?.startsWith("APPOINTMENT_")) return "Appointment changed before this action ran.";
+  if (action.status === "SKIPPED") return "Action was skipped.";
+  if (action.status === "FAILED") return "Action could not be completed.";
+  if (action.status === "CANCELLED") return "Action was cancelled.";
+  return null;
 }
 
 export function AutomationBuilder() {
@@ -702,10 +722,10 @@ function ActivityView({
       <div className="runActions">
         {item.actions.map(action => <div key={action.actionIndex} className={`runAction ${action.status.toLowerCase()}`}>
           <span>{["COMPLETED"].includes(action.status) ? "✓" : action.status === "SKIPPED" ? "○" : action.status === "FAILED" || action.status === "UNKNOWN" ? "!" : "·"}</span>
-          <div><strong>{actionName(action.actionType)}</strong>{action.errorMessage && <small>{action.errorMessage}</small>}</div>
+          <div><strong>{actionName(action.actionType)}</strong>{actionOutcome(action) && <small>{actionOutcome(action)}</small>}</div>
         </div>)}
       </div>
-      {item.run.errorMessage && <p className="runError">{item.run.errorMessage}</p>}
+      {item.run.status === "FAILED" && <p className="runError">Automation stopped because an action could not be completed.</p>}
     </article>)}
   </div>;
 }
