@@ -363,17 +363,19 @@ export async function sendSmsConversationText(
   return sendSmsConversationTextWithRuntimeInternal(workspaceId, conversationId, runtime, input);
 }
 
-export async function sendPreclassifiedAutomationSms(
+type PreclassifiedAutomationSmsInput = {
+  text: string;
+  classifiedPurpose: SmsPurpose;
+  idempotencyKey: string;
+  metadata?: Record<string, unknown>;
+};
+
+export function sendPreclassifiedAutomationSmsWithRuntime(
   workspaceId: string,
   conversationId: string,
-  input: {
-    text: string;
-    classifiedPurpose: SmsPurpose;
-    idempotencyKey: string;
-    metadata?: Record<string, unknown>;
-  },
+  runtime: SmsRuntime,
+  input: PreclassifiedAutomationSmsInput,
 ) {
-  const runtime = await resolveSmsRuntimeForWorkspace(workspaceId);
   return sendSmsConversationTextWithRuntimeInternal(workspaceId, conversationId, runtime, {
     senderType: "SYSTEM",
     text: input.text,
@@ -381,4 +383,13 @@ export async function sendPreclassifiedAutomationSms(
     metadata: input.metadata,
     preclassifiedPurpose: input.classifiedPurpose,
   });
+}
+
+export async function sendPreclassifiedAutomationSms(
+  workspaceId: string,
+  conversationId: string,
+  input: PreclassifiedAutomationSmsInput,
+) {
+  const runtime = await resolveSmsRuntimeForWorkspace(workspaceId);
+  return sendPreclassifiedAutomationSmsWithRuntime(workspaceId, conversationId, runtime, input);
 }
