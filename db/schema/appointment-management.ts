@@ -38,6 +38,9 @@ export const appointmentManagementRequests = pgTable("appointment_management_req
     .where(sql`${table.status} IN ('COLLECTING', 'AWAITING_CONFIRMATION', 'EXECUTING')`),
   index("appointment_management_owner_idx")
     .on(table.workspaceId, table.contactId, table.conversationId, table.updatedAt),
+  index("appointment_management_unresolved_appointment_idx")
+    .on(table.workspaceId, table.contactId, table.appointmentId, table.updatedAt)
+    .where(sql`${table.status} IN ('EXECUTING', 'RECONCILING')`),
   index("appointment_management_expiry_idx")
     .on(table.status, table.expiresAt),
 ]);
