@@ -307,10 +307,12 @@ describe("automation executor safety", () => {
       workspaceId, eventId: event.id, workflowVersionId: firstVersion.id,
       actions: original.actions,
     });
-    expect((await createWorkflowRun({
+    if (!run) throw new Error("Published workflow unexpectedly became inactive.");
+    const duplicate = await createWorkflowRun({
       workspaceId, eventId: event.id, workflowVersionId: firstVersion.id,
       actions: original.actions,
-    })).id).toBe(run.id);
+    });
+    expect(duplicate?.id).toBe(run.id);
 
     await updateWorkflowDraft(workspaceId, definition.id, "High-scoring leads", {
       ...original, actions: [{ type: "NOTIFY_STAFF", title: "New message", message: "New published message." }],
