@@ -36,23 +36,30 @@ export function CustomAutomationHome({ canManage }: { canManage: boolean }) {
   const router = useRouter();
   const [items, setItems] = useState<WorkflowSummary[]>([]);
   const [loading, setLoading] = useState(true);
+  const [loadingMore, setLoadingMore] = useState(false);
+  const [nextOffset, setNextOffset] = useState<number | null>(null);
   const [creating, setCreating] = useState(false);
   const [chooserOpen, setChooserOpen] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const load = useCallback(async () => {
+  const load = useCallback(async (offset = 0) => {
+    if (offset) setLoadingMore(true);
+    setError(null);
     try {
-      const response = await fetch("/api/automations/workflows", { cache: "no-store" });
+      const response = await fetch(`/api/automations/workflows?offset=${offset}`, { cache: "no-store" });
       const data = await response.json().catch(() => null) as {
         items?: WorkflowSummary[];
+        nextOffset?: number | null;
         error?: { message?: string };
       } | null;
       if (!response.ok) throw new Error(data?.error?.message ?? "Unable to load automations.");
-      setItems(data?.items ?? []);
+      setItems(current => offset ? [...current, ...(data?.items ?? [])] : data?.items ?? []);
+      setNextOffset(data?.nextOffset ?? null);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Unable to load automations.");
     } finally {
-      setLoading(false);
+      if (offset) setLoadingMore(false);
+      else setLoading(false);
     }
   }, []);
 
@@ -83,7 +90,7 @@ export function CustomAutomationHome({ canManage }: { canManage: boolean }) {
 
   return <section className="customAutomationSection">
     <div className="customAutomationHeader">
-      <div><h2>Your automations</h2>{items.length > 0 && <span>{items.length}</span>}</div>
+      <div><h2>Your automations</h2>{items.length > 0 && <span>{items.length}{nextOffset !== null ? "+" : ""}</span>}</div>
       {canManage && <button className="createAutomationButton" onClick={() => setChooserOpen(true)}>+ Create automation</button>}
     </div>
 
@@ -110,6 +117,11 @@ export function CustomAutomationHome({ canManage }: { canManage: boolean }) {
         <span className="customAutomationArrow">›</span>
       </button>)}
     </div>}
+    {nextOffset !== null && <button
+      className="customAutomationMore"
+      disabled={loadingMore}
+      onClick={() => void load(nextOffset)}
+    >{loadingMore ? "Loading…" : "Load more"}</button>}
 
     {chooserOpen && <div className="starterBackdrop" role="presentation" onMouseDown={() => !creating && setChooserOpen(false)}>
       <div className="starterDialog" role="dialog" aria-modal="true" aria-label="Create automation" onMouseDown={event => event.stopPropagation()}>
