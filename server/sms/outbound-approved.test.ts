@@ -5,7 +5,7 @@ import { contacts, conversations, creditWallets, hostedApiRateCards, hostedPhone
 import { appendMessage, getOrCreateOpenConversation } from "@/server/domain/core/repository";
 import type { SmsRuntime } from "@/server/providers/sms/runtime";
 import { getSmsConsentStatus, recordSmsConsent } from "./consent";
-import { sendSmsConversationTextWithRuntime } from "./outbound";
+import { sendPreclassifiedAutomationSms, sendSmsConversationTextWithRuntime } from "./outbound";
 import { classifySmsPurpose } from "./classification";
 
 vi.mock("./classification", () => ({
@@ -104,6 +104,19 @@ describe("approved managed number outbound SMS", () => {
     await expect(sendSmsConversationTextWithRuntime(workspaceId, conversationId, runtime(), {
       senderType: "AI", text: "Your appointment is tomorrow.", to: "+12025550108",
     })).rejects.toMatchObject({ code: "SMS_CONSENT_REQUIRED" });
+    expect(send).not.toHaveBeenCalled();
+  });
+
+  it("executes preclassified automation SMS without an LLM call while retaining deterministic policy enforcement", async () => {
+    vi.mocked(classifySmsPurpose).mockClear();
+
+    await expect(sendPreclassifiedAutomationSms(workspaceId, conversationId, {
+      text: "Your appointment is tomorrow. Special offer: 25% discount.",
+      classifiedPurpose: "TRANSACTIONAL",
+      idempotencyKey: "workflow-delivery-1",
+    })).rejects.toMatchObject({ code: "SMS_CAMPAIGN_PURPOSE_NOT_APPROVED" });
+
+    expect(classifySmsPurpose).not.toHaveBeenCalled();
     expect(send).not.toHaveBeenCalled();
   });
 
