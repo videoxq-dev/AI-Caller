@@ -458,7 +458,7 @@ export async function handleAppointmentManagementTurn(
     return null;
   }
   if (!active && initialIntent === "STATUS") {
-    return { reply: statusReply(ctx, await linkedAppointments(ctx, now, true)) };
+    return { reply: await statusReply(ctx, await linkedAppointments(ctx, now, true)) };
   }
   if (active?.status === "EXECUTING") {
     return initialIntent || isExplicitActionConfirmation(message.body)
@@ -471,8 +471,8 @@ export async function handleAppointmentManagementTurn(
   }
   if (active && initialIntent === "STATUS") {
     return { reply: active.appointmentId
-      ? statusReply(ctx, (await linkedAppointments(ctx, now, true)).filter(row => row.id === active!.appointmentId))
-      : statusReply(ctx, await linkedAppointments(ctx, now, true)) };
+      ? await statusReply(ctx, (await linkedAppointments(ctx, now, true)).filter(row => row.id === active!.appointmentId))
+      : await statusReply(ctx, await linkedAppointments(ctx, now, true)) };
   }
   if (active && active.status === "AWAITING_CONFIRMATION" && isExplicitActionConfirmation(message.body)) {
     return finishRequest(ctx, active, message.id, now);
