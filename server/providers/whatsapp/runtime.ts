@@ -1,4 +1,5 @@
 import { and, eq, sql } from "drizzle-orm";
+import { AppError } from "@/server/http/errors";
 import { db } from "@/db";
 import { capabilityBindings, integrations } from "@/db/schema";
 import { getPrivateIntegration } from "@/server/domain/integrations/repository";
@@ -7,6 +8,7 @@ import { resolveProviderRoute } from "@/server/providers/resolver";
 import type { WhatsAppProvider } from "@/server/providers/contracts";
 import { createE2EWhatsAppProvider, isE2EProviderFixtureMode } from "@/server/providers/e2e-fixtures";
 import { createMetaWhatsAppProvider } from "./meta-cloud";
+import { createMetaTemplateClient } from "./meta-templates";
 
 export type WhatsAppRuntime = {
   workspaceId: string;
@@ -92,5 +94,27 @@ export async function resolveWhatsAppRuntimeForWorkspace(workspaceId: string, fe
     id: integration.id,
     encryptedCredentials: integration.encryptedCredentials,
     settings: integration.settings,
+  }, fetcher);
+}
+
+/** Template management uses the same connected WABA as sending, never a client-supplied WABA ID. */
+export async function resolveWhatsAppTemplatesForWorkspace(
+  workspaceId: string,
+  fetcher: typeof fetch = fetch,
+) {
+  let runtime: WhatsAppRuntime;
+  try {
+    runtime = await resolveWhatsAppRuntimeForWorkspace(workspaceId, fetcher);
+  } catch {
+    throw new AppError("WHATSAPP_NOT_CONNECTED", "Connect WhatsApp before managing templates.", 409);
+  }
+  const integration = await getPrivateIntegration(workspaceId, "whatsapp");
+  if (!integration || integration.id !== runtime.integrationId || !integration.encryptedCredentials) {
+    throw new AppError("WHATSAPP_NOT_CONNECTED", "Connect WhatsApp before managing templates.", 409);
+  }
+  const secret = credentials(integration.encryptedCredentials);
+  return createMetaTemplateClient({
+    accessToken: required(secret, "accessToken", "Meta access token"),
+    wabaId: runtime.wabaId,
   }, fetcher);
 }
