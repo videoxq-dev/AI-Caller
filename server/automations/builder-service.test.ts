@@ -93,7 +93,7 @@ describe("Phase 4 automation builder service", () => {
     const created = await createWorkflowDraft(workspaceId, starter.name, starter.definition);
 
     await expect(testBuilderWorkflow(workspaceId, created.id, {
-      qualificationScore: 90,
+      sample: { qualificationScore: 90 },
     })).resolves.toMatchObject({
       matches: true,
       conditions: [{
@@ -107,7 +107,7 @@ describe("Phase 4 automation builder service", () => {
     });
 
     await expect(testBuilderWorkflow(workspaceId, created.id, {
-      qualificationScore: 60,
+      sample: { qualificationScore: 60 },
     })).resolves.toMatchObject({
       matches: false,
       conditions: [{ matched: false }],
