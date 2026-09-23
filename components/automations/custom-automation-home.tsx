@@ -102,7 +102,7 @@ export function CustomAutomationHome({ canManage }: { canManage: boolean }) {
         <span className="customAutomationCopy">
           <span className="customAutomationNameRow">
             <strong>{item.name}</strong>
-            <i className={`builderStatus ${item.status.toLowerCase()}`}>{statusLabel(item.status)}</i>
+            <i className={`customAutomationStatus ${item.status.toLowerCase()}`}>{statusLabel(item.status)}</i>
           </span>
           <small>{item.triggerLabel}{item.actionLabels.length ? ` · ${item.actionLabels.join(" → ")}` : ""}</small>
         </span>
