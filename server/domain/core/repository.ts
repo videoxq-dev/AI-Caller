@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import {
   and,
   asc,
@@ -692,7 +693,7 @@ export async function updateNativeAppointmentAfterReschedule(
     await tx.insert(automationEvents).values({
       workspaceId, type: "APPOINTMENT_RESCHEDULED",
       aggregateType: "APPOINTMENT", aggregateId: appointment.id,
-      occurrenceKey: appointment.startsAt.toISOString(),
+      occurrenceKey: randomUUID(),
       payload: {
         appointmentId: appointment.id, contactId: appointment.contactId,
         conversationId: appointment.conversationId,
@@ -729,7 +730,7 @@ export async function updateAppointmentAfterReschedule(
       type: "APPOINTMENT_RESCHEDULED",
       aggregateType: "APPOINTMENT",
       aggregateId: appointment.id,
-      occurrenceKey: appointment.startsAt.toISOString(),
+      occurrenceKey: randomUUID(),
       payload: {
         appointmentId: appointment.id,
         contactId: appointment.contactId,
@@ -750,19 +751,29 @@ export async function setAppointmentStatus(
   return db.transaction(async (tx) => {
     const [appointment] = await tx.update(appointments).set({ status, updatedAt: new Date() })
       .where(and(eq(appointments.workspaceId, workspaceId), eq(appointments.id, appointmentId),
+        ne(appointments.status, status),
         expectedUpdatedAt ? and(
-        gte(appointments.updatedAt, expectedUpdatedAt),
-        lt(appointments.updatedAt, new Date(expectedUpdatedAt.getTime() + 1)),
-      ) : undefined)).returning();
-    if (!appointment) throw new AppError("APPOINTMENT_CHANGED", "That appointment changed before its status could be updated.", 409);
+          gte(appointments.updatedAt, expectedUpdatedAt),
+          lt(appointments.updatedAt, new Date(expectedUpdatedAt.getTime() + 1)),
+        ) : undefined)).returning();
+    if (!appointment) {
+      const [current] = await tx.select().from(appointments).where(and(
+        eq(appointments.workspaceId, workspaceId), eq(appointments.id, appointmentId),
+      )).limit(1);
+      // An identical status request is a no-op, not a second business transition.
+      // Preserve the original change-conflict response for genuinely stale edits.
+      if (current?.status === status) return current;
+      throw new AppError("APPOINTMENT_CHANGED", "That appointment changed before its status could be updated.", 409);
+    }
     if (status === "CANCELLED") {
       await tx.insert(automationEvents).values({
         workspaceId,
         type: "APPOINTMENT_CANCELLED",
         aggregateType: "APPOINTMENT",
         aggregateId: appointment.id,
+        occurrenceKey: randomUUID(),
         payload: { appointmentId: appointment.id, startsAt: appointment.startsAt.toISOString() },
-      }).onConflictDoNothing();
+      });
     }
     return appointment;
   });
