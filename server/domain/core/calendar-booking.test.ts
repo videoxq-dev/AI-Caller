@@ -181,6 +181,55 @@ describe("calendar booking service", () => {
     expect(calendar.reschedule).toHaveBeenCalledWith({ externalId: "event-1", ...next });
   });
 
+  it("does not mutate a provider appointment after its approval snapshot becomes stale", async () => {
+    const calendar = provider();
+    const service = createCalendarBookingService({
+      resolveCurrent: vi.fn(),
+      resolveForIntegration: vi.fn(async () => calendar),
+      insertAppointment: vi.fn(),
+      getAppointment: vi.fn(async () => ({
+        ...storedAppointment(),
+        updatedAt: new Date("2037-09-23T12:00:00.000Z"),
+      })),
+      updateAfterReschedule: vi.fn(),
+      setStatus: vi.fn(),
+    });
+    const proposal = {
+      startsAt: new Date("2037-09-24T10:00:00.000Z"),
+      endsAt: new Date("2037-09-24T10:30:00.000Z"),
+      timezone: "America/New_York",
+    };
+    await expect(service.reschedule(
+      "workspace-1", "appointment-1", proposal,
+      new Date("2037-09-22T12:00:00.000Z"),
+    )).rejects.toMatchObject({ code: "APPOINTMENT_CHANGED" });
+    expect(calendar.reschedule).not.toHaveBeenCalled();
+    await expect(service.cancel(
+      "workspace-1", "appointment-1",
+      new Date("2037-09-22T12:00:00.000Z"),
+    )).rejects.toMatchObject({ code: "APPOINTMENT_CHANGED" });
+    expect(calendar.cancel).not.toHaveBeenCalled();
+  });
+
+  it("does not silently change a connected provider event's local service only", async () => {
+    const calendar = provider();
+    const service = createCalendarBookingService({
+      resolveCurrent: vi.fn(),
+      resolveForIntegration: vi.fn(async () => calendar),
+      insertAppointment: vi.fn(),
+      getAppointment: vi.fn(async () => storedAppointment()),
+      updateAfterReschedule: vi.fn(),
+      setStatus: vi.fn(),
+    });
+    await expect(service.reschedule("workspace-1", "appointment-1", {
+      startsAt: new Date("2037-09-24T10:00:00.000Z"),
+      endsAt: new Date("2037-09-24T10:30:00.000Z"),
+      timezone: "America/New_York",
+    }, undefined, { serviceId: "different-service", title: "Industrial Cleaning" }))
+      .rejects.toMatchObject({ code: "APPOINTMENT_SERVICE_CHANGE_UNSUPPORTED" });
+    expect(calendar.reschedule).not.toHaveBeenCalled();
+  });
+
   it("rolls back the provider event if local booking persistence fails", async () => {
     const calendar = provider();
     const service = createCalendarBookingService({

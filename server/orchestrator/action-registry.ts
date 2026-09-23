@@ -47,6 +47,18 @@ export const agentActionRegistry = {
     confirmation: "EXPLICIT_CUSTOMER",
     description: "Commit a customer-approved appointment through the durable booking subsystem.",
   },
+  RESCHEDULE_APPOINTMENT: {
+    capability: "RESCHEDULE_APPOINTMENT",
+    risk: "CONSEQUENTIAL",
+    confirmation: "EXPLICIT_CUSTOMER",
+    description: "Reschedule an owned existing appointment after authoritative availability and explicit approval.",
+  },
+  CANCEL_APPOINTMENT: {
+    capability: "CANCEL_APPOINTMENT",
+    risk: "CONSEQUENTIAL",
+    confirmation: "EXPLICIT_CUSTOMER",
+    description: "Cancel an owned existing appointment after explicit customer approval.",
+  },
   RECORD_SMS_CONSENT: {
     capability: "RECORD_SMS_CONSENT",
     risk: "MUTATING",
@@ -82,6 +94,7 @@ const realtimeToolCapabilityRules = {
   capture_booking_details: ["CHECK_AVAILABILITY", "BOOK_APPOINTMENT"],
   check_availability: ["CHECK_AVAILABILITY"],
   book_appointment: ["BOOK_APPOINTMENT"],
+  manage_appointment: ["RESCHEDULE_APPOINTMENT", "CANCEL_APPOINTMENT"],
   escalate_to_staff: ["ESCALATE"],
   qualify_lead: ["QUALIFY_LEAD"],
 } as const satisfies Record<string, readonly AgentCapability[]>;

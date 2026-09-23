@@ -92,6 +92,13 @@ function replayActionType(action: RegisteredAgentActionName): OrchestratorEnvelo
   if (action === "ANSWER_INQUIRY" || action === "UPDATE_CONTACT" || action === "UPDATE_LEAD") {
     return "NONE";
   }
+  // Existing-appointment changes use their own durable, approval-gated
+  // management requests. They must never be replayed by the booking/action
+  // orchestrator as though they were new-booking operations.
+  if (action === "RESCHEDULE_APPOINTMENT" || action === "CANCEL_APPOINTMENT") {
+    throw new AppError("APPOINTMENT_MANAGEMENT_REPLAY_UNSUPPORTED",
+      "Appointment changes require their saved management request for reconciliation.", 409);
+  }
   return action;
 }
 

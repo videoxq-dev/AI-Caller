@@ -4,6 +4,9 @@ import { enqueueUniqueJob } from "@/server/jobs";
 import { WHATSAPP_INBOUND_RESPONSE, whatsappInboundResponseJobSchema, type WhatsAppInboundResponseJob } from "@/server/jobs/queues";
 import { responseOrchestrator } from "@/server/orchestrator";
 import { handleBookingTurn } from "@/server/booking/conversation";
+import {
+  handleAppointmentManagementTurn, recordAppointmentManagementPreviewDelivery,
+} from "@/server/booking/management";
 import { recordBookingPreviewDelivery } from "@/server/booking/offers";
 import { shouldUseBookingV2 } from "@/server/booking/rollout";
 import type { NormalizedWhatsAppEvent, WhatsAppWebhookInput } from "@/server/providers/contracts";
@@ -235,13 +238,18 @@ export function createWhatsAppWebhookService(dependencies: WhatsAppServiceDepend
           conversationId: conversation.id, channel: "WHATSAPP" as const,
           sessionKey: `WHATSAPP:${conversation.id}`,
         };
-        const bookingTurn = conversation.handlingMode === "AI" &&
+        const managementTurn = conversation.handlingMode === "AI"
+          ? await handleAppointmentManagementTurn(
+              bookingContext, { id: inbound.id, body: job.text },
+            )
+          : null;
+        const bookingTurn = !managementTurn && conversation.handlingMode === "AI" &&
           await shouldUseBookingV2(bookingContext)
           ? await handleBookingTurn(bookingContext, { id: inbound.id, body: job.text })
           : null;
-        const orchestrated = bookingTurn ? null
+        const orchestrated = managementTurn || bookingTurn ? null
           : await dependencies.respond(job.workspaceId, conversation.id);
-        const reply = bookingTurn?.reply ?? orchestrated?.reply ?? null;
+        const reply = managementTurn?.reply ?? bookingTurn?.reply ?? orchestrated?.reply ?? null;
         if (!reply) {
           await completeProviderWebhookEvent(job.workspaceId, job.webhookEventId);
           return { skipped: false as const, replied: false as const };
@@ -251,12 +259,26 @@ export function createWhatsAppWebhookService(dependencies: WhatsAppServiceDepend
           const outbound = await dependencies.sendText(job.workspaceId, conversation.id, {
             senderType: "AI",
             text: reply,
-            metadata: bookingTurn?.preview ? {
+            metadata: managementTurn?.preview
+              ? { appointmentManagementRequestId: managementTurn.preview.requestId,
+                    appointmentManagementVersion: managementTurn.preview.version }
+              : bookingTurn?.preview ? {
               bookingPreviewId: bookingTurn.preview.previewId,
               bookingDraftId: bookingTurn.preview.draftId,
               bookingVersion: bookingTurn.preview.version,
             } : undefined,
           });
+          if (managementTurn?.preview) {
+            const messageId = outbound && typeof outbound === "object" &&
+              "id" in outbound && typeof (outbound as { id?: unknown }).id === "string"
+                ? (outbound as { id: string }).id : null;
+            if (!messageId) throw new AppError("APPOINTMENT_MANAGEMENT_DELIVERY_UNVERIFIED",
+              "WhatsApp accepted no durable receipt for the appointment-change preview.", 503);
+            await recordAppointmentManagementPreviewDelivery(
+              bookingContext, managementTurn.preview.requestId, messageId,
+              managementTurn.preview.version,
+            );
+          }
           if (bookingTurn?.preview) {
             const messageId = outbound && typeof outbound === "object" &&
               "id" in outbound && typeof (outbound as { id?: unknown }).id === "string"

@@ -1,6 +1,10 @@
 import WebSocket from "ws";
+import { and, eq } from "drizzle-orm";
+import { db } from "@/db";
+import { messages } from "@/db/schema";
 import { appendMessage } from "@/server/domain/core/repository";
 import { recordBookingPreviewDelivery } from "@/server/booking/offers";
+import { recordAppointmentManagementPreviewDelivery } from "@/server/booking/management";
 import { releaseCreditReservation } from "@/server/credits/service";
 import { getEnv } from "@/server/env";
 import { logger } from "@/server/observability/logger";
@@ -237,6 +241,10 @@ export function attachRealtimeMedia({ telnyx, identity, streamId }: BridgeOption
       call.metadata.bookingAwaitingRealtimeDelivery &&
       typeof call.metadata.bookingAwaitingRealtimeDelivery === "object"
         ? call.metadata.bookingAwaitingRealtimeDelivery as Record<string, unknown> : null;
+    const managementPending = call.metadata.appointmentManagementAwaitingRealtimeDelivery
+      && typeof call.metadata.appointmentManagementAwaitingRealtimeDelivery === "object"
+      ? call.metadata.appointmentManagementAwaitingRealtimeDelivery as Record<string, unknown>
+      : null;
     const eventId = `${id}:${itemId}:ai`;
     const segment = await appendVoiceTranscriptSegment(workspaceId, callId, {
       speaker: "AI", text: transcript, externalEventId: eventId,
@@ -248,6 +256,11 @@ export function attachRealtimeMedia({ telnyx, identity, streamId }: BridgeOption
       metadata: { voiceCallId: callId, transcriptSegmentId: segment.id,
         voiceMode: call.mode, realtimeModel: call.metadata.realtimeModel,
         potentiallyInterrupted: interruptedResponseIds.has(id),
+        ...(managementPending && typeof managementPending.requestId === "string" &&
+          typeof managementPending.version === "number" ? {
+          appointmentManagementRequestId: managementPending.requestId,
+          appointmentManagementVersion: managementPending.version,
+        } : {}),
         ...(pending && typeof pending.draftId === "string" &&
           typeof pending.previewId === "string" && typeof pending.version === "number" ? {
           bookingDraftId: pending.draftId,
@@ -279,8 +292,40 @@ export function attachRealtimeMedia({ telnyx, identity, streamId }: BridgeOption
     const messageId = await messagePromise;
     if (!messageId) return;
     const call = await getVoiceCall(workspaceId, callId);
-    const pending = call?.metadata.bookingAwaitingRealtimeDelivery;
-    if (!call || call.bookingEngineVersion !== "v2" ||
+    if (!call) return;
+    const management = call.metadata.appointmentManagementAwaitingRealtimeDelivery;
+    if (management && typeof management === "object") {
+      const data = management as Record<string, unknown>;
+      if (typeof data.requestId === "string" && typeof data.version === "number") {
+        const [spoken] = await db.select({ body: messages.body })
+          .from(messages).where(and(
+            eq(messages.workspaceId, workspaceId),
+            eq(messages.conversationId, call.conversationId),
+            eq(messages.id, messageId),
+            eq(messages.senderType, "AI"),
+            eq(messages.channel, "PHONE"),
+          )).limit(1);
+        // Do not accept an unrelated response as a delivered approval preview.
+        if (spoken && /\bconfirm\b/i.test(spoken.body) &&
+          /\bappointment\b/i.test(spoken.body)) {
+          try {
+            await recordAppointmentManagementPreviewDelivery({
+              workspaceId, contactId: call.contactId,
+              conversationId: call.conversationId,
+              channel: "PHONE", sessionKey: call.id,
+            }, data.requestId, messageId, data.version);
+            await updateVoiceCall(workspaceId, callId, {}, {
+              appointmentManagementAwaitingRealtimeDelivery: null,
+            });
+          } catch (err) {
+            logger.warn({ err, workspaceId, callId, responseId },
+              "Realtime appointment-management readback was not verified");
+          }
+        }
+      }
+    }
+    const pending = call.metadata.bookingAwaitingRealtimeDelivery;
+    if (call.bookingEngineVersion !== "v2" ||
       !pending || typeof pending !== "object") return;
     const data = pending as Record<string, unknown>;
     if (typeof data.draftId !== "string" || typeof data.previewId !== "string" ||

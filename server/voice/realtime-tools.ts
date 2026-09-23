@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import { z } from "zod";
 import { and, desc, eq, sql } from "drizzle-orm";
 import { db } from "@/db";
@@ -17,6 +18,7 @@ import { prepareBookingPreview, searchBookingAvailability, selectBookingOffer } 
 import { parseBookingDate, parseBookingTime } from "@/server/booking/time";
 import { getBusinessSetup } from "@/server/domain/onboarding/repository";
 import { assertRealtimeBookingReady, captureRealtimeBookingDetails, getRealtimeBookingDetails, realtimeBookingDetailsSchema, saveRealtimeAvailability, sameBookingInstant } from "./realtime-booking";
+import { handleAppointmentManagementTurn } from "@/server/booking/management";
 import { getVoiceCall, updateVoiceCall } from "./repository";
 
 export const realtimeTools = [
@@ -50,6 +52,13 @@ export const realtimeTools = [
       timezone: { type: "string" }, title: { type: "string" },
       serviceId: { type: ["string", "null"] }, notes: { type: ["string", "null"] },
     }, required: ["startsAt", "endsAt", "timezone", "title"] },
+  },
+  {
+    type: "function", name: "manage_appointment",
+    description: "ONLY for an existing customer's appointment: check its status, reschedule its date/time, or cancel it. Do not use new-booking tools for these requests. Quote the caller's latest words as message; the server finds owned appointments, gathers details, checks availability and requires a delivered readback plus persisted explicit caller approval before a change.",
+    parameters: { type: "object", properties: {
+      message: { type: "string", description: "The caller's latest request or confirmation words as spoken. Never invent an approval." },
+    }, required: ["message"] },
   },
   {
     type: "function", name: "escalate_to_staff",
@@ -462,6 +471,57 @@ export async function runRealtimeBusinessTool(input: {
   try { args = record(JSON.parse(input.arguments)); }
   catch { return { ok: false, reason: "The tool arguments were invalid." }; }
 
+  if (input.name === "manage_appointment") {
+    const parsed = z.object({ message: z.string().trim().min(1).max(500) }).strict()
+      .safeParse(args);
+    if (!parsed.success) {
+      return { ok: false as const, reason: "Please repeat the appointment request." };
+    }
+    if (!input.isCurrentTurn()) {
+      return { ok: false as const, reason: "The caller corrected the request." };
+    }
+    const ctx = bookingContext(input);
+    const [utterance] = await db.select({
+      id: messages.id, body: messages.body, createdAt: messages.createdAt,
+    }).from(messages).where(and(
+      eq(messages.workspaceId, input.workspaceId),
+      eq(messages.conversationId, input.conversationId),
+      eq(messages.channel, "PHONE"),
+      eq(messages.senderType, "CUSTOMER"),
+      eq(messages.contentType, "CALL_TRANSCRIPT"),
+      sql`${messages.metadata}->>'voiceCallId' = ${input.callId}`,
+    )).orderBy(desc(messages.createdAt), desc(messages.id)).limit(1);
+    // The model's words can help gather a proposal, but only a persisted
+    // same-call caller utterance can approve a consequential change.
+    const body = parsed.data.message;
+    const sourceId = utterance?.id ?? randomUUID();
+    const turn = await handleAppointmentManagementTurn(ctx, { id: sourceId, body });
+    if (!turn) return { ok: false as const, reason: "No existing appointment-management request matched. Continue the normal conversation." };
+    if (!input.isCurrentTurn()) {
+      return { ok: false as const, reason: "The caller corrected the request. Do not describe a change as completed." };
+    }
+    if (turn.preview) {
+      await updateVoiceCall(input.workspaceId, input.callId, {}, {
+        appointmentManagementAwaitingRealtimeDelivery: {
+          requestId: turn.preview.requestId,
+          version: turn.preview.version,
+        },
+      });
+    }
+    return {
+      ok: true as const,
+      kind: "appointment_management" as const,
+      data: {
+        ...(turn.preview ? {
+          requestId: turn.preview.requestId,
+          version: turn.preview.version,
+          awaitingConfirmation: true,
+        } : {}),
+        spokenInstruction: turn.reply,
+      },
+    };
+  }
+
   if (call.bookingEngineVersion === "v2" &&
       ["capture_booking_details", "check_availability", "book_appointment"].includes(input.name)) {
     try {
@@ -651,6 +711,16 @@ REALTIME CALL: Speak naturally and concisely, never produce JSON to the caller.
 Listen through natural pauses; consider the latest correction authoritative. Keep
 known service, location, date, time and timezone in working memory. Ask ONLY for
 missing details; when the caller supplies a date, ask for time rather than both.
+EXISTING APPOINTMENT MANAGEMENT: If the caller asks to update, reschedule,
+cancel or check an EXISTING appointment, call manage_appointment with the
+caller's latest words. Never start capture_booking_details, check_availability,
+or book_appointment merely because the caller mentioned an existing appointment.
+Read the server's spokenInstruction faithfully, including the current and proposed
+appointment and request to approve it. Do not claim a change completed unless the
+tool says so. On approval call manage_appointment again only after the caller
+explicitly says yes to the spoken proposal. A carrier transcript may lag live speech;
+if the server cannot verify approval, ask the caller to repeat it. The server
+owns appointment identity, availability, modification and cancellation.
 BOOKING TOOL SEQUENCE:
 1. Call capture_booking_details with the service and the caller's original
 dateExpression/timeExpression words from THIS call; call it again on every

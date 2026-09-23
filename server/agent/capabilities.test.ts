@@ -17,6 +17,22 @@ describe("agent capability policy", () => {
       .toThrow("administrator review");
   });
 
+  it("preserves legacy appointment permissions when new management keys are absent", () => {
+    const {
+      RESCHEDULE_APPOINTMENT: _reschedule,
+      CANCEL_APPOINTMENT: _cancel,
+      ...legacy
+    } = defaultAgentCapabilities;
+    const oldPolicy = capabilitiesFromBehaviorSettings({ capabilities: legacy });
+    expect(oldPolicy).toEqual(defaultAgentCapabilities);
+    const disabled = capabilitiesFromBehaviorSettings({
+      capabilities: { ...legacy, BOOK_APPOINTMENT: false },
+    });
+    expect(disabled.BOOK_APPOINTMENT).toBe(false);
+    expect(disabled.RESCHEDULE_APPOINTMENT).toBe(false);
+    expect(disabled.CANCEL_APPOINTMENT).toBe(false);
+  });
+
   it("rejects disabled booking even when the planner supplies a well-formed action", () => {
     const policy = agentCapabilitiesSchema.parse({ ...defaultAgentCapabilities, BOOK_APPOINTMENT: false });
     try {

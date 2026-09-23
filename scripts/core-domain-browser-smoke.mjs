@@ -163,6 +163,37 @@ async function verifyDesktop() {
   await assertNoHorizontalOverflow(page, "Appointments desktop");
   await page.screenshot({ path: path.join(outputDir, "appointments-desktop.png"), fullPage: true });
 
+  // The reschedule drawer used to present an inert "via conversation"
+  // button. Verify that the new form issues a real appointment update.
+  let rescheduleRequest = null;
+  await page.route("**/api/appointments/*/reschedule", async (route) => {
+    rescheduleRequest = {
+      url: route.request().url(),
+      method: route.request().method(),
+      input: route.request().postDataJSON(),
+    };
+    await route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify({ appointment: { status: "CONFIRMED" } }),
+    });
+  });
+  await page.getByRole("button", { name: "Reschedule appointment" }).click();
+  const newStart = new Date(Date.now() + 48 * 60 * 60_000);
+  newStart.setUTCMinutes(0, 0, 0);
+  await page.getByLabel("New appointment start").fill(newStart.toISOString().slice(0, 16));
+  await page.getByRole("button", { name: "Confirm reschedule" }).click();
+  await page.getByRole("button", { name: "Reschedule appointment" }).waitFor();
+  assert(rescheduleRequest?.method === "POST", "Appointment drawer did not submit a POST reschedule request.");
+  assert(new URL(rescheduleRequest.url).pathname.startsWith("/api/appointments/") &&
+    new URL(rescheduleRequest.url).pathname.endsWith("/reschedule"),
+    "Appointment drawer submitted to the wrong reschedule API.");
+  assert(Date.parse(rescheduleRequest.input.startsAt) > Date.now(),
+    "Appointment drawer sent an invalid past start.");
+  assert(Date.parse(rescheduleRequest.input.endsAt) > Date.parse(rescheduleRequest.input.startsAt),
+    "Appointment drawer sent an invalid end.");
+  await page.unroute("**/api/appointments/*/reschedule");
+
   await page.goto(`${baseUrl}/inbox`, { waitUntil: "networkidle" });
   await page.getByRole("heading", { name: "Inbox", level: 1 }).waitFor();
   await waitForText(page, "I need a consultation from web chat.");

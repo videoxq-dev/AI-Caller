@@ -25,6 +25,7 @@ import {
   conversations,
   leads,
   messages,
+  services,
 } from "@/db/schema";
 import { AppError } from "@/server/http/errors";
 import {
@@ -626,6 +627,8 @@ export async function updateNativeAppointmentAfterReschedule(
   appointmentId: string,
   input: AppointmentRescheduleInput,
   policy: NativeBookingPolicy,
+  expectedUpdatedAt?: Date,
+  serviceChange?: { serviceId: string; title: string },
 ) {
   return db.transaction(async tx => {
     await tx.execute(sql`SELECT pg_advisory_xact_lock(hashtext(${workspaceId}))`);
@@ -633,8 +636,24 @@ export async function updateNativeAppointmentAfterReschedule(
       eq(appointments.workspaceId, workspaceId), eq(appointments.id, appointmentId),
     )).limit(1);
     if (!previous) throw new AppError("APPOINTMENT_NOT_FOUND", "Appointment not found.", 404);
-    if (previous.status === "CANCELLED") {
-      throw new AppError("APPOINTMENT_CANCELLED", "Cancelled appointments cannot be rescheduled.", 409);
+    if (!["PENDING", "CONFIRMED"].includes(previous.status)) {
+      throw new AppError("APPOINTMENT_NOT_EDITABLE", "Only upcoming confirmed or pending appointments can be rescheduled.", 409);
+    }
+    if (expectedUpdatedAt && previous.updatedAt.getTime() !== expectedUpdatedAt.getTime()) {
+      throw new AppError("APPOINTMENT_CHANGED", "That appointment changed. Please review its current time before rescheduling.", 409);
+    }
+    if (serviceChange) {
+      const [service] = await tx.select().from(services).where(and(
+        eq(services.workspaceId, workspaceId),
+        eq(services.id, serviceChange.serviceId),
+        eq(services.active, true),
+      )).limit(1);
+      const duration = (input.endsAt.getTime() - input.startsAt.getTime()) / 60_000;
+      if (!service || service.name !== serviceChange.title ||
+        service.durationMinutes !== duration) {
+        throw new AppError("APPOINTMENT_SERVICE_CHANGED",
+          "The service or its configured duration changed. Please review the appointment again.", 409);
+      }
     }
     const existing = await tx.select({
       startsAt: appointments.startsAt,
@@ -659,8 +678,17 @@ export async function updateNativeAppointmentAfterReschedule(
     assertNativePolicyAvailability(input, [...existing, ...reservations], policy);
     const [appointment] = await tx.update(appointments).set({
       startsAt: input.startsAt, endsAt: input.endsAt, timezone: input.timezone,
+      ...(serviceChange ? {
+        serviceId: serviceChange.serviceId,
+        title: serviceChange.title,
+      } : {}),
       status: "CONFIRMED", updatedAt: new Date(),
-    }).where(and(eq(appointments.workspaceId, workspaceId), eq(appointments.id, appointmentId))).returning();
+    }).where(and(eq(appointments.workspaceId, workspaceId), eq(appointments.id, appointmentId),
+      expectedUpdatedAt ? and(
+        gte(appointments.updatedAt, expectedUpdatedAt),
+        lt(appointments.updatedAt, new Date(expectedUpdatedAt.getTime() + 1)),
+      ) : undefined)).returning();
+    if (!appointment) throw new AppError("APPOINTMENT_CHANGED", "That appointment changed before rescheduling.", 409);
     await tx.insert(automationEvents).values({
       workspaceId, type: "APPOINTMENT_RESCHEDULED",
       aggregateType: "APPOINTMENT", aggregateId: appointment.id,
@@ -680,6 +708,7 @@ export async function updateAppointmentAfterReschedule(
   appointmentId: string,
   input: AppointmentRescheduleInput,
   externalEventId?: string,
+  expectedUpdatedAt?: Date,
 ) {
   return db.transaction(async (tx) => {
     const [appointment] = await tx.update(appointments).set({
@@ -689,8 +718,12 @@ export async function updateAppointmentAfterReschedule(
       externalEventId: externalEventId,
       status: "CONFIRMED",
       updatedAt: new Date(),
-    }).where(and(eq(appointments.workspaceId, workspaceId), eq(appointments.id, appointmentId))).returning();
-    if (!appointment) throw new AppError("APPOINTMENT_NOT_FOUND", "Appointment not found.", 404);
+    }).where(and(eq(appointments.workspaceId, workspaceId), eq(appointments.id, appointmentId),
+      expectedUpdatedAt ? and(
+        gte(appointments.updatedAt, expectedUpdatedAt),
+        lt(appointments.updatedAt, new Date(expectedUpdatedAt.getTime() + 1)),
+      ) : undefined)).returning();
+    if (!appointment) throw new AppError("APPOINTMENT_CHANGED", "That appointment changed before rescheduling.", 409);
     await tx.insert(automationEvents).values({
       workspaceId,
       type: "APPOINTMENT_RESCHEDULED",
@@ -712,11 +745,16 @@ export async function setAppointmentStatus(
   workspaceId: string,
   appointmentId: string,
   status: "PENDING" | "CONFIRMED" | "COMPLETED" | "CANCELLED" | "NO_SHOW",
+  expectedUpdatedAt?: Date,
 ) {
   return db.transaction(async (tx) => {
     const [appointment] = await tx.update(appointments).set({ status, updatedAt: new Date() })
-      .where(and(eq(appointments.workspaceId, workspaceId), eq(appointments.id, appointmentId))).returning();
-    if (!appointment) throw new AppError("APPOINTMENT_NOT_FOUND", "Appointment not found.", 404);
+      .where(and(eq(appointments.workspaceId, workspaceId), eq(appointments.id, appointmentId),
+        expectedUpdatedAt ? and(
+        gte(appointments.updatedAt, expectedUpdatedAt),
+        lt(appointments.updatedAt, new Date(expectedUpdatedAt.getTime() + 1)),
+      ) : undefined)).returning();
+    if (!appointment) throw new AppError("APPOINTMENT_CHANGED", "That appointment changed before its status could be updated.", 409);
     if (status === "CANCELLED") {
       await tx.insert(automationEvents).values({
         workspaceId,
