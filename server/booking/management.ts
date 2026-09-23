@@ -245,10 +245,14 @@ function errorMessage(error: unknown) {
   return "I couldn't verify the appointment change. Please ask the business team to check it before trying again.";
 }
 
-function statusReply(rows: Appointment[]) {
+async function statusReply(ctx: BookingContext, rows: Appointment[]) {
   if (!rows.length) return "I can't find an appointment linked to this conversation's contact. Please ask the business team to verify a booking made through a different contact or session.";
   if (rows.length > 5) return "There are several linked appointments; please ask the business team which one you mean.";
-  return rows.map(row => appointmentLabel(row) + " — " + row.status.toLowerCase()).join("; ") + ".";
+  const details = await Promise.all(rows.map(async row => {
+    const unresolved = await unresolvedChange(ctx, row);
+    return unresolved ?? appointmentLabel(row) + " — " + row.status.toLowerCase();
+  }));
+  return details.join("; ") + ".";
 }
 
 async function finishRequest(ctx: BookingContext, row: RequestRow, sourceMessageId: string, now: Date) {
@@ -377,7 +381,27 @@ async function finishRequest(ctx: BookingContext, row: RequestRow, sourceMessage
       status: knownRejection ? "FAILED" : "RECONCILING",
       completedAt: knownRejection ? new Date() : null, updatedAt: new Date(),
     }).where(eq(appointmentManagementRequests.id, row.id));
-    return { reply: errorMessage(error) + " I haven't confirmed that your appointment was changed; please ask the business team to verify it." };
+    let reply = errorMessage(error) +
+      " I haven't confirmed that your appointment was changed; please ask the business team to verify it.";
+    if (!knownRejection && ctx.conversationId) {
+      try {
+        const agent = await getWorkspaceAgent(ctx.workspaceId);
+        if (agent && /escalate/i.test(agent.whenUnsure)
+          && capabilitiesFromBehaviorSettings(agent.behaviorSettings).ESCALATE) {
+          await escalateConversationIssue({
+            workspaceId: ctx.workspaceId, conversationId: ctx.conversationId,
+            reason: "Existing appointment " + appointment.id +
+              " has an uncertain calendar mutation (" + row.intent +
+              "); staff must reconcile its provider and saved appointment state.",
+          });
+          reply += " I've flagged this specific appointment issue for staff follow-up.";
+        }
+      } catch (escalationError) {
+        logger.error({ err: escalationError, workspaceId: ctx.workspaceId,
+          appointmentId: appointment.id }, "Uncertain appointment outcome could not be escalated");
+      }
+    }
+    return { reply };
   }
 }
 
@@ -434,7 +458,7 @@ export async function handleAppointmentManagementTurn(
     return null;
   }
   if (!active && initialIntent === "STATUS") {
-    return { reply: statusReply(await linkedAppointments(ctx, now, true)) };
+    return { reply: statusReply(ctx, await linkedAppointments(ctx, now, true)) };
   }
   if (active?.status === "EXECUTING") {
     return initialIntent || isExplicitActionConfirmation(message.body)
@@ -447,8 +471,8 @@ export async function handleAppointmentManagementTurn(
   }
   if (active && initialIntent === "STATUS") {
     return { reply: active.appointmentId
-      ? statusReply((await linkedAppointments(ctx, now, true)).filter(row => row.id === active!.appointmentId))
-      : statusReply(await linkedAppointments(ctx, now, true)) };
+      ? statusReply(ctx, (await linkedAppointments(ctx, now, true)).filter(row => row.id === active!.appointmentId))
+      : statusReply(ctx, await linkedAppointments(ctx, now, true)) };
   }
   if (active && active.status === "AWAITING_CONFIRMATION" && isExplicitActionConfirmation(message.body)) {
     return finishRequest(ctx, active, message.id, now);
