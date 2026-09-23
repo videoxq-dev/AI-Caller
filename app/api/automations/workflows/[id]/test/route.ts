@@ -1,5 +1,5 @@
 import { resolveWorkspaceContext } from "@/server/auth/workspace-context";
-import { testBuilderWorkflow } from "@/server/automations/builder-service";
+import { testBuilderWorkflow, parseBuilderWorkflowId } from "@/server/automations/builder-service";
 import { toErrorResponse } from "@/server/http/errors";
 
 export async function POST(
@@ -8,7 +8,7 @@ export async function POST(
 ) {
   try {
     const context = await resolveWorkspaceContext(request.headers);
-    const { id } = await params;
+    const id = parseBuilderWorkflowId((await params).id);
     const result = await testBuilderWorkflow(
       context.workspace.id,
       id,
