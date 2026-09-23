@@ -88,7 +88,7 @@ try {
   await page.getByRole("heading", { name: "Message templates" }).waitFor();
   await page.getByText("welcome message").waitFor();
   await page.getByRole("button", { name: "Load more" }).click();
-  await page.getByText("outdated offer").waitFor();
+  await page.getByText("outdated offer", { exact: true }).waitFor();
   const rejected = page.locator(".waTemplateCard").filter({ hasText: "outdated offer" });
   await rejected.locator("summary").click();
   await rejected.getByText("Meta rejection reason: POLICY").waitFor();
