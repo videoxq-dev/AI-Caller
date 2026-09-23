@@ -19,8 +19,10 @@ const createSchema = z.object({
 export async function GET(request: Request) {
   try {
     const context = await resolveWorkspaceContext(request.headers);
-    const offset = z.coerce.number().int().min(0).max(100000)
-      .parse(new URL(request.url).searchParams.get("offset") ?? "0");
+    const offset = parseInput(
+      z.coerce.number().int().min(0).max(100000),
+      new URL(request.url).searchParams.get("offset") ?? "0",
+    );
     const pageSize = 50;
     const page = await listBuilderWorkflows(context.workspace.id, offset, pageSize);
     // Fetch the next item without traversing unlimited historical definitions.
