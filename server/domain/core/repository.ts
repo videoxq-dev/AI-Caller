@@ -520,6 +520,7 @@ export async function insertAppointment(
           contactId: appointment.contactId,
           conversationId: appointment.conversationId,
           startsAt: appointment.startsAt.toISOString(),
+          revision: appointment.revision,
         },
       }).onConflictDoNothing();
     }
@@ -617,6 +618,7 @@ export async function insertNativeAppointment(
         appointmentId: appointment.id, contactId: appointment.contactId,
         conversationId: appointment.conversationId,
         startsAt: appointment.startsAt.toISOString(),
+        revision: appointment.revision,
       },
     }).onConflictDoNothing();
     return appointment;
@@ -691,6 +693,7 @@ export async function updateNativeAppointmentAfterReschedule(
         title: serviceChange.title,
       } : {}),
       status: "CONFIRMED", updatedAt: new Date(),
+      revision: sql`${appointments.revision} + 1`,
     }).where(and(eq(appointments.workspaceId, workspaceId), eq(appointments.id, appointmentId),
       expectedUpdatedAt ? and(
         gte(appointments.updatedAt, expectedUpdatedAt),
@@ -705,6 +708,7 @@ export async function updateNativeAppointmentAfterReschedule(
         appointmentId: appointment.id, contactId: appointment.contactId,
         conversationId: appointment.conversationId,
         startsAt: appointment.startsAt.toISOString(),
+        revision: appointment.revision,
       },
     });
     return appointment;
@@ -737,6 +741,7 @@ export async function updateAppointmentAfterReschedule(
       timezone: input.timezone,
       externalEventId: externalEventId,
       status: "CONFIRMED",
+      revision: sql`${appointments.revision} + 1`,
       updatedAt: new Date(),
     }).where(and(eq(appointments.workspaceId, workspaceId), eq(appointments.id, appointmentId),
       expectedUpdatedAt ? and(
@@ -755,6 +760,7 @@ export async function updateAppointmentAfterReschedule(
         contactId: appointment.contactId,
         conversationId: appointment.conversationId,
         startsAt: appointment.startsAt.toISOString(),
+        revision: appointment.revision,
       },
     });
     return appointment;
@@ -768,7 +774,7 @@ export async function setAppointmentStatus(
   expectedUpdatedAt?: Date,
 ) {
   return db.transaction(async (tx) => {
-    const [appointment] = await tx.update(appointments).set({ status, updatedAt: new Date() })
+    const [appointment] = await tx.update(appointments).set({ status, revision: sql`${appointments.revision} + 1`, updatedAt: new Date() })
       .where(and(eq(appointments.workspaceId, workspaceId), eq(appointments.id, appointmentId),
         ne(appointments.status, status),
         expectedUpdatedAt ? and(
@@ -791,7 +797,7 @@ export async function setAppointmentStatus(
         aggregateType: "APPOINTMENT",
         aggregateId: appointment.id,
         occurrenceKey: randomUUID(),
-        payload: { appointmentId: appointment.id, startsAt: appointment.startsAt.toISOString() },
+        payload: { appointmentId: appointment.id, startsAt: appointment.startsAt.toISOString(), revision: appointment.revision },
       });
     }
     return appointment;
