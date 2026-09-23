@@ -420,7 +420,7 @@ export async function getAutomationRun(workspaceId: string, runId: string) {
   return run ?? null;
 }
 
-export async function listAutomationActivity(workspaceId: string, limit = 100) {
+export async function listAutomationActivity(workspaceId: string, limit = 100, definitionId?: string) {
   const rows = await db.select({
     run: automationRuns,
     event: automationEvents,
@@ -439,7 +439,9 @@ export async function listAutomationActivity(workspaceId: string, limit = 100) {
       eq(workflowDefinitions.workspaceId, workspaceId),
       eq(workflowDefinitions.id, workflowVersions.definitionId),
     ))
-    .where(eq(automationRuns.workspaceId, workspaceId))
+    .where(definitionId
+      ? and(eq(automationRuns.workspaceId, workspaceId), eq(workflowDefinitions.id, definitionId))
+      : eq(automationRuns.workspaceId, workspaceId))
     .orderBy(desc(automationRuns.createdAt))
     .limit(Math.min(Math.max(limit, 1), 200));
 

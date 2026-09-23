@@ -206,8 +206,20 @@ jobs:
       - name: Phase 1 AI Agent browser acceptance verification
         run: npm run test:browser:phase1
 
+      - name: Phase 4 Automation Builder browser acceptance verification
+        run: npm run test:browser:phase4
+
       - name: Booking remediation browser acceptance verification
         run: npm run test:browser:booking
+
+      - name: Upload Phase 4 Automation Builder screenshots
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: phase4-automation-builder-verification
+          path: artifacts/phase4-automation-builder
+          if-no-files-found: warn
+          retention-days: 14
 
       - name: Upload booking remediation browser screenshots
         if: always()

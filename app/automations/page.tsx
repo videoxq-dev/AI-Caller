@@ -8,6 +8,7 @@ import {
   UsersIcon,
 } from "@/components/icons";
 import { AppNav } from "@/components/core-domain/app-nav";
+import { CustomAutomationHome } from "@/components/automations/custom-automation-home";
 import "../dashboard/dashboard.css";
 import "./automations.css";
 
@@ -34,7 +35,7 @@ type TeamMember = {
 type ActivityItem = {
   run: {
     id: string;
-    key: AutomationKey;
+    key: AutomationKey | null;
     status: "PENDING" | "RUNNING" | "COMPLETED" | "SKIPPED" | "FAILED";
     scheduledFor: string | null;
     completedAt: string | null;
@@ -42,6 +43,7 @@ type ActivityItem = {
     createdAt: string;
     occurrenceKey: string;
   };
+  workflow?: { name: string | null } | null;
   event: {
     type: string;
     aggregateType: string;
@@ -54,7 +56,6 @@ type Definition = {
   key: AutomationKey;
   title: string;
   description: string;
-  detail: string;
   tone: string;
   channels: string[];
 };
@@ -63,40 +64,35 @@ const definitions: Definition[] = [
   {
     key: "MISSED_INQUIRY_RECOVERY",
     title: "Missed inquiry recovery",
-    description: "Follow up only when an inbound inquiry received no newer reply.",
-    detail: "Re-checks the conversation before sending so answered inquiries are skipped.",
+    description: "Follow up when a customer inquiry goes unanswered.",
     tone: "red",
     channels: ["SMS", "WhatsApp"],
   },
   {
     key: "QUALIFIED_LEAD_ASSIGNMENT",
     title: "Qualified lead assignment",
-    description: "Assign and notify your team when the qualification engine marks a lead qualified.",
-    detail: "Uses the server-authoritative qualification transition from the shared AI orchestrator.",
+    description: "Assign qualified leads to the right team member.",
     tone: "blue",
     channels: ["In-app"],
   },
   {
     key: "APPOINTMENT_CONFIRMATION",
     title: "Appointment confirmation",
-    description: "Send a customer confirmation after a booking is persisted successfully.",
-    detail: "WhatsApp delivery requires an approved template; SMS is available by default.",
+    description: "Confirm new appointments with customers.",
     tone: "green",
     channels: ["SMS", "WhatsApp"],
   },
   {
     key: "APPOINTMENT_REMINDER",
     title: "Appointment reminder",
-    description: "Schedule one or two reminders before a confirmed appointment.",
-    detail: "Each run re-checks appointment status and start time before delivery.",
+    description: "Remind customers before upcoming appointments.",
     tone: "orange",
     channels: ["SMS", "WhatsApp"],
   },
   {
     key: "HUMAN_ESCALATION",
     title: "Human escalation",
-    description: "Assign and notify a team member when the AI hands a conversation to a human.",
-    detail: "Escalation and assignment remain auditable in the conversation history.",
+    description: "Notify your team when a conversation needs human help.",
     tone: "purple",
     channels: ["In-app"],
   },
@@ -125,8 +121,9 @@ function configChannels(config: Record<string, unknown>, fallback: Array<"SMS" |
   return channels.length ? channels : fallback;
 }
 
-function humanKey(key: AutomationKey) {
-  return definitions.find((item) => item.key === key)?.title ?? key;
+function humanKey(key: AutomationKey | null, workflowName?: string | null) {
+  if (!key) return workflowName ?? "Custom automation";
+  return definitions.find((item) => item.key === key)?.title ?? "Automation";
 }
 
 function channelLabel(channel: string) {
@@ -192,7 +189,7 @@ export default function AutomationsPage() {
     const counts = new Map<AutomationKey, number>();
     for (const item of activity) {
       if (new Date(item.run.createdAt).getTime() < cutoff) continue;
-      if (item.run.status !== "COMPLETED") continue;
+      if (item.run.status !== "COMPLETED" || !item.run.key) continue;
       counts.set(item.run.key, (counts.get(item.run.key) ?? 0) + 1);
     }
     return counts;
@@ -240,10 +237,7 @@ export default function AutomationsPage() {
 
       <section className="appWorkspace automationWorkspace">
         <header className="automationTopbar">
-          <div className="automationTopbarCopy">
-            <strong>Reliable customer follow-up</strong>
-            <span>Predefined recipes only. Immediate AI replies remain owned by the conversation orchestrator.</span>
-          </div>
+          <div className="automationTopbarCopy"><strong>Automations</strong></div>
           <button type="button" className="activityLogButton" onClick={() => setActivityOpen((value) => !value)}>
             <ClockIcon size={16} />{activityOpen ? "Hide activity" : "View activity log"}
           </button>
@@ -251,7 +245,7 @@ export default function AutomationsPage() {
 
         <div className={`automationBody ${selected ? "drawerOpen" : ""}`}>
           <div className="automationTitleRow">
-            <div><h1>Automations</h1><p>Configure reliable follow-ups, team routing, confirmations, reminders, and escalation notifications.</p></div>
+            <div><h1>Automations</h1></div>
             {!canManage && !loading && <span className="automationReadOnly">View only · Owner/Admin can edit</span>}
           </div>
 
@@ -261,6 +255,7 @@ export default function AutomationsPage() {
             <ActivityLog items={activity} loading={loading} />
           )}
 
+          <div className="automationSectionHeading"><h2>Built-in automations</h2></div>
           <section className="automationList">
             {definitions.map((automation) => {
               const setting = settingsByKey.get(automation.key);
@@ -278,7 +273,6 @@ export default function AutomationsPage() {
                       {enabled ? <span className="activePill">Active</span> : <span className="inactivePill">Paused</span>}
                     </div>
                     <p>{automation.description}</p>
-                    <small>{automation.detail}</small>
                     <div className="automationChannels">
                       {automation.channels.map((channel) => <ChannelPill key={channel} channel={channel} />)}
                     </div>
@@ -313,6 +307,8 @@ export default function AutomationsPage() {
             })}
             {loading && <div className="automationLoading">Loading workspace automations…</div>}
           </section>
+
+          <CustomAutomationHome canManage={canManage} />
         </div>
 
         {selected && selectedSetting && (
@@ -623,7 +619,7 @@ function ActivityLog({ items, loading }: { items: ActivityItem[]; loading: boole
     {items.map((item) => (
       <div className="automationActivityRow" key={item.run.id}>
         <span className={`automationRunStatus ${item.run.status.toLowerCase()}`}>{item.run.status}</span>
-        <div><strong>{humanKey(item.run.key)}</strong><small>{item.event.type.replaceAll("_", " ")} · {new Date(item.run.createdAt).toLocaleString()}</small></div>
+        <div><strong>{humanKey(item.run.key, item.workflow?.name)}</strong><small>{item.event.type.replaceAll("_", " ")} · {new Date(item.run.createdAt).toLocaleString()}</small></div>
         <div className="automationActivityMeta">
           {item.run.scheduledFor && <small>Scheduled {new Date(item.run.scheduledFor).toLocaleString()}</small>}
           {item.run.errorMessage && <small className="automationActivityError">{item.run.errorMessage}</small>}

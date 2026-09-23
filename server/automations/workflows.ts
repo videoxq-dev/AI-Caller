@@ -303,8 +303,10 @@ export async function setWorkflowStatus(
       eq(workflowDefinitions.workspaceId, workspaceId),
       eq(workflowDefinitions.id, definitionId),
     )).for("update").limit(1);
-    if (!definition || !["PUBLISHED", "PAUSED"].includes(definition.status)
-      || !definition.publishedVersion) {
+    const canArchiveDraft = status === "ARCHIVED" && definition?.status === "DRAFT";
+    if (!definition || (!canArchiveDraft && (
+      !["PUBLISHED", "PAUSED"].includes(definition.status) || !definition.publishedVersion
+    ))) {
       throw new AppError("WORKFLOW_STATUS_CONFLICT", "Publish this workflow before changing its status.", 409);
     }
     if (status === "PUBLISHED" && definition.status === "PAUSED") {
