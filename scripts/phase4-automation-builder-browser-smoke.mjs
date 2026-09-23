@@ -211,7 +211,7 @@ try {
   await page.setViewportSize({ width: 1440, height: 1000 });
   await page.goto(`${baseUrl}/automations`, { waitUntil: "networkidle" });
   await page.getByText("High-value lead alert", { exact: true }).last().waitFor();
-  await page.getByText("1 runs", { exact: true }).waitFor();
+  await page.getByText("1 run", { exact: true }).waitFor();
 
   assert(errors.length === 0, `Browser errors: ${errors.join("; ")}`);
   console.log("Phase 4 automation builder acceptance passed: create, test, publish, execute once, audit, pause/resume, and responsive builder UI.");
