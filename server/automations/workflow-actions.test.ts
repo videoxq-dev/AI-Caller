@@ -1,4 +1,5 @@
 import { afterAll, beforeEach, describe, expect, it, vi } from "vitest";
+import { and, eq } from "drizzle-orm";
 import { closeDatabase, db } from "@/db";
 import {
   automationDeliveries,
