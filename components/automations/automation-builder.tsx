@@ -510,7 +510,6 @@ export function AutomationBuilder() {
             draft={draft}
             result={testResult}
             inputs={testInputs}
-            members={members}
             loading={working === "test"}
             onChange={(key, value) => setTestInputs(current => ({ ...current, [key]: value }))}
             onRun={() => void runTest()}
