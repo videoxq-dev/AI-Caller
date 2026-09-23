@@ -106,7 +106,7 @@ export function CustomAutomationHome({ canManage }: { canManage: boolean }) {
           </span>
           <small>{item.triggerLabel}{item.actionLabels.length ? ` · ${item.actionLabels.join(" → ")}` : ""}</small>
         </span>
-        <span className="customAutomationRuns">{item.runCount} runs</span>
+        <span className="customAutomationRuns">{item.runCount} {item.runCount === 1 ? "run" : "runs"}</span>
         <span className="customAutomationArrow">›</span>
       </button>)}
     </div>}
