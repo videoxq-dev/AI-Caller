@@ -104,6 +104,7 @@ export async function dispatchAutomationEvent(workspaceId: string, eventId: stri
       workflowVersionId: version.id,
       actions: version.snapshot.actions,
     });
+    if (!run) continue;
     await enqueueRun(run);
     runs += 1;
   }
