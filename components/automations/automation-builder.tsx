@@ -255,18 +255,28 @@ export function AutomationBuilder() {
   }
 
   function addCondition() {
-    if (!trigger || !catalog) return;
-    const available = trigger.conditions.find(field =>
-      !draft?.conditions.some(condition => condition.field === field));
-    if (!available) return;
+    if (!trigger?.conditions.length || !draft || draft.conditions.length >= 10) return;
+    const field = trigger.conditions[0];
     updateDraft(current => ({
       ...current,
       conditions: [
         ...current.conditions,
-        available === "qualificationScore"
-          ? { field: available, operator: "GTE", value: 80 }
-          : { field: available, operator: "EQ", value: "SMS" },
+        field === "qualificationScore"
+          ? { field, operator: "GTE", value: 80 }
+          : { field, operator: "EQ", value: "SMS" },
       ],
+    }));
+  }
+
+  function changeConditionField(index: number, field: ConditionField) {
+    updateDraft(current => ({
+      ...current,
+      conditions: current.conditions.map((condition, conditionIndex) => {
+        if (conditionIndex !== index || condition.field === field) return condition;
+        return field === "qualificationScore"
+          ? { field, operator: "GTE", value: 80 }
+          : { field, operator: "EQ", value: "SMS" };
+      }),
     }));
   }
 
@@ -461,8 +471,7 @@ export function AutomationBuilder() {
     return <main className="appShell builderShell"><AppNav active="Automations" className="appSidebar" /><section className="builderLoading">{error ?? "Automation not found."}</section></main>;
   }
 
-  const availableConditions = trigger?.conditions.filter(field =>
-    !draft.conditions.some(condition => condition.field === field)) ?? [];
+  const canAddCondition = Boolean(trigger?.conditions.length) && draft.conditions.length < 10;
   const availableActions = catalog.actions.filter(action => trigger?.actions.includes(action.id));
   const showPublish = workflow.status === "DRAFT"
     || (workflow.status === "ACTIVE" && (dirty || workflow.hasUnpublishedChanges));
@@ -523,10 +532,18 @@ export function AutomationBuilder() {
               <div className="stepHeader">
                 <span>2</span><h2>ONLY IF</h2>
                 {draft.conditions.length > 1 && (
-                  <select className="matchSelect" disabled={!canManage} value={draft.match} onChange={event => updateDraft(current => ({ ...current, match: event.target.value as "ALL" | "ANY" }))}>
-                    <option value="ALL">All are true</option>
-                    <option value="ANY">Any are true</option>
-                  </select>
+                  <fieldset className="conditionMatch" disabled={!canManage} aria-label="Match conditions">
+                    <label>
+                      <input type="radio" name="condition-match" value="ALL" checked={draft.match === "ALL"}
+                        onChange={() => updateDraft(current => ({ ...current, match: "ALL" }))} />
+                      <span>All</span>
+                    </label>
+                    <label>
+                      <input type="radio" name="condition-match" value="ANY" checked={draft.match === "ANY"}
+                        onChange={() => updateDraft(current => ({ ...current, match: "ANY" }))} />
+                      <span>Any</span>
+                    </label>
+                  </fieldset>
                 )}
               </div>
               <div className="stepBody conditionBody">
@@ -536,12 +553,14 @@ export function AutomationBuilder() {
                     key={`${condition.field}-${index}`}
                     condition={condition}
                     catalog={catalog}
+                    fields={trigger?.conditions ?? []}
                     disabled={!canManage}
+                    onFieldChange={field => changeConditionField(index, field)}
                     onChange={patch => updateCondition(index, patch)}
                     onRemove={() => removeCondition(index)}
                   />
                 ))}
-                {availableConditions.length > 0 && canManage && (
+                {canAddCondition && canManage && (
                   <button className="addRowButton" onClick={addCondition}>+ Add condition</button>
                 )}
               </div>
@@ -618,20 +637,32 @@ export function AutomationBuilder() {
 function ConditionRow({
   condition,
   catalog,
+  fields,
   disabled,
+  onFieldChange,
   onChange,
   onRemove,
 }: {
   condition: Condition;
   catalog: Catalog;
+  fields: readonly ConditionField[];
   disabled: boolean;
+  onFieldChange: (field: ConditionField) => void;
   onChange: (patch: Partial<Condition>) => void;
   onRemove: () => void;
 }) {
+  const fieldControl = fields.length > 1
+    ? <select aria-label="Condition field" disabled={disabled} value={condition.field}
+        onChange={event => onFieldChange(event.target.value as ConditionField)}>
+        {fields.map(field => <option key={field} value={field}>
+          {catalog.conditions[field].label}
+        </option>)}
+      </select>
+    : <span className="conditionField">{catalog.conditions[condition.field].label}</span>;
   if (condition.field === "qualificationScore") {
     const spec = catalog.conditions.qualificationScore;
     return <div className="conditionRow">
-      <span className="conditionField">{spec.label}</span>
+      {fieldControl}
       <select disabled={disabled} value={condition.operator} onChange={event => onChange({ operator: event.target.value as Operator })}>
         {spec.operators.map(operator => <option key={operator.id} value={operator.id}>{operator.label}</option>)}
       </select>
@@ -641,7 +672,7 @@ function ConditionRow({
   }
   const spec = catalog.conditions.channel;
   return <div className="conditionRow">
-    <span className="conditionField">{spec.label}</span>
+    {fieldControl}
     <span className="conditionOperator">is</span>
     <select disabled={disabled} value={condition.value} onChange={event => onChange({ value: event.target.value as "PHONE" | "SMS" | "WHATSAPP" | "WEBCHAT" })}>
       {spec.options.map(option => <option key={option.id} value={option.id}>{option.label}</option>)}
