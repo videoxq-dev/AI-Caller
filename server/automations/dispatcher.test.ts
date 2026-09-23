@@ -97,6 +97,32 @@ describe("automation dispatcher", () => {
     const runs = await db.select().from(automationRuns);
     expect(runs.map((run) => run.occurrenceKey).sort()).toEqual(["before:120", "before:1440"]);
     expect(runs.every((run) => run.scheduledFor instanceof Date)).toBe(true);
+    expect(runs.every((run) => run.metadata.expectedAppointmentRevision === 0)).toBe(true);
+  });
+
+
+  it("persists the appointment revision with each scheduled reminder", async () => {
+    await db.insert(automationSettings).values({
+      workspaceId,
+      key: "APPOINTMENT_REMINDER",
+      enabled: true,
+      config: {
+        firstMinutesBefore: 1440, secondMinutesBefore: null,
+        channels: ["SMS"], message: "Reminder",
+        whatsappTemplateName: null, whatsappTemplateLanguage: "en_US",
+      },
+    });
+    const startsAt = new Date(Date.now() + 48 * 60 * 60 * 1000).toISOString();
+    const [event] = await db.insert(automationEvents).values({
+      workspaceId, type: "APPOINTMENT_RESCHEDULED",
+      aggregateType: "APPOINTMENT", aggregateId: "11111111-1111-4111-8111-111111111111",
+      payload: { appointmentId: "11111111-1111-4111-8111-111111111111", startsAt, revision: 7 },
+    }).returning();
+
+    await dispatchAutomationEvent(workspaceId, event.id);
+    const [run] = await db.select().from(automationRuns);
+    expect(run.metadata.expectedAppointmentRevision).toBe(7);
+    expect(run.metadata.expectedStartsAt).toBe(startsAt);
   });
 
   it("leaves an event recoverable if enqueue fails after the run is committed", async () => {
