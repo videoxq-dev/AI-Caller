@@ -215,7 +215,9 @@ export async function listWorkflowActionRuns(workspaceId: string, runId: string)
 
 export async function claimWorkflowActionRun(workspaceId: string, runId: string, actionIndex: number) {
   const now = new Date();
-  const staleBefore = new Date(now.getTime() - 2 * 60_000);
+  // Action side effects may legitimately outlive the run recovery lease.
+  // Keep action ownership for the full pg-boss job expiry window before reclaiming.
+  const staleBefore = new Date(now.getTime() - 5 * 60_000);
   const [action] = await db.update(workflowActionRuns).set({
     status: "RUNNING",
     startedAt: now,
@@ -494,6 +496,47 @@ export async function claimAutomationDelivery(input: {
   )).limit(1);
   if (!existing) throw new AppError("AUTOMATION_DELIVERY_CONFLICT", "Automation delivery could not be resolved.", 409);
   return { delivery: existing, created: false as const };
+}
+
+export async function getAutomationDelivery(workspaceId: string, deliveryId: string) {
+  const [delivery] = await db.select().from(automationDeliveries).where(and(
+    eq(automationDeliveries.workspaceId, workspaceId),
+    eq(automationDeliveries.id, deliveryId),
+  )).limit(1);
+  return delivery ?? null;
+}
+
+export async function listWorkflowActionDeliveries(workspaceId: string, actionRunId: string) {
+  return db.select().from(automationDeliveries).where(and(
+    eq(automationDeliveries.workspaceId, workspaceId),
+    eq(automationDeliveries.actionRunId, actionRunId),
+  )).orderBy(asc(automationDeliveries.createdAt));
+}
+
+export async function finishPendingAutomationDelivery(
+  workspaceId: string,
+  deliveryId: string,
+  input: {
+    status: "SENT" | "SKIPPED" | "FAILED" | "UNKNOWN";
+    messageId?: string | null;
+    providerExternalId?: string | null;
+    errorCode?: string | null;
+    errorMessage?: string | null;
+  },
+) {
+  const [delivery] = await db.update(automationDeliveries).set({
+    status: input.status,
+    messageId: input.messageId ?? null,
+    providerExternalId: input.providerExternalId ?? null,
+    errorCode: input.errorCode ?? null,
+    errorMessage: input.errorMessage?.slice(0, 1000) ?? null,
+    updatedAt: new Date(),
+  }).where(and(
+    eq(automationDeliveries.workspaceId, workspaceId),
+    eq(automationDeliveries.id, deliveryId),
+    eq(automationDeliveries.status, "PENDING"),
+  )).returning();
+  return delivery ?? null;
 }
 
 export async function finishAutomationDelivery(
