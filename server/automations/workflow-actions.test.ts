@@ -22,7 +22,7 @@ import { classifySmsPurpose } from "@/server/sms/classification";
 import { sendPreclassifiedAutomationSms } from "@/server/sms/outbound";
 import { executeAutomationRun } from "./executor";
 import { createWorkflowRun, listAutomationActivity, listWorkflowActionRuns } from "./repository";
-import { createWorkflowDraft, getWorkflowVersion, publishWorkflow } from "./workflows";
+import { createWorkflowDraft, getWorkflowVersion, publishWorkflow, setWorkflowStatus } from "./workflows";
 
 vi.mock("@/server/sms/classification", () => ({
   classifySmsPurpose: vi.fn(),
@@ -380,6 +380,79 @@ describe("Phase 3C durable workflow actions", () => {
     });
     expect(await db.select().from(automationDeliveries)).toHaveLength(0);
     expect(vi.mocked(sendPreclassifiedAutomationSms)).not.toHaveBeenCalled();
+  });
+
+  it("recovers an interrupted claimed SMS as UNKNOWN without sending again", async () => {
+    const { lead, conversation } = await leadContext();
+    const { version, snapshot } = await publishedWorkflow([
+      { type: "SEND_CUSTOMER_SMS", message: "Hi {{name}}, your update is ready." },
+      { type: "NOTIFY_STAFF", userId: staffId, title: "Later action", message: "Do not run after uncertain SMS." },
+    ]);
+    const { run } = await eventAndRun(lead, version, snapshot.actions);
+    const [smsAction] = await listWorkflowActionRuns(workspaceId, run.id);
+    const stale = new Date(Date.now() - 6 * 60_000);
+    await db.update(automationRuns).set({
+      status: "RUNNING",
+      startedAt: stale,
+    }).where(eq(automationRuns.id, run.id));
+    await db.update(workflowActionRuns).set({
+      status: "RUNNING",
+      startedAt: stale,
+      attemptCount: 1,
+    }).where(eq(workflowActionRuns.id, smsAction.id));
+    await db.insert(automationDeliveries).values({
+      workspaceId,
+      runId: run.id,
+      actionRunId: smsAction.id,
+      channel: "SMS",
+      recipient: conversation.id,
+      status: "PENDING",
+    });
+
+    await expect(executeAutomationRun(workspaceId, run.id)).resolves.toMatchObject({
+      status: "FAILED",
+    });
+    const actions = await listWorkflowActionRuns(workspaceId, run.id);
+    expect(actions.map(action => action.status)).toEqual(["UNKNOWN", "PENDING"]);
+    const [delivery] = await db.select().from(automationDeliveries);
+    expect(delivery.status).toBe("UNKNOWN");
+    expect(vi.mocked(sendPreclassifiedAutomationSms)).not.toHaveBeenCalled();
+    expect(await db.select().from(notifications)).toHaveLength(0);
+  });
+
+  it("lets in-flight SMS complete after pause but cancels subsequent workflow actions", async () => {
+    const { lead } = await leadContext();
+    const { definition, version, snapshot } = await publishedWorkflow([
+      { type: "SEND_CUSTOMER_SMS", message: "Hi {{name}}, an update for you." },
+      { type: "NOTIFY_STAFF", userId: staffId, title: "Never after pause", message: "Do not deliver." },
+    ]);
+    const { run } = await eventAndRun(lead, version, snapshot.actions);
+    let signalSend!: () => void;
+    let completeSend!: (value: { id: string; externalMessageId: string }) => void;
+    const beganSend = new Promise<void>(resolve => { signalSend = resolve; });
+    const pendingProvider = new Promise<{ id: string; externalMessageId: string }>(resolve => {
+      completeSend = resolve;
+    });
+    vi.mocked(sendPreclassifiedAutomationSms).mockImplementation(async () => {
+      signalSend();
+      return await pendingProvider as never;
+    });
+    const executing = executeAutomationRun(workspaceId, run.id);
+    await beganSend;
+    await setWorkflowStatus(workspaceId, definition.id, "PAUSED");
+    completeSend({
+      id: "44444444-4444-4444-8444-444444444444",
+      externalMessageId: "accepted-before-pause",
+    });
+
+    await expect(executing).resolves.toMatchObject({ status: "CANCELLED" });
+    const [storedRun] = await db.select().from(automationRuns)
+      .where(eq(automationRuns.id, run.id));
+    expect(storedRun.status).toBe("CANCELLED");
+    const actions = await listWorkflowActionRuns(workspaceId, run.id);
+    expect(actions.map(action => action.status)).toEqual(["COMPLETED", "CANCELLED"]);
+    expect(await db.select().from(notifications)).toHaveLength(0);
+    expect(vi.mocked(sendPreclassifiedAutomationSms)).toHaveBeenCalledTimes(1);
   });
 
   it("allows two intentional SMS actions to the same conversation without delivery identity collisions", async () => {
