@@ -233,8 +233,16 @@ describe("versioned deterministic workflows", () => {
     expect(version2.version).toBe(2);
     expect(version2.id).not.toBe(version1.id);
     expect((await listPublishedWorkflowVersions(workspaceId, priorEvent.id))[0].id).toBe(version1.id);
-    expect((await getWorkflowVersion(workspaceId, version1.id))?.snapshot.actions[0].title).toBe("High-priority lead");
-    expect((await getWorkflowVersion(workspaceId, version2.id))?.snapshot.actions[0].title).toBe("Urgent lead");
+    const storedV1 = await getWorkflowVersion(workspaceId, version1.id);
+    const storedV2 = await getWorkflowVersion(workspaceId, version2.id);
+    expect(storedV1?.snapshot.actions[0]).toMatchObject({
+      type: "NOTIFY_STAFF",
+      title: "High-priority lead",
+    });
+    expect(storedV2?.snapshot.actions[0]).toMatchObject({
+      type: "NOTIFY_STAFF",
+      title: "Urgent lead",
+    });
 
     await setWorkflowStatus(workspaceId, draft.id, "PAUSED");
     expect(await listPublishedWorkflowVersions(workspaceId)).toHaveLength(0);
