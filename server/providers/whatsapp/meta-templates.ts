@@ -5,7 +5,7 @@ import { providerJson } from "@/server/providers/http";
 
 const templateName = z.string().trim().regex(/^[a-z][a-z0-9_]{0,511}$/, "Use lowercase letters, numbers, and underscores; start with a letter.");
 const language = z.string().regex(/^[a-z]{2,3}(?:_[A-Z]{2})?$/, "Choose a valid template language.");
-export const templateCursorSchema = z.string().min(1).max(512).regex(/^[A-Za-z0-9+/_=-]+$/);
+export const templateCursorSchema = z.string().min(1).max(512).regex(/^[A-Za-z0-9+\/_=-]+$/);
 
 export const createWhatsAppTemplateSchema = z.object({
   name: templateName,
