@@ -142,7 +142,7 @@ export async function createWorkflowRun(input: {
     // Match publish/pause/archive lock order to avoid a workflow-definition /
     // workspace foreign-key deadlock under concurrent dispatch and state change.
     const [workspace] = await tx.select({ id: workspaces.id }).from(workspaces)
-      .where(eq(workspaces.id, input.workspaceId)).for("update").limit(1);
+      .where(eq(workspaces.id, input.workspaceId)).for("share").limit(1);
     if (!workspace) throw new AppError("WORKSPACE_NOT_FOUND", "Workspace not found.", 404);
 
     const [event] = await tx.select({ id: automationEvents.id }).from(automationEvents).where(and(
