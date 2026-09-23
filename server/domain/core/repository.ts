@@ -656,6 +656,13 @@ export async function updateNativeAppointmentAfterReschedule(
           "The service or its configured duration changed. Please review the appointment again.", 409);
       }
     }
+    // A repeated approval of the already-applied edit is not a new business event.
+    if (previous.status === "CONFIRMED"
+      && previous.startsAt.getTime() === input.startsAt.getTime()
+      && previous.endsAt.getTime() === input.endsAt.getTime()
+      && previous.timezone === input.timezone
+      && (!serviceChange || (previous.serviceId === serviceChange.serviceId
+        && previous.title === serviceChange.title))) return previous;
     const existing = await tx.select({
       startsAt: appointments.startsAt,
       endsAt: appointments.endsAt,
@@ -712,6 +719,18 @@ export async function updateAppointmentAfterReschedule(
   expectedUpdatedAt?: Date,
 ) {
   return db.transaction(async (tx) => {
+    const [previous] = await tx.select().from(appointments).where(and(
+      eq(appointments.workspaceId, workspaceId), eq(appointments.id, appointmentId),
+    )).limit(1).for("update");
+    if (!previous || (expectedUpdatedAt
+      && previous.updatedAt.getTime() !== expectedUpdatedAt.getTime())) {
+      throw new AppError("APPOINTMENT_CHANGED", "That appointment changed before rescheduling.", 409);
+    }
+    if (previous.status === "CONFIRMED"
+      && previous.startsAt.getTime() === input.startsAt.getTime()
+      && previous.endsAt.getTime() === input.endsAt.getTime()
+      && previous.timezone === input.timezone
+      && previous.externalEventId === (externalEventId ?? null)) return previous;
     const [appointment] = await tx.update(appointments).set({
       startsAt: input.startsAt,
       endsAt: input.endsAt,
