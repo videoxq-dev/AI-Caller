@@ -294,6 +294,9 @@ describe("existing appointment management (isolated from V2 booking)", () => {
       .some(row => row.status === "RECONCILING")).toBe(true);
     const retry = await turn("Reschedule my appointment");
     expect(retry?.reply).toContain("unresolved calendar outcome");
+    const status = await turn("What's the status of my appointment?");
+    expect(status?.reply).toContain("unresolved calendar outcome");
+    expect(status?.reply).not.toContain(" — confirmed.");
     expect(provider).toHaveBeenCalledTimes(1);
     const [saved] = await db.select().from(appointments);
     expect(saved.startsAt.toISOString()).toBe(oldStart.toISOString());
