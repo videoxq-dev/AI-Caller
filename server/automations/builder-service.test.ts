@@ -88,6 +88,20 @@ describe("Phase 4 automation builder service", () => {
     expect(items[0]).not.toHaveProperty("version");
   });
 
+  it("pages custom automations without dropping older drafts or crossing workspace boundaries", async () => {
+    const starter = builderStarter("HIGH_VALUE_LEAD_ALERT");
+    const first = await createWorkflowDraft(workspaceId, "First automation", starter.definition);
+    const second = await createWorkflowDraft(workspaceId, "Second automation", starter.definition);
+    await createWorkflowDraft(otherWorkspaceId, "Other workspace automation", starter.definition);
+
+    const firstPage = await listBuilderWorkflows(workspaceId, 0, 1);
+    const secondPage = await listBuilderWorkflows(workspaceId, 1, 1);
+    expect(firstPage).toHaveLength(1);
+    expect(secondPage).toHaveLength(1);
+    expect(new Set([firstPage[0].id, secondPage[0].id])).toEqual(new Set([first.id, second.id]));
+    expect(await listBuilderWorkflows(workspaceId, 2, 1)).toHaveLength(0);
+  });
+
   it("dry-runs qualification conditions without creating events or runs", async () => {
     const starter = builderStarter("HIGH_VALUE_LEAD_ALERT");
     const created = await createWorkflowDraft(workspaceId, starter.name, starter.definition);
