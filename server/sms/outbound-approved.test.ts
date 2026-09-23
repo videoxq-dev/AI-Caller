@@ -5,7 +5,7 @@ import { contacts, conversations, creditWallets, hostedApiRateCards, hostedPhone
 import { appendMessage, getOrCreateOpenConversation } from "@/server/domain/core/repository";
 import type { SmsRuntime } from "@/server/providers/sms/runtime";
 import { getSmsConsentStatus, recordSmsConsent } from "./consent";
-import { sendPreclassifiedAutomationSms, sendSmsConversationTextWithRuntime } from "./outbound";
+import { sendPreclassifiedAutomationSmsWithRuntime, sendSmsConversationTextWithRuntime } from "./outbound";
 import { classifySmsPurpose } from "./classification";
 
 vi.mock("./classification", () => ({
@@ -110,7 +110,7 @@ describe("approved managed number outbound SMS", () => {
   it("executes preclassified automation SMS without an LLM call while retaining deterministic policy enforcement", async () => {
     vi.mocked(classifySmsPurpose).mockClear();
 
-    await expect(sendPreclassifiedAutomationSms(workspaceId, conversationId, {
+    await expect(sendPreclassifiedAutomationSmsWithRuntime(workspaceId, conversationId, runtime(), {
       text: "Your appointment is tomorrow. Special offer: 25% discount.",
       classifiedPurpose: "TRANSACTIONAL",
       idempotencyKey: "workflow-delivery-1",
