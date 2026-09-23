@@ -98,6 +98,7 @@ describe("calendar booking service", () => {
       endsAt: booking.endsAt,
       timezone: booking.timezone,
       status: "CONFIRMED" as const,
+      revision: 0,
       bookingSource: booking.bookingSource ?? null,
       notes: booking.notes ?? null,
       bookingCommandId: null,
