@@ -121,6 +121,34 @@ async function currentRequest(ctx: BookingContext, now: Date) {
   return row;
 }
 
+async function unresolvedChange(ctx: BookingContext, appointment: Appointment) {
+  const [pending] = await db.select().from(appointmentManagementRequests)
+    .where(and(
+      eq(appointmentManagementRequests.workspaceId, ctx.workspaceId),
+      eq(appointmentManagementRequests.contactId, ctx.contactId),
+      eq(appointmentManagementRequests.appointmentId, appointment.id),
+      inArray(appointmentManagementRequests.status, ["EXECUTING", "RECONCILING"]),
+    )).orderBy(desc(appointmentManagementRequests.createdAt)).limit(1);
+  if (!pending) return null;
+  const matchesSavedOutcome = pending.intent === "CANCEL"
+    ? appointment.status === "CANCELLED"
+    : Boolean(pending.proposedStartsAt && pending.proposedEndsAt
+        && appointment.startsAt.getTime() === pending.proposedStartsAt.getTime()
+        && appointment.endsAt.getTime() === pending.proposedEndsAt.getTime()
+        && (!pending.proposedServiceId || appointment.serviceId === pending.proposedServiceId));
+  if (matchesSavedOutcome) {
+    await db.update(appointmentManagementRequests).set({
+      status: "COMPLETED", completedAt: new Date(), updatedAt: new Date(),
+    }).where(and(eq(appointmentManagementRequests.id, pending.id),
+      inArray(appointmentManagementRequests.status, ["EXECUTING", "RECONCILING"])));
+    return "The saved appointment shows " + appointmentLabel(appointment) +
+      " — " + appointment.status.toLowerCase() + ". No additional change was made.";
+  }
+  return "A previous change to " + appointmentLabel(appointment) +
+    " has an unresolved calendar outcome. I won't submit a duplicate change. " +
+    "Please ask the business team to verify the calendar and resolve this appointment issue.";
+}
+
 async function hasUnfinishedBooking(ctx: BookingContext) {
   const [draft] = await db.select({ id: bookingDrafts.id })
     .from(bookingDrafts).where(and(
@@ -231,7 +259,8 @@ async function finishRequest(ctx: BookingContext, row: RequestRow, sourceMessage
     }
     if (row.intent === "RESCHEDULE" && row.proposedStartsAt && row.proposedEndsAt &&
       appointment.startsAt.getTime() === row.proposedStartsAt.getTime() &&
-      appointment.endsAt.getTime() === row.proposedEndsAt.getTime()) {
+      appointment.endsAt.getTime() === row.proposedEndsAt.getTime() &&
+      (!row.proposedServiceId || appointment.serviceId === row.proposedServiceId)) {
       await saveRequest(row, { status: "COMPLETED", completedAt: now }, now);
       return { reply: "Your appointment is confirmed for " + appointmentLabel(appointment) + "." };
     }
@@ -314,8 +343,14 @@ async function finishRequest(ctx: BookingContext, row: RequestRow, sourceMessage
   } catch (error) {
     // The provider might have accepted a request whose response timed out.
     // Never re-send an uncertain cancellation/reschedule automatically.
+    // A timeout or failed persistence after a provider call is not proof the
+    // provider rejected the change. Keep a cross-session appointment hold
+    // until an authoritative saved outcome can be observed or staff resolve it.
+    const knownRejection = error instanceof AppError && error.status < 500
+      && error.code !== "APPOINTMENT_CHANGED";
     await db.update(appointmentManagementRequests).set({
-      status: "FAILED", completedAt: new Date(), updatedAt: new Date(),
+      status: knownRejection ? "FAILED" : "RECONCILING",
+      completedAt: knownRejection ? new Date() : null, updatedAt: new Date(),
     }).where(eq(appointmentManagementRequests.id, row.id));
     return { reply: errorMessage(error) + " I haven't confirmed that your appointment was changed; please ask the business team to verify it." };
   }
@@ -424,6 +459,15 @@ export async function handleAppointmentManagementTurn(
     }, now);
   }
   const appointment = await findOwnedAppointment(ctx, active.appointmentId!);
+  if (appointment) {
+    const unresolved = await unresolvedChange(ctx, appointment);
+    if (unresolved) {
+      if (active.status !== "EXECUTING") {
+        await saveRequest(active, { status: "ABANDONED" }, now);
+      }
+      return { reply: unresolved };
+    }
+  }
   if (!appointment || !EDITABLE_APPOINTMENT.includes(appointment.status as typeof EDITABLE_APPOINTMENT[number])
     || appointment.startsAt <= now) {
     await saveRequest(active, { status: "ABANDONED" }, now);
