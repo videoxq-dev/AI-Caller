@@ -18,8 +18,9 @@ import { sendSmsConversationText } from "@/server/sms/outbound";
 import type { WorkflowAction } from "./action-registry";
 import {
   claimAutomationDelivery,
-  finishAutomationDelivery,
+  finishPendingAutomationDelivery,
   finishWorkflowActionRun,
+  getAutomationDelivery,
 } from "./repository";
 
 type AutomationEvent = {
@@ -425,29 +426,34 @@ async function finishActionFromExistingDelivery(
     providerExternalId: string | null;
   },
 ): Promise<WorkflowActionTerminalStatus> {
-  let status: WorkflowActionTerminalStatus;
-  if (delivery.status === "SENT") status = "COMPLETED";
-  else if (delivery.status === "SKIPPED") status = "SKIPPED";
-  else if (delivery.status === "FAILED") status = "FAILED";
-  else status = "UNKNOWN";
-
-  if (delivery.status === "PENDING") {
-    await finishAutomationDelivery(workspaceId, delivery.id, {
+  let current = delivery;
+  if (current.status === "PENDING") {
+    const reconciled = await finishPendingAutomationDelivery(workspaceId, current.id, {
       status: "UNKNOWN",
       errorCode: "INTERRUPTED_DELIVERY",
       errorMessage: "A prior worker stopped after claiming this SMS delivery; it was not retried to avoid a duplicate message.",
     });
+    current = reconciled ?? await getAutomationDelivery(workspaceId, current.id) ?? current;
   }
+
+  let status: WorkflowActionTerminalStatus;
+  if (current.status === "SENT") status = "COMPLETED";
+  else if (current.status === "SKIPPED") status = "SKIPPED";
+  else if (current.status === "FAILED") status = "FAILED";
+  else status = "UNKNOWN";
+
   await finishWorkflowActionRun(workspaceId, actionRunId, {
     status,
-    errorCode: delivery.status === "PENDING" ? "INTERRUPTED_DELIVERY" : delivery.errorCode,
-    errorMessage: delivery.status === "PENDING"
+    errorCode: current.status === "UNKNOWN" && !current.errorCode
+      ? "INTERRUPTED_DELIVERY"
+      : current.errorCode,
+    errorMessage: current.status === "UNKNOWN" && !current.errorMessage
       ? "A prior SMS attempt has an uncertain outcome and will not be resent automatically."
-      : delivery.errorMessage,
+      : current.errorMessage,
     result: {
-      deliveryId: delivery.id,
-      messageId: delivery.messageId,
-      providerExternalId: delivery.providerExternalId,
+      deliveryId: current.id,
+      messageId: current.messageId,
+      providerExternalId: current.providerExternalId,
       recovered: true,
     },
   });
@@ -492,15 +498,20 @@ async function executeCustomerSms(input: {
         workflowActionRunId: input.actionRunId,
       },
     });
-    await finishAutomationDelivery(input.workspaceId, claimed.delivery.id, {
+    const finishedDelivery = await finishPendingAutomationDelivery(input.workspaceId, claimed.delivery.id, {
       status: "SENT",
       messageId: message.id,
       providerExternalId: message.externalMessageId,
     });
+    if (!finishedDelivery) {
+      const current = await getAutomationDelivery(input.workspaceId, claimed.delivery.id);
+      if (!current) throw new AppError("AUTOMATION_DELIVERY_NOT_FOUND", "SMS delivery record disappeared.", 409);
+      return finishActionFromExistingDelivery(input.workspaceId, input.actionRunId, current);
+    }
     await finishWorkflowActionRun(input.workspaceId, input.actionRunId, {
       status: "COMPLETED",
       result: {
-        deliveryId: claimed.delivery.id,
+        deliveryId: finishedDelivery.id,
         messageId: message.id,
         providerExternalId: message.externalMessageId,
       },
@@ -510,16 +521,21 @@ async function executeCustomerSms(input: {
     const status = classifySmsError(error);
     const errorCode = error instanceof AppError ? error.code : "SMS_DELIVERY_UNCERTAIN";
     const errorMessage = error instanceof Error ? error.message : "SMS delivery did not complete.";
-    await finishAutomationDelivery(input.workspaceId, claimed.delivery.id, {
+    const finishedDelivery = await finishPendingAutomationDelivery(input.workspaceId, claimed.delivery.id, {
       status,
       errorCode,
       errorMessage,
     });
+    if (!finishedDelivery) {
+      const current = await getAutomationDelivery(input.workspaceId, claimed.delivery.id);
+      if (!current) throw new AppError("AUTOMATION_DELIVERY_NOT_FOUND", "SMS delivery record disappeared.", 409);
+      return finishActionFromExistingDelivery(input.workspaceId, input.actionRunId, current);
+    }
     await finishWorkflowActionRun(input.workspaceId, input.actionRunId, {
       status,
       errorCode,
       errorMessage,
-      result: { deliveryId: claimed.delivery.id },
+      result: { deliveryId: finishedDelivery.id },
     });
     return status;
   }
