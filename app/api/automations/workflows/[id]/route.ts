@@ -1,7 +1,7 @@
 import { z } from "zod";
 import { requireWorkspacePermission } from "@/server/auth/permissions";
 import { resolveWorkspaceContext } from "@/server/auth/workspace-context";
-import { getBuilderWorkflow } from "@/server/automations/builder-service";
+import { getBuilderWorkflow, parseBuilderWorkflowId } from "@/server/automations/builder-service";
 import { updateWorkflowDraft, workflowDefinitionSchema } from "@/server/automations/workflows";
 import { toErrorResponse } from "@/server/http/errors";
 import { parseInput } from "@/server/http/validation";
@@ -17,7 +17,7 @@ export async function GET(
 ) {
   try {
     const context = await resolveWorkspaceContext(request.headers);
-    const { id } = await params;
+    const id = parseBuilderWorkflowId((await params).id);
     const workflow = await getBuilderWorkflow(context.workspace.id, id);
     return Response.json({
       workflow,
@@ -35,7 +35,7 @@ export async function PATCH(
   try {
     const context = await resolveWorkspaceContext(request.headers);
     requireWorkspacePermission(context.membership.role, "automation.manage");
-    const { id } = await params;
+    const id = parseBuilderWorkflowId((await params).id);
     const input = parseInput(updateSchema, await request.json());
     await updateWorkflowDraft(context.workspace.id, id, input.name, input.draft);
     const workflow = await getBuilderWorkflow(context.workspace.id, id);
