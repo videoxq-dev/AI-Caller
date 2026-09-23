@@ -195,7 +195,7 @@ async function executeAssignLead(input: {
     const [member] = await tx.select({ userId: memberships.userId }).from(memberships).where(and(
       eq(memberships.workspaceId, input.workspaceId),
       eq(memberships.userId, input.action.userId),
-    )).limit(1);
+    )).for("share").limit(1);
     if (!member) {
       throw new AppError(
         "WORKFLOW_STAFF_INVALID",
@@ -300,9 +300,9 @@ async function executeNotifyStaff(input: {
       ? (await tx.select({ userId: memberships.userId }).from(memberships).where(and(
           eq(memberships.workspaceId, input.workspaceId),
           eq(memberships.userId, input.action.userId),
-        ))).map(row => row.userId)
+        )).for("share")).map(row => row.userId)
       : (await tx.select({ userId: memberships.userId }).from(memberships)
-          .where(eq(memberships.workspaceId, input.workspaceId)))
+          .where(eq(memberships.workspaceId, input.workspaceId)).for("share"))
         .map(row => row.userId);
 
     if (input.action.userId && recipients.length === 0) {
