@@ -37,6 +37,7 @@ export const automationRunStatus = pgEnum("automation_run_status", [
   "COMPLETED",
   "SKIPPED",
   "FAILED",
+  "CANCELLED",
 ]);
 
 export const automationDeliveryStatus = pgEnum("automation_delivery_status", [
@@ -45,6 +46,16 @@ export const automationDeliveryStatus = pgEnum("automation_delivery_status", [
   "SKIPPED",
   "FAILED",
   "UNKNOWN",
+]);
+
+export const workflowActionRunStatus = pgEnum("workflow_action_run_status", [
+  "PENDING",
+  "RUNNING",
+  "COMPLETED",
+  "SKIPPED",
+  "FAILED",
+  "UNKNOWN",
+  "CANCELLED",
 ]);
 
 export const automationSettings = pgTable(
@@ -127,6 +138,25 @@ export const workflowVersions = pgTable(
   ],
 );
 
+export const workflowStatusHistory = pgTable(
+  "workflow_status_history",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    workspaceId: uuid("workspace_id").notNull().references(() => workspaces.id, { onDelete: "cascade" }),
+    definitionId: uuid("definition_id").notNull(),
+    status: text("status").$type<"PUBLISHED" | "PAUSED" | "ARCHIVED">().notNull(),
+    occurredAt: timestamp("occurred_at", { withTimezone: true, mode: "date" }).defaultNow().notNull(),
+  },
+  (table) => [
+    foreignKey({
+      name: "workflow_status_history_definition_workspace_fk",
+      columns: [table.definitionId, table.workspaceId],
+      foreignColumns: [workflowDefinitions.id, workflowDefinitions.workspaceId],
+    }).onDelete("cascade"),
+    index("workflow_status_history_definition_time_idx").on(table.workspaceId, table.definitionId, table.occurredAt),
+  ],
+);
+
 export const automationRuns = pgTable(
   "automation_runs",
   {
@@ -142,6 +172,7 @@ export const automationRuns = pgTable(
     completedAt: timestamp("completed_at", { withTimezone: true, mode: "date" }),
     errorCode: text("error_code"),
     errorMessage: text("error_message"),
+    cancelRequestedAt: timestamp("cancel_requested_at", { withTimezone: true, mode: "date" }),
     metadata: jsonb("metadata").$type<Record<string, unknown>>().default({}).notNull(),
     createdAt: timestamp("created_at", { withTimezone: true, mode: "date" }).defaultNow().notNull(),
   },
@@ -161,12 +192,39 @@ export const automationRuns = pgTable(
   ],
 );
 
+export const workflowActionRuns = pgTable(
+  "workflow_action_runs",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    workspaceId: uuid("workspace_id").notNull().references(() => workspaces.id, { onDelete: "cascade" }),
+    automationRunId: uuid("automation_run_id").notNull().references(() => automationRuns.id, { onDelete: "cascade" }),
+    actionIndex: integer("action_index").notNull(),
+    actionType: text("action_type").notNull(),
+    status: workflowActionRunStatus("status").default("PENDING").notNull(),
+    attemptCount: integer("attempt_count").default(0).notNull(),
+    startedAt: timestamp("started_at", { withTimezone: true, mode: "date" }),
+    completedAt: timestamp("completed_at", { withTimezone: true, mode: "date" }),
+    errorCode: text("error_code"),
+    errorMessage: text("error_message"),
+    result: jsonb("result").$type<Record<string, unknown>>().default({}).notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true, mode: "date" }).defaultNow().notNull(),
+    updatedAt: timestamp("updated_at", { withTimezone: true, mode: "date" }).defaultNow().notNull(),
+  },
+  (table) => [
+    uniqueIndex("workflow_action_runs_run_index_uq").on(table.automationRunId, table.actionIndex),
+    uniqueIndex("workflow_action_runs_identity_uq").on(table.id, table.automationRunId, table.workspaceId),
+    index("workflow_action_runs_run_status_idx").on(table.automationRunId, table.status, table.actionIndex),
+    index("workflow_action_runs_recovery_idx").on(table.status, table.startedAt),
+  ],
+);
+
 export const automationDeliveries = pgTable(
   "automation_deliveries",
   {
     id: uuid("id").defaultRandom().primaryKey(),
     workspaceId: uuid("workspace_id").notNull().references(() => workspaces.id, { onDelete: "cascade" }),
     runId: uuid("run_id").notNull().references(() => automationRuns.id, { onDelete: "cascade" }),
+    actionRunId: uuid("action_run_id"),
     channel: text("channel").notNull(),
     recipient: text("recipient").notNull(),
     status: automationDeliveryStatus("status").default("PENDING").notNull(),
@@ -178,7 +236,18 @@ export const automationDeliveries = pgTable(
     updatedAt: timestamp("updated_at", { withTimezone: true, mode: "date" }).defaultNow().notNull(),
   },
   (table) => [
-    uniqueIndex("automation_deliveries_run_channel_recipient_uq").on(table.runId, table.channel, table.recipient),
+    foreignKey({
+      name: "automation_deliveries_action_run_fk",
+      columns: [table.actionRunId, table.runId, table.workspaceId],
+      foreignColumns: [workflowActionRuns.id, workflowActionRuns.automationRunId, workflowActionRuns.workspaceId],
+    }).onDelete("cascade"),
+    uniqueIndex("automation_deliveries_run_channel_recipient_uq")
+      .on(table.runId, table.channel, table.recipient)
+      .where(sql`${table.actionRunId} is null`),
+    uniqueIndex("automation_deliveries_action_channel_recipient_uq")
+      .on(table.actionRunId, table.channel, table.recipient)
+      .where(sql`${table.actionRunId} is not null`),
+    index("automation_deliveries_action_run_idx").on(table.actionRunId),
     index("automation_deliveries_workspace_created_idx").on(table.workspaceId, table.createdAt),
   ],
 );

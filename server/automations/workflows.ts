@@ -1,8 +1,25 @@
-import { and, desc, eq, lte, ne, sql } from "drizzle-orm";
+import { and, desc, eq, inArray, lte, ne, sql } from "drizzle-orm";
 import { z } from "zod";
 import { db } from "@/db";
-import { automationEvents, automationEventType, workflowDefinitions, workflowVersions, workspaces } from "@/db/schema";
+import {
+  automationEvents,
+  automationEventType,
+  automationRuns,
+  workflowActionRuns,
+  workflowDefinitions,
+  workflowStatusHistory,
+  workflowVersions,
+  workspaces,
+} from "@/db/schema";
 import { AppError } from "@/server/http/errors";
+import {
+  actionAllowedForTrigger,
+  MAX_WORKFLOW_ACTIONS,
+  prepareWorkflowActionsForPublication,
+  publishedWorkflowActionSchema,
+  validateWorkflowActionsForPublication,
+  workflowActionSchema,
+} from "./action-registry";
 
 // This is deliberately a closed, typed registry. No arbitrary payload paths,
 // user scripts, network endpoints, or editable execution mode.
@@ -29,11 +46,7 @@ export const workflowDefinitionSchema = z.object({
   trigger: z.enum(automationEventType.enumValues),
   match: z.enum(["ALL", "ANY"]).default("ALL"),
   conditions: z.array(conditionSchema).max(10).default([]),
-  actions: z.array(z.object({
-    type: z.literal("NOTIFY_STAFF"),
-    title: z.string().trim().min(1).max(120),
-    message: z.string().trim().min(1).max(500),
-  }).strict()).length(1),
+  actions: z.array(workflowActionSchema).min(1).max(MAX_WORKFLOW_ACTIONS),
 }).strict().superRefine((draft, ctx) => {
   for (const [index, condition] of draft.conditions.entries()) {
     const allowed = condition.field === "qualificationScore"
@@ -49,15 +62,59 @@ export const workflowDefinitionSchema = z.object({
       message: "This field is not available for the selected trigger.",
     });
   }
+  for (const [index, action] of draft.actions.entries()) {
+    if (!actionAllowedForTrigger(draft.trigger, action)) {
+      ctx.addIssue({
+        code: "custom",
+        path: ["actions", index, "type"],
+        message: `${action.type} cannot run for ${draft.trigger} events.`,
+      });
+    }
+  }
+});
+
+export const publishedWorkflowDefinitionSchema = z.object({
+  trigger: z.enum(automationEventType.enumValues),
+  match: z.enum(["ALL", "ANY"]).default("ALL"),
+  conditions: z.array(conditionSchema).max(10).default([]),
+  actions: z.array(publishedWorkflowActionSchema).min(1).max(MAX_WORKFLOW_ACTIONS),
+}).strict().superRefine((snapshot, ctx) => {
+  for (const [index, condition] of snapshot.conditions.entries()) {
+    const allowed = condition.field === "qualificationScore"
+      ? snapshot.trigger === "LEAD_QUALIFIED"
+      : condition.field === "channel"
+        ? snapshot.trigger === "INQUIRY_RECEIVED"
+        : snapshot.trigger === "APPOINTMENT_CONFIRMED"
+          || snapshot.trigger === "APPOINTMENT_RESCHEDULED"
+          || snapshot.trigger === "APPOINTMENT_CANCELLED";
+    if (!allowed) ctx.addIssue({
+      code: "custom",
+      path: ["conditions", index, "field"],
+      message: "This field is not available for the selected trigger.",
+    });
+  }
+  for (const [index, action] of snapshot.actions.entries()) {
+    if (!actionAllowedForTrigger(snapshot.trigger, action)) {
+      ctx.addIssue({
+        code: "custom",
+        path: ["actions", index, "type"],
+        message: `${action.type} cannot run for ${snapshot.trigger} events.`,
+      });
+    }
+  }
 });
 
 export type WorkflowDefinition = z.infer<typeof workflowDefinitionSchema>;
+export type PublishedWorkflowDefinition = z.infer<typeof publishedWorkflowDefinitionSchema>;
 type WorkflowEvent = {
   type: typeof automationEventType.enumValues[number];
   payload: Record<string, unknown>;
 };
 
-export function matchesWorkflow(definition: WorkflowDefinition, event: WorkflowEvent) {
+export function matchesWorkflow(
+  definition: WorkflowDefinition | PublishedWorkflowDefinition,
+  event: WorkflowEvent,
+) {
   if (definition.trigger !== event.type) return false;
   if (definition.conditions.length === 0) return true;
   const results = definition.conditions.map(condition => {
@@ -98,13 +155,62 @@ export async function updateWorkflowDraft(workspaceId: string, definitionId: str
   return updated;
 }
 
+function publishedSnapshotAsDraft(snapshot: PublishedWorkflowDefinition): WorkflowDefinition {
+  return workflowDefinitionSchema.parse({
+    ...snapshot,
+    actions: snapshot.actions.map(action => {
+      if (action.type !== "SEND_CUSTOMER_SMS") return action;
+      const { classifiedPurpose: _classifiedPurpose, ...draftAction } = action;
+      return draftAction;
+    }),
+  });
+}
+
 export async function publishWorkflow(workspaceId: string, definitionId: string) {
+  // Purpose classification can call the model. Never hold workflow/workspace locks
+  // across that external work: prepare from a stable draft, then compare-and-publish.
+  const [candidate] = await db.select().from(workflowDefinitions).where(and(
+    eq(workflowDefinitions.workspaceId, workspaceId),
+    eq(workflowDefinitions.id, definitionId),
+  )).limit(1);
+  if (!candidate || candidate.status === "ARCHIVED") {
+    throw new AppError("WORKFLOW_NOT_EDITABLE", "Workflow not found or archived.", 404);
+  }
+
+  const candidateDraft = workflowDefinitionSchema.parse(candidate.draft);
+
+  // Repeated publish of an unchanged active definition is a true no-op and does
+  // not spend another classification call.
+  if (candidate.status === "PUBLISHED" && candidate.publishedVersion) {
+    const [current] = await db.select().from(workflowVersions).where(and(
+      eq(workflowVersions.workspaceId, workspaceId),
+      eq(workflowVersions.definitionId, definitionId),
+      eq(workflowVersions.version, candidate.publishedVersion),
+    )).limit(1);
+    const parsed = current ? publishedWorkflowDefinitionSchema.safeParse(current.snapshot) : null;
+    if (parsed?.success
+      && JSON.stringify(publishedSnapshotAsDraft(parsed.data)) === JSON.stringify(candidateDraft)) {
+      return current;
+    }
+  }
+
+  const preparedActions = await prepareWorkflowActionsForPublication({
+    workspaceId,
+    referenceId: definitionId,
+    trigger: candidateDraft.trigger,
+    actions: candidateDraft.actions,
+  });
+  const publishedSnapshot = publishedWorkflowDefinitionSchema.parse({
+    ...candidateDraft,
+    actions: preparedActions,
+  });
+
   return db.transaction(async tx => {
-    // Serialize publication within the workspace so the dispatcher cap cannot
-    // be exceeded by two simultaneous publish operations.
+    // All state-changing workflow operations take the workspace lock first.
     const [workspace] = await tx.select({ id: workspaces.id }).from(workspaces)
       .where(eq(workspaces.id, workspaceId)).for("update").limit(1);
     if (!workspace) throw new AppError("WORKSPACE_NOT_FOUND", "Workspace not found.", 404);
+
     const [definition] = await tx.select().from(workflowDefinitions).where(and(
       eq(workflowDefinitions.workspaceId, workspaceId),
       eq(workflowDefinitions.id, definitionId),
@@ -112,18 +218,36 @@ export async function publishWorkflow(workspaceId: string, definitionId: string)
     if (!definition || definition.status === "ARCHIVED") {
       throw new AppError("WORKFLOW_NOT_EDITABLE", "Workflow not found or archived.", 404);
     }
-    const snapshot = workflowDefinitionSchema.parse(definition.draft);
+
+    const lockedDraft = workflowDefinitionSchema.parse(definition.draft);
+    if (JSON.stringify(lockedDraft) !== JSON.stringify(candidateDraft)) {
+      throw new AppError(
+        "WORKFLOW_CHANGED_DURING_PUBLISH",
+        "Workflow changed while publication validation was running. Publish the latest draft again.",
+        409,
+      );
+    }
+
+    // Staff membership is cheap and mutable; verify it again at the commit boundary.
+    await validateWorkflowActionsForPublication({
+      workspaceId,
+      trigger: lockedDraft.trigger,
+      actions: lockedDraft.actions,
+    });
+
     if (definition.publishedVersion && definition.status === "PUBLISHED") {
       const [current] = await tx.select().from(workflowVersions).where(and(
         eq(workflowVersions.workspaceId, workspaceId),
         eq(workflowVersions.definitionId, definitionId),
         eq(workflowVersions.version, definition.publishedVersion),
       )).limit(1);
-      // PostgreSQL jsonb normalizes object-key order. Compare normalized,
-      // validated definitions rather than raw JSON serialization.
-      const previous = current ? workflowDefinitionSchema.safeParse(current.snapshot) : null;
-      if (previous?.success && JSON.stringify(previous.data) === JSON.stringify(snapshot)) return current;
+      const previous = current ? publishedWorkflowDefinitionSchema.safeParse(current.snapshot) : null;
+      if (previous?.success
+        && JSON.stringify(previous.data) === JSON.stringify(publishedSnapshot)) {
+        return current;
+      }
     }
+
     if (definition.status !== "PUBLISHED") {
       const published = await tx.select({ id: workflowDefinitions.id }).from(workflowDefinitions)
         .where(and(
@@ -134,16 +258,34 @@ export async function publishWorkflow(workspaceId: string, definitionId: string)
         throw new AppError("WORKFLOW_LIMIT_EXCEEDED", "This workspace has reached its published workflow limit.", 409);
       }
     }
+
     const nextVersion = (definition.publishedVersion ?? 0) + 1;
+    const publishedAt = sql<Date>`clock_timestamp()`;
     const [version] = await tx.insert(workflowVersions).values({
-      workspaceId, definitionId, version: nextVersion, snapshot,
+      workspaceId,
+      definitionId,
+      version: nextVersion,
+      snapshot: publishedSnapshot,
+      publishedAt,
     }).returning();
+
     await tx.update(workflowDefinitions).set({
-      status: "PUBLISHED", publishedVersion: nextVersion, updatedAt: new Date(),
+      status: "PUBLISHED",
+      publishedVersion: nextVersion,
+      updatedAt: publishedAt,
     }).where(and(
       eq(workflowDefinitions.workspaceId, workspaceId),
       eq(workflowDefinitions.id, definitionId),
     ));
+
+    if (definition.status !== "PUBLISHED") {
+      await tx.insert(workflowStatusHistory).values({
+        workspaceId,
+        definitionId,
+        status: "PUBLISHED",
+        occurredAt: publishedAt,
+      });
+    }
     return version;
   });
 }
@@ -176,24 +318,82 @@ export async function setWorkflowStatus(
       }
     }
     if (status === definition.status) return definition;
+
+    const now = new Date();
     const [updated] = await tx.update(workflowDefinitions).set({
-      status, updatedAt: new Date(),
+      status, updatedAt: now,
     }).where(and(
       eq(workflowDefinitions.workspaceId, workspaceId),
       eq(workflowDefinitions.id, definitionId),
     )).returning();
+
+    await tx.insert(workflowStatusHistory).values({
+      workspaceId,
+      definitionId,
+      status,
+      occurredAt: sql<Date>`clock_timestamp()`,
+    });
+
+    if (status !== "PUBLISHED") {
+      const versions = await tx.select({ id: workflowVersions.id }).from(workflowVersions).where(and(
+        eq(workflowVersions.workspaceId, workspaceId),
+        eq(workflowVersions.definitionId, definitionId),
+      ));
+      const versionIds = versions.map(row => row.id);
+      if (versionIds.length) {
+        const pendingRuns = await tx.update(automationRuns).set({
+          status: "CANCELLED",
+          completedAt: now,
+          errorCode: status === "PAUSED" ? "WORKFLOW_PAUSED" : "WORKFLOW_ARCHIVED",
+          errorMessage: status === "PAUSED"
+            ? "Workflow was paused before this run started."
+            : "Workflow was archived before this run started.",
+        }).where(and(
+          eq(automationRuns.workspaceId, workspaceId),
+          inArray(automationRuns.workflowVersionId, versionIds),
+          eq(automationRuns.status, "PENDING"),
+        )).returning({ id: automationRuns.id });
+
+        const runningRuns = await tx.update(automationRuns).set({
+          cancelRequestedAt: now,
+        }).where(and(
+          eq(automationRuns.workspaceId, workspaceId),
+          inArray(automationRuns.workflowVersionId, versionIds),
+          eq(automationRuns.status, "RUNNING"),
+        )).returning({ id: automationRuns.id });
+
+        const affectedRunIds = [...pendingRuns, ...runningRuns].map(row => row.id);
+        if (affectedRunIds.length) {
+          await tx.update(workflowActionRuns).set({
+            status: "CANCELLED",
+            completedAt: now,
+            errorCode: status === "PAUSED" ? "WORKFLOW_PAUSED" : "WORKFLOW_ARCHIVED",
+            errorMessage: status === "PAUSED"
+              ? "Workflow was paused before this action started."
+              : "Workflow was archived before this action started.",
+            updatedAt: now,
+          }).where(and(
+            eq(workflowActionRuns.workspaceId, workspaceId),
+            inArray(workflowActionRuns.automationRunId, affectedRunIds),
+            eq(workflowActionRuns.status, "PENDING"),
+          ));
+        }
+      }
+    }
     return updated;
   });
 }
 
 export async function listPublishedWorkflowVersions(workspaceId: string, eventId?: string) {
-  // Compare timestamps in PostgreSQL: JS Date would discard PostgreSQL microseconds.
+  // Keep event/version/status comparisons at PostgreSQL precision. JS Date truncates
+  // PostgreSQL microseconds and can move a boundary event across a publish/pause edge.
   const occurrence = eventId
     ? sql<Date>`(SELECT ${automationEvents.occurredAt} FROM ${automationEvents} WHERE ${automationEvents.id} = ${eventId} AND ${automationEvents.workspaceId} = ${workspaceId})`
-    : sql<Date>`now()`;
-  // Select one version per definition: the snapshot effective when the
-  // business event was committed, even if a newer version was published later.
-  // Events before the first publication are never replayed by a new workflow.
+    : sql<Date>`clock_timestamp()`;
+  const recordedAt = eventId
+    ? sql<Date>`(SELECT ${automationEvents.createdAt} FROM ${automationEvents} WHERE ${automationEvents.id} = ${eventId} AND ${automationEvents.workspaceId} = ${workspaceId})`
+    : sql<Date>`clock_timestamp()`;
+
   const rows = await db.selectDistinctOn([workflowDefinitions.id], {
     id: workflowVersions.id,
     definitionId: workflowDefinitions.id,
@@ -212,17 +412,50 @@ export async function listPublishedWorkflowVersions(workspaceId: string, eventId
   if (rows.length > 200) {
     throw new AppError("WORKFLOW_LIMIT_EXCEEDED", "Too many published workflows in this workspace.", 409);
   }
-  return rows.map(row => ({
+  if (!rows.length) return [];
+
+  const definitionIds = rows.map(row => row.definitionId);
+  // The latest activation window—not merely historical status at event time—
+  // governs dispatch. A pause cancels even an earlier undispatched event; resume
+  // starts a NEW window and must never resurrect that backlog.
+  const statuses = await db.selectDistinctOn([workflowStatusHistory.definitionId], {
+    definitionId: workflowStatusHistory.definitionId,
+    status: workflowStatusHistory.status,
+    startedBeforeEvent: sql<boolean>`${workflowStatusHistory.occurredAt} <= ${recordedAt}`,
+  }).from(workflowStatusHistory).where(and(
+    eq(workflowStatusHistory.workspaceId, workspaceId),
+    inArray(workflowStatusHistory.definitionId, definitionIds),
+  )).orderBy(workflowStatusHistory.definitionId, desc(workflowStatusHistory.occurredAt));
+
+  const eligible = new Set(
+    statuses.filter(row => row.status === "PUBLISHED" && row.startedBeforeEvent)
+      .map(row => row.definitionId),
+  );
+  return rows.filter(row => eligible.has(row.definitionId)).map(row => ({
     ...row,
-    snapshot: workflowDefinitionSchema.parse(row.snapshot),
+    snapshot: publishedWorkflowDefinitionSchema.parse(row.snapshot),
   }));
 }
 
 // Execution retrieves the frozen version by workspace, not the editable draft.
 export async function getWorkflowVersion(workspaceId: string, versionId: string) {
-  const [row] = await db.select().from(workflowVersions).where(and(
-    eq(workflowVersions.workspaceId, workspaceId),
-    eq(workflowVersions.id, versionId),
-  )).limit(1);
-  return row ? { ...row, snapshot: workflowDefinitionSchema.parse(row.snapshot) } : null;
+  const [row] = await db.select({
+    version: workflowVersions,
+    definitionStatus: workflowDefinitions.status,
+    definitionName: workflowDefinitions.name,
+  }).from(workflowVersions)
+    .innerJoin(workflowDefinitions, and(
+      eq(workflowDefinitions.workspaceId, workflowVersions.workspaceId),
+      eq(workflowDefinitions.id, workflowVersions.definitionId),
+    ))
+    .where(and(
+      eq(workflowVersions.workspaceId, workspaceId),
+      eq(workflowVersions.id, versionId),
+    )).limit(1);
+  return row ? {
+    ...row.version,
+    definitionStatus: row.definitionStatus,
+    definitionName: row.definitionName,
+    snapshot: publishedWorkflowDefinitionSchema.parse(row.version.snapshot),
+  } : null;
 }

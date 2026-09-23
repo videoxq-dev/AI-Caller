@@ -21,16 +21,26 @@ import {
   sendWhatsAppConversationText,
 } from "@/server/whatsapp/outbound";
 import {
+  cancelAutomationRun,
+  cancelPendingWorkflowActions,
   claimAutomationDelivery,
   claimAutomationRun,
+  claimWorkflowActionRun,
   completeAutomationRun,
   failAutomationRun,
   finishAutomationDelivery,
+  finishPendingAutomationDelivery,
+  finishWorkflowActionRun,
   getAutomationEvent,
+  getAutomationRun,
   getAutomationSetting,
   listAutomationDeliveries,
+  listWorkflowActionDeliveries,
+  listWorkflowActionRuns,
   releaseAutomationRunForRetry,
+  releaseWorkflowActionRunForRetry,
 } from "./repository";
+import { executeWorkflowAction, resolveWorkflowCustomerContext } from "./workflow-action-executor";
 import { getWorkflowVersion } from "./workflows";
 import type {
   AppointmentConfirmationConfig,
@@ -449,9 +459,260 @@ async function executeEscalation(
   });
 }
 
+async function stopCustomWorkflowRun(
+  workspaceId: string,
+  runId: string,
+  reason: string,
+) {
+  const actions = await listWorkflowActionRuns(workspaceId, runId);
+  await cancelPendingWorkflowActions(workspaceId, runId, reason);
+  const running = actions.find(action => action.status === "RUNNING");
+  if (!running) {
+    await cancelAutomationRun(workspaceId, runId, reason);
+    return "CANCELLED" as const;
+  }
+
+  // A running action owns its side effect for the full worker job lease.
+  // Pause never interrupts it mid-flight; it only prevents subsequent actions.
+  const actionStaleBefore = Date.now() - 5 * 60_000;
+  if (running.startedAt && running.startedAt.getTime() >= actionStaleBefore) {
+    return "RUNNING" as const;
+  }
+
+  const deliveries = await listWorkflowActionDeliveries(workspaceId, running.id);
+  if (deliveries.length === 0) {
+    await finishWorkflowActionRun(workspaceId, running.id, {
+      status: "CANCELLED",
+      errorCode: "WORKFLOW_CANCELLED",
+      errorMessage: reason,
+    });
+    await cancelAutomationRun(workspaceId, runId, reason);
+    return "CANCELLED" as const;
+  }
+  if (deliveries.length !== 1) {
+    await failAutomationRun(
+      workspaceId,
+      runId,
+      new AppError(
+        "WORKFLOW_ACTION_DELIVERY_CONFLICT",
+        "A running workflow action has an unexpected number of deliveries.",
+        409,
+      ),
+      { actionRunId: running.id, deliveryCount: deliveries.length },
+    );
+    return "FAILED" as const;
+  }
+
+  let [delivery] = deliveries;
+  if (delivery.status === "PENDING") {
+    const reconciled = await finishPendingAutomationDelivery(workspaceId, delivery.id, {
+      status: "UNKNOWN",
+      errorCode: "INTERRUPTED_DELIVERY",
+      errorMessage: "Workflow was paused after an external delivery was claimed; outcome is uncertain.",
+    });
+    if (reconciled) delivery = reconciled;
+  }
+
+  if (delivery.status === "SENT" || delivery.status === "SKIPPED") {
+    await finishWorkflowActionRun(workspaceId, running.id, {
+      status: delivery.status === "SENT" ? "COMPLETED" : "SKIPPED",
+      errorCode: delivery.errorCode,
+      errorMessage: delivery.errorMessage,
+      result: {
+        deliveryId: delivery.id,
+        messageId: delivery.messageId,
+        providerExternalId: delivery.providerExternalId,
+        recoveredDuringCancellation: true,
+      },
+    });
+    await cancelAutomationRun(workspaceId, runId, reason);
+    return "CANCELLED" as const;
+  }
+
+  await finishWorkflowActionRun(workspaceId, running.id, {
+    status: delivery.status === "FAILED" ? "FAILED" : "UNKNOWN",
+    errorCode: delivery.errorCode ?? (delivery.status === "UNKNOWN" ? "INTERRUPTED_DELIVERY" : "WORKFLOW_ACTION_FAILED"),
+    errorMessage: delivery.errorMessage ?? "External workflow action did not complete safely.",
+    result: { deliveryId: delivery.id, recoveredDuringCancellation: true },
+  });
+  await failAutomationRun(
+    workspaceId,
+    runId,
+    new AppError(
+      delivery.status === "FAILED" ? "WORKFLOW_ACTION_FAILED" : "WORKFLOW_ACTION_UNKNOWN",
+      delivery.status === "FAILED"
+        ? "Workflow action failed before cancellation could complete."
+        : "Workflow action has an uncertain external outcome and will not be retried.",
+      502,
+    ),
+    { actionRunId: running.id, deliveryId: delivery.id },
+  );
+  return "FAILED" as const;
+}
+
+async function executeCustomWorkflowRun(
+  workspaceId: string,
+  run: NonNullable<Awaited<ReturnType<typeof claimAutomationRun>>>,
+  event: NonNullable<Awaited<ReturnType<typeof getAutomationEvent>>>,
+) {
+  if (!run.workflowVersionId) {
+    throw new AppError("WORKFLOW_VERSION_INVALID", "Workflow run has no version.", 409);
+  }
+  const version = await getWorkflowVersion(workspaceId, run.workflowVersionId);
+  if (!version || version.snapshot.trigger !== event.type) {
+    throw new AppError("WORKFLOW_VERSION_INVALID", "The published workflow version is unavailable or incompatible.", 409);
+  }
+
+  const persisted = await listWorkflowActionRuns(workspaceId, run.id);
+  if (persisted.length !== version.snapshot.actions.length
+    || persisted.some((row, index) => (
+      row.actionIndex !== index || row.actionType !== version.snapshot.actions[index]?.type
+    ))) {
+    throw new AppError(
+      "WORKFLOW_ACTION_LEDGER_CONFLICT",
+      "Workflow action ledger does not match its immutable workflow version.",
+      409,
+    );
+  }
+
+  if (version.definitionStatus !== "PUBLISHED" || run.cancelRequestedAt) {
+    const reason = version.definitionStatus === "PUBLISHED"
+      ? "Workflow cancellation was requested before execution."
+      : `Workflow is ${version.definitionStatus.toLowerCase()}.`;
+    const status = await stopCustomWorkflowRun(workspaceId, run.id, reason);
+    return { claimed: true as const, status };
+  }
+
+  const context = await resolveWorkflowCustomerContext(workspaceId, event);
+  let completed = 0;
+  let skipped = 0;
+
+  for (let actionIndex = 0; actionIndex < version.snapshot.actions.length; actionIndex += 1) {
+    const latestRun = await getAutomationRun(workspaceId, run.id);
+    if (!latestRun || latestRun.status === "CANCELLED" || latestRun.cancelRequestedAt) {
+      const reason = "Workflow was paused or archived while this run was executing.";
+      if (!latestRun) throw new AppError("AUTOMATION_RUN_NOT_FOUND", "Workflow run disappeared.", 409);
+      if (latestRun.status === "CANCELLED") {
+        return { claimed: true as const, status: "CANCELLED" as const };
+      }
+      const status = await stopCustomWorkflowRun(workspaceId, run.id, reason);
+      return { claimed: true as const, status };
+    }
+
+    const action = version.snapshot.actions[actionIndex];
+    const claimedAction = await claimWorkflowActionRun(workspaceId, run.id, actionIndex);
+    if (!claimedAction) {
+      const rows = await listWorkflowActionRuns(workspaceId, run.id);
+      const current = rows.find(row => row.actionIndex === actionIndex);
+      if (!current) throw new AppError("WORKFLOW_ACTION_NOT_FOUND", "Workflow action run is missing.", 409);
+      if (current.status === "COMPLETED") {
+        completed += 1;
+        continue;
+      }
+      if (current.status === "SKIPPED") {
+        skipped += 1;
+        continue;
+      }
+      if (current.status === "CANCELLED") {
+        const reason = current.errorMessage ?? "Workflow action was cancelled.";
+        await cancelPendingWorkflowActions(workspaceId, run.id, reason);
+        await cancelAutomationRun(workspaceId, run.id, reason);
+        return { claimed: true as const, status: "CANCELLED" as const };
+      }
+      if (current.status === "FAILED" || current.status === "UNKNOWN") {
+        await failAutomationRun(
+          workspaceId,
+          run.id,
+          new AppError(
+            current.status === "UNKNOWN" ? "WORKFLOW_ACTION_UNKNOWN" : "WORKFLOW_ACTION_FAILED",
+            current.errorMessage ?? "Workflow action did not complete.",
+            502,
+          ),
+          { failedActionIndex: actionIndex, failedActionStatus: current.status },
+        );
+        return { claimed: true as const, status: "FAILED" as const };
+      }
+      // A reclaimed run can encounter a still-fresh action owned by the prior
+      // worker. Leave the run running; that worker remains responsible for it.
+      return { claimed: true as const, status: "RUNNING" as const };
+    }
+
+    try {
+      const outcome = await executeWorkflowAction({
+        workspaceId,
+        runId: run.id,
+        actionRunId: claimedAction.id,
+        actionType: claimedAction.actionType,
+        action,
+        event,
+        context,
+      });
+      if (outcome === "COMPLETED") {
+        completed += 1;
+        continue;
+      }
+      if (outcome === "SKIPPED") {
+        skipped += 1;
+        continue;
+      }
+      await failAutomationRun(
+        workspaceId,
+        run.id,
+        new AppError(
+          outcome === "UNKNOWN" ? "WORKFLOW_ACTION_UNKNOWN" : "WORKFLOW_ACTION_FAILED",
+          outcome === "UNKNOWN"
+            ? "Workflow action has an uncertain external outcome and will not be retried automatically."
+            : "Workflow action failed.",
+          502,
+        ),
+        { failedActionIndex: actionIndex, failedActionStatus: outcome },
+      );
+      return { claimed: true as const, status: "FAILED" as const };
+    } catch (error) {
+      await releaseWorkflowActionRunForRetry(workspaceId, claimedAction.id).catch(() => undefined);
+      throw error;
+    }
+  }
+
+  const status = completed > 0 ? "COMPLETED" as const : "SKIPPED" as const;
+  await completeAutomationRun(workspaceId, run.id, status, {
+    actionSummary: { completed, skipped, total: version.snapshot.actions.length },
+    workflowVersionId: version.id,
+    workflowDefinitionId: version.definitionId,
+  });
+  return {
+    claimed: true as const,
+    status,
+    actionSummary: { completed, skipped, total: version.snapshot.actions.length },
+  };
+}
+
 export async function executeAutomationRun(workspaceId: string, runId: string) {
   const run = await claimAutomationRun(workspaceId, runId);
   if (!run) return { claimed: false as const };
+
+  if (run.workflowVersionId) {
+    try {
+      const event = await getAutomationEvent(workspaceId, run.eventId);
+      if (!event) throw new AppError("AUTOMATION_EVENT_NOT_FOUND", "Automation event not found.", 404);
+      return await executeCustomWorkflowRun(workspaceId, run, event);
+    } catch (error) {
+      if (isRetryableAutomationError(error)) {
+        const actions = await listWorkflowActionRuns(workspaceId, run.id).catch(() => []);
+        for (const action of actions.filter(item => item.status === "RUNNING")) {
+          await releaseWorkflowActionRunForRetry(workspaceId, action.id).catch(() => undefined);
+        }
+        await releaseAutomationRunForRetry(workspaceId, run.id).catch(() => undefined);
+        throw error;
+      }
+      await failAutomationRun(workspaceId, run.id, error).catch(() => undefined);
+      return {
+        claimed: true as const,
+        status: "FAILED" as const,
+        error: error instanceof Error ? error.message : "Workflow execution failed.",
+      };
+    }
+  }
 
   try {
     const event = await getAutomationEvent(workspaceId, run.eventId);
@@ -464,20 +725,7 @@ export async function executeAutomationRun(workspaceId: string, runId: string) {
     }
 
     let summary: DeliverySummary = { sent: 0, skipped: 0, failed: 0 };
-    if (run.workflowVersionId) {
-      const version = await getWorkflowVersion(workspaceId, run.workflowVersionId);
-      if (!version || version.snapshot.trigger !== event.type) {
-        throw new AppError("WORKFLOW_VERSION_INVALID", "The published workflow version is unavailable or incompatible.", 409);
-      }
-      const [action] = version.snapshot.actions;
-      // Only registered and validated deterministic actions reach this boundary.
-      if (action.type === "NOTIFY_STAFF") {
-        summary = await deliverInApp({
-          workspaceId, runId, userId: null, title: action.title, body: action.message,
-          metadata: { workflowVersionId: version.id, workflowDefinitionId: version.definitionId },
-        });
-      }
-    } else if (run.key === "MISSED_INQUIRY_RECOVERY") {
+    if (run.key === "MISSED_INQUIRY_RECOVERY") {
       summary = await executeMissedInquiry(workspaceId, runId, event, setting?.config as MissedInquiryConfig);
     } else if (run.key === "QUALIFIED_LEAD_ASSIGNMENT") {
       summary = await executeQualifiedLead(workspaceId, runId, event);
