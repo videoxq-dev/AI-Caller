@@ -157,6 +157,31 @@ describe("Phase 4 automation builder service", () => {
     expect(await db.select().from(automationRuns)).toHaveLength(0);
   });
 
+  it("evaluates and saves multiple conditions with both All and Any", async () => {
+    const starter = builderStarter("HIGH_VALUE_LEAD_ALERT");
+    const created = await createWorkflowDraft(workspaceId, starter.name, starter.definition);
+    const conditions = [
+      { field: "qualificationScore" as const, operator: "GTE" as const, value: 80 },
+      { field: "qualificationScore" as const, operator: "LTE" as const, value: 95 },
+    ];
+    const allDraft = { ...starter.definition, conditions, match: "ALL" as const };
+    await updateWorkflowDraft(workspaceId, created.id, starter.name, allDraft);
+    expect((await getBuilderWorkflow(workspaceId, created.id)).draft).toMatchObject({
+      match: "ALL",
+      conditions,
+    });
+    await expect(testBuilderWorkflow(workspaceId, created.id, {
+      sample: { qualificationScore: 90 },
+    })).resolves.toMatchObject({ matches: true, conditions: [{ matched: true }, { matched: true }] });
+    await expect(testBuilderWorkflow(workspaceId, created.id, {
+      sample: { qualificationScore: 99 },
+    })).resolves.toMatchObject({ matches: false, conditions: [{ matched: true }, { matched: false }] });
+    await expect(testBuilderWorkflow(workspaceId, created.id, {
+      draft: { ...allDraft, match: "ANY" },
+      sample: { qualificationScore: 99 },
+    })).resolves.toMatchObject({ matches: true, conditions: [{ matched: true }, { matched: false }] });
+  });
+
   it("requires sample values only for conditions the draft actually uses", async () => {
     const starter = builderStarter("HIGH_VALUE_LEAD_ALERT");
     const created = await createWorkflowDraft(workspaceId, starter.name, starter.definition);
