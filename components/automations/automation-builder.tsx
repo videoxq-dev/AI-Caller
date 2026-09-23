@@ -353,21 +353,18 @@ export function AutomationBuilder() {
     setWorking("test");
     setError(null);
     try {
-      if (dirty) {
-        const saved = await saveDraft();
-        if (!saved) return;
+      if (!draft) return;
+      const sample: Record<string, unknown> = {};
+      if (draft.conditions.some(condition => condition.field === "qualificationScore")) {
+        sample.qualificationScore = Number(testInputs.qualificationScore ?? "90");
       }
-      const body: Record<string, unknown> = {};
-      if (draft?.conditions.some(condition => condition.field === "qualificationScore")) {
-        body.qualificationScore = Number(testInputs.qualificationScore ?? "90");
-      }
-      if (draft?.conditions.some(condition => condition.field === "channel")) {
-        body.channel = testInputs.channel || "SMS";
+      if (draft.conditions.some(condition => condition.field === "channel")) {
+        sample.channel = testInputs.channel || "SMS";
       }
       const response = await fetch(`/api/automations/workflows/${id}/test`, {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify(body),
+        body: JSON.stringify({ draft, sample }),
       });
       const data = await response.json().catch(() => null) as { result?: TestResult } | null;
       if (!response.ok || !data?.result) throw new Error(responseMessage(data, "Unable to test automation."));
