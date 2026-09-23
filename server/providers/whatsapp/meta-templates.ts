@@ -15,10 +15,10 @@ export const createWhatsAppTemplateSchema = z.object({
   footer: z.string().trim().max(60).default(""),
   samples: z.array(z.string().trim().min(1).max(200)).max(10).default([]),
 }).strict().superRefine((input, ctx) => {
-  const matches = [...input.body.matchAll(/{{(\\d+)}}/g)].map(match => Number(match[1]));
+  const matches = [...input.body.matchAll(/{{(\d+)}}/g)].map(match => Number(match[1]));
   const unique = [...new Set(matches)];
   if (unique.length > 10 || unique.some((value, index) => value !== index + 1)
-    || /{{|}}/.test(input.body.replace(/{{\\d+}}/g, ""))) {
+    || /{{|}}/.test(input.body.replace(/{{\d+}}/g, ""))) {
     ctx.addIssue({ code: "custom", path: ["body"], message: "Use consecutive placeholders {{1}}, {{2}}, and so on." });
   }
   if (input.samples.length !== unique.length) {
@@ -71,11 +71,11 @@ export function createMetaTemplateClient(
   config: { accessToken: string; wabaId: string; graphApiVersion?: string },
   fetcher: typeof fetch = fetch,
 ) {
-  if (!config.accessToken || !/^\\d{1,30}$/.test(config.wabaId)) {
+  if (!config.accessToken || !/^\d{1,30}$/.test(config.wabaId)) {
     throw new AppError("WHATSAPP_ACCOUNT_INVALID", "WhatsApp account configuration is incomplete.", 409);
   }
   const version = config.graphApiVersion ?? getEnv().META_GRAPH_API_VERSION;
-  if (!/^v\\d+\\.\\d+$/.test(version)) throw new Error("Invalid Meta Graph API version.");
+  if (!/^v\d+\.\d+$/.test(version)) throw new Error("Invalid Meta Graph API version.");
   const endpoint = `https://graph.facebook.com/${version}/${config.wabaId}/message_templates`;
   const headers = { authorization: `Bearer ${config.accessToken}` };
   return {
