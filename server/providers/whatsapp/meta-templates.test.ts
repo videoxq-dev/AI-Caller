@@ -64,7 +64,8 @@ describe("Meta WhatsApp template management", () => {
     });
     expect(JSON.stringify(page)).not.toContain("opaqueProviderSecret");
     await client.list("cDoxOjc=");
-    expect(fetcher.mock.calls[1]?.[0]).toBe("https://graph.facebook.com/v22.0/123456789/message_templates?limit=50&after=cDoxOjc%3D");
+    const [secondUrl] = fetcher.mock.calls[1] as unknown as [string, RequestInit];
+    expect(secondUrl).toBe("https://graph.facebook.com/v22.0/123456789/message_templates?limit=50&after=cDoxOjc%3D");
   });
 
   it("rejects malformed names, gaps, and absent placeholder examples before provider submission", async () => {
