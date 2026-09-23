@@ -345,11 +345,16 @@ async function executeAppointmentMessage(
   key: "APPOINTMENT_CONFIRMATION" | "APPOINTMENT_REMINDER",
   config: AppointmentConfirmationConfig | AppointmentReminderConfig,
   expectedStartsAt?: string | null,
+  expectedRevision?: number,
 ) {
   const appointmentId = typeof event.payload.appointmentId === "string" ? event.payload.appointmentId : null;
   if (!appointmentId) return { sent: 0, skipped: 1, failed: 0 };
   const context = await automationContext(workspaceId, appointmentId);
   if (!context || context.appointment.status !== "CONFIRMED" || !context.appointment.conversationId) {
+    return { sent: 0, skipped: 1, failed: 0 };
+  }
+  // Time alone cannot distinguish the original A from a later A → B → A edit.
+  if (key === "APPOINTMENT_REMINDER" && context.appointment.revision !== expectedRevision) {
     return { sent: 0, skipped: 1, failed: 0 };
   }
   if (key === "APPOINTMENT_REMINDER" && expectedStartsAt && context.appointment.startsAt.toISOString() !== expectedStartsAt) {
@@ -472,6 +477,12 @@ export async function executeAutomationRun(workspaceId: string, runId: string) {
       );
     } else if (run.key === "APPOINTMENT_REMINDER") {
       const expectedStartsAt = typeof run.metadata.expectedStartsAt === "string" ? run.metadata.expectedStartsAt : null;
+      const rawRevision = run.metadata.expectedAppointmentRevision;
+      const expectedRevision = rawRevision === undefined
+        ? 0 // Reminders queued before migration 0033 belong to revision zero.
+        : typeof rawRevision === "number" && Number.isSafeInteger(rawRevision) && rawRevision >= 0
+          ? rawRevision
+          : -1; // Corrupted metadata must never authorize a reminder.
       summary = await executeAppointmentMessage(
         workspaceId,
         runId,
@@ -479,6 +490,7 @@ export async function executeAutomationRun(workspaceId: string, runId: string) {
         run.key,
         setting.config as AppointmentReminderConfig,
         expectedStartsAt,
+        expectedRevision,
       );
     } else if (run.key === "HUMAN_ESCALATION") {
       summary = await executeEscalation(workspaceId, runId, event);
