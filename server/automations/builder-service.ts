@@ -72,17 +72,21 @@ export async function listBuilderWorkflows(workspaceId: string) {
   const publishedRows = definitions.some(item => item.publishedVersion)
     ? await db.select({
         definitionId: workflowVersions.definitionId,
-        version: workflowVersions.version,
         snapshot: workflowVersions.snapshot,
-      }).from(workflowVersions).where(eq(workflowVersions.workspaceId, workspaceId))
+      }).from(workflowVersions)
+        .innerJoin(workflowDefinitions, and(
+          eq(workflowDefinitions.workspaceId, workflowVersions.workspaceId),
+          eq(workflowDefinitions.id, workflowVersions.definitionId),
+          eq(workflowDefinitions.publishedVersion, workflowVersions.version),
+        ))
+        .where(and(
+          eq(workflowVersions.workspaceId, workspaceId),
+          ne(workflowDefinitions.status, "ARCHIVED"),
+        ))
     : [];
-  const publishedByDefinition = new Map<string, { version: number; snapshot: unknown }>();
-  for (const row of publishedRows) {
-    const current = publishedByDefinition.get(row.definitionId);
-    if (!current || row.version > current.version) {
-      publishedByDefinition.set(row.definitionId, { version: row.version, snapshot: row.snapshot });
-    }
-  }
+  const publishedByDefinition = new Map(
+    publishedRows.map(row => [row.definitionId, row.snapshot]),
+  );
 
   return definitions.map(definition => {
     const draft = workflowDefinitionSchema.parse(definition.draft);
