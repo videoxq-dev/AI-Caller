@@ -499,9 +499,6 @@ export function AutomationBuilder() {
                 {workflow.status === "ACTIVE" && canManage && (
                   <button className="quietButton" disabled={working !== null} onClick={() => void changeStatus("pause")}>Pause</button>
                 )}
-                {workflow.status === "PAUSED" && canManage && (
-                  <button className="quietButton" disabled={working !== null} onClick={() => void resumeLatest()}>Resume</button>
-                )}
                 {canManage && <div className="builderMore">
                   <button className="builderMoreButton" aria-label="More automation actions" onClick={() => setMoreOpen(value => !value)}>⋯</button>
                   {moreOpen && <div className="builderMoreMenu">
