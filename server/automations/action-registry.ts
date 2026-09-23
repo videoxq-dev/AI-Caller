@@ -3,6 +3,8 @@ import { z } from "zod";
 import { db } from "@/db";
 import { automationEventType, memberships } from "@/db/schema";
 import { AppError } from "@/server/http/errors";
+import { classifySmsPurpose } from "@/server/sms/classification";
+import type { SmsPurpose } from "@/server/sms/policy";
 
 export const MAX_WORKFLOW_ACTIONS = 5;
 
@@ -34,7 +36,18 @@ export const workflowActionSchema = z.discriminatedUnion("type", [
   sendCustomerSmsActionSchema,
 ]);
 
+export const publishedSendCustomerSmsActionSchema = sendCustomerSmsActionSchema.extend({
+  classifiedPurpose: z.enum(["TRANSACTIONAL", "MARKETING"]),
+}).strict();
+
+export const publishedWorkflowActionSchema = z.discriminatedUnion("type", [
+  notifyStaffActionSchema,
+  assignLeadActionSchema,
+  publishedSendCustomerSmsActionSchema,
+]);
+
 export type WorkflowAction = z.infer<typeof workflowActionSchema>;
+export type PublishedWorkflowAction = z.infer<typeof publishedWorkflowActionSchema>;
 export type WorkflowActionType = WorkflowAction["type"];
 export type AutomationEventType = typeof automationEventType.enumValues[number];
 
@@ -138,4 +151,35 @@ export async function validateWorkflowActionsForPublication(input: {
       400,
     );
   }
+}
+
+export async function prepareWorkflowActionsForPublication(input: {
+  workspaceId: string;
+  referenceId: string;
+  trigger: AutomationEventType;
+  actions: WorkflowAction[];
+}): Promise<PublishedWorkflowAction[]> {
+  await validateWorkflowActionsForPublication(input);
+
+  return Promise.all(input.actions.map(async action => {
+    if (action.type !== "SEND_CUSTOMER_SMS") return action;
+    const classifiedPurpose = await classifySmsPurpose({
+      workspaceId: input.workspaceId,
+      referenceId: input.referenceId,
+      message: action.message,
+      campaignDescription: `Deterministic customer-service workflow triggered by ${input.trigger}`,
+      lastCustomerMessage: null,
+    });
+    if (classifiedPurpose === "UNCERTAIN") {
+      throw new AppError(
+        "WORKFLOW_SMS_PURPOSE_UNCERTAIN",
+        "The SMS template purpose could not be classified safely. Edit the message before publishing.",
+        400,
+      );
+    }
+    return {
+      ...action,
+      classifiedPurpose: classifiedPurpose satisfies SmsPurpose,
+    };
+  }));
 }
