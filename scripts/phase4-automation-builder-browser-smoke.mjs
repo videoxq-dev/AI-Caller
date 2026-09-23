@@ -159,6 +159,18 @@ try {
   await page.getByRole("button", { name: "Pause", exact: true }).click();
   await page.getByText("Paused", { exact: true }).waitFor();
 
+  // A paused automation can be edited and saved without reactivating.
+  await page.locator(".conditionRow input[type='number']").first().fill("95");
+  await page.getByRole("button", { name: "Save draft", exact: true }).click();
+  await page.getByText("Paused", { exact: true }).waitFor();
+  const pausedDraft = await pool.query(
+    `SELECT status, draft FROM workflow_definitions WHERE workspace_id = $1 AND id = $2`,
+    [workspaceId, definitionId],
+  );
+  assert(pausedDraft.rows[0]?.status === "PAUSED", "Saving a paused automation unexpectedly resumed it.");
+  assert(pausedDraft.rows[0]?.draft?.conditions?.[0]?.value === 95,
+    "Paused automation edit was not saved.");
+
   const pausedContact = await pool.query(
     `INSERT INTO contacts (workspace_id, name) VALUES ($1, 'Paused Phase Four Lead') RETURNING id`,
     [workspaceId],
@@ -190,8 +202,22 @@ try {
   );
   assert(pausedRuns.rows[0].count === 0, "Paused automation created a workflow run.");
 
-  await page.getByRole("button", { name: "Resume", exact: true }).click();
+  await page.getByRole("button", { name: "Resume", exact: true }).first().click();
   await page.getByText("Active", { exact: true }).waitFor();
+  const resumedDefinition = await pool.query(
+    `SELECT d.status, v.snapshot
+       FROM workflow_definitions d
+       JOIN workflow_versions v
+         ON v.workspace_id = d.workspace_id
+        AND v.definition_id = d.id
+        AND v.version = d.published_version
+      WHERE d.workspace_id = $1 AND d.id = $2`,
+    [workspaceId, definitionId],
+  );
+  assert(resumedDefinition.rows[0]?.status === "PUBLISHED",
+    "Resume did not reactivate the paused automation.");
+  assert(resumedDefinition.rows[0]?.snapshot?.conditions?.[0]?.value === 95,
+    "Resume did not activate the latest saved configuration.");
   await page.waitForTimeout(700);
   pausedRuns = await pool.query(
     `SELECT count(*)::int AS count FROM automation_runs WHERE workspace_id = $1 AND event_id = $2`,
