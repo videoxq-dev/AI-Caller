@@ -309,31 +309,53 @@ async function finishRequest(ctx: BookingContext, row: RequestRow, sourceMessage
     eq(appointmentManagementRequests.previewDeliveredAt, row.previewDeliveredAt))).returning();
   if (!claimed) return { reply: "This appointment change is already being processed. Please ask for its status before trying again." };
   try {
-    if (row.intent === "CANCEL") {
-      await calendarBookingService.cancel(
-        ctx.workspaceId, appointment.id, row.originalUpdatedAt ?? undefined,
-      );
-    } else {
-      if (!row.proposedStartsAt || !row.proposedEndsAt) {
-        throw new AppError("APPOINTMENT_CHANGE_INCOMPLETE", "Please choose a new date and time.", 422);
+    // Serialize consequential changes to the SAME appointment across every
+    // conversation/session. The version check must happen AFTER acquiring
+    // the lock and BEFORE the external provider call.
+    await db.transaction(async (tx) => {
+      await tx.execute(sql`SELECT pg_advisory_xact_lock(
+        hashtext(${`appointment-management:${ctx.workspaceId}:${appointment.id}`})
+      )`);
+      const [latest] = await tx.select().from(appointments).where(and(
+        eq(appointments.workspaceId, ctx.workspaceId),
+        eq(appointments.contactId, ctx.contactId),
+        eq(appointments.id, appointment.id),
+      )).limit(1);
+      if (!latest || !row.originalUpdatedAt ||
+        !EDITABLE_APPOINTMENT.includes(latest.status as typeof EDITABLE_APPOINTMENT[number]) ||
+        latest.updatedAt.getTime() !== row.originalUpdatedAt.getTime() ||
+        latest.startsAt.getTime() !== row.originalStartsAt?.getTime() ||
+        latest.endsAt.getTime() !== row.originalEndsAt?.getTime()) {
+        throw new AppError("APPOINTMENT_SNAPSHOT_STALE",
+          "The appointment changed before I could submit the approved request.", 409);
       }
-      const serviceChange = row.proposedServiceId
-        ? await db.select().from(services).where(and(
-            eq(services.workspaceId, ctx.workspaceId),
-            eq(services.id, row.proposedServiceId),
-            eq(services.active, true),
-          )).limit(1).then(rows => rows[0] ?? null)
-        : null;
-      if (row.proposedServiceId && !serviceChange) {
-        throw new AppError("APPOINTMENT_SERVICE_UNAVAILABLE",
-          "The requested service is no longer available.", 409);
+      if (row.intent === "CANCEL") {
+        await calendarBookingService.cancel(
+          ctx.workspaceId, appointment.id, row.originalUpdatedAt,
+        );
+      } else {
+        if (!row.proposedStartsAt || !row.proposedEndsAt) {
+          throw new AppError("APPOINTMENT_CHANGE_INCOMPLETE", "Please choose a new date and time.", 422);
+        }
+        const serviceChange = row.proposedServiceId
+          ? await tx.select().from(services).where(and(
+              eq(services.workspaceId, ctx.workspaceId),
+              eq(services.id, row.proposedServiceId),
+              eq(services.active, true),
+            )).limit(1).then(rows => rows[0] ?? null)
+          : null;
+        if (row.proposedServiceId && !serviceChange) {
+          throw new AppError("APPOINTMENT_SERVICE_UNAVAILABLE",
+            "The requested service is no longer available.", 409);
+        }
+        await availableForReschedule(ctx, latest, row.proposedStartsAt, row.proposedEndsAt, now);
+        await calendarBookingService.reschedule(ctx.workspaceId, appointment.id, {
+          startsAt: row.proposedStartsAt, endsAt: row.proposedEndsAt,
+          timezone: row.timezone ?? latest.timezone,
+        }, row.originalUpdatedAt,
+        serviceChange ? { serviceId: serviceChange.id, title: serviceChange.name } : undefined);
       }
-      await availableForReschedule(ctx, appointment, row.proposedStartsAt, row.proposedEndsAt, now);
-      await calendarBookingService.reschedule(ctx.workspaceId, appointment.id, {
-        startsAt: row.proposedStartsAt, endsAt: row.proposedEndsAt, timezone: row.timezone ?? appointment.timezone,
-      }, row.originalUpdatedAt ?? undefined,
-      serviceChange ? { serviceId: serviceChange.id, title: serviceChange.name } : undefined);
-    }
+    });
     const updated = await findOwnedAppointment(ctx, appointment.id);
     if (!updated) throw new AppError("APPOINTMENT_NOT_FOUND",
       "The saved appointment could not be verified after its change.", 503);
