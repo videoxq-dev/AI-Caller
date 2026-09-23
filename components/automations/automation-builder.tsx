@@ -220,7 +220,7 @@ export function AutomationBuilder() {
         ...current,
         trigger: next,
         conditions,
-        actions: actions.length ? actions : [defaultAction(nextCatalog.actions[0])],
+        actions: actions.length ? actions : [defaultAction(nextCatalog.actions[0]!)],
       };
     });
   }
@@ -359,7 +359,7 @@ export function AutomationBuilder() {
       }
       const body: Record<string, unknown> = {};
       if (draft?.conditions.some(condition => condition.field === "qualificationScore")) {
-        body.qualificationScore = Number(testInputs.qualificationScore ?? "0");
+        body.qualificationScore = Number(testInputs.qualificationScore ?? "90");
       }
       if (draft?.conditions.some(condition => condition.field === "channel")) {
         body.channel = testInputs.channel || "SMS";
