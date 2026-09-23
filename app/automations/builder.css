@@ -5,3 +5,7 @@
 /* On small screens the global navigation occupies the bottom 68px. Keep the
    Builder controls immediately above it and reserve scroll space for both. */
 @media(max-width:620px){.builderCanvas{margin-bottom:164px}.activityView{padding-bottom:90px}.builderFooter{left:0;right:0;bottom:68px;z-index:41;min-height:64px;gap:7px;padding:9px 10px;box-shadow:0 -6px 18px rgba(29,45,68,.05)}.builderFooter button{min-width:0;flex:1;white-space:nowrap;font-size:12px}.testPanel{bottom:68px;z-index:60}.archiveBackdrop{z-index:80}}
+
+/* A compact, explicit condition match control appears when two or more rows exist. */
+.conditionMatch{display:flex;align-items:center;gap:14px;margin:0 0 0 auto;padding:0;border:0;min-width:0}.conditionMatch label{display:inline-flex;align-items:center;gap:5px;color:#40536c;font-size:13px;font-weight:650;white-space:nowrap;cursor:pointer}.conditionMatch input{width:15px;height:15px;margin:0;accent-color:#1769ee;cursor:pointer}.conditionMatch:disabled label,.conditionMatch:disabled input{cursor:not-allowed}
+@media(max-width:620px){.conditionMatch{gap:11px}.conditionMatch label{font-size:12px}}
