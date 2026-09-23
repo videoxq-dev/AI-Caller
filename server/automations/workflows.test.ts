@@ -136,6 +136,7 @@ describe("versioned deterministic workflows", () => {
       workflowVersionId: version.id,
       actions: stored.snapshot.actions,
     });
+    if (!queuedRun) throw new Error("Published workflow unexpectedly became inactive.");
 
     await setWorkflowStatus(workspaceId, draft.id, "PAUSED");
     const [cancelledRun] = await db.select().from(automationRuns)
@@ -191,6 +192,7 @@ describe("versioned deterministic workflows", () => {
       workflowVersionId: version.id,
       actions: stored.snapshot.actions,
     });
+    if (!run) throw new Error("Published workflow unexpectedly became inactive.");
     await db.update(automationRuns).set({
       status: "RUNNING",
       startedAt: new Date(),
