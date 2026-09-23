@@ -1,8 +1,23 @@
-import { and, desc, eq, lte, ne, sql } from "drizzle-orm";
+import { and, desc, eq, inArray, lte, ne, sql } from "drizzle-orm";
 import { z } from "zod";
 import { db } from "@/db";
-import { automationEvents, automationEventType, workflowDefinitions, workflowVersions, workspaces } from "@/db/schema";
+import {
+  automationEvents,
+  automationEventType,
+  automationRuns,
+  workflowActionRuns,
+  workflowDefinitions,
+  workflowStatusHistory,
+  workflowVersions,
+  workspaces,
+} from "@/db/schema";
 import { AppError } from "@/server/http/errors";
+import {
+  actionAllowedForTrigger,
+  MAX_WORKFLOW_ACTIONS,
+  validateWorkflowActionsForPublication,
+  workflowActionSchema,
+} from "./action-registry";
 
 // This is deliberately a closed, typed registry. No arbitrary payload paths,
 // user scripts, network endpoints, or editable execution mode.
@@ -29,11 +44,7 @@ export const workflowDefinitionSchema = z.object({
   trigger: z.enum(automationEventType.enumValues),
   match: z.enum(["ALL", "ANY"]).default("ALL"),
   conditions: z.array(conditionSchema).max(10).default([]),
-  actions: z.array(z.object({
-    type: z.literal("NOTIFY_STAFF"),
-    title: z.string().trim().min(1).max(120),
-    message: z.string().trim().min(1).max(500),
-  }).strict()).length(1),
+  actions: z.array(workflowActionSchema).min(1).max(MAX_WORKFLOW_ACTIONS),
 }).strict().superRefine((draft, ctx) => {
   for (const [index, condition] of draft.conditions.entries()) {
     const allowed = condition.field === "qualificationScore"
@@ -48,6 +59,15 @@ export const workflowDefinitionSchema = z.object({
       path: ["conditions", index, "field"],
       message: "This field is not available for the selected trigger.",
     });
+  }
+  for (const [index, action] of draft.actions.entries()) {
+    if (!actionAllowedForTrigger(draft.trigger, action)) {
+      ctx.addIssue({
+        code: "custom",
+        path: ["actions", index, "type"],
+        message: `${action.type} cannot run for ${draft.trigger} events.`,
+      });
+    }
   }
 });
 
@@ -113,6 +133,11 @@ export async function publishWorkflow(workspaceId: string, definitionId: string)
       throw new AppError("WORKFLOW_NOT_EDITABLE", "Workflow not found or archived.", 404);
     }
     const snapshot = workflowDefinitionSchema.parse(definition.draft);
+    await validateWorkflowActionsForPublication({
+      workspaceId,
+      trigger: snapshot.trigger,
+      actions: snapshot.actions,
+    });
     if (definition.publishedVersion && definition.status === "PUBLISHED") {
       const [current] = await tx.select().from(workflowVersions).where(and(
         eq(workflowVersions.workspaceId, workspaceId),
@@ -135,15 +160,21 @@ export async function publishWorkflow(workspaceId: string, definitionId: string)
       }
     }
     const nextVersion = (definition.publishedVersion ?? 0) + 1;
+    const publishedAt = new Date();
     const [version] = await tx.insert(workflowVersions).values({
-      workspaceId, definitionId, version: nextVersion, snapshot,
+      workspaceId, definitionId, version: nextVersion, snapshot, publishedAt,
     }).returning();
     await tx.update(workflowDefinitions).set({
-      status: "PUBLISHED", publishedVersion: nextVersion, updatedAt: new Date(),
+      status: "PUBLISHED", publishedVersion: nextVersion, updatedAt: publishedAt,
     }).where(and(
       eq(workflowDefinitions.workspaceId, workspaceId),
       eq(workflowDefinitions.id, definitionId),
     ));
+    if (definition.status !== "PUBLISHED") {
+      await tx.insert(workflowStatusHistory).values({
+        workspaceId, definitionId, status: "PUBLISHED", occurredAt: publishedAt,
+      });
+    }
     return version;
   });
 }
@@ -176,24 +207,79 @@ export async function setWorkflowStatus(
       }
     }
     if (status === definition.status) return definition;
+
+    const now = new Date();
     const [updated] = await tx.update(workflowDefinitions).set({
-      status, updatedAt: new Date(),
+      status, updatedAt: now,
     }).where(and(
       eq(workflowDefinitions.workspaceId, workspaceId),
       eq(workflowDefinitions.id, definitionId),
     )).returning();
+
+    await tx.insert(workflowStatusHistory).values({
+      workspaceId,
+      definitionId,
+      status,
+      occurredAt: now,
+    });
+
+    if (status !== "PUBLISHED") {
+      const versions = await tx.select({ id: workflowVersions.id }).from(workflowVersions).where(and(
+        eq(workflowVersions.workspaceId, workspaceId),
+        eq(workflowVersions.definitionId, definitionId),
+      ));
+      const versionIds = versions.map(row => row.id);
+      if (versionIds.length) {
+        const pendingRuns = await tx.update(automationRuns).set({
+          status: "CANCELLED",
+          completedAt: now,
+          errorCode: status === "PAUSED" ? "WORKFLOW_PAUSED" : "WORKFLOW_ARCHIVED",
+          errorMessage: status === "PAUSED"
+            ? "Workflow was paused before this run started."
+            : "Workflow was archived before this run started.",
+        }).where(and(
+          eq(automationRuns.workspaceId, workspaceId),
+          inArray(automationRuns.workflowVersionId, versionIds),
+          eq(automationRuns.status, "PENDING"),
+        )).returning({ id: automationRuns.id });
+
+        const runningRuns = await tx.update(automationRuns).set({
+          cancelRequestedAt: now,
+        }).where(and(
+          eq(automationRuns.workspaceId, workspaceId),
+          inArray(automationRuns.workflowVersionId, versionIds),
+          eq(automationRuns.status, "RUNNING"),
+        )).returning({ id: automationRuns.id });
+
+        const affectedRunIds = [...pendingRuns, ...runningRuns].map(row => row.id);
+        if (affectedRunIds.length) {
+          await tx.update(workflowActionRuns).set({
+            status: "CANCELLED",
+            completedAt: now,
+            errorCode: status === "PAUSED" ? "WORKFLOW_PAUSED" : "WORKFLOW_ARCHIVED",
+            errorMessage: status === "PAUSED"
+              ? "Workflow was paused before this action started."
+              : "Workflow was archived before this action started.",
+            updatedAt: now,
+          }).where(and(
+            eq(workflowActionRuns.workspaceId, workspaceId),
+            inArray(workflowActionRuns.automationRunId, affectedRunIds),
+            eq(workflowActionRuns.status, "PENDING"),
+          ));
+        }
+      }
+    }
     return updated;
   });
 }
 
 export async function listPublishedWorkflowVersions(workspaceId: string, eventId?: string) {
-  // Compare timestamps in PostgreSQL: JS Date would discard PostgreSQL microseconds.
+  // Keep event/version/status comparisons at PostgreSQL precision. JS Date truncates
+  // PostgreSQL microseconds and can move a boundary event across a publish/pause edge.
   const occurrence = eventId
     ? sql<Date>`(SELECT ${automationEvents.occurredAt} FROM ${automationEvents} WHERE ${automationEvents.id} = ${eventId} AND ${automationEvents.workspaceId} = ${workspaceId})`
     : sql<Date>`now()`;
-  // Select one version per definition: the snapshot effective when the
-  // business event was committed, even if a newer version was published later.
-  // Events before the first publication are never replayed by a new workflow.
+
   const rows = await db.selectDistinctOn([workflowDefinitions.id], {
     id: workflowVersions.id,
     definitionId: workflowDefinitions.id,
@@ -212,7 +298,22 @@ export async function listPublishedWorkflowVersions(workspaceId: string, eventId
   if (rows.length > 200) {
     throw new AppError("WORKFLOW_LIMIT_EXCEEDED", "Too many published workflows in this workspace.", 409);
   }
-  return rows.map(row => ({
+  if (!rows.length) return [];
+
+  const definitionIds = rows.map(row => row.definitionId);
+  const statuses = await db.selectDistinctOn([workflowStatusHistory.definitionId], {
+    definitionId: workflowStatusHistory.definitionId,
+    status: workflowStatusHistory.status,
+  }).from(workflowStatusHistory).where(and(
+    eq(workflowStatusHistory.workspaceId, workspaceId),
+    inArray(workflowStatusHistory.definitionId, definitionIds),
+    lte(workflowStatusHistory.occurredAt, occurrence),
+  )).orderBy(workflowStatusHistory.definitionId, desc(workflowStatusHistory.occurredAt));
+
+  const activeAtOccurrence = new Set(
+    statuses.filter(row => row.status === "PUBLISHED").map(row => row.definitionId),
+  );
+  return rows.filter(row => activeAtOccurrence.has(row.definitionId)).map(row => ({
     ...row,
     snapshot: workflowDefinitionSchema.parse(row.snapshot),
   }));
@@ -220,9 +321,23 @@ export async function listPublishedWorkflowVersions(workspaceId: string, eventId
 
 // Execution retrieves the frozen version by workspace, not the editable draft.
 export async function getWorkflowVersion(workspaceId: string, versionId: string) {
-  const [row] = await db.select().from(workflowVersions).where(and(
-    eq(workflowVersions.workspaceId, workspaceId),
-    eq(workflowVersions.id, versionId),
-  )).limit(1);
-  return row ? { ...row, snapshot: workflowDefinitionSchema.parse(row.snapshot) } : null;
+  const [row] = await db.select({
+    version: workflowVersions,
+    definitionStatus: workflowDefinitions.status,
+    definitionName: workflowDefinitions.name,
+  }).from(workflowVersions)
+    .innerJoin(workflowDefinitions, and(
+      eq(workflowDefinitions.workspaceId, workflowVersions.workspaceId),
+      eq(workflowDefinitions.id, workflowVersions.definitionId),
+    ))
+    .where(and(
+      eq(workflowVersions.workspaceId, workspaceId),
+      eq(workflowVersions.id, versionId),
+    )).limit(1);
+  return row ? {
+    ...row.version,
+    definitionStatus: row.definitionStatus,
+    definitionName: row.definitionName,
+    snapshot: workflowDefinitionSchema.parse(row.version.snapshot),
+  } : null;
 }
