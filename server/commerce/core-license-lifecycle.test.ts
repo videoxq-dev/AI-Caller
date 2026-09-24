@@ -209,12 +209,26 @@ describe("Core purchase lifecycle", () => {
     let refund: ReturnType<typeof processCommerceEvent> | null = null;
     let bill: ReturnType<typeof processCommerceEvent> | null = null;
     let refundWaiting = false;
-    let billWaiting = false;
+    let billStarted = false;
     try {
       refund = processCommerceEvent(purchaseEvent("RFND", receipt));
       refundWaiting = await waitFor(1);
-      bill = processCommerceEvent(purchaseEvent("BILL", receipt));
-      billWaiting = await waitFor(2);
+      const billEvent = purchaseEvent("BILL", receipt);
+      bill = processCommerceEvent(billEvent);
+      // Prove that the second IPN entered commerce processing while the
+      // refund is blocked. Depending on database row-lock scheduling it may
+      // wait on the license UPSERT rather than the advisory lock itself.
+      for (let i = 0; i < 100; i++) {
+        const observed = await guard.query(
+          "select status from commerce_events where source = 'JVZOO' and external_event_id = $1",
+          [billEvent.externalEventId],
+        );
+        if (observed.rows[0]?.status === "RECEIVED") {
+          billStarted = true;
+          break;
+        }
+        await new Promise((resolve) => setTimeout(resolve, 30));
+      }
     } finally {
       await guard.query("COMMIT");
       await guard.end();
@@ -222,7 +236,7 @@ describe("Core purchase lifecycle", () => {
     // Always drain both tasks even if the wait assertions fail.
     const results = await Promise.allSettled([refund, bill].filter((task) => task !== null));
     expect(refundWaiting).toBe(true);
-    expect(billWaiting).toBe(true);
+    expect(billStarted).toBe(true);
     expect(results.every((result) => result.status === "fulfilled")).toBe(true);
     const [license] = await db.select().from(licenses).where(eq(licenses.externalPurchaseId, receipt));
     expect(license.status).toBe("REFUNDED");
