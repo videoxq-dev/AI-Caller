@@ -1,5 +1,6 @@
 import { afterAll, beforeEach, describe, expect, it } from "vitest";
 import { closeDatabase, db } from "@/db";
+import { AppError } from "@/server/http/errors";
 import {
   appointments,
   automationDeliveries,
@@ -17,7 +18,7 @@ import {
   user,
   workspaces,
 } from "@/db/schema";
-import { executeAutomationRun } from "./executor";
+import { deliveryFailureStatus, executeAutomationRun } from "./executor";
 import { createAutomationRun, createWorkflowRun } from "./repository";
 import { createWorkflowDraft, publishWorkflow, updateWorkflowDraft } from "./workflows";
 
@@ -59,6 +60,26 @@ describe("automation executor safety", () => {
 
   afterAll(async () => {
     await closeDatabase();
+  });
+
+  it("records policy-blocked legacy SMS as SKIPPED rather than unknown delivery", () => {
+    for (const code of [
+      "SMS_CONSENT_REQUIRED",
+      "SMS_CAMPAIGN_NOT_APPROVED",
+      "SMS_CAMPAIGN_PURPOSE_NOT_APPROVED",
+      "SMS_CAMPAIGN_REVIEW_REQUIRED",
+      "SMS_REGISTRATION_REQUIRED",
+      "SMS_UNSAFE_LINK",
+      "SMS_TOO_LONG",
+    ]) {
+      expect(deliveryFailureStatus(new AppError(code, "Blocked before dispatch.", 409))).toBe("SKIPPED");
+    }
+    expect(deliveryFailureStatus(
+      new AppError("SMS_ACCEPTED_FINALIZATION_FAILED", "Carrier may have accepted.", 503),
+    )).toBe("UNKNOWN");
+    expect(deliveryFailureStatus(
+      new AppError("HUMAN_TAKEOVER_REQUIRED", "Take over the conversation.", 409),
+    )).toBe("FAILED");
   });
 
   it("fails a deterministic invalid assignee instead of retrying forever", async () => {
