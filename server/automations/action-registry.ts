@@ -4,6 +4,7 @@ import { db } from "@/db";
 import { automationEventType, memberships } from "@/db/schema";
 import { AppError } from "@/server/http/errors";
 import { classifySmsPurpose } from "@/server/sms/classification";
+import { resolveWhatsAppTemplatesForWorkspace } from "@/server/providers/whatsapp/runtime";
 
 export const MAX_WORKFLOW_ACTIONS = 5;
 
@@ -29,20 +30,34 @@ export const sendCustomerSmsActionSchema = z.object({
   message: customerMessage,
 }).strict();
 
+export const sendCustomerWhatsAppActionSchema = z.object({
+  type: z.literal("SEND_CUSTOMER_WHATSAPP"),
+  templateName: z.string().trim().regex(/^[a-z][a-z0-9_]{0,511}$/),
+  languageCode: z.string().regex(/^[a-z]{2,3}(?:_[A-Z]{2})?$/),
+  // Positional Meta BODY placeholders, mapped only from registered event data.
+  variables: z.array(z.enum(["name", "business_name", "service", "appointment_date", "appointment_time"])).max(10),
+}).strict();
+
 export const workflowActionSchema = z.discriminatedUnion("type", [
   notifyStaffActionSchema,
   assignLeadActionSchema,
   sendCustomerSmsActionSchema,
+  sendCustomerWhatsAppActionSchema,
 ]);
 
 export const publishedSendCustomerSmsActionSchema = sendCustomerSmsActionSchema.extend({
   classifiedPurpose: z.enum(["TRANSACTIONAL", "MARKETING"]),
 }).strict();
 
+export const publishedSendCustomerWhatsAppActionSchema = sendCustomerWhatsAppActionSchema.extend({
+  approvedCategory: z.enum(["UTILITY", "MARKETING"]),
+}).strict();
+
 export const publishedWorkflowActionSchema = z.discriminatedUnion("type", [
   notifyStaffActionSchema,
   assignLeadActionSchema,
   publishedSendCustomerSmsActionSchema,
+  publishedSendCustomerWhatsAppActionSchema,
 ]);
 
 export type WorkflowAction = z.infer<typeof workflowActionSchema>;
@@ -71,7 +86,7 @@ export function actionAllowedForTrigger(
 ) {
   if (action.type === "NOTIFY_STAFF") return true;
   if (action.type === "ASSIGN_LEAD") return trigger === "LEAD_QUALIFIED";
-  if (action.type === "SEND_CUSTOMER_SMS") return smsTriggers.has(trigger);
+  if (action.type === "SEND_CUSTOMER_SMS" || action.type === "SEND_CUSTOMER_WHATSAPP") return smsTriggers.has(trigger);
   return false;
 }
 
@@ -131,6 +146,16 @@ export async function validateWorkflowActionsForPublication(input: {
         400,
       );
     }
+    if (action.type === "SEND_CUSTOMER_WHATSAPP") {
+      const allowed = new Set(commonVariables);
+      if (appointmentTriggers.has(input.trigger)) {
+        for (const variable of appointmentVariables) allowed.add(variable);
+      }
+      if (action.variables.some(variable => !allowed.has(variable))) {
+        throw new AppError("WORKFLOW_TEMPLATE_VARIABLE_UNSUPPORTED",
+          "Choose only variables available for this workflow trigger.", 400);
+      }
+    }
     if (action.type === "SEND_CUSTOMER_SMS") {
       assertSupportedTemplateVariables(input.trigger, action.message);
       // The send path has always enforced 1,600 characters. Validate before
@@ -173,6 +198,20 @@ export async function prepareWorkflowActionsForPublication(input: {
   await validateWorkflowActionsForPublication(input);
 
   return Promise.all(input.actions.map(async action => {
+    if (action.type === "SEND_CUSTOMER_WHATSAPP") {
+      const provider = await resolveWhatsAppTemplatesForWorkspace(input.workspaceId);
+      const approved = await provider.approved(action.templateName, action.languageCode);
+      const matches = [...approved.body.matchAll(/{{(\d+)}}/g)].map(match => Number(match[1]));
+      if (matches.some(value => value < 1 || value > 10)
+        || matches.length !== action.variables.length
+        || new Set(matches).size !== action.variables.length
+        || [...new Set(matches)].some((value, index) => value !== index + 1)
+        || /{{|}}/.test(approved.body.replace(/{{\d+}}/g, ""))) {
+        throw new AppError("WHATSAPP_TEMPLATE_VARIABLE_MISMATCH",
+          "Select one variable for each approved WhatsApp template placeholder.", 409);
+      }
+      return { ...action, approvedCategory: approved.category as "UTILITY" | "MARKETING" };
+    }
     if (action.type !== "SEND_CUSTOMER_SMS") return action;
     const classifiedPurpose = await classifySmsPurpose({
       workspaceId: input.workspaceId,
