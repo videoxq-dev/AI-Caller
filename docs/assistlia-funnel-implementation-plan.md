@@ -9,7 +9,7 @@ There is **one application** with five offers and six purchasable SKUs:
 | Offer | License product code | Brief-defined commercial difference |
 | --- | --- | --- |
 | Front end: Core | CORE | One business; 15,000 starter credits; one configured AI agent; native appointments and Core channels |
-| OTO 1: Unlimited | UNLIMITED | Up to ten businesses; up to five staff per business; expanded calendars, up to two imported website/file knowledge sources per business, widgets, automations and reporting; an additional 15,000 promotional credits |
+| OTO 1: Unlimited | UNLIMITED | Up to ten businesses; up to five staff per business; expanded calendars, up to two imported website/file knowledge sources per business, widgets and reporting; an additional 15,000 promotional credits |
 | OTO 2: Performance | PERFORMANCE | Unlocks the existing Automation Builder and custom automations |
 | OTO 3: Agency | AGENCY_50, AGENCY_100 | Agency console and 50 or 100 managed client businesses, with a client-capacity expansion path |
 | OTO 4: Whitelabel | WHITELABEL | Custom domain, product name, brand assets and client-facing branded experience |
