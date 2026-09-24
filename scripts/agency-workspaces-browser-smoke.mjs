@@ -93,7 +93,7 @@ try {
 
   await page.getByRole("button", { name: "New workspace" }).click();
   await page.getByLabel("Business name").fill("Agency Second Client");
-  await page.getByRole("button", { name: "Create workspace", exact: true }).click();
+  await page.locator(".agencyCreateCard").getByRole("button", { name: "Create workspace", exact: true }).click();
   await page.waitForURL(url => new URL(url).pathname === "/setup/business");
   await page.goto(`${baseUrl}/workspaces`, { waitUntil: "networkidle" });
   await page.getByText("2 / 50").waitFor();
