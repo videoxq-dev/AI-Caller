@@ -36,6 +36,16 @@ async function noOverflow(page, label) {
 const browser = await chromium.launch({ headless: true });
 const context = await browser.newContext({ viewport: { width: 1440, height: 1000 } });
 const page = await context.newPage();
+// Browser-only Meta fixture: real template approval is verified by the
+// server-side provider tests and is never inferred from this mocked catalog.
+await page.route("**/api/automations/whatsapp-templates**", async route => {
+  await route.fulfill({ status: 200, contentType: "application/json",
+    body: JSON.stringify({ items: [{
+      name: "appointment_update", language: "en_US", category: "UTILITY",
+      status: "APPROVED", body: "Hi {{1}}, your appointment is confirmed.",
+    }], nextCursor: null }),
+  });
+});
 const errors = [];
 page.on("pageerror", error => errors.push(`pageerror: ${error.message}`));
 page.on("response", response => {
@@ -296,6 +306,20 @@ try {
   await page.getByRole("complementary", { name: "Test automation" })
     .getByRole("button", { name: "×" }).click();
   await page.screenshot({ path: path.join(outputDir, "builder-mobile.png"), fullPage: true });
+
+  await page.setViewportSize({ width: 1440, height: 1000 });
+  await page.locator(".addActionSelect select").selectOption("SEND_CUSTOMER_WHATSAPP");
+  await page.getByText("WhatsApp approved templates", { exact: true }).waitFor();
+  await page.getByText("Hi {{1}}, your appointment is confirmed.", { exact: true }).waitFor();
+  const whatsappAction = page.locator(".actionCard").filter({
+    hasText: "Send approved WhatsApp template",
+  });
+  await whatsappAction.getByLabel("Template value 1").selectOption("name");
+  await noOverflow(page, "Phase 6B WhatsApp template editor desktop");
+  await page.screenshot({ path: path.join(outputDir, "whatsapp-action-desktop.png"), fullPage: true });
+  await page.setViewportSize({ width: 390, height: 844 });
+  await noOverflow(page, "Phase 6B WhatsApp template editor mobile");
+  await page.screenshot({ path: path.join(outputDir, "whatsapp-action-mobile.png"), fullPage: true });
 
   await page.setViewportSize({ width: 1440, height: 1000 });
   await page.goto(`${baseUrl}/automations`, { waitUntil: "networkidle" });
