@@ -173,15 +173,18 @@ async function revoke(event: NormalizedPurchaseEvent) {
     }
   }
 
-  // A late cancellation/refund must not overwrite a more severe terminal
-  // financial status (chargeback > refund > cancellation).
-  const status = license.status === "CHARGEBACK" || event.eventType === "CGBK"
-    ? "CHARGEBACK"
-    : license.status === "REFUNDED" || event.eventType === "RFND"
-      ? "REFUNDED"
-      : "CANCELLED";
   return db.transaction(async (tx) => {
     await tx.execute(sql`select pg_advisory_xact_lock(hashtext(${`core-license:${license.workspaceId}`}))`);
+    // Resolve financial status after acquiring the lock: concurrent refund and
+    // chargeback events must not race to overwrite the final classification.
+    const [locked] = await tx.select({ status: licenses.status })
+      .from(licenses).where(eq(licenses.id, license.id)).limit(1);
+    if (!locked) throw new AppError("LICENSE_NOT_FOUND", "This receipt no longer exists.", 503);
+    const status = locked.status === "CHARGEBACK" || event.eventType === "CGBK"
+      ? "CHARGEBACK"
+      : locked.status === "REFUNDED" || event.eventType === "RFND"
+        ? "REFUNDED"
+        : "CANCELLED";
     await tx.update(licenses).set({ status, rawMetadata: event.raw, updatedAt: new Date() })
       .where(eq(licenses.id, license.id));
     const [stillActive] = await tx.select({ id: licenses.id }).from(licenses).where(and(
