@@ -110,7 +110,7 @@ try {
   const clientRow = page.locator(".agencyWorkspaceRow").filter({ hasText: "Agency Second Client" });
   await clientRow.getByRole("button", { name: "Manage access" }).click();
   await page.getByRole("heading", { name: "Agency Second Client", exact: true }).last().waitFor();
-  await page.getByText("0 / 0", { exact: true }).waitFor();
+  await page.getByText("0 / 5", { exact: true }).waitFor();
   await page.getByLabel("Invite someone").fill(clientEmail);
   await page.getByRole("combobox", { name: "Access role" }).selectOption("CLIENT_OWNER");
   const inviteResponsePromise = page.waitForResponse(response =>
