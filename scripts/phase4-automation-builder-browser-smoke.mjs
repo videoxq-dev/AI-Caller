@@ -76,9 +76,20 @@ try {
   );
   const workspaceId = owner.rows[0].workspace_id;
 
-  // The Automation Builder is a Performance entitlement. This acceptance user
-  // explicitly receives that purchase so the browser scenario exercises the
-  // same commercial boundary as production instead of bypassing it.
+  // A Core/Unlimited workspace must see the commercial gate and cannot bypass
+  // it by calling the custom-workflow API directly.
+  await page.goto(`${baseUrl}/automations`, { waitUntil: "networkidle" });
+  await page.getByText("Available with Performance", { exact: true }).waitFor();
+  assert(await page.getByRole("button", { name: /Create automation/ }).count() === 0,
+    "Automation Builder creation was visible without Performance.");
+  const blockedCreate = await context.request.post(`${baseUrl}/api/automations/workflows`, {
+    data: { starter: "BLANK" },
+  });
+  assert(blockedCreate.status() === 403,
+    `Custom workflow API was not Performance-gated: ${blockedCreate.status()} ${await blockedCreate.text()}`);
+
+  // The Automation Builder is a Performance entitlement. Grant the purchase
+  // explicitly, then verify the same workspace gains the existing Builder.
   await pool.query(
     `INSERT INTO licenses
        (workspace_id, purchaser_user_id, source, external_purchase_id, product_code, status, purchased_at)
@@ -86,7 +97,7 @@ try {
     [workspaceId, owner.rows[0].user_id, `phase4-browser-performance-${stamp}`],
   );
 
-  await page.goto(`${baseUrl}/automations`, { waitUntil: "networkidle" });
+  await page.reload({ waitUntil: "networkidle" });
   await page.getByRole("heading", { name: "Automations", exact: true }).waitFor();
   await page.getByRole("button", { name: /Create automation/ }).click();
   await page.getByRole("dialog", { name: "Create automation" }).waitFor();
