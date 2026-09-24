@@ -9,6 +9,7 @@ export type WorkspaceIntegrationEntitlements = {
   purchaserUserId: string | null;
   externalCalendar: boolean;
   agencyByop: boolean;
+  performanceAutomations: boolean;
 };
 
 export async function getWorkspaceIntegrationEntitlements(
@@ -18,7 +19,12 @@ export async function getWorkspaceIntegrationEntitlements(
     .where(and(eq(memberships.workspaceId, workspaceId), eq(memberships.role, "OWNER")))
     .limit(2);
   if (owners.length !== 1) {
-    return { purchaserUserId: null, externalCalendar: false, agencyByop: false };
+    return {
+      purchaserUserId: null,
+      externalCalendar: false,
+      agencyByop: false,
+      performanceAutomations: false,
+    };
   }
 
   const rows = await db.select({ productCode: licenses.productCode }).from(licenses).where(and(
@@ -30,11 +36,23 @@ export async function getWorkspaceIntegrationEntitlements(
     purchaserUserId: owners[0].userId,
     externalCalendar: products.has("UNLIMITED"),
     agencyByop: products.has("AGENCY_50") || products.has("AGENCY_100"),
+    performanceAutomations: products.has("PERFORMANCE"),
   };
 }
 
 export function isExternalCalendarProvider(provider: string) {
   return CALENDAR_PROVIDERS.has(provider);
+}
+
+export async function requirePerformanceAutomationEntitlement(workspaceId: string) {
+  const entitlement = await getWorkspaceIntegrationEntitlements(workspaceId);
+  if (!entitlement.performanceAutomations) {
+    throw new AppError(
+      "AUTOMATION_BUILDER_REQUIRES_PERFORMANCE",
+      "Automation Builder and custom automations require the Performance upgrade.",
+      403,
+    );
+  }
 }
 
 export async function requireProviderIntegrationEntitlement(workspaceId: string, provider: string) {
