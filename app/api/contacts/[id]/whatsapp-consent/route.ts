@@ -9,7 +9,7 @@ import { parseInput } from "@/server/http/validation";
 import { getWhatsAppConsentStatus, recordWhatsAppConsent, validWhatsAppId } from "@/server/whatsapp/consent";
 
 const inputSchema = z.object({
-  waId: z.string().min(8).max(15),
+  waId: z.string().min(8).max(16),
   category: z.enum(["UTILITY", "MARKETING"]),
   status: z.enum(["OPTED_IN", "OPTED_OUT"]),
   consentStatement: z.string().trim().max(2000),
