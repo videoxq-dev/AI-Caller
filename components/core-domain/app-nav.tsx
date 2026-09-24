@@ -13,6 +13,13 @@ type WorkspaceMembership = {
   role: "OWNER" | "ADMIN" | "STAFF";
 };
 
+type BusinessCapacity = {
+  ownedBusinesses: number;
+  businessLimit: number;
+  availableBusinesses: number;
+  activeProducts: string[];
+};
+
 type NotificationItem = {
   id: string;
   type: string;
@@ -37,6 +44,7 @@ const items = [
 export function AppNav({ active, className = "appSidebar" }: { active: string; className?: string }) {
   const [workspaces, setWorkspaces] = useState<WorkspaceMembership[]>([]);
   const [activeWorkspaceId, setActiveWorkspaceId] = useState("");
+  const [capacity, setCapacity] = useState<BusinessCapacity | null>(null);
   const [notifications, setNotifications] = useState<NotificationItem[]>([]);
   const [notificationsOpen, setNotificationsOpen] = useState(false);
   const [switching, setSwitching] = useState(false);
@@ -54,6 +62,7 @@ export function AppNav({ active, className = "appSidebar" }: { active: string; c
       if (cancelled) return;
       setWorkspaces(workspaceData?.workspaces ?? []);
       setActiveWorkspaceId(workspaceData?.activeWorkspaceId ?? "");
+      setCapacity(workspaceData?.capacity ?? null);
       setNotifications(notificationData?.items ?? []);
     }).catch(() => undefined);
     return () => { cancelled = true; };
@@ -61,6 +70,7 @@ export function AppNav({ active, className = "appSidebar" }: { active: string; c
 
   const unread = useMemo(() => notifications.filter((item) => !item.readAt).length, [notifications]);
   const activeWorkspace = workspaces.find((workspace) => workspace.workspaceId === activeWorkspaceId) ?? null;
+  const atCapacity = capacity !== null && capacity.availableBusinesses <= 0;
 
   async function switchWorkspace(workspaceId: string) {
     if (!workspaceId || workspaceId === activeWorkspaceId || switching) return;
@@ -81,7 +91,7 @@ export function AppNav({ active, className = "appSidebar" }: { active: string; c
   async function createWorkspace(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
     const name = workspaceName.trim();
-    if (name.length < 2 || creating) return;
+    if (name.length < 2 || creating || atCapacity) return;
     setCreating(true);
     setWorkspaceError(null);
     try {
@@ -150,17 +160,24 @@ export function AppNav({ active, className = "appSidebar" }: { active: string; c
         </button>
         {createOpen && (
           <form className="navWorkspaceCreatePanel" onSubmit={(event) => void createWorkspace(event)}>
+            {capacity && (
+              <p className="navWorkspaceCapacity" role="status">
+                {capacity.ownedBusinesses} of {capacity.businessLimit} business slots used.
+                {atCapacity ? " Your current offer does not include another business." : ""}
+              </p>
+            )}
             <label htmlFor="new-workspace-name">Workspace name</label>
             <input
               id="new-workspace-name"
               value={workspaceName}
               maxLength={120}
+              disabled={atCapacity || creating}
               autoFocus
               onChange={(event) => setWorkspaceName(event.target.value)}
               placeholder="Business name"
             />
             {workspaceError && <p>{workspaceError}</p>}
-            <div><button type="button" onClick={() => setCreateOpen(false)} disabled={creating}>Cancel</button><button type="submit" disabled={creating || workspaceName.trim().length < 2}>{creating ? "Creating…" : "Create"}</button></div>
+            <div><button type="button" onClick={() => setCreateOpen(false)} disabled={creating}>Cancel</button><button type="submit" disabled={creating || atCapacity || workspaceName.trim().length < 2}>{creating ? "Creating…" : "Create"}</button></div>
           </form>
         )}
         {notificationsOpen && (
