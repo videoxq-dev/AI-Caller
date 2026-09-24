@@ -106,6 +106,19 @@ describe("Core purchase lifecycle", () => {
     expect(license.status).toBe("REFUNDED");
   });
 
+  it("never downgrades chargeback status to a later refund or cancellation", async () => {
+    await coreLicense("charged-back-core");
+    await processCommerceEvent(purchaseEvent("CGBK", "charged-back-core"));
+    await processCommerceEvent(purchaseEvent("RFND", "charged-back-core"));
+    await processCommerceEvent(purchaseEvent("CANCEL-REBILL", "charged-back-core"));
+    const [license] = await db.select().from(licenses)
+      .where(eq(licenses.externalPurchaseId, "charged-back-core"));
+    expect(license.status).toBe("CHARGEBACK");
+    expect((await db.select().from(workspaces).where(eq(workspaces.id, workspaceId)))[0].status).toBe("SUSPENDED");
+    const attempt = await processCommerceEvent(purchaseEvent("UNCANCEL-REBILL", "charged-back-core"));
+    expect(attempt).toMatchObject({ result: { ignored: true, reason: "REVOKED_PURCHASE" } });
+  });
+
   it("does not discard an out-of-order refund before the corresponding purchase arrives", async () => {
     const earlyRefund = purchaseEvent("RFND", "late-purchase");
     await expect(processCommerceEvent(earlyRefund)).rejects.toMatchObject({
