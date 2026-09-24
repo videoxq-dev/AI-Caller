@@ -5,7 +5,7 @@ import type { ApprovedSmsPolicy, SmsPurpose } from "./policy";
 
 export type SmsAutomationReadiness = {
   status: "NOT_CONFIGURED" | "PROVIDER_DISCONNECTED" | "CARRIER_UNVERIFIED"
-    | "REGISTRATION_REQUIRED" | "IN_REVIEW" | "REJECTED" | "READY";
+    | "REGISTRATION_REQUIRED" | "IN_REVIEW" | "REJECTED" | "PHONE_SUSPENDED" | "READY";
   categories: SmsPurpose[];
   message: string;
   setupUrl: string;
@@ -46,15 +46,22 @@ export async function smsAutomationReadiness(workspaceId: string): Promise<SmsAu
 
   const [number] = await db.select({
     id: hostedPhoneNumbers.id,
+    status: hostedPhoneNumbers.status,
     messagingReadiness: hostedPhoneNumbers.messagingReadiness,
   }).from(hostedPhoneNumbers).where(and(
     eq(hostedPhoneNumbers.workspaceId, workspaceId),
-    inArray(hostedPhoneNumbers.status, ["ACTIVE", "PAST_DUE"]),
+    inArray(hostedPhoneNumbers.status, ["ACTIVE", "PAST_DUE", "SUSPENDED"]),
     isNull(hostedPhoneNumbers.releasedAt),
   )).limit(1);
   if (!number) {
     return { ...base, status: "NOT_CONFIGURED",
       message: "Activate an AI Caller number before this automation can send SMS." };
+  }
+
+  if (number.status === "SUSPENDED") {
+    return { ...base, status: "PHONE_SUSPENDED",
+      message: "The AI Caller phone number is suspended. SMS actions will not send until phone service is restored.",
+      setupUrl: "/settings?tab=phone" };
   }
 
   const [registration] = await db.select({
