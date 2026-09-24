@@ -62,6 +62,7 @@ function publicTemplate(item: z.infer<typeof graphTemplate>) {
     body: item.components.find(component => component.type.toUpperCase() === "BODY")?.text ?? "",
     footer: item.components.find(component => component.type.toUpperCase() === "FOOTER")?.text ?? "",
     rejectionReason: item.rejected_reason ?? null,
+    textOnly: item.components.every(component => ["BODY", "FOOTER"].includes(component.type.toUpperCase())),
   };
 }
 
@@ -106,6 +107,10 @@ export function createMetaTemplateClient(
           "This template and language are not currently approved for sending.", 409);
       }
       const template = publicTemplate(match);
+      if (!template.textOnly) {
+        throw new AppError("WHATSAPP_TEMPLATE_UNSUPPORTED",
+          "This template includes a header or buttons; choose a text-only template.", 409);
+      }
       if (!template.body) {
         throw new AppError("WHATSAPP_TEMPLATE_UNSUPPORTED",
           "This template has no text body usable by this automation.", 409);
