@@ -685,6 +685,7 @@ async function executeCustomerWhatsApp(input: {
     const suppress = error instanceof AppError && [
       "WHATSAPP_IDENTITY_NOT_FOUND", "WHATSAPP_CONSENT_REQUIRED",
       "WHATSAPP_TEMPLATE_NOT_APPROVED", "WHATSAPP_TEMPLATE_UNSUPPORTED",
+      "WHATSAPP_TEMPLATE_APPROVAL_UNVERIFIED",
       "WHATSAPP_TEMPLATE_VARIABLE_MISSING", "WHATSAPP_TEMPLATE_VARIABLE_MISMATCH",
     ].includes(error.code);
     const status = suppress ? "SKIPPED" as const
