@@ -56,7 +56,7 @@ F7: typed workflow conditions, branches, delays, follow-ups and suppression/canc
 
 ### F10–F11 — Agency
 
-F10: agency owner/client hierarchy, capacity SKUs, delegated team and client access, client provisioning and central dashboard. F11: cloning with safe secret exclusion, templates, unified agency reports and additional-capacity purchase behavior.
+F10: agency owner/client hierarchy, capacity SKUs, delegated team and client access, client provisioning and central dashboard. Non-calendar bring-your-own-provider (BYOP) integrations—such as customer-supplied AI, telephony or messaging provider credentials—are Agency-only. Unlimited external-calendar access is the explicit exception and must not be generalized into broader BYOP access. F11: cloning with safe secret exclusion, templates, unified agency reports and additional-capacity purchase behavior.
 
 ### F12 — Whitelabel
 
@@ -77,3 +77,6 @@ Exercise Core-only, each OTO combination, Agency 50 to 100, Whitelabel, duplicat
 ## Imported knowledge clarification — September 24, 2026
 
 The founder subsequently clarified the initial broad Unlimited Knowledge wording: **Core has no imported website/file knowledge upload; an active Unlimited purchase allows at most two imported sources per business, counting website imports and uploaded files together**. Manually entered service, product, FAQ and policy knowledge in Core remains available. On Unlimited refund, keep previously imported content accessible to staff for deletion but block additions and edits until eligible access returns; never silently delete business data. This later product instruction controls the importer source count, not the earlier general wording in the copywriter brief.\n
+## External integration entitlement clarification — September 24, 2026
+
+Core uses AI Caller’s native in-app booking and **cannot connect external calendars**. Unlimited unlocks the existing external calendar integration capability (Google Calendar, Microsoft Outlook, Calendly and Cal.com); it does **not** imply unlimited calendar connections or require new multi-calendar functionality. All other customer-supplied BYOP integrations are reserved for Agency. Meta Embedded Signup for the Core WhatsApp channel and AI Caller-managed hosted voice/SMS/AI services are not treated as Agency BYOP.

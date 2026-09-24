@@ -15,6 +15,7 @@ import { integrationSaveSchema, providerIdSchema } from "@/server/domain/integra
 import { AppError, toErrorResponse } from "@/server/http/errors";
 import { parseInput } from "@/server/http/validation";
 import { decryptIntegrationCredentials, type EncryptedSecretEnvelope } from "@/server/security/secrets";
+import { getWorkspaceIntegrationEntitlements, requireProviderIntegrationEntitlement } from "@/server/commerce/workspace-entitlements";
 
 const disconnectSchema = z.object({
   provider: providerIdSchema,
@@ -93,8 +94,13 @@ export async function GET(request: Request) {
   try {
     const context = await resolveWorkspaceContext(request.headers);
     const env = getEnv();
+    const [integrations, entitlements] = await Promise.all([
+      listIntegrations(context.workspace.id),
+      getWorkspaceIntegrationEntitlements(context.workspace.id),
+    ]);
     return Response.json({
-      integrations: await listIntegrations(context.workspace.id),
+      integrations,
+      entitlements: { externalCalendar: entitlements.externalCalendar, agencyByop: entitlements.agencyByop },
       hostedAI: {
         configured: Boolean(env.HOSTED_AI_API_KEY?.trim()),
         provider: env.HOSTED_AI_PROVIDER,
@@ -112,6 +118,7 @@ export async function POST(request: Request) {
     const context = await resolveWorkspaceContext(request.headers);
     requireWorkspacePermission(context.membership.role, "integration.manage");
     const input = parseInput(integrationSaveSchema, await request.json());
+    await requireProviderIntegrationEntitlement(context.workspace.id, input.provider);
 
     if (!directCredentialProviders.has(input.provider)) {
       const message = input.provider === "whatsapp"

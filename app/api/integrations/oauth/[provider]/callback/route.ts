@@ -2,6 +2,7 @@ import { resolveWorkspaceContext } from "@/server/auth/workspace-context";
 import { bindCapability, saveVerifiedIntegration } from "@/server/domain/integrations/repository";
 import { exchangeOAuthCode, verifyOAuthState, type OAuthProviderId } from "@/server/providers/oauth";
 import { getEnv } from "@/server/env";
+import { requireProviderIntegrationEntitlement } from "@/server/commerce/workspace-entitlements";
 
 function redirectWithStatus(path: string, provider: string, status: "connected" | "error", message?: string) {
   const url = new URL(path, getEnv().BETTER_AUTH_URL);
@@ -35,6 +36,8 @@ export async function GET(request: Request, { params }: { params: Promise<{ prov
     if (state.provider !== rawProvider || state.workspaceId !== context.workspace.id) {
       throw new Error("OAuth authorization does not match this workspace.");
     }
+
+    await requireProviderIntegrationEntitlement(context.workspace.id, rawProvider);
 
     const code = url.searchParams.get("code");
     if (!code) {

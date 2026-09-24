@@ -4,6 +4,7 @@ import { getCommunicationSetup, saveCommunicationSetup } from "@/server/domain/i
 import { communicationSetupSchema } from "@/server/domain/integrations/schemas";
 import { toErrorResponse } from "@/server/http/errors";
 import { parseInput } from "@/server/http/validation";
+import { requireCapabilityBindingEntitlement } from "@/server/commerce/workspace-entitlements";
 
 export async function GET(request: Request) {
   try {
@@ -19,6 +20,11 @@ export async function PUT(request: Request) {
     const context = await resolveWorkspaceContext(request.headers);
     requireWorkspacePermission(context.membership.role, "integration.manage");
     const input = parseInput(communicationSetupSchema, await request.json());
+    await Promise.all([
+      requireCapabilityBindingEntitlement(context.workspace.id, "VOICE", input.voice.mode, input.voice.provider ?? null),
+      requireCapabilityBindingEntitlement(context.workspace.id, "SMS", input.sms.mode, input.sms.provider ?? null),
+      requireCapabilityBindingEntitlement(context.workspace.id, "WHATSAPP", input.whatsapp.mode, input.whatsapp.provider ?? null),
+    ]);
     return Response.json({ settings: await saveCommunicationSetup(context.workspace.id, input) });
   } catch (error) {
     return toErrorResponse(error);

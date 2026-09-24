@@ -1,7 +1,8 @@
+import { randomUUID } from "node:crypto";
 import { and, eq } from "drizzle-orm";
 import { afterAll, beforeEach, describe, expect, it } from "vitest";
 import { closeDatabase, db } from "@/db";
-import { capabilityBindings, integrations, workspaces } from "@/db/schema";
+import { capabilityBindings, integrations, licenses, memberships, user, workspaces } from "@/db/schema";
 import {
   bindCapability,
   getIntegration,
@@ -15,6 +16,19 @@ import { decryptIntegrationCredentials, type EncryptedSecretEnvelope } from "@/s
 import { resolveProviderRoute } from "./resolver";
 
 let workspaceId = "";
+const createdUsers: string[] = [];
+
+async function grant(productCode: "UNLIMITED" | "AGENCY_50") {
+  const ownerId = randomUUID();
+  createdUsers.push(ownerId);
+  await db.insert(user).values({ id: ownerId, name: "Provider Buyer", email: `${ownerId}@example.com`, emailVerified: true });
+  await db.insert(memberships).values({ workspaceId, userId: ownerId, role: "OWNER" });
+  const [license] = await db.insert(licenses).values({
+    workspaceId, purchaserUserId: ownerId, source: "MANUAL", externalPurchaseId: randomUUID(),
+    productCode, status: "ACTIVE", purchasedAt: new Date(),
+  }).returning();
+  return license;
+}
 
 describe("provider capability routing", () => {
   beforeEach(async () => {
@@ -26,6 +40,8 @@ describe("provider capability routing", () => {
   });
 
   afterAll(async () => {
+    await db.delete(workspaces);
+    for (const id of createdUsers) await db.delete(user).where(eq(user.id, id));
     await closeDatabase();
   });
 
@@ -34,7 +50,8 @@ describe("provider capability routing", () => {
     expect(route).toMatchObject({ capability: "AI_TEXT", mode: "HOSTED", provider: "credits", integrationId: null });
   });
 
-  it("resolves a connected BYOP provider and never exposes plaintext secrets", async () => {
+  it("resolves an Agency BYOP provider and never exposes plaintext secrets", async () => {
+    await grant("AGENCY_50");
     await saveVerifiedIntegration(workspaceId, {
       provider: "openai",
       category: "AI",
@@ -98,7 +115,8 @@ describe("provider capability routing", () => {
     expect(decrypted).toEqual({ sid: "AC123", authToken: "original-secret", phone: "+15550002222" });
   });
 
-  it("keeps a connected external calendar route authoritative", async () => {
+  it("keeps a connected external calendar route authoritative for Unlimited", async () => {
+    await grant("UNLIMITED");
     await saveVerifiedIntegration(workspaceId, {
       provider: "calcom",
       category: "CALENDAR",
@@ -112,6 +130,23 @@ describe("provider capability routing", () => {
       mode: "BYOP",
       provider: "calcom",
     });
+  });
+
+  it("falls back to native calendar immediately after Unlimited is refunded", async () => {
+    const license = await grant("UNLIMITED");
+    await saveVerifiedIntegration(workspaceId, {
+      provider: "calcom",
+      category: "CALENDAR",
+      mode: "BYOP",
+      credentials: { apiKey: "refunded-calendar-key" },
+      settings: {},
+    });
+    await bindCapability(workspaceId, "CALENDAR", "BYOP", "calcom");
+    await expect(resolveProviderRoute(workspaceId, "CALENDAR")).resolves.toMatchObject({ provider: "calcom" });
+
+    await db.update(licenses).set({ status: "REFUNDED" }).where(eq(licenses.id, license.id));
+    await expect(resolveProviderRoute(workspaceId, "CALENDAR")).resolves.toBeNull();
+    expect(await getIntegration(workspaceId, "calcom")).toMatchObject({ status: "CONNECTED" });
   });
 
   it("treats a stale disconnected calendar binding as no external route", async () => {

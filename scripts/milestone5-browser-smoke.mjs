@@ -183,18 +183,8 @@ try {
        (capability, provider, model, unit, cost_micros, units_per_cost, target_margin_bps, effective_from, metadata)
      VALUES ('SMS', 'telnyx', '', 'SMS_SEGMENT', 450, 1, 5000, now(), '{"fixture":"milestone5"}'::jsonb)`,
   );
-  const calendarIntegration = await pool.query(
-    `INSERT INTO integrations (workspace_id, category, provider, mode, status, settings)
-     VALUES ($1, 'CALENDAR', 'calcom', 'BYOP', 'CONNECTED', '{}'::jsonb)
-     RETURNING id`,
-    [workspaceId],
-  );
-  await pool.query(
-    `INSERT INTO capability_bindings (workspace_id, capability, integration_id, mode)
-     VALUES ($1, 'CALENDAR', $2, 'BYOP')
-     ON CONFLICT (workspace_id, capability) DO UPDATE SET integration_id = EXCLUDED.integration_id, mode = EXCLUDED.mode, updated_at = now()`,
-    [workspaceId, calendarIntegration.rows[0].id],
-  );
+  // Core uses the native in-app appointment calendar. Do not seed an external
+  // calendar binding here: external calendar integrations are an Unlimited entitlement.
   const hostedCommunicationSettings = {
     voice: { mode: "HOSTED", provider: null, numberMode: "new", number: "+12025550200" },
     sms: { mode: "HOSTED", provider: null, numberMode: "same", number: "+12025550200", displayName: "Milestone Five Auto Spa", replyWindow: "Always respond", afterHoursBehavior: "Auto-reply + collect details" },
@@ -414,12 +404,13 @@ try {
   assert(lead.rows[0]?.service_requested === "QA Consultation", "SMS lead service request was not persisted.");
 
   const appointment = await pool.query(
-    `SELECT status, title, booking_source, external_event_id FROM appointments WHERE workspace_id = $1 AND contact_id = $2 ORDER BY created_at DESC LIMIT 1`,
+    `SELECT status, title, booking_source, external_event_id, integration_id FROM appointments WHERE workspace_id = $1 AND contact_id = $2 ORDER BY created_at DESC LIMIT 1`,
     [workspaceId, contact.rows[0].id],
   );
   assert(appointment.rows[0]?.status === "CONFIRMED", "SMS booking did not persist a confirmed appointment.");
   assert(appointment.rows[0]?.booking_source === "SMS_AI", `Expected SMS_AI booking source, received ${appointment.rows[0]?.booking_source ?? "none"}.`);
-  assert(Boolean(appointment.rows[0]?.external_event_id), "SMS booking did not persist provider event id.");
+  assert(appointment.rows[0]?.external_event_id === null, "Core SMS booking unexpectedly created an external calendar event.");
+  assert(appointment.rows[0]?.integration_id === null, "Core SMS booking unexpectedly persisted an external calendar integration.");
 
   const timeline = await pool.query(
     `SELECT channel, direction, sender_type, content_type, body, provider, external_message_id, status
@@ -449,9 +440,24 @@ try {
     "SMS delivery status",
   );
 
-  const smsUsage = await pool.query(`SELECT mode, provider, credits_charged FROM usage_events WHERE workspace_id = $1 AND capability = 'SMS' ORDER BY created_at`, [workspaceId]);
+  const smsUsage = await pool.query(
+    `SELECT mode, provider, credits_charged, provider_usage, billed_units
+       FROM usage_events
+      WHERE workspace_id = $1 AND capability = 'SMS'
+      ORDER BY created_at`,
+    [workspaceId],
+  );
   assert(smsUsage.rowCount === 8, `Expected 8 hosted SMS usage events (4 inbound + 4 outbound), received ${smsUsage.rowCount}.`);
-  assert(smsUsage.rows.every((row) => row.mode === "HOSTED" && row.provider === "telnyx" && row.credits_charged === 1), "Hosted SMS usage attribution/credits are incorrect.");
+  assert(smsUsage.rows.every((row) => row.mode === "HOSTED" && row.provider === "telnyx"),
+    `Hosted SMS usage attribution is incorrect: ${JSON.stringify(smsUsage.rows)}`);
+  assert(smsUsage.rows.every((row) => {
+    const segments = Number(row.provider_usage?.segments ?? row.billed_units?.SMS_SEGMENT ?? 0);
+    return Number.isSafeInteger(segments) && segments > 0
+      && Number(row.billed_units?.SMS_SEGMENT ?? 0) === segments
+      // Fixture pricing is 450 provider micros at 50% target margin:
+      // retail is 900 micros per segment, rounded to one 1,000-micro credit unit.
+      && row.credits_charged === segments;
+  }), `Hosted SMS segment metering/credits are incorrect: ${JSON.stringify(smsUsage.rows)}`);
 
   const balance = (await pool.query(`SELECT balance FROM credit_wallets WHERE workspace_id = $1`, [workspaceId])).rows[0].balance;
   const charged = (await pool.query(

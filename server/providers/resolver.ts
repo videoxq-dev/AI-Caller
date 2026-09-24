@@ -3,6 +3,7 @@ import { db } from "@/db";
 import { capabilityBindings, integrations } from "@/db/schema";
 import { assertProviderSupportsCapability } from "./catalog";
 import type { Capability, ProviderRoute } from "./contracts";
+import { getWorkspaceIntegrationEntitlements } from "@/server/commerce/workspace-entitlements";
 
 export async function resolveProviderRoute(workspaceId: string, capability: Capability): Promise<ProviderRoute | null> {
   const [binding] = await db.select().from(capabilityBindings).where(and(eq(capabilityBindings.workspaceId, workspaceId), eq(capabilityBindings.capability, capability))).limit(1);
@@ -16,6 +17,19 @@ export async function resolveProviderRoute(workspaceId: string, capability: Capa
 
   if (binding.mode === "HOSTED") {
     return { workspaceId, capability, mode: "HOSTED", provider: capability === "AI_TEXT" ? "credits" : "hosted", integrationId: null, settings: {} };
+  }
+
+  const entitlement = await getWorkspaceIntegrationEntitlements(workspaceId);
+  if (capability === "CALENDAR" && !entitlement.externalCalendar) return null;
+  if (capability !== "WHATSAPP" && capability !== "CALENDAR" && !entitlement.agencyByop) {
+    return {
+      workspaceId,
+      capability,
+      mode: "HOSTED",
+      provider: capability === "AI_TEXT" ? "credits" : "hosted",
+      integrationId: null,
+      settings: {},
+    };
   }
 
   if (!binding.integrationId) {

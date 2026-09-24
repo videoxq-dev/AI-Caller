@@ -5,6 +5,7 @@ import { capabilityBindingInputSchema } from "@/server/domain/integrations/schem
 import { resolveProviderRoute } from "@/server/providers/resolver";
 import { toErrorResponse } from "@/server/http/errors";
 import { parseInput } from "@/server/http/validation";
+import { requireCapabilityBindingEntitlement } from "@/server/commerce/workspace-entitlements";
 
 const capabilities = ["AI_TEXT", "SMS", "VOICE", "WHATSAPP", "CALENDAR"] as const;
 
@@ -23,6 +24,7 @@ export async function PUT(request: Request) {
     const context = await resolveWorkspaceContext(request.headers);
     requireWorkspacePermission(context.membership.role, "integration.manage");
     const input = parseInput(capabilityBindingInputSchema, await request.json());
+    await requireCapabilityBindingEntitlement(context.workspace.id, input.capability, input.mode, input.provider ?? null);
     await bindCapability(context.workspace.id, input.capability, input.mode, input.provider ?? null);
     return Response.json({ route: await resolveProviderRoute(context.workspace.id, input.capability) });
   } catch (error) {
