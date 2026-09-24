@@ -101,6 +101,8 @@ export function deliveryFailureStatus(error: unknown): "FAILED" | "UNKNOWN" | "S
     || error.code === "WHATSAPP_TEMPLATE_UNSUPPORTED"
     || error.code === "WHATSAPP_TEMPLATE_VARIABLE_MISMATCH"
     || error.code === "WHATSAPP_TEMPLATE_APPROVAL_UNVERIFIED"
+    || error.code === "WHATSAPP_CONSENT_UNVERIFIED"
+    || error.code === "WHATSAPP_NOT_CONNECTED"
   )) return "SKIPPED";
   // A known local rejection is not an uncertain carrier send.
   if (error instanceof AppError && error.status < 500) return "FAILED";
