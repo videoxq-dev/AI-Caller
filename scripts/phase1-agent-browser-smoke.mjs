@@ -44,10 +44,11 @@ try {
   await api(context, "POST", "/api/auth/sign-up/email", {
     name: "Phase One Owner", email, password: "BrowserSmokePass123!",
   }, "sign up");
-  const owners = await pool.query(`SELECT m.workspace_id FROM memberships m
+  const owners = await pool.query(`SELECT m.workspace_id, u.id AS user_id FROM memberships m
     JOIN "user" u ON u.id = m.user_id WHERE u.email = $1 LIMIT 1`, [email]);
   const workspaceId = owners.rows[0]?.workspace_id;
-  assert(workspaceId, "Workspace was not provisioned.");
+  const purchaserUserId = owners.rows[0]?.user_id;
+  assert(workspaceId && purchaserUserId, "Workspace and owner were not provisioned.");
 
   // Retain explicit legacy/rollback coverage. The durable production default is
   // verified separately by booking-remediation-browser-smoke.mjs.
@@ -59,9 +60,26 @@ try {
   );
 
 
+  const beforeUpgrade = await api(context, "PUT", "/api/workspaces", {
+    name: "Phase One Second Workspace",
+  }, "Core cannot create an additional business", 403);
+  assert(beforeUpgrade.error?.code === "WORKSPACE_LIMIT_REACHED",
+    "Business capacity was not enforced before the Unlimited purchase.");
+
+  // Acceptance fixture: validate the real workspace creation/switch API with
+  // the account-level commercial entitlement that authorizes ten businesses.
+  // Never bypass the production quota or weaken its server-side enforcement.
+  await pool.query(
+    `INSERT INTO licenses
+       (workspace_id, purchaser_user_id, source, external_purchase_id,
+        product_code, status, purchased_at)
+     VALUES ($1, $2, 'MANUAL', $3, 'UNLIMITED', 'ACTIVE', now())`,
+    [workspaceId, purchaserUserId, "phase1-unlimited-" + Date.now()],
+  );
+
   const additional = await api(context, "PUT", "/api/workspaces", {
     name: "Phase One Second Workspace",
-  }, "create an additional workspace", 201);
+  }, "create an additional workspace after Unlimited upgrade", 201);
   assert(additional.workspace?.role === "OWNER"
     && additional.workspace?.workspaceName === "Phase One Second Workspace",
   "Workspace creation did not return a new owner workspace.");
