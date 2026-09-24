@@ -113,7 +113,7 @@ try {
 
   await page.goto(`${baseUrl}/ai-agent`, { waitUntil: "networkidle" });
   await page.getByRole("button", { name: "Create workspace", exact: true }).click();
-  await page.getByText("2 of 2 business slots used.", { exact: true }).waitFor();
+  await page.locator(".navWorkspaceCapacity").getByText(/2 of 2 business slots used\\./).waitFor();
   await page.getByRole("button", { name: "Create workspace", exact: true }).click();
   await page.getByRole("button", { name: "Behavior", exact: true }).click();
   await page.getByLabel("Assistant name").fill("Mia");
