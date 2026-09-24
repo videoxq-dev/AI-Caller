@@ -29,6 +29,7 @@ import {
   services,
 } from "@/db/schema";
 import { AppError } from "@/server/http/errors";
+import { assertCanCreateContactInTx } from "@/server/commerce/contact-capacity";
 import {
   contactIdentityInputSchema,
   type AppointmentInput,
@@ -69,6 +70,7 @@ async function ensureContactInWorkspace(workspaceId: string, contactId: string) 
 
 export async function createContact(workspaceId: string, input: ContactInput) {
   return db.transaction(async (tx) => {
+    await assertCanCreateContactInTx(tx, workspaceId);
     const [contact] = await tx.insert(contacts).values({
       workspaceId,
       name: input.name ?? null,
