@@ -39,11 +39,12 @@ const page = await context.newPage();
 // Browser-only Meta fixture: real template approval is verified by the
 // server-side provider tests and is never inferred from this mocked catalog.
 await page.route("**/api/automations/whatsapp-templates**", async route => {
+  const hasNextPage = new URL(route.request().url()).searchParams.has("after");
   await route.fulfill({ status: 200, contentType: "application/json",
-    body: JSON.stringify({ items: [{
+    body: JSON.stringify(hasNextPage ? { items: [{
       name: "appointment_update", language: "en_US", category: "UTILITY",
       status: "APPROVED", body: "Hi {{1}}, your appointment is confirmed.",
-    }], nextCursor: null }),
+    }], nextCursor: null } : { items: [], nextCursor: "cDoxOjc=" }),
   });
 });
 const errors = [];
@@ -308,6 +309,7 @@ try {
   await page.screenshot({ path: path.join(outputDir, "builder-mobile.png"), fullPage: true });
 
   await page.setViewportSize({ width: 1440, height: 1000 });
+  await page.getByRole("button", { name: "Check more WhatsApp templates" }).click();
   await page.locator(".addActionSelect select").selectOption("SEND_CUSTOMER_WHATSAPP");
   await page.getByText("WhatsApp approved templates", { exact: true }).waitFor();
   await page.getByText("Hi {{1}}, your appointment is confirmed.", { exact: true }).waitFor();
