@@ -70,7 +70,7 @@ The founder approved a revised capacity model: **Unlimited covers two total owne
 
 The Agency-only Workspaces page lists purchaser-owned workspaces, displays client usage and available slots, creates workspaces through the existing transactionally limited API, and opens an existing business via the existing workspace switch endpoint. The existing quick workspace switcher stays available to all packages; Unlimited can create its second business there without access to the Agency page. Access to the Agency inventory API and page must be rechecked against an active Agency license, even if the user directly navigates to the URL. Workspace creation is not restricted solely to Agency.
 
-This scope delivers Agency **workspace management**, not completion of the broader Agency commercial package: JVZoo Agency sale/refund provisioning, delegated client access, cloning, BYOP connection UX, and cross-client reporting require separate acceptance before Agency can be declared commercially ready.
+The workspace-management slice delivered the Agency dashboard and capacity enforcement. The commercial-lifecycle slice below adds JVZoo Agency sale/revocation provisioning. Delegated client access, Agency credit allocation, cloning/templates and cross-client reporting remain separate acceptance gates before the broader Agency package is complete; BYOP has since moved to Whitelabel.
 
 ### Agency commercial lifecycle clarification — September 24, 2026
 
