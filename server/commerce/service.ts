@@ -1,5 +1,5 @@
 import { randomBytes } from "node:crypto";
-import { and, eq, sql } from "drizzle-orm";
+import { and, eq, inArray, sql } from "drizzle-orm";
 import { db } from "@/db";
 import {
   commerceEvents,
@@ -129,7 +129,9 @@ async function activate(event: NormalizedPurchaseEvent) {
       setWhere: and(
         eq(licenses.workspaceId, provisioned.workspace.workspaceId),
         eq(licenses.purchaserUserId, provisioned.user.id),
-        eq(licenses.status, event.eventType === "UNCANCEL-REBILL" ? "CANCELLED" : "ACTIVE"),
+        event.eventType === "UNCANCEL-REBILL"
+          ? inArray(licenses.status, ["ACTIVE", "CANCELLED"])
+          : eq(licenses.status, "ACTIVE"),
       ),
     })
     .returning();
