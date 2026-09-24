@@ -3,7 +3,7 @@ import { resolveWorkspaceContext } from "@/server/auth/workspace-context";
 import { requireWorkspacePermission } from "@/server/auth/permissions";
 import { AppError, toErrorResponse } from "@/server/http/errors";
 import { parseInput } from "@/server/http/validation";
-import { saveKnowledgeSource } from "@/server/knowledge/repository";
+import { getKnowledgeSourceUsage, saveKnowledgeSource } from "@/server/knowledge/repository";
 import { importWebsiteText } from "@/server/knowledge/website-import";
 
 const schema = z.object({ url: z.string().trim().min(1).max(2000) });
@@ -13,6 +13,9 @@ export async function POST(request: Request) {
     const context = await resolveWorkspaceContext(request.headers);
     requireWorkspacePermission(context.membership.role, "integration.manage");
     const input = parseInput(schema, await request.json());
+    if ((await getKnowledgeSourceUsage(context.workspace.id)).limit === 0) {
+      throw new AppError("KNOWLEDGE_IMPORT_REQUIRES_UNLIMITED", "Upgrade to Unlimited to import business knowledge.", 403);
+    }
     let imported;
     try {
       imported = await importWebsiteText(input.url);

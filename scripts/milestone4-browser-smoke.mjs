@@ -141,6 +141,26 @@ try {
     "Milestone 4 did not create the stale external calendar route used to verify native fallback.");
 
 
+  // Verify the Core upload boundary before upgrading this browser fixture.
+  const coreUpload = await context.request.post(`${baseUrl}/api/knowledge/files`, {
+    multipart: { file: {
+      name: "core-blocked.txt", mimeType: "text/plain",
+      buffer: Buffer.from("Core cannot import additional business documents."),
+    } },
+  });
+  assert(coreUpload.status() === 403, "Core was incorrectly allowed to import business knowledge.");
+
+  // Give the signed-in owner a real test-scoped Unlimited license so the
+  // following import and website SSRF assertions exercise the paid entitlement.
+  const upgraded = await pool.query(
+    `INSERT INTO licenses (workspace_id, purchaser_user_id, source, external_purchase_id, product_code, status, purchased_at)
+     SELECT $1, u.id, 'MANUAL', $2, 'UNLIMITED', 'ACTIVE', now()
+       FROM "user" u WHERE u.email = $3
+     RETURNING id`,
+    [workspaceId, `milestone4-unlimited-knowledge:${workspaceId}`, email],
+  );
+  assert(upgraded.rows.length === 1, "Unable to activate the test owner's Unlimited knowledge entitlement.");
+
   const upload = await parseResponse(await context.request.post(`${baseUrl}/api/knowledge/files`, {
     multipart: { file: {
       name: "qa-services.txt", mimeType: "text/plain",
