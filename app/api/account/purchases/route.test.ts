@@ -3,6 +3,7 @@ import { auth } from "@/server/auth";
 import { assertPlatformUserActive } from "@/server/admin/auth";
 import { getOwnedWorkspaceCapacity } from "@/server/auth/workspace-repository";
 import { getFunnelAccountSummary } from "@/server/commerce/account-licenses";
+import { AppError } from "@/server/http/errors";
 import { GET } from "./route";
 
 vi.mock("@/server/auth", () => ({ auth: { api: { getSession: vi.fn() } } }));
@@ -57,7 +58,7 @@ describe("authenticated funnel purchase summary", () => {
 
   it("respects account suspension and does not require an active workspace", async () => {
     vi.mocked(assertPlatformUserActive).mockRejectedValue(
-      Object.assign(new Error("Account suspended"), { code: "USER_SUSPENDED", status: 403 }),
+      new AppError("USER_SUSPENDED", "Account suspended", 403),
     );
     const response = await GET(request());
     expect(response.status).toBe(403);
