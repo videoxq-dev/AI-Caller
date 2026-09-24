@@ -631,7 +631,7 @@ export function AutomationBuilder() {
               <div className="stepBody actionsBody">
                 {!whatsappTemplates.length && trigger?.actions.includes("SEND_CUSTOMER_WHATSAPP")
                   && !draft.actions.some(action => action.type === "SEND_CUSTOMER_WHATSAPP") && (
-                  <div className="builderSmsReadiness waiting" role="status">
+                  <div className="builderWhatsAppReadiness waiting" role="status">
                     <span>{whatsappError ?? "To add WhatsApp messages, connect WhatsApp and get a text template approved."}</span>
                     <Link href="/integrations/whatsapp/templates">Manage WhatsApp templates →</Link>
                   </div>
@@ -644,7 +644,7 @@ export function AutomationBuilder() {
                   </div>
                 )}
                 {draft.actions.some(action => action.type === "SEND_CUSTOMER_WHATSAPP") && (
-                  <div className="builderSmsReadiness" role="status">
+                  <div className="builderWhatsAppReadiness" role="status">
                     <strong>WhatsApp approved templates</strong>
                     <span>{whatsappTemplates.length
                       ? "Only Meta-approved templates can be selected. Approval and customer consent are rechecked before every send."
