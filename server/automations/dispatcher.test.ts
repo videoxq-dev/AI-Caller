@@ -62,6 +62,26 @@ describe("automation dispatcher", () => {
     expect(await db.select().from(automationRuns)).toHaveLength(0);
   });
 
+  it("keeps built-in recipes available when Performance is not active", async () => {
+    await db.update(licenses).set({ status: "REFUNDED" }).where(eq(licenses.workspaceId, workspaceId));
+    await db.insert(automationSettings).values({
+      workspaceId,
+      key: "QUALIFIED_LEAD_ASSIGNMENT",
+      enabled: true,
+      config: { assignedUserId: null, notifyInApp: true },
+    });
+    const [event] = await db.insert(automationEvents).values({
+      workspaceId,
+      type: "LEAD_QUALIFIED",
+      aggregateType: "LEAD",
+      aggregateId: "core-built-in",
+    }).returning();
+
+    await expect(dispatchAutomationEvent(workspaceId, event.id)).resolves.toMatchObject({ runs: 1 });
+    const [run] = await db.select().from(automationRuns);
+    expect(run).toMatchObject({ key: "QUALIFIED_LEAD_ASSIGNMENT" });
+  });
+
   it("creates exactly one run when the same event is dispatched twice", async () => {
     await db.insert(automationSettings).values({
       workspaceId,
