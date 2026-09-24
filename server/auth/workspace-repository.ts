@@ -2,7 +2,7 @@ import { and, asc, eq, sql } from "drizzle-orm";
 import { getFunnelAccountSummary } from "@/server/commerce/account-licenses";
 import { db } from "@/db";
 import { licenses, memberships, user, workspacePlans, workspaces } from "@/db/schema";
-import { getPurchasedBusinessLimit } from "@/server/commerce/products";
+import { getAgencyClientLimit, getPurchasedBusinessLimit } from "@/server/commerce/products";
 import { AppError } from "@/server/http/errors";
 
 type WorkspaceUser = {
@@ -151,10 +151,15 @@ export async function getOwnedWorkspaceCapacity(userId: string) {
   ]);
   const ownedBusinesses = counts[0]?.count ?? 0;
   const businessLimit = Math.max(1, summary.businessLimit);
+  const agencyClientLimit = getAgencyClientLimit(summary.activeProducts);
+  const agencyClientsUsed = Math.max(0, ownedBusinesses - 1);
   return {
     ownedBusinesses,
     businessLimit,
     availableBusinesses: Math.max(0, businessLimit - ownedBusinesses),
+    agencyClientLimit,
+    agencyClientsUsed: agencyClientLimit === null ? null : agencyClientsUsed,
+    agencyClientsAvailable: agencyClientLimit === null ? null : Math.max(0, agencyClientLimit - agencyClientsUsed),
     activeProducts: summary.activeProducts,
   };
 }

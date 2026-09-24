@@ -2,7 +2,7 @@ import { randomUUID } from "node:crypto";
 import { afterAll, beforeEach, describe, expect, it } from "vitest";
 import { closeDatabase, db } from "@/db";
 import { account, licenses, memberships, session, user, verification, workspaces } from "@/db/schema";
-import { createWorkspaceForUser, ensureDefaultWorkspace, getPrimaryMembership, getPrimaryOwnedWorkspace, listMembershipsForUser } from "./workspace-repository";
+import { createWorkspaceForUser, ensureDefaultWorkspace, getOwnedWorkspaceCapacity, getPrimaryMembership, getPrimaryOwnedWorkspace, listMembershipsForUser } from "./workspace-repository";
 
 const TEST_USER_ID = "workspace-test-user";
 
@@ -67,30 +67,55 @@ describe("workspace provisioning", () => {
       .rejects.toMatchObject({ code: "WORKSPACE_LIMIT_REACHED" });
   });
 
-  it("permits up to ten owned businesses under an active Unlimited license", async () => {
+  it("permits one additional business under an active Unlimited license", async () => {
     const workspace = await createWorkspaceForUser(TEST_USER_ID, "First Business");
     await db.insert(licenses).values({ workspaceId: workspace.workspaceId, purchaserUserId: TEST_USER_ID, source: "MANUAL", externalPurchaseId: randomUUID(), productCode: "UNLIMITED", status: "ACTIVE", purchasedAt: new Date() });
-    for (let business = 2; business <= 10; business++) {
-      expect((await createWorkspaceForUser(TEST_USER_ID, "Business " + business)).role).toBe("OWNER");
-    }
-    await expect(createWorkspaceForUser(TEST_USER_ID, "Eleventh Business"))
+    expect((await createWorkspaceForUser(TEST_USER_ID, "Second Business")).role).toBe("OWNER");
+    await expect(createWorkspaceForUser(TEST_USER_ID, "Third Business"))
       .rejects.toMatchObject({ code: "WORKSPACE_LIMIT_REACHED" });
-    expect(await listMembershipsForUser(TEST_USER_ID)).toHaveLength(10);
+    expect(await listMembershipsForUser(TEST_USER_ID)).toHaveLength(2);
   });
 
   it("serializes concurrent final-slot creation rather than exceeding the purchased limit", async () => {
     const workspace = await createWorkspaceForUser(TEST_USER_ID, "First Business");
     await db.insert(licenses).values({ workspaceId: workspace.workspaceId, purchaserUserId: TEST_USER_ID, source: "MANUAL", externalPurchaseId: randomUUID(), productCode: "UNLIMITED", status: "ACTIVE", purchasedAt: new Date() });
-    for (let business = 2; business <= 9; business++) {
-      await createWorkspaceForUser(TEST_USER_ID, "Business " + business);
-    }
     const results = await Promise.allSettled([
       createWorkspaceForUser(TEST_USER_ID, "Concurrent A"),
       createWorkspaceForUser(TEST_USER_ID, "Concurrent B"),
     ]);
     expect(results.filter((result) => result.status === "fulfilled")).toHaveLength(1);
     expect(results.filter((result) => result.status === "rejected")).toHaveLength(1);
-    expect(await listMembershipsForUser(TEST_USER_ID)).toHaveLength(10);
+    expect(await listMembershipsForUser(TEST_USER_ID)).toHaveLength(2);
+  });
+
+  it("reserves Agency 50 slots for clients in addition to the original business", async () => {
+    const original = await createWorkspaceForUser(TEST_USER_ID, "Original Business");
+    await db.insert(licenses).values({ workspaceId: original.workspaceId, purchaserUserId: TEST_USER_ID, source: "MANUAL", externalPurchaseId: randomUUID(), productCode: "AGENCY_50", status: "ACTIVE", purchasedAt: new Date() });
+    expect(await getOwnedWorkspaceCapacity(TEST_USER_ID)).toMatchObject({
+      ownedBusinesses: 1, businessLimit: 51, availableBusinesses: 50,
+      agencyClientLimit: 50, agencyClientsUsed: 0, agencyClientsAvailable: 50,
+    });
+    for (let client = 1; client <= 50; client++) {
+      await createWorkspaceForUser(TEST_USER_ID, "Client " + client);
+    }
+    expect(await getOwnedWorkspaceCapacity(TEST_USER_ID)).toMatchObject({
+      ownedBusinesses: 51, businessLimit: 51, availableBusinesses: 0,
+      agencyClientLimit: 50, agencyClientsUsed: 50, agencyClientsAvailable: 0,
+    });
+    await expect(createWorkspaceForUser(TEST_USER_ID, "Extra Client"))
+      .rejects.toMatchObject({ code: "WORKSPACE_LIMIT_REACHED", status: 403 });
+  });
+
+  it("uses Agency 100 capacity rather than stacking 50 and 100 entitlements", async () => {
+    const original = await createWorkspaceForUser(TEST_USER_ID, "Original Business");
+    await db.insert(licenses).values([
+      { workspaceId: original.workspaceId, purchaserUserId: TEST_USER_ID, source: "MANUAL", externalPurchaseId: randomUUID(), productCode: "AGENCY_50", status: "ACTIVE", purchasedAt: new Date() },
+      { workspaceId: original.workspaceId, purchaserUserId: TEST_USER_ID, source: "MANUAL", externalPurchaseId: randomUUID(), productCode: "AGENCY_100", status: "ACTIVE", purchasedAt: new Date() },
+    ]);
+    expect(await getOwnedWorkspaceCapacity(TEST_USER_ID)).toMatchObject({
+      ownedBusinesses: 1, businessLimit: 101, availableBusinesses: 100,
+      agencyClientLimit: 100, agencyClientsUsed: 0, agencyClientsAvailable: 100,
+    });
   });
 
   it("does not delete over-limit legacy workspaces while blocking new ones", async () => {

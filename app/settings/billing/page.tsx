@@ -80,8 +80,8 @@ function offerLabel(code: string) {
     CORE: "Core",
     UNLIMITED: "Unlimited",
     PERFORMANCE: "Performance",
-    AGENCY_50: "Agency · 50 businesses",
-    AGENCY_100: "Agency · 100 businesses",
+    AGENCY_50: "Agency · 50 clients",
+    AGENCY_100: "Agency · 100 clients",
     WHITELABEL: "Whitelabel",
   };
   return names[code] ?? code.replaceAll("_", " ");

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { FUNNEL_PRODUCTS, resolveFunnelProductId, type FunnelProductConfiguration } from "./products";
+import { FUNNEL_PRODUCTS, getAgencyClientLimit, getPurchasedBusinessLimit, resolveFunnelProductId, type FunnelProductConfiguration } from "./products";
 
 const configuration: FunnelProductConfiguration = {
   JVZOO_CORE_PRODUCT_IDS: " core-1,core-2 ",
@@ -55,8 +55,14 @@ describe("Assistlia commercial funnel product mapping", () => {
       businessLimit: 1, purchaseCredits: 15_000,
     });
     expect(FUNNEL_PRODUCTS.find(({ code }) => code === "UNLIMITED")).toMatchObject({
-      businessLimit: 10, purchaseCredits: 15_000,
+      businessLimit: 2, purchaseCredits: 15_000,
     });
     expect(FUNNEL_PRODUCTS.filter(({ offer }) => offer === "AGENCY").map(({ businessLimit }) => businessLimit)).toEqual([50, 100]);
+    expect(getPurchasedBusinessLimit(["UNLIMITED"])).toBe(2);
+    expect(getAgencyClientLimit(["CORE", "AGENCY_50"])).toBe(50);
+    expect(getPurchasedBusinessLimit(["CORE", "AGENCY_50"])).toBe(51);
+    expect(getPurchasedBusinessLimit(["AGENCY_100"])).toBe(101);
+    expect(getPurchasedBusinessLimit(["AGENCY_50", "AGENCY_100"])).toBe(101);
+    expect(getAgencyClientLimit(["CORE", "UNLIMITED"])).toBeNull();
   });
 });

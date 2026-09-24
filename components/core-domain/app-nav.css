@@ -6,3 +6,5 @@
 .sidebarHelp strong{font-size:10px}
 .sidebarHelp small{margin-top:3px;color:#1769ee;font-size:9px}
 @media(max-width:620px){.sidebarHelp{display:none}}
+
+@media(max-width:620px){.appNav:has(.appNavItem[href='/workspaces']){grid-template-columns:repeat(9,minmax(0,1fr))}.appNav:has(.appNavItem[href='/workspaces']) .appNavItem{padding:0 2px}}

@@ -1,0 +1,39 @@
+.agencyBody{max-width:1360px;margin:0 auto;padding:28px;display:grid;gap:22px}
+.agencyCreateButton{min-height:42px;padding:0 18px;border:1px solid #1769ee;border-radius:9px;color:#fff;background:#1769ee;font-size:13px;font-weight:750;cursor:pointer}
+.agencyCreateButton:hover:not(:disabled){background:#0b55cc}.agencyCreateButton:disabled{opacity:.55;cursor:not-allowed}
+.agencySummary{display:grid;grid-template-columns:1.65fr 1fr 1fr;gap:16px}
+.agencyUsageCard,.agencyStatCard,.agencyListCard,.agencyCreateCard{padding:24px;border:1px solid #dde5ef;border-radius:14px;background:#fff;box-shadow:0 10px 30px rgba(42,63,91,.045)}
+.agencyEyebrow{margin:0;color:#60718a;font-size:12px;font-weight:800;text-transform:uppercase;letter-spacing:.07em}
+.agencyUsageNumber{display:flex;align-items:baseline;flex-wrap:wrap;gap:12px;margin-top:12px}
+.agencyUsageNumber strong{font-size:42px;letter-spacing:-1.5px;line-height:1.2}
+.agencyUsageNumber strong span{color:#7a8a9f;font-size:24px;letter-spacing:0}
+.agencyUsageNumber>span{color:#52647d;font-size:12px}
+.agencyProgress{height:10px;margin:20px 0 12px;overflow:hidden;border-radius:999px;background:#e9f0fb}
+.agencyProgress span{height:100%;display:block;border-radius:999px;background:#1769ee;transition:width .2s ease}
+.agencyUsageHint,.agencyStatCard p{margin:0;color:#718198;font-size:12px;line-height:1.6}
+.agencyStatCard{display:flex;flex-direction:column;justify-content:center;gap:12px}
+.agencyStatCard>span{color:#52647d;font-size:13px;font-weight:750}
+.agencyStatCard strong{color:#1769ee;font-size:42px;line-height:1}
+.agencyListHeader{display:flex;align-items:start;justify-content:space-between;gap:16px;padding-bottom:20px}
+.agencyListHeader h2,.agencyCreateCard h2{margin:0;font-size:21px;letter-spacing:-.35px}
+.agencyListHeader p,.agencyCreateCard p{margin:6px 0 0;color:#718198;font-size:12px;line-height:1.5}
+.agencyListHeader>span{padding:8px 12px;border-radius:100px;color:#52647d;background:#f0f5fc;font-size:12px;font-weight:750;white-space:nowrap}
+.agencyWorkspaceRow{display:grid;grid-template-columns:46px minmax(0,1fr) auto;align-items:center;gap:14px;padding:17px 0;border-top:1px solid #ecf0f5}
+.agencyWorkspaceMark{width:44px;height:44px;display:grid;place-items:center;border-radius:11px;color:#1769ee;background:#e7f2ff;font-size:20px;font-weight:800}
+.agencyWorkspaceInfo{min-width:0;display:grid;gap:7px}
+.agencyWorkspaceInfo strong{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:15px}
+.agencyWorkspaceTags{display:flex;align-items:center;flex-wrap:wrap;gap:8px;color:#708199;font-size:11px}
+.agencyOriginalTag,.agencyCurrentTag,.agencyActiveTag,.agencySuspendedTag{padding:4px 8px;border-radius:999px;font-size:10px;font-weight:750}
+.agencyOriginalTag{color:#6d42ac;background:#f3eaff}.agencyCurrentTag{color:#1769ee;background:#e9f3ff}
+.agencyActiveTag{color:#0d8c54;background:#e7f7ee}.agencySuspendedTag{color:#9d2d3d;background:#fff0f2}
+.agencyOpenButton,.agencySecondaryButton{min-height:37px;padding:0 14px;border:1px solid #b9d0ee;border-radius:8px;color:#1769ee;background:#fff;font-size:12px;font-weight:750;cursor:pointer}
+.agencyOpenButton:hover:not(:disabled),.agencySecondaryButton:hover:not(:disabled){background:#f0f7ff}
+.agencyOpenButton:disabled,.agencySecondaryButton:disabled{opacity:.55;cursor:not-allowed}
+.agencyCreateCard{display:grid;gap:14px}
+.agencyCreateCard label{color:#31465f;font-size:12px;font-weight:750}
+.agencyCreateFields{display:flex;gap:10px;flex-wrap:wrap}
+.agencyCreateFields input{flex:1;min-width:190px;height:42px;padding:0 12px;border:1px solid #cdd9e9;border-radius:9px;color:#20314b;font-size:13px}
+.agencyEmpty{margin:0;padding:34px 0;color:#718198;text-align:center;font-size:13px}
+.agencyActionError{padding:12px 14px;border:1px solid #f5b8c0;border-radius:10px;color:#9f1f32;background:#fff4f5;font-size:12px}
+@media(max-width:1150px){.agencySummary{grid-template-columns:1fr 1fr}.agencyUsageCard{grid-column:1/-1}}
+@media(max-width:620px){.agencyBody{gap:12px;padding:14px 10px 90px}.agencySummary{grid-template-columns:1fr 1fr;gap:10px}.agencyUsageCard,.agencyStatCard,.agencyListCard,.agencyCreateCard{padding:15px}.agencyUsageCard{grid-column:1/-1}.agencyUsageNumber strong{font-size:36px}.agencyStatCard strong{font-size:32px}.agencyListHeader{flex-wrap:wrap}.agencyWorkspaceRow{grid-template-columns:38px minmax(0,1fr);gap:10px}.agencyWorkspaceMark{width:36px;height:36px}.agencyOpenButton{grid-column:2;justify-self:start}.agencyCreateFields{display:grid}.agencyCreateFields input{width:100%}}

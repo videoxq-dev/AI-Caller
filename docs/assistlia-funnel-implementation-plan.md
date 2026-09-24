@@ -9,16 +9,16 @@ There is **one application** with five offers and six purchasable SKUs:
 | Offer | License product code | Brief-defined commercial difference |
 | --- | --- | --- |
 | Front end: Core | CORE | One business; 15,000 starter credits; one configured AI agent; native appointments and Core channels |
-| OTO 1: Unlimited | UNLIMITED | Up to ten businesses; up to five staff per business; expanded calendars, up to two imported website/file knowledge sources per business, widgets and reporting; an additional 15,000 promotional credits |
+| OTO 1: Unlimited | UNLIMITED | Up to two total businesses; up to five staff per business; expanded calendars, up to two imported website/file knowledge sources per business, widgets and reporting; an additional 15,000 promotional credits |
 | OTO 2: Performance | PERFORMANCE | Unlocks the existing Automation Builder and custom automations |
-| OTO 3: Agency | AGENCY_50, AGENCY_100 | Agency console and 50 or 100 managed client businesses, with a client-capacity expansion path |
+| OTO 3: Agency | AGENCY_50, AGENCY_100 | Agency workspace management and 50 or 100 client businesses in addition to the buyer's original workspace, with a client-capacity expansion path |
 | OTO 4: Whitelabel | WHITELABEL | Custom domain, product name, brand assets and client-facing branded experience |
 
 “Unlimited” is not unlimited hosted AI, voice, messaging or provider consumption. Credits remain metered. There is still **one AI Caller-managed Telnyx number and one configured AI agent per business workspace** under the current runtime contract; none of these SKUs authorizes changing that architecture silently. Automation remains a structured, non-drag-and-drop builder with system-chosen workflow execution, not a user-facing execution-mode selector.
 
 Keep **commercial purchase licenses** separate from the existing PERSONAL/GROWTH workspace billing plan. The latter currently governs seat quotas, whereas the funnel grants access and business capacity to the purchasing account. Do not treat a workspace-level JSON entitlement as an authoritative account-level workspace quota.
 
-A buyer can provide Core as a service to another business, but the Core license still covers one business. Unlimited permits up to ten; Agency has separate 50- and 100-client SKUs. Define effective capacity from **active purchases**, not from the latest webhook or an unvalidated UI selection. OTO entitlements add their documented capabilities; purchasing a later OTO does not implicitly grant every earlier OTO unless that is explicitly part of the commercial offer.
+A buyer can provide Core as a service to another business, but the Core license still covers one business. Unlimited permits two total business workspaces, counting the original; Agency has separate 50- and 100-client SKUs, each exclusive of the original business (51 or 101 total owned workspaces). Define effective capacity from **active purchases**, not from the latest webhook or an unvalidated UI selection. OTO entitlements add their documented capabilities; purchasing a later OTO does not implicitly grant every earlier OTO unless that is explicitly part of the commercial offer.
 
 ## Frozen completed surfaces
 
@@ -52,7 +52,7 @@ Confirm inbound phone, SMS, WhatsApp, webchat, unified inbox, manually entered s
 
 ### OTO 1 — Unlimited
 
-The revised funnel brief plus the founder's later clarifications define the implemented Unlimited boundary. Unlimited supports up to ten owned businesses, up to five staff per business, removes Core's 500-contact cap, unlocks up to two combined website/file knowledge imports per business, unlocks the existing supported external-calendar connection capability, and grants an additional 15,000 promotional hosted credits. Core retains native in-app scheduling. Unlimited does **not** mean unlimited calendar connections, does not authorize a new multi-calendar architecture, and does not unlock non-calendar BYOP; other customer-supplied provider integrations remain Agency-only.
+The revised funnel brief plus the founder's later clarifications define the implemented Unlimited boundary. Unlimited supports up to two owned businesses including the original, up to five staff per business, removes Core's 500-contact cap, unlocks up to two combined website/file knowledge imports per business, unlocks the existing supported external-calendar connection capability, and grants an additional 15,000 promotional hosted credits. Core retains native in-app scheduling. Unlimited does **not** mean unlimited calendar connections, does not authorize a new multi-calendar architecture, and does not unlock non-calendar BYOP; other customer-supplied provider integrations remain Agency-only.
 
 Once the Core 500-contact maximum and Unlimited uncapped-contact entitlement are verified and merged, the founder has confirmed the agreed **Core and OTO 1 Unlimited implementation scope is complete**. Do not infer additional Unlimited engineering work from the superseded F4/F5/F6 milestone language.
 
@@ -63,6 +63,14 @@ The founder's September 24 clarification locks Performance to the **existing Aut
 Core and Unlimited retain the built-in automation recipes. An active `PERFORMANCE` purchase is required to access the Automation Builder, create or edit custom workflows, publish/resume them, inspect their custom-workflow activity, and execute published custom workflows. Later OTO purchases such as Agency or Whitelabel do not implicitly grant Performance. If Performance is refunded or otherwise inactive, preserve custom workflow definitions and history but stop dispatching or executing them until Performance access is restored.
 
 **Frozen-feature guard — Phase 6C SMS:** Phase 6C SMS readiness and its acceptance behavior are concluded. Do not modify SMS runtime behavior, SMS workflow behavior, or the Phase 6C acceptance script while implementing unrelated funnel/entitlement work unless the founder explicitly reopens SMS scope. If a new cross-cutting entitlement causes a Phase 6C regression, fix the new entitlement or generic test scaffolding outside the SMS feature boundary; do not rewrite the concluded SMS workflow to accommodate the new work.
+
+### Agency workspace capacity and management clarification — September 24, 2026
+
+The founder approved a revised capacity model: **Unlimited covers two total owned workspaces (original plus one additional); Agency 50 grants 50 client workspaces on top of the original workspace, and Agency 100 grants 100 client workspaces on top of the original**. Thus server-side total-owned capacity is 2, 51 and 101 respectively, while the Agency management dashboard shows **client usage** as e.g. `2/50`, excluding the original. Agency client SKUs do not stack; the highest active client allowance applies. Inactive/refunded licenses confer no capacity and existing over-limit businesses remain available but cannot be expanded.
+
+The Agency-only Workspaces page lists purchaser-owned workspaces, displays client usage and available slots, creates workspaces through the existing transactionally limited API, and opens an existing business via the existing workspace switch endpoint. The existing quick workspace switcher stays available to all packages; Unlimited can create its second business there without access to the Agency page. Access to the Agency inventory API and page must be rechecked against an active Agency license, even if the user directly navigates to the URL. Workspace creation is not restricted solely to Agency.
+
+This scope delivers Agency **workspace management**, not completion of the broader Agency commercial package: JVZoo Agency sale/refund provisioning, delegated client access, cloning, BYOP connection UX, and cross-client reporting require separate acceptance before Agency can be declared commercially ready.
 
 ### F10–F11 — Agency
 
