@@ -119,6 +119,17 @@ describe("Core purchase lifecycle", () => {
     expect(attempt).toMatchObject({ result: { ignored: true, reason: "REVOKED_PURCHASE" } });
   });
 
+  it("preserves chargeback precedence when refund and chargeback arrive together", async () => {
+    await coreLicense("parallel-terminal-receipt");
+    await Promise.all([
+      processCommerceEvent(purchaseEvent("RFND", "parallel-terminal-receipt")),
+      processCommerceEvent(purchaseEvent("CGBK", "parallel-terminal-receipt")),
+    ]);
+    const [license] = await db.select().from(licenses)
+      .where(eq(licenses.externalPurchaseId, "parallel-terminal-receipt"));
+    expect(license.status).toBe("CHARGEBACK");
+  });
+
   it("does not discard an out-of-order refund before the corresponding purchase arrives", async () => {
     const earlyRefund = purchaseEvent("RFND", "late-purchase");
     await expect(processCommerceEvent(earlyRefund)).rejects.toMatchObject({
