@@ -60,6 +60,13 @@ try {
   );
 
 
+  const beforeCapacity = await api(context, "GET", "/api/workspaces", undefined,
+    "read Core business capacity");
+  assert(beforeCapacity.capacity?.ownedBusinesses === 1
+    && beforeCapacity.capacity?.businessLimit === 1
+    && beforeCapacity.capacity?.availableBusinesses === 0,
+  "Core workspace capacity API did not report its initial one-business limit.");
+
   const beforeUpgrade = await api(context, "PUT", "/api/workspaces", {
     name: "Phase One Second Workspace",
   }, "Core cannot create an additional business", 403);
@@ -88,6 +95,10 @@ try {
   assert(afterCreate.workspaces?.length === 2
     && afterCreate.activeWorkspaceId === additional.workspace.workspaceId,
   "The new workspace was not available and selected after creation.");
+  assert(afterCreate.capacity?.ownedBusinesses === 2
+    && afterCreate.capacity?.businessLimit === 10
+    && afterCreate.capacity?.availableBusinesses === 8,
+  "Unlimited workspace capacity API did not reflect the purchased business allowance.");
   await api(context, "POST", "/api/workspaces", { workspaceId },
     "switch back to the original workspace");
   const switched = await api(context, "GET", "/api/workspaces", undefined,
@@ -101,7 +112,9 @@ try {
     { status: "ACTIVE" }, "cannot activate a missing agent", 409);
 
   await page.goto(`${baseUrl}/ai-agent`, { waitUntil: "networkidle" });
-  await page.getByRole("button", { name: "Create workspace", exact: true }).waitFor();
+  await page.getByRole("button", { name: "Create workspace", exact: true }).click();
+  await page.getByText("2 of 10 business slots used.", { exact: true }).waitFor();
+  await page.getByRole("button", { name: "Create workspace", exact: true }).click();
   await page.getByRole("button", { name: "Behavior", exact: true }).click();
   await page.getByLabel("Assistant name").fill("Mia");
   await page.getByLabel("Primary goal").selectOption("Answer questions");
