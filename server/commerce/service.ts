@@ -1,5 +1,5 @@
 import { randomBytes } from "node:crypto";
-import { and, eq } from "drizzle-orm";
+import { and, eq, sql } from "drizzle-orm";
 import { db } from "@/db";
 import {
   commerceEvents,
@@ -143,24 +143,34 @@ async function activate(event: NormalizedPurchaseEvent) {
 
 async function revoke(event: NormalizedPurchaseEvent) {
   if (!isCoreProduct(event.productId)) return { ignored: true as const, reason: "UNMAPPED_PRODUCT" };
-  const [license] = await db
-    .select()
-    .from(licenses)
-    .where(and(eq(licenses.source, "JVZOO"), eq(licenses.externalPurchaseId, event.externalPurchaseId), eq(licenses.productCode, "CORE")))
-    .limit(1);
-  if (!license) return { ignored: true as const, reason: "LICENSE_NOT_FOUND" };
+  return db.transaction(async (tx) => {
+    const [license] = await tx
+      .select()
+      .from(licenses)
+      .where(and(eq(licenses.source, "JVZOO"), eq(licenses.externalPurchaseId, event.externalPurchaseId), eq(licenses.productCode, "CORE")))
+      .limit(1);
+    if (!license) return { ignored: true as const, reason: "LICENSE_NOT_FOUND" };
 
-  const status = event.eventType === "CGBK" ? "CHARGEBACK" : event.eventType === "RFND" ? "REFUNDED" : "CANCELLED";
-  await db.update(licenses).set({ status, rawMetadata: event.raw, updatedAt: new Date() }).where(eq(licenses.id, license.id));
-  await db.update(workspaces).set({ status: "SUSPENDED", updatedAt: new Date() }).where(eq(workspaces.id, license.workspaceId));
-  await db
-    .insert(workspaceEntitlements)
-    .values({ workspaceId: license.workspaceId, key: "core_access", value: false, updatedAt: new Date() })
-    .onConflictDoUpdate({
-      target: [workspaceEntitlements.workspaceId, workspaceEntitlements.key],
-      set: { value: false, updatedAt: new Date() },
-    });
-  return { ignored: false as const, workspaceId: license.workspaceId, licenseId: license.id };
+    // Serialize receipt revocations for a business before checking whether
+    // another Core purchase still grants access.
+    await tx.execute(sql`select pg_advisory_xact_lock(hashtext(${`core-license-revoke:${license.workspaceId}`}))`);
+    const status = event.eventType === "CGBK" ? "CHARGEBACK" : event.eventType === "RFND" ? "REFUNDED" : "CANCELLED";
+    await tx.update(licenses).set({ status, rawMetadata: event.raw, updatedAt: new Date() }).where(eq(licenses.id, license.id));
+    const [remaining] = await tx.select({ id: licenses.id }).from(licenses)
+      .where(and(eq(licenses.workspaceId, license.workspaceId), eq(licenses.productCode, "CORE"), eq(licenses.status, "ACTIVE")))
+      .limit(1);
+    if (!remaining) {
+      await tx.update(workspaces).set({ status: "SUSPENDED", updatedAt: new Date() }).where(eq(workspaces.id, license.workspaceId));
+      await tx
+        .insert(workspaceEntitlements)
+        .values({ workspaceId: license.workspaceId, key: "core_access", value: false, updatedAt: new Date() })
+        .onConflictDoUpdate({
+          target: [workspaceEntitlements.workspaceId, workspaceEntitlements.key],
+          set: { value: false, updatedAt: new Date() },
+        });
+    }
+    return { ignored: false as const, workspaceId: license.workspaceId, licenseId: license.id, coreAccessRetained: Boolean(remaining) };
+  });
 }
 
 export async function processCommerceEvent(event: NormalizedPurchaseEvent) {
@@ -201,16 +211,8 @@ export async function processCommerceEvent(event: NormalizedPurchaseEvent) {
   try {
     let result: unknown;
     if (ACTIVE_EVENTS.has(event.eventType)) result = await activate(event);
-    else if (REVOKE_EVENTS.has(event.eventType)) result = await revoke(event);
-    else if (event.eventType === "CANCEL-REBILL") {
-      const [license] = await db
-        .select()
-        .from(licenses)
-        .where(and(eq(licenses.source, "JVZOO"), eq(licenses.externalPurchaseId, event.externalPurchaseId), eq(licenses.productCode, "CORE")))
-        .limit(1);
-      if (license) await db.update(licenses).set({ status: "CANCELLED", updatedAt: new Date(), rawMetadata: event.raw }).where(eq(licenses.id, license.id));
-      result = { ignored: false, cancellationRecorded: Boolean(license) };
-    } else {
+    else if (REVOKE_EVENTS.has(event.eventType) || event.eventType === "CANCEL-REBILL") result = await revoke(event);
+    else {
       result = { ignored: true, reason: "UNSUPPORTED_EVENT" };
     }
 
