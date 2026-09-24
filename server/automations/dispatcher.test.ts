@@ -1,4 +1,5 @@
 import { afterAll, beforeEach, describe, expect, it, vi } from "vitest";
+import { eq } from "drizzle-orm";
 import { closeDatabase, db } from "@/db";
 import { enqueueUniqueJob } from "@/server/jobs";
 import {
