@@ -76,17 +76,6 @@ try {
   );
   const workspaceId = owner.rows[0].workspace_id;
 
-  // Generic guarded E2E signups carry Performance so unrelated completed
-  // acceptance suites can continue exercising custom automations. This test is
-  // specifically for the commercial gate, so remove only its fixture license.
-  await pool.query(
-    `DELETE FROM licenses
-      WHERE workspace_id = $1
-        AND product_code = 'PERFORMANCE'
-        AND raw_metadata->>'e2eFixture' = 'true'`,
-    [workspaceId],
-  );
-
   // A Core/Unlimited workspace must see the commercial gate and cannot bypass
   // it by calling the custom-workflow API directly.
   await page.goto(`${baseUrl}/automations`, { waitUntil: "networkidle" });
