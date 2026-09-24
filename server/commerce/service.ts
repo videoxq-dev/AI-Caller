@@ -32,7 +32,9 @@ function isCoreProduct(productId: string): boolean {
   return resolveFunnelProductId(productId, env) === "CORE";
 }
 
-async function grantCoreEntitlements(workspaceId: string) {
+type Tx = Parameters<Parameters<typeof db.transaction>[0]>[0];
+
+async function grantCoreEntitlements(workspaceId: string, tx: Tx) {
   const entries: Array<[string, unknown]> = [
     ["workspace_limit", 1],
     ["calendar_connection_limit", 1],
@@ -41,7 +43,7 @@ async function grantCoreEntitlements(workspaceId: string) {
     ["core_access", true],
   ];
   for (const [key, value] of entries) {
-    await db
+    await tx
       .insert(workspaceEntitlements)
       .values({ workspaceId, key, value, updatedAt: new Date() })
       .onConflictDoUpdate({
@@ -147,7 +149,7 @@ async function activate(event: NormalizedPurchaseEvent) {
     if (current?.status !== "ACTIVE") return false;
     await tx.update(workspaces).set({ status: "ACTIVE", updatedAt: new Date() })
       .where(eq(workspaces.id, license.workspaceId));
-    await grantCoreEntitlements(license.workspaceId);
+    await grantCoreEntitlements(license.workspaceId, tx);
     return true;
   });
   if (!canActivate) return { ignored: true as const, reason: "REVOKED_PURCHASE" };
@@ -303,7 +305,7 @@ export async function activateManualCoreLicense(workspaceId: string) {
       set: { status: "ACTIVE", updatedAt: new Date() },
     })
     .returning();
-  await grantCoreEntitlements(workspaceId);
+  await db.transaction((tx) => grantCoreEntitlements(workspaceId, tx));
   const balance = await grantStarterCredits(workspaceId, license.id);
   return { license, balance };
 }
