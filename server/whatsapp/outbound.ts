@@ -12,6 +12,7 @@ import {
 } from "@/server/providers/whatsapp/runtime";
 import { getWhatsAppConsentStatus } from "./consent";
 import { classifySmsForPolicy } from "@/server/sms/policy";
+import { approvedWhatsAppParameterCount } from "@/server/providers/whatsapp/meta-templates";
 import {
   attachWhatsAppProviderMessage,
   getWhatsAppConversationRecipient,
@@ -213,13 +214,13 @@ export function createWhatsAppOutboundService(dependencies: OutboundDependencies
         throw new AppError("WHATSAPP_TEMPLATE_NOT_APPROVED",
           "The template category changed since this workflow was published.", 409);
       }
-      const slots = [...eligibility.body.matchAll(/{{(\d+)}}/g)].map(match => Number(match[1]));
+      const slotCount = approvedWhatsAppParameterCount(eligibility.body);
       const component = input.components?.find((item): item is {
         type: string; parameters?: Array<{ type: string; text: string }>;
       } => Boolean(item && typeof item === "object" && "type" in item
         && (item as { type: unknown }).type === "body"));
       const params = component?.parameters ?? [];
-      if (slots.length !== params.length || params.some(param =>
+      if (slotCount !== params.length || params.some(param =>
         param.type !== "text" || typeof param.text !== "string" || !param.text.trim())) {
         throw new AppError("WHATSAPP_TEMPLATE_VARIABLE_MISMATCH",
           "Supply one nonempty text value for each approved template placeholder.", 409);
