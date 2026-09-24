@@ -175,6 +175,7 @@ export function createWhatsAppOutboundService(dependencies: OutboundDependencies
         templateName: string;
         languageCode: string;
         components?: unknown[];
+        expectedCategory?: "UTILITY" | "MARKETING";
       },
     ) {
       const conversation = await conversationState(workspaceId, conversationId);
@@ -197,6 +198,21 @@ export function createWhatsAppOutboundService(dependencies: OutboundDependencies
           "This WhatsApp template is not currently approved.", 409);
       }
       const category = eligibility.category as "UTILITY" | "MARKETING";
+      if (input.expectedCategory && input.expectedCategory !== category) {
+        throw new AppError("WHATSAPP_TEMPLATE_NOT_APPROVED",
+          "The template category changed since this workflow was published.", 409);
+      }
+      const slots = [...eligibility.body.matchAll(/{{(\d+)}}/g)].map(match => Number(match[1]));
+      const component = input.components?.find((item): item is {
+        type: string; parameters?: Array<{ type: string; text: string }>;
+      } => Boolean(item && typeof item === "object" && "type" in item
+        && (item as { type: unknown }).type === "body"));
+      const params = component?.parameters ?? [];
+      if (slots.length !== params.length || params.some(param =>
+        param.type !== "text" || typeof param.text !== "string" || !param.text.trim())) {
+        throw new AppError("WHATSAPP_TEMPLATE_VARIABLE_MISMATCH",
+          "Supply one nonempty text value for each approved template placeholder.", 409);
+      }
       await requireWhatsAppConsent(workspaceId, to, category, true);
       const outbound = await appendMessage(workspaceId, conversationId, {
         channel: "WHATSAPP",
@@ -223,7 +239,8 @@ export function createWhatsAppOutboundService(dependencies: OutboundDependencies
       // an uncertain provider send or automatically retry them.
       try {
         const current = await getTemplate(workspaceId, input.templateName, input.languageCode);
-        if (current.status !== "APPROVED" || current.category !== category) {
+        if (current.status !== "APPROVED" || current.category !== category
+          || current.body !== eligibility.body) {
           throw new AppError("WHATSAPP_TEMPLATE_NOT_APPROVED",
             "Template approval or category changed before sending.", 409);
         }
@@ -275,6 +292,7 @@ export function sendWhatsAppConversationTemplate(
     templateName: string;
     languageCode: string;
     components?: unknown[];
+    expectedCategory?: "UTILITY" | "MARKETING";
   },
 ) {
   return whatsAppOutboundService.sendTemplate(workspaceId, conversationId, input);
