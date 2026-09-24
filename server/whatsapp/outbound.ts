@@ -216,6 +216,7 @@ export function createWhatsAppOutboundService(dependencies: OutboundDependencies
         languageCode: string;
         components?: unknown[];
         expectedCategory?: "UTILITY" | "MARKETING";
+        beforeDispatch?: () => Promise<void>;
       },
     ) {
       const conversation = await conversationState(workspaceId, conversationId);
@@ -291,6 +292,7 @@ export function createWhatsAppOutboundService(dependencies: OutboundDependencies
             "Template approval or category changed before sending.", 409);
         }
         await requireWhatsAppConsent(workspaceId, to, category, true);
+        await input.beforeDispatch?.();
       } catch (error) {
         await db.update(messages).set({ status: "SUPPRESSED",
           metadata: { ...outbound.metadata,
@@ -339,6 +341,7 @@ export function sendWhatsAppConversationTemplate(
     languageCode: string;
     components?: unknown[];
     expectedCategory?: "UTILITY" | "MARKETING";
+    beforeDispatch?: () => Promise<void>;
   },
 ) {
   return whatsAppOutboundService.sendTemplate(workspaceId, conversationId, input);
