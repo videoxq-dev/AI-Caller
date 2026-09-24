@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto";
+import pg from "pg";
 import { afterAll, afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { and, eq } from "drizzle-orm";
 import { closeDatabase, db } from "@/db";
@@ -165,5 +166,60 @@ describe("Core purchase lifecycle", () => {
     ]);
     expect(results).toHaveLength(2);
     expect((await db.select().from(workspaces).where(eq(workspaces.id, workspaceId)))[0].status).toBe("SUSPENDED");
+  });
+
+  it("blocks an in-flight BILL behind an earlier refund before writing Core access", async () => {
+    const receipt = "interleaved-bill-refund";
+    await coreLicense(receipt);
+    const guard = new pg.Client({ connectionString: process.env.DATABASE_URL });
+    await guard.connect();
+    await guard.query("BEGIN");
+    await guard.query("select pg_advisory_xact_lock(hashtext($1))", ["core-license:" + workspaceId]);
+
+    const waitingCount = async () => {
+      const result = await guard.query(
+        "select count(*)::int AS waiting from pg_stat_activity " +
+        "where wait_event = 'advisory' and pid <> pg_backend_pid() " +
+        "and query like '%pg_advisory_xact_lock%'",
+      );
+      return result.rows[0].waiting as number;
+    };
+    const waitFor = async (minimum: number) => {
+      for (let i = 0; i < 100; i++) {
+        if (await waitingCount() >= minimum) return true;
+        await new Promise((resolve) => setTimeout(resolve, 30));
+      }
+      return false;
+    };
+
+    let refund: ReturnType<typeof processCommerceEvent> | null = null;
+    let bill: ReturnType<typeof processCommerceEvent> | null = null;
+    let refundWaiting = false;
+    let billWaiting = false;
+    try {
+      refund = processCommerceEvent(purchaseEvent("RFND", receipt));
+      refundWaiting = await waitFor(1);
+      bill = processCommerceEvent(purchaseEvent("BILL", receipt));
+      billWaiting = await waitFor(2);
+    } finally {
+      await guard.query("COMMIT");
+      await guard.end();
+    }
+    // Always drain both tasks even if the wait assertions fail.
+    const results = await Promise.allSettled([refund, bill].filter((task) => task !== null));
+    expect(refundWaiting).toBe(true);
+    expect(billWaiting).toBe(true);
+    expect(results.every((result) => result.status === "fulfilled")).toBe(true);
+    const [license] = await db.select().from(licenses).where(eq(licenses.externalPurchaseId, receipt));
+    expect(license.status).toBe("REFUNDED");
+    const [workspace] = await db.select().from(workspaces).where(eq(workspaces.id, workspaceId));
+    const [access] = await db.select().from(workspaceEntitlements).where(and(
+      eq(workspaceEntitlements.workspaceId, workspaceId),
+      eq(workspaceEntitlements.key, "core_access"),
+    ));
+    expect(workspace.status).toBe("SUSPENDED");
+    expect(access.value).toBe(false);
+    expect(results[1].status === "fulfilled" && results[1].value)
+      .toMatchObject({ result: { ignored: true, reason: "REVOKED_PURCHASE" } });
   });
 });
