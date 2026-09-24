@@ -19,14 +19,14 @@ describe("authenticated funnel purchase summary", () => {
       user: { id: "buyer-1", email: "buyer@example.com" },
     } as Awaited<ReturnType<typeof auth.api.getSession>>);
     vi.mocked(getFunnelAccountSummary).mockResolvedValue({
-      activeProducts: ["CORE", "UNLIMITED"], businessLimit: 10,
+      activeProducts: ["CORE"], businessLimit: 1,
       licenses: [
         { id: "core-license", workspaceId: "buyer-business", productCode: "CORE", status: "ACTIVE", purchasedAt: new Date("2026-09-01T10:00:00Z") },
         { id: "unlimited-license", workspaceId: "buyer-business", productCode: "UNLIMITED", status: "REFUNDED", purchasedAt: new Date("2026-09-02T10:00:00Z") },
       ],
     });
     vi.mocked(getOwnedWorkspaceCapacity).mockResolvedValue({
-      ownedBusinesses: 1, businessLimit: 10, availableBusinesses: 9, activeProducts: ["CORE", "UNLIMITED"],
+      ownedBusinesses: 1, businessLimit: 1, availableBusinesses: 0, activeProducts: ["CORE"],
     });
   });
 
@@ -35,8 +35,8 @@ describe("authenticated funnel purchase summary", () => {
     expect(response.status).toBe(200);
     expect(response.headers.get("cache-control")).toBe("no-store");
     expect(await response.json()).toMatchObject({
-      activeProducts: ["CORE", "UNLIMITED"],
-      businessLimit: 10, ownedBusinesses: 1, availableBusinesses: 9,
+      activeProducts: ["CORE"],
+      businessLimit: 1, ownedBusinesses: 1, availableBusinesses: 0,
       licenses: [
         { id: "core-license", productCode: "CORE", status: "ACTIVE" },
         { id: "unlimited-license", productCode: "UNLIMITED", status: "REFUNDED" },
