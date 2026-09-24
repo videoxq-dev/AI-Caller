@@ -1,7 +1,7 @@
 import { and, asc, eq, sql } from "drizzle-orm";
 import { db } from "@/db";
 import { licenses, memberships, user, workspacePlans, workspaces } from "@/db/schema";
-import { FUNNEL_PRODUCTS } from "@/server/commerce/products";
+import { getPurchasedBusinessLimit } from "@/server/commerce/products";
 import { AppError } from "@/server/http/errors";
 
 type WorkspaceUser = {
@@ -153,9 +153,7 @@ export async function createWorkspaceForUser(userId: string, name: string): Prom
     const activePurchases = await tx.selectDistinct({ code: licenses.productCode })
       .from(licenses)
       .where(and(eq(licenses.purchaserUserId, userId), eq(licenses.status, "ACTIVE")));
-    const purchasedCapacity = Math.max(0, ...activePurchases.map(
-      ({ code }) => FUNNEL_PRODUCTS.find((product) => product.code === code)?.businessLimit ?? 0,
-    ));
+    const purchasedCapacity = getPurchasedBusinessLimit(activePurchases.map(({ code }) => code));
     // A buyer can set up the initial business before checkout. Existing older
     // workspaces remain intact, but extra creation requires purchased capacity.
     const limit = Math.max(1, purchasedCapacity);
