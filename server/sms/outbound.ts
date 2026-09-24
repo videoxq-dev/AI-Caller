@@ -19,7 +19,7 @@ import { resolveSmsRuntimeForWorkspace, type SmsRuntime } from "@/server/provide
 import { attachSmsProviderMessage, markSmsSendFailure } from "./repository";
 import { classifySmsPurpose } from "./classification";
 import { consentAllowsSend, getSmsConsentStatus, normalizedSmsPhone } from "./consent";
-import { classifySmsForPolicy, validateApprovedSmsMessage, type ApprovedSmsPolicy, type SmsPurpose } from "./policy";
+import { classifySmsForPolicy, validateApprovedSmsMessage, validateSmsLinks, type ApprovedSmsPolicy, type SmsPurpose } from "./policy";
 
 const MAX_SMS_TEXT_CHARACTERS = 1600;
 
@@ -215,41 +215,32 @@ async function sendSmsConversationTextWithRuntimeInternal(
 
   const text = smsText(input.text);
   const to = input.to ?? await destination(workspaceId, conversationId);
-  // Treat a free-form human draft and an AI-generated message identically: the caller
-  // does not get to choose its compliance category. Approved scope is carrier-derived.
-  let actualPurpose: SmsPurpose = "TRANSACTIONAL";
-  if (runtime.mode === "HOSTED") {
-    const policy = await managedSmsPolicy(workspaceId, runtime.senderNumber);
-    const reply = await smsReplyContext(workspaceId, conversationId, to);
-    const classifiedPurpose = input.preclassifiedPurpose ?? await classifySmsPurpose({
-      workspaceId,
-      referenceId: conversationId,
-      message: text,
-      campaignDescription: policy.description,
-      lastCustomerMessage: reply.lastCustomerMessage,
-    });
-    actualPurpose = validateApprovedSmsMessage({
-      policy,
-      classifiedPurpose: classifySmsForPolicy(text, classifiedPurpose),
-      text,
-    });
-    const consent = await getSmsConsentStatus(workspaceId, to, actualPurpose);
-    if (!consentAllowsSend({ consent, purpose: actualPurpose, currentConversationReply: reply.currentConversationReply })) {
-      throw new AppError("SMS_CONSENT_REQUIRED", "This contact has not opted in to this type of message or has opted out.", 409);
-    }
-  } else if (input.preclassifiedPurpose) {
-    // Automated BYOP SMS still needs recipient consent and opt-out enforcement.
-    // An external provider connection alone is not authorization to market.
-    const purpose = classifySmsForPolicy(text, input.preclassifiedPurpose);
-    if (purpose === "UNCERTAIN") {
-      throw new AppError("SMS_CAMPAIGN_REVIEW_REQUIRED", "Please review this message before sending.", 409);
-    }
-    actualPurpose = purpose;
-    const reply = await smsReplyContext(workspaceId, conversationId, to);
-    const consent = await getSmsConsentStatus(workspaceId, to, actualPurpose);
-    if (!consentAllowsSend({ consent, purpose: actualPurpose, currentConversationReply: reply.currentConversationReply })) {
-      throw new AppError("SMS_CONSENT_REQUIRED", "This contact has not opted in to this type of message or has opted out.", 409);
-    }
+  // Every sender (AI, staff or automation) uses the same purpose and consent
+  // decision. BYOP has no independently verified carrier policy in AI Caller;
+  // never confuse a connected provider with an approved campaign.
+  const policy = runtime.mode === "HOSTED"
+    ? await managedSmsPolicy(workspaceId, runtime.senderNumber)
+    : null;
+  const reply = await smsReplyContext(workspaceId, conversationId, to);
+  const classifiedPurpose = input.preclassifiedPurpose ?? await classifySmsPurpose({
+    workspaceId,
+    referenceId: conversationId,
+    message: text,
+    campaignDescription: policy?.description
+      ?? "External SMS provider: classify message purpose only; carrier campaign approval is not verified by AI Caller.",
+    lastCustomerMessage: reply.lastCustomerMessage,
+  });
+  const purpose = classifySmsForPolicy(text, classifiedPurpose);
+  if (purpose === "UNCERTAIN") {
+    throw new AppError("SMS_CAMPAIGN_REVIEW_REQUIRED", "Please review this message before sending.", 409);
+  }
+  const actualPurpose: SmsPurpose = policy
+    ? validateApprovedSmsMessage({ policy, classifiedPurpose: purpose, text })
+    : purpose;
+  if (!policy) validateSmsLinks(text, true);
+  const consent = await getSmsConsentStatus(workspaceId, to, actualPurpose);
+  if (!consentAllowsSend({ consent, purpose: actualPurpose, currentConversationReply: reply.currentConversationReply })) {
+    throw new AppError("SMS_CONSENT_REQUIRED", "This contact has not opted in to this type of message or has opted out.", 409);
   }
   const segmentUsage = analyzeSmsSegments(text);
   const outbound = await appendMessage(workspaceId, conversationId, {
@@ -261,7 +252,7 @@ async function sendSmsConversationTextWithRuntimeInternal(
     provider: runtime.providerName,
     externalMessageId: null,
     status: "SENDING",
-    metadata: { ...input.metadata, mode: runtime.mode, ...(runtime.mode === "HOSTED" || input.preclassifiedPurpose ? { smsPurpose: actualPurpose } : {}) },
+    metadata: { ...input.metadata, mode: runtime.mode, smsPurpose: actualPurpose },
   });
 
   let hostedCharge: HostedSmsCharge | null = null;
@@ -291,19 +282,17 @@ async function sendSmsConversationTextWithRuntimeInternal(
       // lose approval while a queued message is waiting for credits or AI generation.
       const currentPolicy = await managedSmsPolicy(workspaceId, runtime.senderNumber);
       validateApprovedSmsMessage({ policy: currentPolicy, classifiedPurpose: actualPurpose, text });
-      const consent = await getSmsConsentStatus(workspaceId, to, actualPurpose);
-      const reply = await smsReplyContext(workspaceId, conversationId, to);
-      if (!consentAllowsSend({ consent, purpose: actualPurpose, currentConversationReply: reply.currentConversationReply })) {
-        throw new AppError("SMS_CONSENT_REQUIRED", "This contact has opted out or lacks consent for this message.", 409);
-      }
-    } else if (input.preclassifiedPurpose) {
-      // Repeat after credit reservation and immediately before provider dispatch:
-      // a pending automation must not bypass an opt-out added meanwhile.
-      const consent = await getSmsConsentStatus(workspaceId, to, actualPurpose);
-      const reply = await smsReplyContext(workspaceId, conversationId, to);
-      if (!consentAllowsSend({ consent, purpose: actualPurpose, currentConversationReply: reply.currentConversationReply })) {
-        throw new AppError("SMS_CONSENT_REQUIRED", "This contact has opted out or lacks consent for this message.", 409);
-      }
+    }
+    // The last-moment opt-out check must also cover non-automation BYOP sends.
+    // A pending reply must not bypass consent withdrawn after classification.
+    const currentConsent = await getSmsConsentStatus(workspaceId, to, actualPurpose);
+    const currentReply = await smsReplyContext(workspaceId, conversationId, to);
+    if (!consentAllowsSend({
+      consent: currentConsent,
+      purpose: actualPurpose,
+      currentConversationReply: currentReply.currentConversationReply,
+    })) {
+      throw new AppError("SMS_CONSENT_REQUIRED", "This contact has opted out or lacks consent for this message.", 409);
     }
     const sent = await runtime.provider.send({
       to,
