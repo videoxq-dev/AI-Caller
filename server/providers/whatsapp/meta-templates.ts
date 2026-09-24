@@ -89,6 +89,29 @@ export function createMetaTemplateClient(
       }
       return { items: result.data.map(publicTemplate), nextCursor: next };
     },
+    async approved(name: string, languageCode: string) {
+      const parsedName = templateName.parse(name);
+      const parsedLanguage = language.parse(languageCode);
+      // Name-filtered and bounded on the connected WABA; never trust a
+      // client-supplied account or follow an arbitrary provider URL.
+      const result = graphList.parse(await providerJson<unknown>(
+        `${endpoint}?name=${encodeURIComponent(parsedName)}&limit=100`,
+        { headers }, fetcher,
+      ));
+      const match = result.data.find(item =>
+        item.name === parsedName && item.language === parsedLanguage);
+      if (!match || match.status !== "APPROVED"
+        || !["UTILITY", "MARKETING"].includes(match.category)) {
+        throw new AppError("WHATSAPP_TEMPLATE_NOT_APPROVED",
+          "This template and language are not currently approved for sending.", 409);
+      }
+      const template = publicTemplate(match);
+      if (!template.body) {
+        throw new AppError("WHATSAPP_TEMPLATE_UNSUPPORTED",
+          "This template has no text body usable by this automation.", 409);
+      }
+      return template;
+    },
     async submit(input: CreateWhatsAppTemplate) {
       const parsed = createWhatsAppTemplateSchema.parse(input);
       const components: Array<Record<string, unknown>> = [{
