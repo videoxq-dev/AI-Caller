@@ -69,6 +69,26 @@ describe("WhatsApp outbound service", () => {
     });
   }
 
+  it("requires WhatsApp marketing consent for an explicit free-form offer within the service window", async () => {
+    await addInbound();
+    const service = createWhatsAppOutboundService({ resolveRuntime: async () => runtime });
+    await expect(service.sendText(workspaceId, conversationId, {
+      senderType: "AI", text: "Special offer: 20% off today.",
+    })).rejects.toMatchObject({ code: "WHATSAPP_CONSENT_REQUIRED" });
+    const [conversation] = await db.select({ contactId: conversations.contactId })
+      .from(conversations).where(eq(conversations.id, conversationId));
+    await recordWhatsAppConsent({
+      workspaceId, contactId: conversation.contactId, waId: "15551230000",
+      category: "MARKETING", status: "OPTED_IN", source: "STAFF_ENTRY",
+      consentStatement: "Customer explicitly requested WhatsApp promotions.",
+    });
+    const message = await service.sendText(workspaceId, conversationId, {
+      senderType: "AI", text: "Special offer: 20% off today.",
+    });
+    expect(message.metadata.whatsappCategory).toBe("MARKETING");
+    expect(provider.sendText).toHaveBeenCalledOnce();
+  });
+
   it("requires human takeover before a staff free-form reply", async () => {
     await addInbound();
     const service = createWhatsAppOutboundService({ resolveRuntime: async () => runtime });
