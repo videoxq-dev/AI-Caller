@@ -59,6 +59,34 @@ type BillingData = {
   usage: Usage[];
 };
 
+type FunnelPurchase = {
+  id: string;
+  workspaceId: string;
+  productCode: string;
+  status: "ACTIVE" | "REFUNDED" | "CHARGEBACK" | "CANCELLED";
+  purchasedAt: string;
+};
+
+type FunnelPurchases = {
+  activeProducts: string[];
+  licenses: FunnelPurchase[];
+  businessLimit: number;
+  ownedBusinesses: number;
+  availableBusinesses: number;
+};
+
+function offerLabel(code: string) {
+  const names: Record<string, string> = {
+    CORE: "Core",
+    UNLIMITED: "Unlimited",
+    PERFORMANCE: "Performance",
+    AGENCY_50: "Agency · 50 businesses",
+    AGENCY_100: "Agency · 100 businesses",
+    WHITELABEL: "Whitelabel",
+  };
+  return names[code] ?? code.replaceAll("_", " ");
+}
+
 function number(value: number) {
   return new Intl.NumberFormat().format(value);
 }
@@ -81,12 +109,31 @@ function statusLabel(status: string) {
 
 export default function BillingPage() {
   const [data, setData] = useState<BillingData | null>(null);
+  const [purchases, setPurchases] = useState<FunnelPurchases | null>(null);
+  const [purchaseError, setPurchaseError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [buying, setBuying] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
 
+  async function loadPurchases() {
+    setPurchaseError(null);
+    try {
+      const response = await fetch("/api/account/purchases", { cache: "no-store" });
+      const payload = await response.json().catch(() => null) as FunnelPurchases | { error?: { message?: string } } | null;
+      if (!response.ok) {
+        const message = payload && "error" in payload ? payload.error?.message : null;
+        throw new Error(message || "Unable to load your purchases.");
+      }
+      setPurchases(payload as FunnelPurchases);
+    } catch (reason) {
+      setPurchases(null);
+      setPurchaseError(reason instanceof Error ? reason.message : "Unable to load your purchases.");
+    }
+  }
+
   async function load() {
+    void loadPurchases();
     setLoading(true);
     setError(null);
     try {
@@ -167,7 +214,7 @@ export default function BillingPage() {
               <small>1,000 credits = $1 of customer value</small>
             </article>
             <article className="billingCard">
-              <span className="billingCardLabel">Current plan</span>
+              <span className="billingCardLabel">Workspace team plan</span>
               <strong className="billingPlanName">{data?.plan.name ?? "—"}</strong>
               <small>{data?.plan.subUserLimit ? `Up to ${data.plan.subUserLimit} sub-users` : "No sub-users"}</small>
             </article>
@@ -181,6 +228,43 @@ export default function BillingPage() {
               <strong>{number(paidTopups)}</strong>
               <small>Verified Stripe payments credited to this workspace</small>
             </article>
+          </section>
+
+          <section className="billingSection" aria-label="Your commercial purchases">
+            <div className="billingSectionHeading">
+              <div>
+                <h2>Your purchases</h2>
+                <p>Commercial offers purchased by your account. These are separate from the workspace team plan above.</p>
+              </div>
+            </div>
+            {purchaseError && <div className="billingPurchaseError" role="alert">{purchaseError}</div>}
+            {purchases && (
+              <>
+                <div className="billingPurchaseCapacity">
+                  <strong>{number(purchases.ownedBusinesses)} of {number(purchases.businessLimit)} businesses</strong>
+                  <span>{number(purchases.availableBusinesses)} available business slots · Active offers: {purchases.activeProducts.length
+                    ? purchases.activeProducts.map(offerLabel).join(", ")
+                    : "None"}</span>
+                </div>
+                <div className="billingTableWrap">
+                  <table className="billingTable">
+                    <thead><tr><th>Offer</th><th>Purchase date</th><th>Status</th></tr></thead>
+                    <tbody>
+                      {purchases.licenses.map((item) => (
+                        <tr key={item.id}>
+                          <td>{offerLabel(item.productCode)}</td>
+                          <td>{date(item.purchasedAt)}</td>
+                          <td><span className={`purchaseStatus purchaseStatus-${item.status.toLowerCase()}`}>{statusLabel(item.status)}</span></td>
+                        </tr>
+                      ))}
+                      {!purchases.licenses.length && (
+                        <tr><td colSpan={3} className="billingEmpty">No commercial purchases are recorded for your account.</td></tr>
+                      )}
+                    </tbody>
+                  </table>
+                </div>
+              </>
+            )}
           </section>
 
           <section className="billingSection">

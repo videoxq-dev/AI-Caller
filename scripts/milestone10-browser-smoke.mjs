@@ -142,6 +142,34 @@ try {
   await assertNoHorizontalOverflow(page, "Billing desktop");
   await page.screenshot({ path: path.join(outputDir, "billing-desktop.png"), fullPage: true });
 
+  // Commercial receipts belong to the account, not the current PERSONAL
+  // workspace team plan. A refunded Unlimited receipt must not confer seats
+  // or ten-business capacity merely because it remains in purchase history.
+  await pool.query(
+    `INSERT INTO licenses
+       (workspace_id, purchaser_user_id, source, external_purchase_id, product_code, status, purchased_at)
+     VALUES ($1, $2, 'MANUAL', $3, 'CORE', 'ACTIVE', now()),
+            ($1, $2, 'MANUAL', $4, 'UNLIMITED', 'REFUNDED', now())`,
+    [workspaceId, adminUserId, `m10-funnel-core-${stamp}`, `m10-funnel-unlimited-${stamp}`],
+  );
+  const accountPurchases = (await api(adminContext, "GET", "/api/account/purchases", undefined, "account purchase history")).data;
+  assert(accountPurchases.licenses?.length === 2, "Account purchase history did not return both receipts.");
+  assert(accountPurchases.businessLimit === 1 && accountPurchases.availableBusinesses === 0,
+    "Refunded Unlimited incorrectly confers commercial business capacity.");
+  assert(accountPurchases.activeProducts?.length === 1 && accountPurchases.activeProducts[0] === "CORE",
+    "Only a currently active Core purchase should appear as an active offer.");
+
+  await page.goto(`${baseUrl}/settings/billing`, { waitUntil: "networkidle" });
+  const purchaseSection = page.getByRole("region", { name: "Your commercial purchases" });
+  await purchaseSection.getByRole("heading", { name: "Your purchases" }).waitFor({ timeout: 10_000 });
+  await purchaseSection.getByText("1 of 1 businesses").waitFor({ timeout: 10_000 });
+  assert(await purchaseSection.getByRole("row").filter({ hasText: "Unlimited" }).getByText("Refunded").isVisible(),
+    "Refunded Unlimited receipt was not shown in the purchase history.");
+  assert(await purchaseSection.getByRole("row").filter({ hasText: "Core" }).getByText("Active").isVisible(),
+    "Core receipt was not shown as active.");
+  await assertNoHorizontalOverflow(page, "Commercial purchase history desktop");
+  await page.screenshot({ path: path.join(outputDir, "billing-commercial-purchases-desktop.png"), fullPage: true });
+
   await page.goto(`${baseUrl}/settings`, { waitUntil: "networkidle" });
   await page.getByRole("heading", { name: "Settings", exact: true }).waitFor({ timeout: 10_000 });
   await page.getByRole("button", { name: "Team", exact: true }).click();
