@@ -28,8 +28,9 @@ function isCoreProduct(productId: string): boolean {
   if (env.NODE_ENV === "production" && !env.JVZOO_CORE_PRODUCT_IDS.split(",").some((id) => id.trim())) {
     throw new Error("JVZOO_CORE_PRODUCT_IDS must be configured in production.");
   }
-  // Only Core has purchase provisioning at this milestone. Mapping an OTO in
-  // configuration must never grant Core or unlock an unfinished offer.
+  // This helper is intentionally Core-only. Agency purchases are dispatched
+  // through their dedicated reconciler; mapping any other SKU here must never
+  // grant Core or unlock an unfinished offer.
   return resolveFunnelProductId(productId, env) === "CORE";
 }
 
