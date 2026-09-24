@@ -17,6 +17,7 @@ Baseline: `main` at `e18972a55bd01897411541b8789cc7a863d603f1`. Phase 5 remains 
 - Show a concise indicator only when the Builder includes an SMS action. The status differentiates an unconfigured sender, connected external (BYOP) provider with unverified carrier approval, pending/rejected managed registration, and a READY managed campaign with its actual approved purpose categories.
 - A provider API key or server-level Telnyx authorization never counts as approval of an individual business's managed SMS campaign. A BYOP "connected" flag does not establish external carrier registration.
 - Workflow drafts/publication remain available while carrier approval is pending. The send path is unchanged and still suppresses a message unless current send-time checks pass.
+- SMS message inputs and publication validation now reject content longer than the outbound sender's existing 1,600-character limit; existing immutable published snapshots retain their schema.
 - No migration, new dependency, second managed number, or provider network call is needed to display readiness.
 
 ## Acceptance boundaries
