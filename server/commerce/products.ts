@@ -5,7 +5,7 @@ import { getEnv } from "@/server/env";
 // Agency has two purchasable capacities within the same Agency offer.
 export const FUNNEL_PRODUCTS = [
   { code: "CORE", offer: "CORE", envKey: "JVZOO_CORE_PRODUCT_IDS", businessLimit: 1, purchaseCredits: 15_000 },
-  { code: "UNLIMITED", offer: "UNLIMITED", envKey: "JVZOO_UNLIMITED_PRODUCT_IDS", businessLimit: 10, purchaseCredits: 15_000 },
+  { code: "UNLIMITED", offer: "UNLIMITED", envKey: "JVZOO_UNLIMITED_PRODUCT_IDS", businessLimit: 2, purchaseCredits: 15_000 },
   { code: "PERFORMANCE", offer: "PERFORMANCE", envKey: "JVZOO_PERFORMANCE_PRODUCT_IDS", businessLimit: null, purchaseCredits: 0 },
   { code: "AGENCY_50", offer: "AGENCY", envKey: "JVZOO_AGENCY_50_PRODUCT_IDS", businessLimit: 50, purchaseCredits: 0 },
   { code: "AGENCY_100", offer: "AGENCY", envKey: "JVZOO_AGENCY_100_PRODUCT_IDS", businessLimit: 100, purchaseCredits: 0 },
@@ -42,9 +42,19 @@ export function resolveFunnelProductId(
   return assigned.get(productId.trim()) ?? null;
 }
 
-/** Effective purchased business slots. The initial signup business is handled separately. */
-export function getPurchasedBusinessLimit(activeCodes: readonly string[]): number {
-  return Math.max(0, ...FUNNEL_PRODUCTS
-    .filter((product) => activeCodes.includes(product.code))
+/** Agency capacity is a client allowance, excluding the buyer's original business. */
+export function getAgencyClientLimit(activeCodes: readonly string[]): number | null {
+  const limit = Math.max(0, ...FUNNEL_PRODUCTS
+    .filter((product) => product.offer === "AGENCY" && activeCodes.includes(product.code))
     .map((product) => product.businessLimit ?? 0));
+  return limit > 0 ? limit : null;
+}
+
+/** Total owned-business capacity; Agency client slots are in addition to the original business. */
+export function getPurchasedBusinessLimit(activeCodes: readonly string[]): number {
+  const standardLimit = Math.max(0, ...FUNNEL_PRODUCTS
+    .filter((product) => product.offer !== "AGENCY" && activeCodes.includes(product.code))
+    .map((product) => product.businessLimit ?? 0));
+  const agencyClients = getAgencyClientLimit(activeCodes);
+  return Math.max(standardLimit, agencyClients === null ? 0 : agencyClients + 1);
 }
