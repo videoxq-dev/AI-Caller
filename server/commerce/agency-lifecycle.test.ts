@@ -180,10 +180,10 @@ describe("Agency purchase lifecycle", () => {
     await addLegacyOwnedWorkspaces(60);
     expect(await getOwnedWorkspaceCapacity(buyerId)).toMatchObject({
       ownedBusinesses: 61,
-      businessLimit: 101,
-      agencyClientLimit: 100,
+      businessLimit: 151,
+      agencyClientLimit: 150,
       agencyClientsUsed: 60,
-      agencyClientsAvailable: 40,
+      agencyClientsAvailable: 90,
     });
 
     await reconcileAgencyReceipt(event("RFND", "agency-100-refunded", "AGENCY_100"));
@@ -199,6 +199,23 @@ describe("Agency purchase lifecycle", () => {
       .toHaveLength(61);
     await expect(createWorkspaceForUser(buyerId, "Over-cap client"))
       .rejects.toMatchObject({ code: "WORKSPACE_LIMIT_REACHED", status: 403 });
+  });
+
+  it("stacks independent receipts for the same Agency SKU", async () => {
+    await reconcileAgencyReceipt(event("SALE", "agency-50-first", "AGENCY_50"));
+    await reconcileAgencyReceipt(event("SALE", "agency-50-second", "AGENCY_50"));
+    expect(await getOwnedWorkspaceCapacity(buyerId)).toMatchObject({
+      businessLimit: 101,
+      agencyClientLimit: 100,
+      agencyClientsAvailable: 100,
+    });
+
+    await reconcileAgencyReceipt(event("RFND", "agency-50-first", "AGENCY_50"));
+    expect(await getOwnedWorkspaceCapacity(buyerId)).toMatchObject({
+      businessLimit: 51,
+      agencyClientLimit: 50,
+      agencyClientsAvailable: 50,
+    });
   });
 
   it("keeps an out-of-order reversal retryable until the matching sale exists", async () => {
