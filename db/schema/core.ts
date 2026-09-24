@@ -45,6 +45,21 @@ export const memberships = pgTable(
   ],
 );
 
+export const workspaceCommercialOwners = pgTable(
+  "workspace_commercial_owners",
+  {
+    workspaceId: uuid("workspace_id").primaryKey().references(() => workspaces.id, { onDelete: "cascade" }),
+    purchaserUserId: text("purchaser_user_id").notNull().references(() => user.id, { onDelete: "cascade" }),
+    kind: text("kind").$type<"PRIMARY" | "ADDITIONAL">().notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true, mode: "date" }).defaultNow().notNull(),
+    updatedAt: timestamp("updated_at", { withTimezone: true, mode: "date" }).defaultNow().notNull(),
+  },
+  (table) => [
+    index("workspace_commercial_owners_purchaser_idx")
+      .on(table.purchaserUserId, table.kind, table.createdAt),
+  ],
+);
+
 export const workspaceInvitations = pgTable(
   "workspace_invitations",
   {

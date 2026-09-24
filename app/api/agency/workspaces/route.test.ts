@@ -1,28 +1,27 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { auth } from "@/server/auth";
 import { assertPlatformUserActive } from "@/server/admin/auth";
-import { getOwnedWorkspaceCapacity, getPrimaryOwnedWorkspace, listMembershipsForUser } from "@/server/auth/workspace-repository";
+import { getOwnedWorkspaceCapacity, listCommercialWorkspacesForUser } from "@/server/auth/workspace-repository";
 import { GET } from "./route";
 
 vi.mock("@/server/auth", () => ({ auth: { api: { getSession: vi.fn() } } }));
 vi.mock("@/server/admin/auth", () => ({ assertPlatformUserActive: vi.fn() }));
 vi.mock("@/server/auth/workspace-repository", () => ({
   getOwnedWorkspaceCapacity: vi.fn(),
-  getPrimaryOwnedWorkspace: vi.fn(),
-  listMembershipsForUser: vi.fn(),
+  listCommercialWorkspacesForUser: vi.fn(),
 }));
 
 const owned = {
   workspaceId: "11111111-1111-4111-8111-111111111111",
   workspaceName: "Owner Business",
   workspaceStatus: "ACTIVE" as const,
-  role: "OWNER" as const,
+  kind: "PRIMARY" as const,
 };
 const client = {
   workspaceId: "22222222-2222-4222-8222-222222222222",
   workspaceName: "Client Business",
   workspaceStatus: "ACTIVE" as const,
-  role: "OWNER" as const,
+  kind: "ADDITIONAL" as const,
 };
 const staff = {
   workspaceId: "33333333-3333-4333-8333-333333333333",
@@ -46,8 +45,7 @@ describe("Agency workspace management API", () => {
       agencyClientLimit: 50, agencyClientsUsed: 1, agencyClientsAvailable: 49,
       activeProducts: ["CORE", "AGENCY_50"],
     });
-    vi.mocked(getPrimaryOwnedWorkspace).mockResolvedValue(owned);
-    vi.mocked(listMembershipsForUser).mockResolvedValue([owned, staff, client]);
+    vi.mocked(listCommercialWorkspacesForUser).mockResolvedValue([owned, client]);
   });
 
   it("returns owned client workspaces and excludes staff access from Agency inventory", async () => {
@@ -60,7 +58,7 @@ describe("Agency workspace management API", () => {
       activeWorkspaceId: client.workspaceId,
       capacity: { agencyClientLimit: 50, agencyClientsUsed: 1, agencyClientsAvailable: 49 },
     });
-    expect(listMembershipsForUser).toHaveBeenCalledExactlyOnceWith("agency-buyer");
+    expect(listCommercialWorkspacesForUser).toHaveBeenCalledExactlyOnceWith("agency-buyer");
     expect(assertPlatformUserActive).toHaveBeenCalledExactlyOnceWith("agency-buyer");
   });
 
@@ -79,7 +77,7 @@ describe("Agency workspace management API", () => {
     const response = await GET(request());
     expect(response.status).toBe(403);
     expect((await response.json()).error.code).toBe("AGENCY_REQUIRED");
-    expect(listMembershipsForUser).not.toHaveBeenCalled();
+    expect(listCommercialWorkspacesForUser).not.toHaveBeenCalled();
   });
 
   it("requires authentication before reading commercial account data", async () => {

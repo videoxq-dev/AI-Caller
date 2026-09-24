@@ -1,7 +1,7 @@
 import { auth } from "@/server/auth";
 import { assertPlatformUserActive } from "@/server/admin/auth";
 import { readActiveWorkspaceId } from "@/server/auth/active-workspace";
-import { getOwnedWorkspaceCapacity, getPrimaryOwnedWorkspace, listMembershipsForUser } from "@/server/auth/workspace-repository";
+import { getOwnedWorkspaceCapacity, listCommercialWorkspacesForUser } from "@/server/auth/workspace-repository";
 import { AppError, toErrorResponse } from "@/server/http/errors";
 
 /** Purchaser-wide Agency management must not depend on the selected client workspace. */
@@ -16,15 +16,11 @@ export async function GET(request: Request) {
       throw new AppError("AGENCY_REQUIRED", "Workspace management requires an active Agency package.", 403);
     }
 
-    const [memberships, original] = await Promise.all([
-      listMembershipsForUser(session.user.id),
-      getPrimaryOwnedWorkspace(session.user.id),
-    ]);
-    const workspaces = memberships.filter((membership) => membership.role === "OWNER");
+    const workspaces = await listCommercialWorkspacesForUser(session.user.id);
     const selected = readActiveWorkspaceId(request.headers);
     return Response.json({
       workspaces,
-      originalWorkspaceId: original?.workspaceId ?? null,
+      originalWorkspaceId: workspaces.find((workspace) => workspace.kind === "PRIMARY")?.workspaceId ?? null,
       activeWorkspaceId: workspaces.some((workspace) => workspace.workspaceId === selected) ? selected : null,
       capacity,
     }, { headers: { "cache-control": "no-store" } });
