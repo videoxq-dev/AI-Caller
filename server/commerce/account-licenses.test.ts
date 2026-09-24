@@ -1,13 +1,15 @@
 import { randomUUID } from "node:crypto";
-import { afterAll, afterEach, describe, expect, it } from "vitest";
+import { afterAll, afterEach, describe, expect, it, vi } from "vitest";
 import { eq } from "drizzle-orm";
 import { closeDatabase, db } from "@/db";
-import { licenses, memberships, user, workspaces } from "@/db/schema";
-import { activateManualCoreLicense } from "./service";
+import { commerceEvents, licenses, memberships, user, workspaces } from "@/db/schema";
+import { activateManualCoreLicense, processCommerceEvent } from "./service";
+import { resetEnvForTests } from "@/server/env";
 import { getFunnelAccountSummary, summarizeFunnelAccountLicenses, type PurchaserLicense } from "./account-licenses";
 
 const users: string[] = [];
 const workspacesToRemove: string[] = [];
+const eventIds: string[] = [];
 
 async function buyer(name: string) {
   const id = randomUUID();
@@ -42,6 +44,12 @@ async function license(userId: string, workspaceId: string, productCode: string,
 
 describe("purchaser-owned commercial licenses", () => {
   afterEach(async () => {
+    for (const id of eventIds) {
+      await db.delete(commerceEvents).where(eq(commerceEvents.externalEventId, id));
+    }
+    eventIds.length = 0;
+    vi.unstubAllEnvs();
+    resetEnvForTests();
     for (const id of workspacesToRemove) {
       await db.delete(workspaces).where(eq(workspaces.id, id));
     }
@@ -107,6 +115,46 @@ describe("purchaser-owned commercial licenses", () => {
       activeProducts: [],
       businessLimit: 0,
     });
+  });
+
+  it("ties a real Core purchase to the buyer, never an older staff workspace", async () => {
+    vi.stubEnv("JVZOO_CORE_PRODUCT_IDS", "funnel-account-core");
+    resetEnvForTests();
+    const buyerId = await buyer("Purchased Account");
+    const partnerId = await buyer("Host Business");
+    const partnerWorkspace = await ownedWorkspace(partnerId);
+    await db.insert(memberships).values({ workspaceId: partnerWorkspace, userId: buyerId, role: "STAFF" });
+    const purchasedWorkspace = await ownedWorkspace(buyerId);
+    const id = randomUUID();
+    eventIds.push(id);
+    const event = {
+      source: "JVZOO" as const,
+      externalEventId: id,
+      externalPurchaseId: id,
+      eventType: "SALE",
+      productId: "funnel-account-core",
+      customerEmail: "funnel-" + buyerId + "@example.com",
+      customerName: "Purchased Account",
+      purchasedAt: new Date(),
+      raw: {},
+    };
+    const result = await processCommerceEvent(event);
+    expect(result).toMatchObject({
+      duplicate: false,
+      result: { workspaceId: purchasedWorkspace },
+    });
+    const [assigned] = await db.select().from(licenses)
+      .where(eq(licenses.externalPurchaseId, id));
+    expect(assigned).toMatchObject({
+      workspaceId: purchasedWorkspace,
+      purchaserUserId: buyerId,
+      productCode: "CORE",
+      status: "ACTIVE",
+    });
+    expect(await getFunnelAccountSummary(buyerId)).toMatchObject({
+      activeProducts: ["CORE"], businessLimit: 1,
+    });
+    expect((await getFunnelAccountSummary(partnerId)).businessLimit).toBe(0);
   });
 
   it("associates manual Core activation with the sole owner and grants credits once", async () => {
