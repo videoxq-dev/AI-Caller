@@ -16,7 +16,7 @@ export async function GET(request: Request) {
     const page = await client.list(after);
     return Response.json({
       items: page.items.filter(item => item.status === "APPROVED"
-        && (item.category === "UTILITY" || item.category === "MARKETING") && item.body),
+        && (item.category === "UTILITY" || item.category === "MARKETING") && item.body && item.textOnly),
       nextCursor: page.nextCursor,
     }, { headers: { "cache-control": "no-store" } });
   } catch (error) {
