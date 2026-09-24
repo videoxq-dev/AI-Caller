@@ -634,6 +634,8 @@ export function AutomationBuilder() {
                   <div className="builderWhatsAppReadiness waiting" role="status">
                     <span>{whatsappError ?? "To add WhatsApp messages, connect WhatsApp and get a text template approved."}</span>
                     <Link href="/integrations/whatsapp/templates">Manage WhatsApp templates →</Link>
+                    {whatsappNext && <button type="button" onClick={() => void loadMoreWhatsAppTemplates()}>
+                      Check more WhatsApp templates</button>}
                   </div>
                 )}
                 {draft.actions.some(action => action.type === "SEND_CUSTOMER_SMS") && smsReadiness && (
