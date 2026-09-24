@@ -129,9 +129,9 @@ export default function CalendarSetupPage() {
         <section className="calendarMainCard">
           <div className="calendarIntro">
             <span className="stepBadge">STEP 4 OF 6</span>
-            <h1>Connect your calendar</h1>
-            <p>AI Caller can check availability and book appointments in-app using your business hours. Connecting an external calendar is optional.</p>
-            <span className="introHelper">Native appointments appear on the Appointments page without Google, Outlook, Calendly or Cal.com. Connect an external provider if you want synced events.</span>
+            <h1>{externalCalendarEnabled ? "Connect your calendar" : "Set up appointment booking"}</h1>
+            <p>{externalCalendarEnabled ? "AI Caller can check availability and book appointments in-app using your business hours. Connecting an external calendar is optional." : "AI Caller uses your business hours and these booking rules to check availability and create appointments directly in-app."}</p>
+            <span className="introHelper">{externalCalendarEnabled ? "Native appointments appear on the Appointments page without Google, Outlook, Calendly or Cal.com. Connect an external provider if you want synced events." : "Core uses the built-in appointment calendar. External calendar connections unlock with Unlimited."}</span>
           </div>
 
           {externalCalendarEnabled === false ? (
@@ -192,7 +192,7 @@ export default function CalendarSetupPage() {
 
         <aside className="calendarSidebar">
           <SetupProgressPanel currentStep={4} estimated="5 minutes" className="sidebarCard calendarProgressCard" progressClassName="sidebarProgressBar calendarProgressBar" />
-          <section className="sidebarCard calendarWhyCard"><h2>{externalCalendarEnabled ? "Why connect your calendar?" : "Built-in scheduling"}</h2><p>{externalCalendarEnabled ? "Your AI assistant will use one normalized calendar capability regardless of the provider you connect." : "Core books directly into AI Caller using your business hours and appointment settings. No external calendar is required."}</p><div className="calendarBenefits"><div className="calendarBenefit"><span className="benefitIcon green"><CalendarIcon size={16} /></span><div><strong>Real availability</strong><small>Keep booking rules in one place.</small></div></div><div className="calendarBenefit"><span className="benefitIcon blue"><GearIcon size={16} /></span><div><strong>Provider-independent</strong><small>Google, Outlook, Calendly and Cal.com share the same booking contract.</small></div></div><div className="calendarBenefit"><span className="benefitIcon green"><ShieldIcon size={16} /></span><div><strong>Secure credentials</strong><small>Connections are stored encrypted.</small></div></div></div></section>
+          <section className="sidebarCard calendarWhyCard"><h2>{externalCalendarEnabled ? "Why connect your calendar?" : "Built-in scheduling"}</h2><p>{externalCalendarEnabled ? "Your AI assistant will use one normalized calendar capability regardless of the provider you connect." : "Core books directly into AI Caller using your business hours and appointment settings. No external calendar is required."}</p><div className="calendarBenefits"><div className="calendarBenefit"><span className="benefitIcon green"><CalendarIcon size={16} /></span><div><strong>Real availability</strong><small>Keep booking rules in one place.</small></div></div><div className="calendarBenefit"><span className="benefitIcon blue"><GearIcon size={16} /></span><div><strong>{externalCalendarEnabled ? "Provider-independent" : "Built-in calendar"}</strong><small>{externalCalendarEnabled ? "Google, Outlook, Calendly and Cal.com share the same booking contract." : "Appointments stay inside AI Caller without an external provider."}</small></div></div><div className="calendarBenefit"><span className="benefitIcon green"><ShieldIcon size={16} /></span><div><strong>{externalCalendarEnabled ? "Secure credentials" : "No provider account needed"}</strong><small>{externalCalendarEnabled ? "Connections are stored encrypted." : "Core booking works without external calendar credentials."}</small></div></div></div></section>
         </aside>
       </div>
     </main>
