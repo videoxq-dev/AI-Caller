@@ -16,6 +16,7 @@ import { getEnv } from "@/server/env";
 import { AppError } from "@/server/http/errors";
 import { enqueueJob } from "@/server/jobs";
 import { COMMERCE_WELCOME_EMAIL } from "@/server/jobs/queues";
+import { reconcileAgencyReceipt } from "./agency-lifecycle";
 import type { NormalizedPurchaseEvent } from "./types";
 import { resolveFunnelProductId } from "./products";
 
@@ -27,8 +28,9 @@ function isCoreProduct(productId: string): boolean {
   if (env.NODE_ENV === "production" && !env.JVZOO_CORE_PRODUCT_IDS.split(",").some((id) => id.trim())) {
     throw new Error("JVZOO_CORE_PRODUCT_IDS must be configured in production.");
   }
-  // Only Core has purchase provisioning at this milestone. Mapping an OTO in
-  // configuration must never grant Core or unlock an unfinished offer.
+  // This helper is intentionally Core-only. Agency purchases are dispatched
+  // through their dedicated reconciler; mapping any other SKU here must never
+  // grant Core or unlock an unfinished offer.
   return resolveFunnelProductId(productId, env) === "CORE";
 }
 
@@ -250,10 +252,10 @@ async function revoke(event: NormalizedPurchaseEvent) {
 
 export async function processCommerceEvent(event: NormalizedPurchaseEvent) {
   const sku = resolveFunnelProductId(event.productId);
-  if (sku && sku !== "CORE") {
-    // Never acknowledge an OTO purchase as processed while its provisioning
-    // is unavailable. Do this before recording the event so provider retries
-    // cannot be consumed as irrevocable "IGNORED" events.
+  if (sku && sku !== "CORE" && sku !== "AGENCY_50" && sku !== "AGENCY_100") {
+    // Never acknowledge an unfinished OTO purchase as processed. Agency is
+    // explicitly enabled below; other OTOs remain closed until their own
+    // purchase lifecycle and promised features have acceptance evidence.
     throw new AppError("FUNNEL_OFFER_NOT_READY", "This funnel offer is not yet enabled for purchase provisioning.", 503);
   }
 
@@ -285,7 +287,9 @@ export async function processCommerceEvent(event: NormalizedPurchaseEvent) {
 
   try {
     let result: unknown;
-    if (ACTIVE_EVENTS.has(event.eventType)) result = await activate(event);
+    if (sku === "AGENCY_50" || sku === "AGENCY_100") {
+      result = await reconcileAgencyReceipt(event);
+    } else if (ACTIVE_EVENTS.has(event.eventType)) result = await activate(event);
     else if (REVOKE_EVENTS.has(event.eventType)) result = await revoke(event);
     else {
       result = { ignored: true, reason: "UNSUPPORTED_EVENT" };
