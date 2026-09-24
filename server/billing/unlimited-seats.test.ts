@@ -99,6 +99,18 @@ describe("Unlimited commercial team seats", () => {
     });
   });
 
+  it("does not infer an Unlimited purchaser for a workspace with ambiguous co-owners", async () => {
+    const owner = await makeUser();
+    const coOwner = await makeUser();
+    const workspaceId = await makeWorkspace(owner.id);
+    await db.insert(memberships).values({ workspaceId, userId: coOwner.id, role: "OWNER" });
+    await grantUnlimited(owner.id, workspaceId);
+    expect(await getWorkspaceSeatUsage(workspaceId)).toMatchObject({
+      plan: { id: "PERSONAL", subUserLimit: 0 },
+      commercialSeatPackage: null,
+    });
+  });
+
   it("retains existing seats after refund but blocks further invitations", async () => {
     const owner = await makeUser();
     const workspaceId = await makeWorkspace(owner.id);
