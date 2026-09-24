@@ -7,7 +7,7 @@ export type WhatsAppCategory = "UTILITY" | "MARKETING";
 export type WhatsAppConsentStatus = "OPTED_IN" | "OPTED_OUT" | "UNKNOWN";
 
 export function validWhatsAppId(value: string) {
-  if (!/^\\d{8,15}$/.test(value)) {
+  if (!/^\d{8,15}$/.test(value)) {
     throw new AppError("WHATSAPP_ID_INVALID", "A valid WhatsApp recipient identity is required.", 422);
   }
   return value;
