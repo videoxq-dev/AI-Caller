@@ -440,9 +440,24 @@ try {
     "SMS delivery status",
   );
 
-  const smsUsage = await pool.query(`SELECT mode, provider, credits_charged FROM usage_events WHERE workspace_id = $1 AND capability = 'SMS' ORDER BY created_at`, [workspaceId]);
+  const smsUsage = await pool.query(
+    `SELECT mode, provider, credits_charged, provider_usage, billed_units
+       FROM usage_events
+      WHERE workspace_id = $1 AND capability = 'SMS'
+      ORDER BY created_at`,
+    [workspaceId],
+  );
   assert(smsUsage.rowCount === 8, `Expected 8 hosted SMS usage events (4 inbound + 4 outbound), received ${smsUsage.rowCount}.`);
-  assert(smsUsage.rows.every((row) => row.mode === "HOSTED" && row.provider === "telnyx" && row.credits_charged === 1), "Hosted SMS usage attribution/credits are incorrect.");
+  assert(smsUsage.rows.every((row) => row.mode === "HOSTED" && row.provider === "telnyx"),
+    `Hosted SMS usage attribution is incorrect: ${JSON.stringify(smsUsage.rows)}`);
+  assert(smsUsage.rows.every((row) => {
+    const segments = Number(row.provider_usage?.segments ?? row.billed_units?.SMS_SEGMENT ?? 0);
+    return Number.isSafeInteger(segments) && segments > 0
+      && Number(row.billed_units?.SMS_SEGMENT ?? 0) === segments
+      // Fixture pricing is 450 provider micros at 50% target margin:
+      // retail is 900 micros per segment, rounded to one 1,000-micro credit unit.
+      && row.credits_charged === segments;
+  }), `Hosted SMS segment metering/credits are incorrect: ${JSON.stringify(smsUsage.rows)}`);
 
   const balance = (await pool.query(`SELECT balance FROM credit_wallets WHERE workspace_id = $1`, [workspaceId])).rows[0].balance;
   const charged = (await pool.query(
