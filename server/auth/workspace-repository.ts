@@ -66,7 +66,7 @@ export async function listCommercialWorkspacesForUser(userId: string): Promise<C
     .from(workspaceCommercialOwners)
     .innerJoin(workspaces, eq(workspaceCommercialOwners.workspaceId, workspaces.id))
     .where(eq(workspaceCommercialOwners.purchaserUserId, userId))
-    .orderBy(asc(workspaceCommercialOwners.createdAt), asc(workspaces.createdAt), asc(workspaces.id));
+    .orderBy(sql`case when ${workspaceCommercialOwners.kind} = 'PRIMARY' then 0 else 1 end`, asc(workspaceCommercialOwners.createdAt), asc(workspaces.createdAt), asc(workspaces.id));
 }
 
 export async function listWorkspaceMembers(workspaceId: string) {
