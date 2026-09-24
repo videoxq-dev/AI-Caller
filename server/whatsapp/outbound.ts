@@ -35,6 +35,21 @@ async function approvedTemplate(workspaceId: string, name: string, language: str
   return (await resolveWhatsAppTemplatesForWorkspace(workspaceId)).approved(name, language);
 }
 
+async function verifyApprovedTemplate(
+  lookup: (workspaceId: string, name: string, language: string) => Promise<ApprovedTemplate>,
+  workspaceId: string, name: string, language: string,
+) {
+  try {
+    return await lookup(workspaceId, name, language);
+  } catch (error) {
+    // All template reads precede provider dispatch. An unavailable Meta
+    // approval read is a definite local suppression, never a sent-unknown.
+    if (error instanceof AppError && error.status < 500) throw error;
+    throw new AppError("WHATSAPP_TEMPLATE_APPROVAL_UNVERIFIED",
+      "Meta template approval could not be verified; no WhatsApp message was sent.", 503);
+  }
+}
+
 async function requireWhatsAppConsent(
   workspaceId: string, to: string, category: "UTILITY" | "MARKETING", requireOptIn: boolean,
 ) {
@@ -203,7 +218,7 @@ export function createWhatsAppOutboundService(dependencies: OutboundDependencies
       const runtime = await dependencies.resolveRuntime(workspaceId);
       const to = await destination(workspaceId, conversationId);
       const getTemplate = dependencies.getApprovedTemplate ?? approvedTemplate;
-      const eligibility = await getTemplate(workspaceId, input.templateName, input.languageCode);
+      const eligibility = await verifyApprovedTemplate(getTemplate, workspaceId, input.templateName, input.languageCode);
       if (eligibility.status !== "APPROVED"
         || !["UTILITY", "MARKETING"].includes(eligibility.category)) {
         throw new AppError("WHATSAPP_TEMPLATE_NOT_APPROVED",
@@ -250,7 +265,7 @@ export function createWhatsAppOutboundService(dependencies: OutboundDependencies
       // Policy failures happen before carrier dispatch; do not label them as
       // an uncertain provider send or automatically retry them.
       try {
-        const current = await getTemplate(workspaceId, input.templateName, input.languageCode);
+        const current = await verifyApprovedTemplate(getTemplate, workspaceId, input.templateName, input.languageCode);
         if (current.status !== "APPROVED" || current.category !== category
           || current.body !== eligibility.body) {
           throw new AppError("WHATSAPP_TEMPLATE_NOT_APPROVED",
