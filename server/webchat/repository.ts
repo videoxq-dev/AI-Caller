@@ -15,6 +15,7 @@ import {
   workspaces,
 } from "@/db/schema";
 import { isBookingV2Enabled } from "@/server/booking/rollout";
+import { getWorkspaceIntegrationEntitlements } from "@/server/commerce/workspace-entitlements";
 import { getOrCreateContactByIdentity, getOrCreateOpenConversation } from "@/server/domain/core/repository";
 import { AppError } from "@/server/http/errors";
 import type { WebchatSessionInput } from "./schemas";
@@ -69,34 +70,115 @@ async function assertNewTurnCapacity(workspaceId: string, sessionId: string) {
   }
 }
 
+type WebchatWidgetUpdate = {
+  name?: string;
+  greeting?: string | null;
+  launcherLabel?: string;
+  enabled?: boolean;
+};
+
+async function requireUnlimitedWidgets(workspaceId: string) {
+  const entitlement = await getWorkspaceIntegrationEntitlements(workspaceId);
+  if (!entitlement.unlimited) {
+    throw new AppError(
+      "UNLIMITED_WIDGETS_REQUIRED",
+      "Unlimited is required to create or manage additional website widgets.",
+      403,
+    );
+  }
+}
+
+async function canServeWidget(widget: typeof webchatWidgets.$inferSelect) {
+  if (widget.isPrimary) return true;
+  return (await getWorkspaceIntegrationEntitlements(widget.workspaceId)).unlimited;
+}
+
 export async function ensureWebchatWidget(workspaceId: string) {
-  const [existing] = await db.select().from(webchatWidgets).where(eq(webchatWidgets.workspaceId, workspaceId)).limit(1);
+  const [existing] = await db.select().from(webchatWidgets).where(and(
+    eq(webchatWidgets.workspaceId, workspaceId),
+    eq(webchatWidgets.isPrimary, true),
+  )).limit(1);
   if (existing) return existing;
 
   for (let attempt = 0; attempt < 3; attempt += 1) {
-    const [created] = await db.insert(webchatWidgets).values({ workspaceId, publicKey: publicKey() })
-      .onConflictDoNothing()
-      .returning();
+    const [created] = await db.insert(webchatWidgets).values({
+      workspaceId,
+      publicKey: publicKey(),
+      name: "Website chat",
+      isPrimary: true,
+    }).onConflictDoNothing().returning();
     if (created) return created;
-    const [raced] = await db.select().from(webchatWidgets).where(eq(webchatWidgets.workspaceId, workspaceId)).limit(1);
+
+    const [raced] = await db.select().from(webchatWidgets).where(and(
+      eq(webchatWidgets.workspaceId, workspaceId),
+      eq(webchatWidgets.isPrimary, true),
+    )).limit(1);
     if (raced) return raced;
   }
   throw new Error("Unable to create a public web chat widget key.");
+}
+
+export async function listWebchatWidgets(workspaceId: string) {
+  await ensureWebchatWidget(workspaceId);
+  return db.select().from(webchatWidgets)
+    .where(eq(webchatWidgets.workspaceId, workspaceId))
+    .orderBy(desc(webchatWidgets.isPrimary), webchatWidgets.createdAt);
+}
+
+export async function createAdditionalWebchatWidget(
+  workspaceId: string,
+  input: { name: string; greeting?: string | null; launcherLabel?: string },
+) {
+  await requireUnlimitedWidgets(workspaceId);
+  const [created] = await db.insert(webchatWidgets).values({
+    workspaceId,
+    publicKey: publicKey(),
+    name: input.name.trim(),
+    isPrimary: false,
+    greeting: input.greeting?.trim() || null,
+    launcherLabel: input.launcherLabel?.trim() || "Chat with us",
+  }).returning();
+  return created;
+}
+
+export async function updateWebchatWidgetById(
+  workspaceId: string,
+  widgetId: string,
+  input: WebchatWidgetUpdate,
+) {
+  const [existing] = await db.select().from(webchatWidgets).where(and(
+    eq(webchatWidgets.workspaceId, workspaceId),
+    eq(webchatWidgets.id, widgetId),
+  )).limit(1);
+  if (!existing) throw new AppError("WIDGET_NOT_FOUND", "Web chat widget not found.", 404);
+
+  if (!existing.isPrimary) {
+    const safeDowngradeDisable = input.enabled === false
+      && input.name === undefined
+      && input.greeting === undefined
+      && input.launcherLabel === undefined;
+    if (!safeDowngradeDisable) await requireUnlimitedWidgets(workspaceId);
+  }
+
+  const patch: Partial<typeof webchatWidgets.$inferInsert> = { updatedAt: new Date() };
+  if (input.name !== undefined) patch.name = input.name.trim();
+  if (input.greeting !== undefined) patch.greeting = input.greeting?.trim() || null;
+  if (input.launcherLabel !== undefined) patch.launcherLabel = input.launcherLabel.trim();
+  if (input.enabled !== undefined) patch.enabled = input.enabled;
+
+  const [updated] = await db.update(webchatWidgets)
+    .set(patch)
+    .where(and(eq(webchatWidgets.workspaceId, workspaceId), eq(webchatWidgets.id, widgetId)))
+    .returning();
+  return updated;
 }
 
 export async function updateWebchatWidget(
   workspaceId: string,
   input: { greeting?: string | null; launcherLabel?: string },
 ) {
-  await ensureWebchatWidget(workspaceId);
-  const patch: Partial<typeof webchatWidgets.$inferInsert> = { updatedAt: new Date() };
-  if (input.greeting !== undefined) patch.greeting = input.greeting?.trim() || null;
-  if (input.launcherLabel !== undefined) patch.launcherLabel = input.launcherLabel.trim();
-  const [updated] = await db.update(webchatWidgets)
-    .set(patch)
-    .where(eq(webchatWidgets.workspaceId, workspaceId))
-    .returning();
-  return updated;
+  const primary = await ensureWebchatWidget(workspaceId);
+  return updateWebchatWidgetById(workspaceId, primary.id, input);
 }
 
 export async function getPublicWebchatWidget(widgetKey: string) {
@@ -110,7 +192,7 @@ export async function getPublicWebchatWidget(widgetKey: string) {
     .leftJoin(aiAgents, eq(aiAgents.workspaceId, webchatWidgets.workspaceId))
     .where(and(eq(webchatWidgets.publicKey, widgetKey), eq(webchatWidgets.enabled, true)))
     .limit(1);
-  if (!row) return null;
+  if (!row || !(await canServeWidget(row.widget))) return null;
   const [registration] = await db.select({
     draft: smsRegistrations.draft,
     status: smsRegistrations.status,
@@ -132,8 +214,11 @@ export async function getPublicWebchatWidget(widgetKey: string) {
   return {
     smsTermsUrl,
     marketingProgramApproved,
+    id: row.widget.id,
     workspaceId: row.widget.workspaceId,
     publicKey: row.widget.publicKey,
+    name: row.widget.name,
+    isPrimary: row.widget.isPrimary,
     launcherLabel: row.widget.launcherLabel,
     businessName: row.business?.businessName ?? "Business",
     assistantName: row.agent?.name ?? "AI Assistant",
@@ -146,13 +231,15 @@ export async function resolveWebchatSession(token: string, expectedWidgetKey?: s
   const [row] = await db.select({ session: webchatSessions, widget: webchatWidgets })
     .from(webchatSessions)
     .innerJoin(webchatWidgets, and(
+      eq(webchatWidgets.id, webchatSessions.widgetId),
       eq(webchatWidgets.workspaceId, webchatSessions.workspaceId),
       eq(webchatWidgets.enabled, true),
     ))
     .innerJoin(workspaces, and(eq(workspaces.id, webchatSessions.workspaceId), eq(workspaces.status, "ACTIVE")))
     .where(and(eq(webchatSessions.tokenHash, hash), gt(webchatSessions.expiresAt, new Date())))
     .limit(1);
-  if (!row || (expectedWidgetKey && row.widget.publicKey !== expectedWidgetKey)) return null;
+  if (!row || (expectedWidgetKey && row.widget.publicKey !== expectedWidgetKey)
+    || !(await canServeWidget(row.widget))) return null;
 
   if (touch) {
     await db.update(webchatSessions).set({ lastSeenAt: new Date() }).where(eq(webchatSessions.id, row.session.id));
@@ -246,6 +333,7 @@ export async function createOrResumeWebchatSession(input: WebchatSessionInput) {
   const sessionToken = randomBytes(32).toString("base64url");
   const [session] = await db.insert(webchatSessions).values({
     workspaceId: widget.workspaceId,
+    widgetId: widget.id,
     contactId: contact.id,
     conversationId: conversation.id,
     visitorId,
