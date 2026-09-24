@@ -113,7 +113,12 @@ try {
 
   await page.goto(`${baseUrl}/ai-agent`, { waitUntil: "networkidle" });
   await page.getByRole("button", { name: "Create workspace", exact: true }).click();
-  await page.locator(".navWorkspaceCapacity").getByText(/2 of 2 business slots used\\./).waitFor();
+  const fullCapacity = page.locator(".navWorkspaceCapacity");
+  await fullCapacity.waitFor();
+  assert((await fullCapacity.innerText()).includes("2 of 2 business slots used."),
+    "Unlimited capacity UI did not show the two-workspace limit.");
+  assert((await fullCapacity.innerText()).includes("does not include another business"),
+    "Unlimited capacity UI did not explain that no further workspace can be created.");
   await page.getByRole("button", { name: "Create workspace", exact: true }).click();
   await page.getByRole("button", { name: "Behavior", exact: true }).click();
   await page.getByLabel("Assistant name").fill("Mia");
