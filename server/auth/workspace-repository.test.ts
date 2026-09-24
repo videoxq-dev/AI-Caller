@@ -1,6 +1,7 @@
+import { randomUUID } from "node:crypto";
 import { afterAll, beforeEach, describe, expect, it } from "vitest";
 import { closeDatabase, db } from "@/db";
-import { account, memberships, session, user, verification, workspaces } from "@/db/schema";
+import { account, licenses, memberships, session, user, verification, workspaces } from "@/db/schema";
 import { createWorkspaceForUser, ensureDefaultWorkspace, getPrimaryMembership, getPrimaryOwnedWorkspace, listMembershipsForUser } from "./workspace-repository";
 
 const TEST_USER_ID = "workspace-test-user";
@@ -48,19 +49,58 @@ describe("workspace provisioning", () => {
     expect(membership?.workspaceId).toBe(first.workspaceId);
   });
 
-  it("creates an additional owner workspace with its own Personal plan", async () => {
-    await ensureDefaultWorkspace({
-      id: TEST_USER_ID,
-      name: "Alex Carter",
-      email: "alex.workspace.test@example.com",
-    });
-
-    const created = await createWorkspaceForUser(TEST_USER_ID, "Second Business");
-
-    expect(created).toMatchObject({ workspaceName: "Second Business", role: "OWNER" });
-    expect(await listMembershipsForUser(TEST_USER_ID)).toHaveLength(2);
+  it("allows an initial buyer workspace but blocks an extra business without capacity", async () => {
+    const first = await createWorkspaceForUser(TEST_USER_ID, "First Business");
+    expect(first.role).toBe("OWNER");
+    await expect(createWorkspaceForUser(TEST_USER_ID, "Second Business"))
+      .rejects.toMatchObject({ code: "WORKSPACE_LIMIT_REACHED", status: 403 });
+    expect(await listMembershipsForUser(TEST_USER_ID)).toHaveLength(1);
   });
 
+  it("enforces Core's one-business limit regardless of refunded higher-tier purchases", async () => {
+    const workspace = await createWorkspaceForUser(TEST_USER_ID, "Core Business");
+    await db.insert(licenses).values([
+      { workspaceId: workspace.workspaceId, purchaserUserId: TEST_USER_ID, source: "MANUAL", externalPurchaseId: randomUUID(), productCode: "CORE", status: "ACTIVE", purchasedAt: new Date() },
+      { workspaceId: workspace.workspaceId, purchaserUserId: TEST_USER_ID, source: "MANUAL", externalPurchaseId: randomUUID(), productCode: "UNLIMITED", status: "REFUNDED", purchasedAt: new Date() },
+    ]);
+    await expect(createWorkspaceForUser(TEST_USER_ID, "Unlicensed Business"))
+      .rejects.toMatchObject({ code: "WORKSPACE_LIMIT_REACHED" });
+  });
+
+  it("permits up to ten owned businesses under an active Unlimited license", async () => {
+    const workspace = await createWorkspaceForUser(TEST_USER_ID, "First Business");
+    await db.insert(licenses).values({ workspaceId: workspace.workspaceId, purchaserUserId: TEST_USER_ID, source: "MANUAL", externalPurchaseId: randomUUID(), productCode: "UNLIMITED", status: "ACTIVE", purchasedAt: new Date() });
+    for (let business = 2; business <= 10; business++) {
+      expect((await createWorkspaceForUser(TEST_USER_ID, "Business " + business)).role).toBe("OWNER");
+    }
+    await expect(createWorkspaceForUser(TEST_USER_ID, "Eleventh Business"))
+      .rejects.toMatchObject({ code: "WORKSPACE_LIMIT_REACHED" });
+    expect(await listMembershipsForUser(TEST_USER_ID)).toHaveLength(10);
+  });
+
+  it("serializes concurrent final-slot creation rather than exceeding the purchased limit", async () => {
+    const workspace = await createWorkspaceForUser(TEST_USER_ID, "First Business");
+    await db.insert(licenses).values({ workspaceId: workspace.workspaceId, purchaserUserId: TEST_USER_ID, source: "MANUAL", externalPurchaseId: randomUUID(), productCode: "UNLIMITED", status: "ACTIVE", purchasedAt: new Date() });
+    for (let business = 2; business <= 9; business++) {
+      await createWorkspaceForUser(TEST_USER_ID, "Business " + business);
+    }
+    const results = await Promise.allSettled([
+      createWorkspaceForUser(TEST_USER_ID, "Concurrent A"),
+      createWorkspaceForUser(TEST_USER_ID, "Concurrent B"),
+    ]);
+    expect(results.filter((result) => result.status === "fulfilled")).toHaveLength(1);
+    expect(results.filter((result) => result.status === "rejected")).toHaveLength(1);
+    expect(await listMembershipsForUser(TEST_USER_ID)).toHaveLength(10);
+  });
+
+  it("does not delete over-limit legacy workspaces while blocking new ones", async () => {
+    await createWorkspaceForUser(TEST_USER_ID, "First Business");
+    const [legacy] = await db.insert(workspaces).values({ name: "Existing Legacy Business" }).returning();
+    await db.insert(memberships).values({ workspaceId: legacy.id, userId: TEST_USER_ID, role: "OWNER" });
+    await expect(createWorkspaceForUser(TEST_USER_ID, "New Business"))
+      .rejects.toMatchObject({ code: "WORKSPACE_LIMIT_REACHED" });
+    expect(await listMembershipsForUser(TEST_USER_ID)).toHaveLength(2);
+  });
 
   it("selects a purchaser-owned business even when a staff workspace is older", async () => {
     const partnerId = "workspace-partner-user";
