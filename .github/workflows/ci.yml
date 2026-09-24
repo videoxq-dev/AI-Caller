@@ -212,8 +212,15 @@ jobs:
       - name: Phase 6A WhatsApp template management browser acceptance verification
         run: npm run test:browser:phase6a
 
+      - name: Provision Performance entitlement for Phase 6C test workspace
+        run: node scripts/ci-e2e-entitlement-grant.mjs install phase6c- PERFORMANCE
+
       - name: Phase 6C SMS automation readiness browser acceptance verification
         run: npm run test:browser:phase6c
+
+      - name: Remove Phase 6C test entitlement provisioner
+        if: always()
+        run: node scripts/ci-e2e-entitlement-grant.mjs remove
 
       - name: Booking remediation browser acceptance verification
         run: npm run test:browser:booking
