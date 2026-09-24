@@ -130,7 +130,12 @@ function actionOutcome(action: ActivityItem["actions"][number]) {
   if (action.status === "UNKNOWN" || action.errorCode === "INTERRUPTED_DELIVERY") {
     return "Could not confirm delivery. It was not sent again automatically.";
   }
-  if (action.errorCode === "SMS_CONSENT_REQUIRED") return "Customer has not opted in to SMS.";
+  if (action.errorCode === "SMS_CONSENT_REQUIRED") return "Customer has not opted in to this type of SMS, or has opted out."; 
+  if (action.errorCode === "SMS_REGISTRATION_REQUIRED" || action.errorCode === "SMS_CAMPAIGN_NOT_APPROVED")
+    return "SMS business registration is not approved yet.";
+  if (action.errorCode === "SMS_REGISTRATION_REJECTED") return "SMS business registration needs attention.";
+  if (action.errorCode === "SMS_CAMPAIGN_PURPOSE_NOT_APPROVED") return "This message type is outside the approved SMS campaign.";
+  if (action.errorCode === "SMS_CAMPAIGN_LINKS_NOT_APPROVED") return "Links are not approved for this SMS campaign.";
   if (action.errorCode?.startsWith("SMS_CAMPAIGN_")
     || action.errorCode === "SMS_REGISTRATION_REQUIRED"
     || action.errorCode === "SMS_REGISTRATION_REJECTED") {
@@ -754,7 +759,7 @@ function ActionCard({
       </>}
 
       {action.type === "SEND_CUSTOMER_SMS" && <>
-        <label><span>Message</span><textarea disabled={disabled} maxLength={2000} value={action.message} onChange={event => onChange({ ...action, message: event.target.value })} /></label>
+        <label><span>Message</span><textarea disabled={disabled} maxLength={1600} value={action.message} onChange={event => onChange({ ...action, message: event.target.value })} /></label>
         {!disabled && <div className="variableChips">
           {variables.map(variable => <button key={variable.id} onClick={() => insertVariable(variable.id)}>+ {variable.label}</button>)}
         </div>}
