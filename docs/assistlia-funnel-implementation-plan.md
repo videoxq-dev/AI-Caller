@@ -48,7 +48,7 @@ Confirm inbound phone, SMS, WhatsApp, webchat, unified inbox, manually entered s
 
 ### F4–F6 — Unlimited
 
-F4: owner-level ten-business capacity, five-staff seats, access controls, unlimited-supported contacts/history/automation limits and a combined maximum of two website-or-file imported knowledge sources per owned business with bounded file sizes and operational safeguards. F5: multiple Google/Microsoft/Calendly/Cal.com calendar connections, service/staff routing and connected-calendar appointment management. F6: multi-widget lifecycle, reusable workflows/configurations, integrations and enhanced reporting; the 15,000 bonus credits arrive through F2.
+F4: owner-level ten-business capacity, five-staff seats, access controls, unlimited-supported contacts/history/automation limits and a combined maximum of two website-or-file imported knowledge sources per owned business with bounded file sizes and operational safeguards. F5: unlock the existing Google Calendar, Microsoft Outlook, Calendly and Cal.com external-calendar integration capability while preserving Core native scheduling; this does not imply unlimited calendar connections or a new multi-calendar architecture. Service/staff routing and connected-calendar appointment management remain separate functional requirements where supported. F6: Unlimited Website Widgets means additional customer-facing web chat widgets for different websites, landing pages, offers, campaigns or departments without a commercial widget-count cap; operational traffic limits still apply. Add the multi-widget lifecycle, reusable workflows/configurations, integrations and enhanced reporting; the 15,000 bonus credits arrive through F2.
 
 ### F7–F9 — Performance
 
