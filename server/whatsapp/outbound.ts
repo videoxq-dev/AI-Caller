@@ -11,6 +11,7 @@ import {
   type WhatsAppRuntime,
 } from "@/server/providers/whatsapp/runtime";
 import { getWhatsAppConsentStatus } from "./consent";
+import { classifySmsForPolicy } from "@/server/sms/policy";
 import {
   attachWhatsAppProviderMessage,
   getWhatsAppConversationRecipient,
@@ -128,7 +129,9 @@ export function createWhatsAppOutboundService(dependencies: OutboundDependencies
       const runtime = await dependencies.resolveRuntime(workspaceId);
       const to = await destination(workspaceId, conversationId);
       const text = whatsappText(input.text);
-      await requireWhatsAppConsent(workspaceId, to, "UTILITY", false);
+      const category = classifySmsForPolicy(text, "TRANSACTIONAL") === "MARKETING"
+        ? "MARKETING" as const : "UTILITY" as const;
+      await requireWhatsAppConsent(workspaceId, to, category, category === "MARKETING");
       const outbound = await appendMessage(workspaceId, conversationId, {
         channel: "WHATSAPP",
         direction: "OUTBOUND",
@@ -138,7 +141,7 @@ export function createWhatsAppOutboundService(dependencies: OutboundDependencies
         provider: "whatsapp",
         externalMessageId: null,
         status: "SENDING",
-        metadata: { ...input.metadata, mode: runtime.mode },
+        metadata: { ...input.metadata, mode: runtime.mode, whatsappCategory: category },
       });
 
       if (input.senderType === "AI") {
@@ -153,7 +156,15 @@ export function createWhatsAppOutboundService(dependencies: OutboundDependencies
       }
 
       try {
-        await requireWhatsAppConsent(workspaceId, to, "UTILITY", false);
+        await requireWhatsAppConsent(workspaceId, to, category, category === "MARKETING");
+      } catch (error) {
+        await db.update(messages).set({ status: "SUPPRESSED",
+          metadata: { ...outbound.metadata, suppressedReason:
+            error instanceof AppError ? error.code : "WHATSAPP_CONSENT_UNVERIFIED" },
+        }).where(and(eq(messages.workspaceId, workspaceId), eq(messages.id, outbound.id)));
+        throw error;
+      }
+      try {
         const sent = await runtime.provider.sendText({ phoneNumberId: runtime.phoneNumberId, to, text });
         const updated = await attachWhatsAppProviderMessage(workspaceId, outbound.id, sent.externalId, sent.status);
         await reconcileDeliveryAfterConfirmedSend(workspaceId, sent.externalId);
