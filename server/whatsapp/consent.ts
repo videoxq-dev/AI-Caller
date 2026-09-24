@@ -31,7 +31,7 @@ export async function getWhatsAppConsentStatus(
   return last?.status ?? "UNKNOWN";
 }
 
-export async function recordWhatsAppConsent(input: {
+type WhatsAppConsentChange = {
   workspaceId: string;
   contactId: string;
   waId: string;
@@ -40,7 +40,11 @@ export async function recordWhatsAppConsent(input: {
   source: "INBOUND_WHATSAPP" | "STAFF_ENTRY";
   sourceReference?: string | null;
   consentStatement?: string | null;
-}) {
+};
+
+async function writeWhatsAppConsents(
+  input: Omit<WhatsAppConsentChange, "category"> & { categories: WhatsAppCategory[] },
+) {
   const waId = validWhatsAppId(input.waId);
   return db.transaction(async tx => {
     const [identity] = await tx.select({ id: contactIdentities.id }).from(contactIdentities)
@@ -53,20 +57,40 @@ export async function recordWhatsAppConsent(input: {
     if (!identity) throw new AppError("WHATSAPP_IDENTITY_NOT_FOUND",
       "WhatsApp permission requires this contact's verified WhatsApp identity.", 409);
     const now = new Date();
-    const values = {
-      workspaceId: input.workspaceId, contactId: input.contactId, waId,
-      category: input.category, status: input.status, source: input.source,
-      sourceReference: input.sourceReference ?? null, consentStatement: input.consentStatement ?? null,
-    };
-    const [state] = await tx.insert(whatsappConsents).values({ ...values, updatedAt: now })
-      .onConflictDoUpdate({
-        target: [whatsappConsents.workspaceId, whatsappConsents.contactId,
-          whatsappConsents.waId, whatsappConsents.category],
-        set: { status: input.status, source: input.source,
-          sourceReference: values.sourceReference, consentStatement: values.consentStatement,
-          updatedAt: now },
-      }).returning();
-    await tx.insert(whatsappConsentEvents).values({ ...values, occurredAt: now });
-    return state;
+    const saved = [];
+    for (const category of input.categories) {
+      const values = {
+        workspaceId: input.workspaceId, contactId: input.contactId, waId,
+        category, status: input.status, source: input.source,
+        sourceReference: input.sourceReference ?? null,
+        consentStatement: input.consentStatement ?? null,
+      };
+      const [state] = await tx.insert(whatsappConsents).values({ ...values, updatedAt: now })
+        .onConflictDoUpdate({
+          target: [whatsappConsents.workspaceId, whatsappConsents.contactId,
+            whatsappConsents.waId, whatsappConsents.category],
+          set: { status: input.status, source: input.source,
+            sourceReference: values.sourceReference, consentStatement: values.consentStatement,
+            updatedAt: now },
+        }).returning();
+      await tx.insert(whatsappConsentEvents).values({ ...values, occurredAt: now });
+      saved.push(state);
+    }
+    return saved;
+  });
+}
+
+export async function recordWhatsAppConsent(input: WhatsAppConsentChange) {
+  const [saved] = await writeWhatsAppConsents({ ...input, categories: [input.category] });
+  return saved;
+}
+
+/** STOP is atomic across categories: marketing cannot remain enabled after a partial write. */
+export async function recordWhatsAppKeywordConsent(
+  input: Omit<WhatsAppConsentChange, "category" | "status"> & { keyword: "STOP" | "START" },
+) {
+  return writeWhatsAppConsents({
+    ...input, status: input.keyword === "STOP" ? "OPTED_OUT" : "OPTED_IN",
+    categories: input.keyword === "STOP" ? ["UTILITY", "MARKETING"] : ["UTILITY"],
   });
 }
