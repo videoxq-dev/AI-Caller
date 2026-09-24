@@ -167,6 +167,7 @@ export function AutomationBuilder() {
   const [whatsappTemplates, setWhatsAppTemplates] = useState<WhatsAppTemplate[]>([]);
   const [whatsappNext, setWhatsAppNext] = useState<string | null>(null);
   const [whatsappError, setWhatsAppError] = useState<string | null>(null);
+  const [whatsappLoading, setWhatsAppLoading] = useState(true);
   const [canManage, setCanManage] = useState(false);
   const [name, setName] = useState("");
   const [draft, setDraft] = useState<WorkflowDraft | null>(null);
@@ -185,13 +186,17 @@ export function AutomationBuilder() {
 
   const load = useCallback(async () => {
     setError(null);
+    // Meta's remote template catalog can take up to the provider timeout.
+    // Loading it must not hold up editing unrelated SMS or staff workflows.
+    setWhatsappLoading(true);
+    const whatsappResponse = fetch("/api/automations/whatsapp-templates", { cache: "no-store" })
+      .catch(() => null);
     try {
-      const [workflowResponse, catalogResponse, teamResponse, smsResponse, whatsappResponse] = await Promise.all([
+      const [workflowResponse, catalogResponse, teamResponse, smsResponse] = await Promise.all([
         fetch(`/api/automations/workflows/${id}`, { cache: "no-store" }),
         fetch("/api/automations/catalog", { cache: "no-store" }),
         fetch("/api/team", { cache: "no-store" }),
         fetch("/api/automations/sms-readiness", { cache: "no-store" }).catch(() => null),
-        fetch("/api/automations/whatsapp-templates", { cache: "no-store" }).catch(() => null),
       ]);
       const workflowData = await workflowResponse.json().catch(() => null) as {
         workflow?: BuilderWorkflow;
@@ -220,15 +225,17 @@ export function AutomationBuilder() {
       setCatalog(catalogData.catalog);
       const smsData = smsResponse?.ok ? await smsResponse.json().catch(() => null) as { readiness?: SmsReadiness } | null : null;
       setSmsReadiness(smsData?.readiness ?? null);
-      const whatsappData = whatsappResponse
-        ? await whatsappResponse.json().catch(() => null) as {
-            items?: WhatsAppTemplate[]; nextCursor?: string | null; error?: { message?: string };
-          } | null
-        : null;
-      setWhatsAppTemplates(whatsappResponse?.ok ? whatsappData?.items ?? [] : []);
-      setWhatsAppNext(whatsappResponse?.ok ? whatsappData?.nextCursor ?? null : null);
-      setWhatsAppError(whatsappResponse?.ok ? null
-        : whatsappData?.error?.message ?? "WhatsApp templates could not be loaded.");
+      void whatsappResponse.then(async response => {
+        const data = response
+          ? await response.json().catch(() => null) as {
+              items?: WhatsAppTemplate[]; nextCursor?: string | null; error?: { message?: string };
+            } | null
+          : null;
+        setWhatsAppTemplates(response?.ok ? data?.items ?? [] : []);
+        setWhatsAppNext(response?.ok ? data?.nextCursor ?? null : null);
+        setWhatsAppError(response?.ok ? null
+          : data?.error?.message ?? "WhatsApp templates could not be loaded.");
+      }).finally(() => setWhatsappLoading(false));
       setCanManage(Boolean(workflowData.canManage));
       setMembers(teamData?.members ?? []);
       setDirty(false);
@@ -632,7 +639,7 @@ export function AutomationBuilder() {
                 {!whatsappTemplates.length && trigger?.actions.includes("SEND_CUSTOMER_WHATSAPP")
                   && !draft.actions.some(action => action.type === "SEND_CUSTOMER_WHATSAPP") && (
                   <div className="builderWhatsAppReadiness waiting" role="status">
-                    <span>{whatsappError ?? "To add WhatsApp messages, connect WhatsApp and get a text template approved."}</span>
+                    <span>{whatsappLoading ? "Checking approved WhatsApp templates…" : whatsappError ?? "To add WhatsApp messages, connect WhatsApp and get a text template approved."}</span>
                     <Link href="/integrations/whatsapp/templates">Manage WhatsApp templates →</Link>
                     {whatsappNext && <button type="button" onClick={() => void loadMoreWhatsAppTemplates()}>
                       Check more WhatsApp templates</button>}
