@@ -32,7 +32,13 @@ function statusLabel(status: WorkflowSummary["status"]) {
   return "Draft";
 }
 
-export function CustomAutomationHome({ canManage }: { canManage: boolean }) {
+export function CustomAutomationHome({
+  canManage,
+  canUseAutomationBuilder,
+}: {
+  canManage: boolean;
+  canUseAutomationBuilder: boolean;
+}) {
   const router = useRouter();
   const [items, setItems] = useState<WorkflowSummary[]>([]);
   const [loading, setLoading] = useState(true);
@@ -63,7 +69,10 @@ export function CustomAutomationHome({ canManage }: { canManage: boolean }) {
     }
   }, []);
 
-  useEffect(() => { void load(); }, [load]);
+  useEffect(() => {
+    if (canUseAutomationBuilder) void load();
+    else setLoading(false);
+  }, [canUseAutomationBuilder, load]);
 
   async function create(starter: Starter["id"]) {
     setCreating(true);
@@ -86,6 +95,16 @@ export function CustomAutomationHome({ canManage }: { canManage: boolean }) {
       setError(err instanceof Error ? err.message : "Unable to create automation.");
       setCreating(false);
     }
+  }
+
+  if (!canUseAutomationBuilder) {
+    return <section className="customAutomationSection">
+      <div className="customAutomationHeader"><div><h2>Automation Builder</h2></div></div>
+      <div className="performanceAutomationGate">
+        <strong>Available with Performance</strong>
+        <p>Create and manage custom automations with the Automation Builder after upgrading to Performance.</p>
+      </div>
+    </section>;
   }
 
   return <section className="customAutomationSection">
