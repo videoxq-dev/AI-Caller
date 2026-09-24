@@ -39,7 +39,7 @@ describe("paginated workspace knowledge API", () => {
 
   it("does not fetch unbounded or invalid pages", async () => {
     const response = await GET(new Request("https://app.example.com/api/knowledge?offset=-1&limit=1000000"));
-    expect(response.status).toBe(400);
+    expect(response.status).toBe(422);
     expect(listKnowledgeSources).not.toHaveBeenCalled();
   });
 
