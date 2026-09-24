@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto";
+import { eq } from "drizzle-orm";
 import { afterAll, beforeEach, describe, expect, it } from "vitest";
 import { closeDatabase, db } from "@/db";
 import { account, licenses, memberships, session, user, verification, workspaceCommercialOwners, workspaces } from "@/db/schema";
