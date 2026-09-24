@@ -118,7 +118,8 @@ describe("Meta WhatsApp template management", () => {
       await expect(client.approved("appointment_reminder", language))
         .rejects.toMatchObject({ code: "WHATSAPP_TEMPLATE_NOT_APPROVED" });
     }
-    expect(fetcher.mock.calls[0]?.[0]).toBe(
+    const calls = fetcher.mock.calls as unknown as Array<[string, RequestInit]>;
+    expect(calls[0]?.[0]).toBe(
       "https://graph.facebook.com/v22.0/123456789/message_templates?name=appointment_reminder&limit=100",
     );
     await expect(client.approved("../other-waba", "en_US")).rejects.toThrow();
