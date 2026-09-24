@@ -68,10 +68,11 @@ describe("Unlimited receipt lifecycle (not connected to live ingress)", () => {
     expect(upgrade[0]).toMatchObject({
       purchaserUserId: buyerId, workspaceId, status: "ACTIVE",
     });
-    expect(await db.select().from(workspaces)).toHaveLength(1);
+    expect(await db.select().from(memberships).where(eq(memberships.userId, buyerId)))
+      .toMatchObject([{ workspaceId, role: "OWNER" }]);
     expect(await db.select().from(creditLedger).where(eq(creditLedger.referenceType, "LICENSE_BONUS")))
       .toHaveLength(1);
-    expect((await db.select().from(creditWallets))[0].balance).toBe(15_000);
+    expect((await db.select().from(creditWallets).where(eq(creditWallets.workspaceId, workspaceId)))[0].balance).toBe(15_000);
   });
 
   it("rejects an unknown or non-Core purchaser without creating an account or receipt", async () => {
@@ -81,7 +82,7 @@ describe("Unlimited receipt lifecycle (not connected to live ingress)", () => {
       .where(eq(licenses.externalPurchaseId, "core-existing-receipt"));
     await expect(reconcileUnlimitedReceipt(event("SALE", "revoked-core")))
       .rejects.toMatchObject({ code: "FUNNEL_CORE_PURCHASE_REQUIRED", status: 409 });
-    expect(await db.select().from(licenses).where(eq(licenses.productCode, "UNLIMITED")))
+    expect(await db.select().from(licenses).where(and(eq(licenses.workspaceId, workspaceId), eq(licenses.productCode, "UNLIMITED"))))
       .toHaveLength(0);
   });
 
@@ -105,13 +106,13 @@ describe("Unlimited receipt lifecycle (not connected to live ingress)", () => {
     });
     await reconcileUnlimitedReceipt(event("RFND", receipt));
     await reconcileUnlimitedReceipt(event("CGBK", receipt));
-    expect((await db.select().from(creditWallets))[0].balance).toBe(-8);
+    expect((await db.select().from(creditWallets).where(eq(creditWallets.workspaceId, workspaceId)))[0].balance).toBe(-8);
     expect(await db.select().from(creditLedger)
       .where(eq(creditLedger.referenceType, "LICENSE_BONUS_REVERSAL"))).toHaveLength(1);
-    expect((await db.select().from(workspaces))[0].status).toBe("ACTIVE");
-    const [core] = await db.select().from(licenses).where(eq(licenses.productCode, "CORE"));
+    expect((await db.select().from(workspaces).where(eq(workspaces.id, workspaceId)))[0].status).toBe("ACTIVE");
+    const [core] = await db.select().from(licenses).where(and(eq(licenses.workspaceId, workspaceId), eq(licenses.productCode, "CORE")));
     expect(core.status).toBe("ACTIVE");
-    const [upgrade] = await db.select().from(licenses).where(eq(licenses.productCode, "UNLIMITED"));
+    const [upgrade] = await db.select().from(licenses).where(and(eq(licenses.workspaceId, workspaceId), eq(licenses.productCode, "UNLIMITED")));
     expect(upgrade.status).toBe("CHARGEBACK");
     expect(await reconcileUnlimitedReceipt(event("SALE", receipt)))
       .toMatchObject({ ignored: true, reason: "REVOKED_PURCHASE" });
@@ -121,12 +122,12 @@ describe("Unlimited receipt lifecycle (not connected to live ingress)", () => {
     const receipt = "unlimited-cancel-resume";
     await reconcileUnlimitedReceipt(event("SALE", receipt));
     await reconcileUnlimitedReceipt(event("CANCEL-REBILL", receipt));
-    expect((await db.select().from(creditWallets))[0].balance).toBe(15_000);
+    expect((await db.select().from(creditWallets).where(eq(creditWallets.workspaceId, workspaceId)))[0].balance).toBe(15_000);
     expect(await reconcileUnlimitedReceipt(event("SALE", receipt)))
       .toMatchObject({ ignored: true, reason: "REVOKED_PURCHASE" });
     await reconcileUnlimitedReceipt(event("UNCANCEL-REBILL", receipt));
     await reconcileUnlimitedReceipt(event("UNCANCEL-REBILL", receipt));
-    expect((await db.select().from(creditWallets))[0].balance).toBe(15_000);
+    expect((await db.select().from(creditWallets).where(eq(creditWallets.workspaceId, workspaceId)))[0].balance).toBe(15_000);
     expect(await db.select().from(creditLedger).where(eq(creditLedger.referenceType, "LICENSE_BONUS")))
       .toHaveLength(1);
     expect(await db.select().from(creditLedger)
@@ -139,8 +140,8 @@ describe("Unlimited receipt lifecycle (not connected to live ingress)", () => {
       .rejects.toMatchObject({ code: "LICENSE_NOT_FOUND", status: 503 });
     await reconcileUnlimitedReceipt(event("SALE", receipt));
     await reconcileUnlimitedReceipt(event("RFND", receipt));
-    expect((await db.select().from(creditWallets))[0].balance).toBe(0);
-    const [upgrade] = await db.select().from(licenses).where(eq(licenses.productCode, "UNLIMITED"));
+    expect((await db.select().from(creditWallets).where(eq(creditWallets.workspaceId, workspaceId)))[0].balance).toBe(0);
+    const [upgrade] = await db.select().from(licenses).where(and(eq(licenses.workspaceId, workspaceId), eq(licenses.productCode, "UNLIMITED")));
     expect(upgrade.status).toBe("REFUNDED");
   });
 
@@ -152,8 +153,8 @@ describe("Unlimited receipt lifecycle (not connected to live ingress)", () => {
       reconcileUnlimitedReceipt(event("CGBK", receipt)),
     ]);
     await reconcileUnlimitedReceipt(event("CANCEL-REBILL", receipt));
-    expect((await db.select().from(creditWallets))[0].balance).toBe(0);
-    const [upgrade] = await db.select().from(licenses).where(eq(licenses.productCode, "UNLIMITED"));
+    expect((await db.select().from(creditWallets).where(eq(creditWallets.workspaceId, workspaceId)))[0].balance).toBe(0);
+    const [upgrade] = await db.select().from(licenses).where(and(eq(licenses.workspaceId, workspaceId), eq(licenses.productCode, "UNLIMITED")));
     expect(upgrade.status).toBe("CHARGEBACK");
     expect(await db.select().from(creditLedger)
       .where(eq(creditLedger.referenceType, "LICENSE_BONUS_REVERSAL"))).toHaveLength(1);
