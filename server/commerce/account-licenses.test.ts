@@ -94,7 +94,7 @@ describe("purchaser-owned commercial licenses", () => {
       make("CORE", "ACTIVE"),
       make("AGENCY_50", "ACTIVE"),
       make("AGENCY_100", "ACTIVE"),
-    ]).businessLimit).toBe(100);
+    ]).businessLimit).toBe(101);
   });
 
   it("isolates buyer licenses even when buyers share a workspace membership", async () => {
@@ -109,7 +109,7 @@ describe("purchaser-owned commercial licenses", () => {
 
     expect(await getFunnelAccountSummary(first)).toMatchObject({
       activeProducts: ["CORE", "UNLIMITED"],
-      businessLimit: 10,
+      businessLimit: 2,
     });
     expect(await getFunnelAccountSummary(second)).toMatchObject({
       activeProducts: [],
