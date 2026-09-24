@@ -1,8 +1,8 @@
 import { randomUUID } from "node:crypto";
 import { afterAll, beforeEach, describe, expect, it } from "vitest";
 import { closeDatabase, db } from "@/db";
-import { account, licenses, memberships, session, user, verification, workspaces } from "@/db/schema";
-import { createWorkspaceForUser, ensureDefaultWorkspace, getOwnedWorkspaceCapacity, getPrimaryMembership, getPrimaryOwnedWorkspace, listMembershipsForUser } from "./workspace-repository";
+import { account, licenses, memberships, session, user, verification, workspaceCommercialOwners, workspaces } from "@/db/schema";
+import { createWorkspaceForUser, ensureDefaultWorkspace, getOwnedWorkspaceCapacity, getPrimaryMembership, getPrimaryOwnedWorkspace, listCommercialWorkspacesForUser, listMembershipsForUser } from "./workspace-repository";
 
 const TEST_USER_ID = "workspace-test-user";
 
@@ -47,6 +47,9 @@ describe("workspace provisioning", () => {
 
     const membership = await getPrimaryMembership(TEST_USER_ID);
     expect(membership?.workspaceId).toBe(first.workspaceId);
+    expect(await db.select().from(workspaceCommercialOwners)
+      .where(eq(workspaceCommercialOwners.purchaserUserId, TEST_USER_ID)))
+      .toMatchObject([{ workspaceId: first.workspaceId, purchaserUserId: TEST_USER_ID, kind: "PRIMARY" }]);
   });
 
   it("allows an initial buyer workspace but blocks an extra business without capacity", async () => {
@@ -74,6 +77,10 @@ describe("workspace provisioning", () => {
     await expect(createWorkspaceForUser(TEST_USER_ID, "Third Business"))
       .rejects.toMatchObject({ code: "WORKSPACE_LIMIT_REACHED" });
     expect(await listMembershipsForUser(TEST_USER_ID)).toHaveLength(2);
+    expect(await listCommercialWorkspacesForUser(TEST_USER_ID)).toMatchObject([
+      { workspaceId: workspace.workspaceId, kind: "PRIMARY" },
+      { workspaceName: "Second Business", kind: "ADDITIONAL" },
+    ]);
   });
 
   it("serializes concurrent final-slot creation rather than exceeding the purchased limit", async () => {
@@ -125,6 +132,45 @@ describe("workspace provisioning", () => {
     await expect(createWorkspaceForUser(TEST_USER_ID, "New Business"))
       .rejects.toMatchObject({ code: "WORKSPACE_LIMIT_REACHED" });
     expect(await listMembershipsForUser(TEST_USER_ID)).toHaveLength(2);
+  });
+
+  it("does not treat operational OWNER access as commercial ownership or extra capacity", async () => {
+    const primary = await createWorkspaceForUser(TEST_USER_ID, "Commercial Primary");
+    await db.insert(licenses).values({
+      workspaceId: primary.workspaceId,
+      purchaserUserId: TEST_USER_ID,
+      source: "MANUAL",
+      externalPurchaseId: randomUUID(),
+      productCode: "CORE",
+      status: "ACTIVE",
+      purchasedAt: new Date(),
+    });
+
+    const partnerId = "commercial-owner-partner";
+    await db.insert(user).values({
+      id: partnerId,
+      name: "Commercial Partner",
+      email: "commercial.partner@example.com",
+      emailVerified: true,
+    });
+    const [partnerWorkspace] = await db.insert(workspaces).values({ name: "Partner Managed Business" }).returning();
+    await db.insert(memberships).values([
+      { workspaceId: partnerWorkspace.id, userId: partnerId, role: "OWNER" },
+      { workspaceId: partnerWorkspace.id, userId: TEST_USER_ID, role: "OWNER" },
+    ]);
+    await db.insert(workspaceCommercialOwners).values({
+      workspaceId: partnerWorkspace.id,
+      purchaserUserId: partnerId,
+      kind: "PRIMARY",
+    });
+
+    expect(await getOwnedWorkspaceCapacity(TEST_USER_ID)).toMatchObject({
+      ownedBusinesses: 1,
+      businessLimit: 1,
+      availableBusinesses: 0,
+    });
+    expect(await listCommercialWorkspacesForUser(TEST_USER_ID)).toHaveLength(1);
+    expect((await getPrimaryOwnedWorkspace(TEST_USER_ID))?.workspaceId).toBe(primary.workspaceId);
   });
 
   it("selects a purchaser-owned business even when a staff workspace is older", async () => {
