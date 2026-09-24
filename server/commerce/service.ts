@@ -1,5 +1,5 @@
 import { randomBytes } from "node:crypto";
-import { and, eq } from "drizzle-orm";
+import { and, eq, inArray, sql } from "drizzle-orm";
 import { db } from "@/db";
 import {
   commerceEvents,
@@ -20,7 +20,7 @@ import type { NormalizedPurchaseEvent } from "./types";
 import { resolveFunnelProductId } from "./products";
 
 const ACTIVE_EVENTS = new Set(["SALE", "BILL", "UNCANCEL-REBILL"]);
-const REVOKE_EVENTS = new Set(["RFND", "CGBK", "INSF"]);
+const REVOKE_EVENTS = new Set(["RFND", "CGBK", "INSF", "CANCEL-REBILL"]);
 
 function isCoreProduct(productId: string): boolean {
   const env = getEnv();
@@ -32,7 +32,9 @@ function isCoreProduct(productId: string): boolean {
   return resolveFunnelProductId(productId, env) === "CORE";
 }
 
-async function grantCoreEntitlements(workspaceId: string) {
+type Tx = Parameters<Parameters<typeof db.transaction>[0]>[0];
+
+async function grantCoreEntitlements(workspaceId: string, tx: Tx) {
   const entries: Array<[string, unknown]> = [
     ["workspace_limit", 1],
     ["calendar_connection_limit", 1],
@@ -41,7 +43,7 @@ async function grantCoreEntitlements(workspaceId: string) {
     ["core_access", true],
   ];
   for (const [key, value] of entries) {
-    await db
+    await tx
       .insert(workspaceEntitlements)
       .values({ workspaceId, key, value, updatedAt: new Date() })
       .onConflictDoUpdate({
@@ -83,6 +85,17 @@ async function activate(event: NormalizedPurchaseEvent) {
     eq(licenses.productCode, "CORE"),
   )).limit(1);
 
+  // A late SALE/BILL cannot revive a refunded or chargeback receipt. Only an
+  // explicit uncancellation may restore a cancelled recurring receipt.
+  if (existingLicense && (
+    existingLicense.status === "REFUNDED"
+    || existingLicense.status === "CHARGEBACK"
+    || (existingLicense.status === "CANCELLED" && event.eventType !== "UNCANCEL-REBILL")
+  )) return { ignored: true as const, reason: "REVOKED_PURCHASE" };
+  if (!existingLicense && event.eventType === "UNCANCEL-REBILL") {
+    throw new AppError("LICENSE_NOT_FOUND", "Cannot restore a receipt before its original purchase is known.", 503);
+  }
+
   let provisioned: Awaited<ReturnType<typeof provisionUser>>;
   if (existingLicense) {
     const [buyer] = existingLicense.purchaserUserId
@@ -116,17 +129,51 @@ async function activate(event: NormalizedPurchaseEvent) {
       setWhere: and(
         eq(licenses.workspaceId, provisioned.workspace.workspaceId),
         eq(licenses.purchaserUserId, provisioned.user.id),
+        event.eventType === "UNCANCEL-REBILL"
+          ? inArray(licenses.status, ["ACTIVE", "CANCELLED"])
+          : eq(licenses.status, "ACTIVE"),
       ),
     })
     .returning();
 
   // A concurrent IPN with the same receipt must not move access or credit grants
   // to a second account, even if both events raced through the initial lookup.
+  if (!license) {
+    // A refund can win between the initial ACTIVE read and this guarded
+    // upsert. Treat a matching, now-revoked receipt as a stale billing event,
+    // not as a different account trying to claim this receipt.
+    const [current] = await db.select({
+      workspaceId: licenses.workspaceId,
+      purchaserUserId: licenses.purchaserUserId,
+      status: licenses.status,
+    }).from(licenses).where(and(
+      eq(licenses.source, "JVZOO"),
+      eq(licenses.externalPurchaseId, event.externalPurchaseId),
+      eq(licenses.productCode, "CORE"),
+    )).limit(1);
+    if (current?.workspaceId === provisioned.workspace.workspaceId
+      && current.purchaserUserId === provisioned.user.id
+      && current.status !== "ACTIVE") {
+      return { ignored: true as const, reason: "REVOKED_PURCHASE" };
+    }
+  }
   if (!license || license.workspaceId !== provisioned.workspace.workspaceId || license.purchaserUserId !== provisioned.user.id) {
     throw new AppError("PURCHASE_OWNERSHIP_CONFLICT", "This receipt is associated with another purchaser or needs ownership reconciliation.", 409);
   }
-  await db.update(workspaces).set({ status: "ACTIVE", updatedAt: new Date() }).where(eq(workspaces.id, license.workspaceId));
-  await grantCoreEntitlements(license.workspaceId);
+  // Purchase and refund IPNs can overlap. Use the same per-business lock as
+  // revocation and re-check the row after acquiring it: an earlier ACTIVE
+  // upsert is not proof the receipt is still ACTIVE when access is written.
+  const canActivate = await db.transaction(async (tx) => {
+    await tx.execute(sql`select pg_advisory_xact_lock(hashtext(${`core-license:${license.workspaceId}`}))`);
+    const [current] = await tx.select({ status: licenses.status }).from(licenses)
+      .where(eq(licenses.id, license.id)).limit(1);
+    if (current?.status !== "ACTIVE") return false;
+    await tx.update(workspaces).set({ status: "ACTIVE", updatedAt: new Date() })
+      .where(eq(workspaces.id, license.workspaceId));
+    await grantCoreEntitlements(license.workspaceId, tx);
+    return true;
+  });
+  if (!canActivate) return { ignored: true as const, reason: "REVOKED_PURCHASE" };
   const balance = await grantStarterCredits(license.workspaceId, license.id);
 
   if (provisioned.created && provisioned.temporaryPassword) {
@@ -148,19 +195,51 @@ async function revoke(event: NormalizedPurchaseEvent) {
     .from(licenses)
     .where(and(eq(licenses.source, "JVZOO"), eq(licenses.externalPurchaseId, event.externalPurchaseId), eq(licenses.productCode, "CORE")))
     .limit(1);
-  if (!license) return { ignored: true as const, reason: "LICENSE_NOT_FOUND" };
+  if (!license) {
+    // Provider IPNs are not guaranteed to be delivered in purchase-first order.
+    // A missing refund must be retryable after its purchase is recorded.
+    throw new AppError("LICENSE_NOT_FOUND", "This receipt has not been recorded yet; retry after its sale arrives.", 503);
+  }
+  if (license.purchaserUserId) {
+    const [buyer] = await db.select({ email: user.email }).from(user)
+      .where(eq(user.id, license.purchaserUserId)).limit(1);
+    if (!buyer || buyer.email.toLowerCase() !== event.customerEmail.toLowerCase()) {
+      throw new AppError("PURCHASE_OWNERSHIP_CONFLICT", "This receipt is associated with another purchaser.", 409);
+    }
+  }
 
-  const status = event.eventType === "CGBK" ? "CHARGEBACK" : event.eventType === "RFND" ? "REFUNDED" : "CANCELLED";
-  await db.update(licenses).set({ status, rawMetadata: event.raw, updatedAt: new Date() }).where(eq(licenses.id, license.id));
-  await db.update(workspaces).set({ status: "SUSPENDED", updatedAt: new Date() }).where(eq(workspaces.id, license.workspaceId));
-  await db
-    .insert(workspaceEntitlements)
-    .values({ workspaceId: license.workspaceId, key: "core_access", value: false, updatedAt: new Date() })
-    .onConflictDoUpdate({
-      target: [workspaceEntitlements.workspaceId, workspaceEntitlements.key],
-      set: { value: false, updatedAt: new Date() },
-    });
-  return { ignored: false as const, workspaceId: license.workspaceId, licenseId: license.id };
+  return db.transaction(async (tx) => {
+    await tx.execute(sql`select pg_advisory_xact_lock(hashtext(${`core-license:${license.workspaceId}`}))`);
+    // Resolve financial status after acquiring the lock: concurrent refund and
+    // chargeback events must not race to overwrite the final classification.
+    const [locked] = await tx.select({ status: licenses.status })
+      .from(licenses).where(eq(licenses.id, license.id)).limit(1);
+    if (!locked) throw new AppError("LICENSE_NOT_FOUND", "This receipt no longer exists.", 503);
+    const status = locked.status === "CHARGEBACK" || event.eventType === "CGBK"
+      ? "CHARGEBACK"
+      : locked.status === "REFUNDED" || event.eventType === "RFND"
+        ? "REFUNDED"
+        : "CANCELLED";
+    await tx.update(licenses).set({ status, rawMetadata: event.raw, updatedAt: new Date() })
+      .where(eq(licenses.id, license.id));
+    const [stillActive] = await tx.select({ id: licenses.id }).from(licenses).where(and(
+      eq(licenses.workspaceId, license.workspaceId),
+      eq(licenses.productCode, "CORE"),
+      eq(licenses.status, "ACTIVE"),
+    )).limit(1);
+    const coreAccess = Boolean(stillActive);
+    if (!coreAccess) {
+      await tx.update(workspaces).set({ status: "SUSPENDED", updatedAt: new Date() })
+        .where(eq(workspaces.id, license.workspaceId));
+    }
+    await tx.insert(workspaceEntitlements)
+      .values({ workspaceId: license.workspaceId, key: "core_access", value: coreAccess, updatedAt: new Date() })
+      .onConflictDoUpdate({
+        target: [workspaceEntitlements.workspaceId, workspaceEntitlements.key],
+        set: { value: coreAccess, updatedAt: new Date() },
+      });
+    return { ignored: false as const, workspaceId: license.workspaceId, licenseId: license.id, coreAccess };
+  });
 }
 
 export async function processCommerceEvent(event: NormalizedPurchaseEvent) {
@@ -202,15 +281,7 @@ export async function processCommerceEvent(event: NormalizedPurchaseEvent) {
     let result: unknown;
     if (ACTIVE_EVENTS.has(event.eventType)) result = await activate(event);
     else if (REVOKE_EVENTS.has(event.eventType)) result = await revoke(event);
-    else if (event.eventType === "CANCEL-REBILL") {
-      const [license] = await db
-        .select()
-        .from(licenses)
-        .where(and(eq(licenses.source, "JVZOO"), eq(licenses.externalPurchaseId, event.externalPurchaseId), eq(licenses.productCode, "CORE")))
-        .limit(1);
-      if (license) await db.update(licenses).set({ status: "CANCELLED", updatedAt: new Date(), rawMetadata: event.raw }).where(eq(licenses.id, license.id));
-      result = { ignored: false, cancellationRecorded: Boolean(license) };
-    } else {
+    else {
       result = { ignored: true, reason: "UNSUPPORTED_EVENT" };
     }
 
@@ -255,7 +326,7 @@ export async function activateManualCoreLicense(workspaceId: string) {
       set: { status: "ACTIVE", updatedAt: new Date() },
     })
     .returning();
-  await grantCoreEntitlements(workspaceId);
+  await db.transaction((tx) => grantCoreEntitlements(workspaceId, tx));
   const balance = await grantStarterCredits(workspaceId, license.id);
   return { license, balance };
 }
