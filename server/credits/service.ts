@@ -106,14 +106,18 @@ async function grantLicenseCreditsInTransaction(
   return wallet.balance;
 }
 
-export async function grantStarterCredits(workspaceId: string, referenceId: string): Promise<number> {
-  const amount = getEnv().STARTER_CREDITS;
-  return db.transaction((tx) => grantLicenseCreditsInTransaction(tx, workspaceId, {
-    amount,
+/** Grant Core credits inside the license/access transaction. */
+export async function grantStarterCreditsInTx(tx: Tx, workspaceId: string, referenceId: string): Promise<number> {
+  return grantLicenseCreditsInTransaction(tx, workspaceId, {
+    amount: getEnv().STARTER_CREDITS,
     reason: "Starter hosted credits",
     referenceType: "LICENSE",
     licenseId: referenceId,
-  }));
+  });
+}
+
+export async function grantStarterCredits(workspaceId: string, referenceId: string): Promise<number> {
+  return db.transaction((tx) => grantStarterCreditsInTx(tx, workspaceId, referenceId));
 }
 
 /**
@@ -142,6 +146,59 @@ export async function grantUnlimitedPurchaseCredits(workspaceId: string, license
       licenseId,
     });
   });
+}
+
+/**
+ * Reverse the precise historical promotional grant once on refund/chargeback.
+ * Preserve paid credits and recorded provider spending. When the grant has
+ * already been spent, a negative wallet records the remaining debit.
+ */
+export async function reverseStarterCreditsInTx(
+  tx: Tx,
+  workspaceId: string,
+  referenceId: string,
+): Promise<number | null> {
+  await lockWallet(tx, workspaceId);
+  const [existing] = await tx.select({ balanceAfter: creditLedger.balanceAfter })
+    .from(creditLedger).where(and(
+      eq(creditLedger.workspaceId, workspaceId),
+      eq(creditLedger.type, "ADJUSTMENT"),
+      eq(creditLedger.referenceType, "LICENSE_GRANT_REVERSAL"),
+      eq(creditLedger.referenceId, referenceId),
+    )).limit(1);
+  if (existing) return existing.balanceAfter;
+
+  const [grant] = await tx.select({ amount: creditLedger.amount })
+    .from(creditLedger).where(and(
+      eq(creditLedger.workspaceId, workspaceId),
+      eq(creditLedger.type, "GRANT"),
+      eq(creditLedger.referenceType, "LICENSE"),
+      eq(creditLedger.referenceId, referenceId),
+    )).limit(1);
+  if (!grant) return null;
+  if (grant.amount <= 0) {
+    throw new AppError("INVALID_LICENSE_GRANT", "The license credit grant is invalid.", 409);
+  }
+
+  const [wallet] = await tx.update(creditWallets)
+    .set({
+      balance: sql`${creditWallets.balance} - ${grant.amount}`,
+      updatedAt: new Date(),
+    })
+    .where(eq(creditWallets.workspaceId, workspaceId))
+    .returning({ balance: creditWallets.balance });
+  if (!wallet) throw new AppError("CREDIT_WALLET_NOT_FOUND", "Hosted credit wallet not found.", 409);
+
+  await tx.insert(creditLedger).values({
+    workspaceId,
+    type: "ADJUSTMENT",
+    amount: -grant.amount,
+    balanceAfter: wallet.balance,
+    reason: "Promotional credits reversed after purchase refund or chargeback",
+    referenceType: "LICENSE_GRANT_REVERSAL",
+    referenceId,
+  });
+  return wallet.balance;
 }
 
 export async function reserveCredits(

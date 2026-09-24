@@ -1,5 +1,5 @@
 import { afterAll, beforeEach, describe, expect, it } from "vitest";
-import { eq } from "drizzle-orm";
+import { and, eq } from "drizzle-orm";
 import { closeDatabase, db } from "@/db";
 import { creditLedger, creditReservations, creditWallets, licenses, workspaces } from "@/db/schema";
 import {
@@ -7,6 +7,7 @@ import {
   debitCredits,
   grantStarterCredits,
   grantUnlimitedPurchaseCredits,
+  reverseStarterCreditsInTx,
   refundCredits,
   releaseCreditReservation,
   reserveCredits,
@@ -306,4 +307,61 @@ describe("credits", () => {
     expect(wallet.balance).toBe(4);
     expect(entries.filter((entry) => entry.type === "DEBIT")).toHaveLength(1);
   });
+  it("reverses the exact original grant once even when the balance is already spent", async () => {
+    const granted = await grantStarterCredits(workspaceId, "refunded-license");
+    await debitCredits(workspaceId, 7, {
+      reason: "Delivered hosted AI", referenceType: "ORCHESTRATOR_CALL", referenceId: "spent-before-refund",
+    });
+
+    const first = await db.transaction((tx) => reverseStarterCreditsInTx(tx, workspaceId, "refunded-license"));
+    const second = await db.transaction((tx) => reverseStarterCreditsInTx(tx, workspaceId, "refunded-license"));
+    expect(granted).toBeGreaterThan(7);
+    expect(first).toBe(-7);
+    expect(second).toBe(-7);
+
+    const [wallet] = await db.select().from(creditWallets).where(eq(creditWallets.workspaceId, workspaceId));
+    expect(wallet.balance).toBe(-7);
+    const adjustments = await db.select().from(creditLedger).where(and(
+      eq(creditLedger.workspaceId, workspaceId),
+      eq(creditLedger.referenceType, "LICENSE_GRANT_REVERSAL"),
+    ));
+    expect(adjustments).toHaveLength(1);
+    expect(adjustments[0]).toMatchObject({
+      type: "ADJUSTMENT", referenceId: "refunded-license", amount: -granted,
+    });
+  });
+
+  it("does not reverse another license or fabricate a reversal for a missing grant", async () => {
+    const firstAmount = await grantStarterCredits(workspaceId, "license-a");
+    const withTwoGrants = await grantStarterCredits(workspaceId, "license-b");
+    const missing = await db.transaction((tx) => reverseStarterCreditsInTx(tx, workspaceId, "license-no-grant"));
+    expect(missing).toBeNull();
+    const afterOneRefund = await db.transaction((tx) => reverseStarterCreditsInTx(tx, workspaceId, "license-a"));
+    expect(afterOneRefund).toBe(withTwoGrants - firstAmount);
+    const [wallet] = await db.select().from(creditWallets).where(eq(creditWallets.workspaceId, workspaceId));
+    expect(wallet.balance).toBe(firstAmount);
+  });
+
+  it("uses the historical grant amount rather than the current promotion setting", async () => {
+    // Use a known historical-sized grant independent of the configured
+    // STARTER_CREDITS value at the time the license is reversed.
+    await db.insert(creditWallets).values({ workspaceId, balance: 2500 });
+    await db.insert(creditLedger).values({
+      workspaceId,
+      type: "GRANT",
+      amount: 2500,
+      balanceAfter: 2500,
+      reason: "Starter hosted credits",
+      referenceType: "LICENSE",
+      referenceId: "historical-license",
+    });
+    expect(await db.transaction((tx) => reverseStarterCreditsInTx(tx, workspaceId, "historical-license")))
+      .toBe(0);
+    const [adjustment] = await db.select().from(creditLedger).where(and(
+      eq(creditLedger.workspaceId, workspaceId),
+      eq(creditLedger.referenceType, "LICENSE_GRANT_REVERSAL"),
+    ));
+    expect(adjustment.amount).toBe(-2500);
+  });
+
 });
