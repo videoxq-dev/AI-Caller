@@ -629,6 +629,13 @@ export function AutomationBuilder() {
             <section className="builderStep">
               <div className="stepHeader"><span>3</span><h2>DO</h2><small>{draft.actions.length} of {catalog.maxActions}</small></div>
               <div className="stepBody actionsBody">
+                {!whatsappTemplates.length && trigger?.actions.includes("SEND_CUSTOMER_WHATSAPP")
+                  && !draft.actions.some(action => action.type === "SEND_CUSTOMER_WHATSAPP") && (
+                  <div className="builderSmsReadiness waiting" role="status">
+                    <span>{whatsappError ?? "To add WhatsApp messages, connect WhatsApp and get a text template approved."}</span>
+                    <Link href="/integrations/whatsapp/templates">Manage WhatsApp templates →</Link>
+                  </div>
+                )}
                 {draft.actions.some(action => action.type === "SEND_CUSTOMER_SMS") && smsReadiness && (
                   <div className={`builderSmsReadiness ${smsReadiness.status === "READY" ? "ready" : "waiting"}`} role="status">
                     <strong>{smsReadiness.status === "READY" ? "SMS sending is ready" : "SMS sending status"}</strong>
