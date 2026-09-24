@@ -1,7 +1,8 @@
 import { and, asc, eq, sql } from "drizzle-orm";
+import { getFunnelAccountSummary } from "@/server/commerce/account-licenses";
 import { db } from "@/db";
 import { licenses, memberships, user, workspacePlans, workspaces } from "@/db/schema";
-import { FUNNEL_PRODUCTS } from "@/server/commerce/products";
+import { getPurchasedBusinessLimit } from "@/server/commerce/products";
 import { AppError } from "@/server/http/errors";
 
 type WorkspaceUser = {
@@ -141,6 +142,23 @@ export async function ensureDefaultWorkspace(user: WorkspaceUser): Promise<Works
   });
 }
 
+export async function getOwnedWorkspaceCapacity(userId: string) {
+  const [summary, counts] = await Promise.all([
+    getFunnelAccountSummary(userId),
+    db.select({ count: sql<number>`count(*)::int` })
+      .from(memberships)
+      .where(and(eq(memberships.userId, userId), eq(memberships.role, "OWNER"))),
+  ]);
+  const ownedBusinesses = counts[0]?.count ?? 0;
+  const businessLimit = Math.max(1, summary.businessLimit);
+  return {
+    ownedBusinesses,
+    businessLimit,
+    availableBusinesses: Math.max(0, businessLimit - ownedBusinesses),
+    activeProducts: summary.activeProducts,
+  };
+}
+
 export async function createWorkspaceForUser(userId: string, name: string): Promise<WorkspaceMembership> {
   const workspaceName = name.trim();
   return db.transaction(async (tx) => {
@@ -153,9 +171,7 @@ export async function createWorkspaceForUser(userId: string, name: string): Prom
     const activePurchases = await tx.selectDistinct({ code: licenses.productCode })
       .from(licenses)
       .where(and(eq(licenses.purchaserUserId, userId), eq(licenses.status, "ACTIVE")));
-    const purchasedCapacity = Math.max(0, ...activePurchases.map(
-      ({ code }) => FUNNEL_PRODUCTS.find((product) => product.code === code)?.businessLimit ?? 0,
-    ));
+    const purchasedCapacity = getPurchasedBusinessLimit(activePurchases.map(({ code }) => code));
     // A buyer can set up the initial business before checkout. Existing older
     // workspaces remain intact, but extra creation requires purchased capacity.
     const limit = Math.max(1, purchasedCapacity);

@@ -3,7 +3,7 @@ import { auth } from "@/server/auth";
 import { assertPlatformUserActive } from "@/server/admin/auth";
 import { resolveWorkspaceContext } from "@/server/auth/workspace-context";
 import { activeWorkspaceCookie } from "@/server/auth/active-workspace";
-import { createWorkspaceForUser, getMembership, listMembershipsForUser } from "@/server/auth/workspace-repository";
+import { createWorkspaceForUser, getMembership, getOwnedWorkspaceCapacity, listMembershipsForUser } from "@/server/auth/workspace-repository";
 import { getEnv } from "@/server/env";
 import { AppError, toErrorResponse } from "@/server/http/errors";
 import { parseInput } from "@/server/http/validation";
@@ -14,8 +14,11 @@ const createSchema = z.object({ name: z.string().trim().min(2).max(120) });
 export async function GET(request: Request) {
   try {
     const context = await resolveWorkspaceContext(request.headers);
-    const memberships = await listMembershipsForUser(context.session.user.id);
-    return Response.json({ workspaces: memberships, activeWorkspaceId: context.workspace.id });
+    const [memberships, capacity] = await Promise.all([
+      listMembershipsForUser(context.session.user.id),
+      getOwnedWorkspaceCapacity(context.session.user.id),
+    ]);
+    return Response.json({ workspaces: memberships, activeWorkspaceId: context.workspace.id, capacity });
   } catch (error) {
     return toErrorResponse(error);
   }
