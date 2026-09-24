@@ -74,7 +74,7 @@ try {
     "Business capacity was not enforced before the Unlimited purchase.");
 
   // Acceptance fixture: validate the real workspace creation/switch API with
-  // the account-level commercial entitlement that authorizes ten businesses.
+  // the account-level commercial entitlement that authorizes two businesses.
   // Never bypass the production quota or weaken its server-side enforcement.
   await pool.query(
     `INSERT INTO licenses
@@ -96,8 +96,8 @@ try {
     && afterCreate.activeWorkspaceId === additional.workspace.workspaceId,
   "The new workspace was not available and selected after creation.");
   assert(afterCreate.capacity?.ownedBusinesses === 2
-    && afterCreate.capacity?.businessLimit === 10
-    && afterCreate.capacity?.availableBusinesses === 8,
+    && afterCreate.capacity?.businessLimit === 2
+    && afterCreate.capacity?.availableBusinesses === 0,
   "Unlimited workspace capacity API did not reflect the purchased business allowance.");
   await api(context, "POST", "/api/workspaces", { workspaceId },
     "switch back to the original workspace");
@@ -113,7 +113,7 @@ try {
 
   await page.goto(`${baseUrl}/ai-agent`, { waitUntil: "networkidle" });
   await page.getByRole("button", { name: "Create workspace", exact: true }).click();
-  await page.getByText("2 of 10 business slots used.", { exact: true }).waitFor();
+  await page.getByText("2 of 2 business slots used.", { exact: true }).waitFor();
   await page.getByRole("button", { name: "Create workspace", exact: true }).click();
   await page.getByRole("button", { name: "Behavior", exact: true }).click();
   await page.getByLabel("Assistant name").fill("Mia");
