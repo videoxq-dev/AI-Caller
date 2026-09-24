@@ -37,15 +37,24 @@ export const knowledgeSources = pgTable(
 export const webchatWidgets = pgTable(
   "webchat_widgets",
   {
-    workspaceId: uuid("workspace_id").primaryKey().references(() => workspaces.id, { onDelete: "cascade" }),
+    id: uuid("id").defaultRandom().primaryKey(),
+    workspaceId: uuid("workspace_id").notNull().references(() => workspaces.id, { onDelete: "cascade" }),
     publicKey: text("public_key").notNull(),
+    name: text("name").default("Website chat").notNull(),
+    isPrimary: boolean("is_primary").default(false).notNull(),
     enabled: boolean("enabled").default(true).notNull(),
     greeting: text("greeting"),
     launcherLabel: text("launcher_label").default("Chat with us").notNull(),
     createdAt: timestamp("created_at", { withTimezone: true, mode: "date" }).defaultNow().notNull(),
     updatedAt: timestamp("updated_at", { withTimezone: true, mode: "date" }).defaultNow().notNull(),
   },
-  (table) => [uniqueIndex("webchat_widgets_public_key_uq").on(table.publicKey)],
+  (table) => [
+    uniqueIndex("webchat_widgets_public_key_uq").on(table.publicKey),
+    index("webchat_widgets_workspace_created_idx").on(table.workspaceId, table.createdAt),
+    uniqueIndex("webchat_widgets_workspace_primary_uq")
+      .on(table.workspaceId)
+      .where(sql`${table.isPrimary} = true`),
+  ],
 );
 
 export const webchatSessions = pgTable(
@@ -53,6 +62,7 @@ export const webchatSessions = pgTable(
   {
     id: uuid("id").defaultRandom().primaryKey(),
     workspaceId: uuid("workspace_id").notNull().references(() => workspaces.id, { onDelete: "cascade" }),
+    widgetId: uuid("widget_id").notNull().references(() => webchatWidgets.id, { onDelete: "restrict" }),
     contactId: uuid("contact_id").notNull().references(() => contacts.id, { onDelete: "cascade" }),
     conversationId: uuid("conversation_id").notNull().references(() => conversations.id, { onDelete: "cascade" }),
     visitorId: text("visitor_id").notNull(),
@@ -66,6 +76,7 @@ export const webchatSessions = pgTable(
     uniqueIndex("webchat_sessions_token_hash_uq").on(table.tokenHash),
     index("webchat_sessions_workspace_visitor_idx").on(table.workspaceId, table.visitorId),
     index("webchat_sessions_workspace_created_idx").on(table.workspaceId, table.createdAt),
+    index("webchat_sessions_widget_created_idx").on(table.widgetId, table.createdAt),
     index("webchat_sessions_conversation_idx").on(table.conversationId),
   ],
 );
