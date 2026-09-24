@@ -206,6 +206,9 @@ jobs:
       - name: Phase 1 AI Agent browser acceptance verification
         run: npm run test:browser:phase1
 
+      - name: Agency workspace management browser acceptance verification
+        run: npm run test:browser:agency
+
       - name: Phase 4 Automation Builder browser acceptance verification
         run: npm run test:browser:phase4
 
@@ -225,6 +228,15 @@ jobs:
 
       - name: Booking remediation browser acceptance verification
         run: npm run test:browser:booking
+
+      - name: Upload Agency workspace management screenshots
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: agency-workspace-management-verification
+          path: artifacts/agency-workspaces
+          if-no-files-found: warn
+          retention-days: 14
 
       - name: Upload Phase 4 Automation Builder screenshots
         if: always()
