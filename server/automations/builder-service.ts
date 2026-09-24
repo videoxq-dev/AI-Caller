@@ -41,9 +41,15 @@ function publishedAsDraft(snapshot: unknown): WorkflowDefinition | null {
   return workflowDefinitionSchema.parse({
     ...parsed.data,
     actions: parsed.data.actions.map(action => {
-      if (action.type !== "SEND_CUSTOMER_SMS") return action;
-      const { classifiedPurpose: _classifiedPurpose, ...draftAction } = action;
-      return draftAction;
+      if (action.type === "SEND_CUSTOMER_SMS") {
+        const { classifiedPurpose: _classifiedPurpose, ...draftAction } = action;
+        return draftAction;
+      }
+      if (action.type === "SEND_CUSTOMER_WHATSAPP") {
+        const { approvedCategory: _approvedCategory, ...draftAction } = action;
+        return draftAction;
+      }
+      return action;
     }),
   });
 }
