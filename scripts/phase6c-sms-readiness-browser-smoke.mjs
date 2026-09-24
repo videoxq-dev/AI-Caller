@@ -36,11 +36,21 @@ try {
   });
   assert(signup.ok(), `Sign up failed: ${await signup.text()}`);
   const membership = await pool.query(
-    `SELECT m.workspace_id FROM memberships m JOIN "user" u ON u.id = m.user_id
+    `SELECT m.workspace_id, m.user_id FROM memberships m JOIN "user" u ON u.id = m.user_id
      WHERE u.email = $1 AND m.role = 'OWNER' LIMIT 1`, [email],
   );
   const workspaceId = membership.rows[0]?.workspace_id;
-  assert(workspaceId, "Owner workspace missing");
+  const ownerId = membership.rows[0]?.user_id;
+  assert(workspaceId && ownerId, "Owner workspace missing");
+
+  // This suite exercises a custom SMS workflow, so provision the commercial
+  // entitlement explicitly instead of bypassing the production gate.
+  await pool.query(
+    `INSERT INTO licenses
+       (workspace_id, purchaser_user_id, source, external_purchase_id, product_code, status, purchased_at)
+     VALUES ($1, $2, 'MANUAL', $3, 'PERFORMANCE', 'ACTIVE', now())`,
+    [workspaceId, ownerId, `phase6c-browser-performance-${Date.now()}`],
+  );
 
   const created = await context.request.post(`${baseUrl}/api/automations/workflows`, {
     data: { starter: "CUSTOMER_BOOKING_CONFIRMATION" },
