@@ -1,6 +1,7 @@
 import { and, eq, gte, lte, sql } from "drizzle-orm";
 import { db } from "@/db";
-import { creditLedger, creditReservations, creditWallets } from "@/db/schema";
+import { creditLedger, creditReservations, creditWallets, licenses } from "@/db/schema";
+import { FUNNEL_PRODUCTS } from "@/server/commerce/products";
 import { getEnv } from "@/server/env";
 import { AppError } from "@/server/http/errors";
 
@@ -64,44 +65,82 @@ export async function getCreditBalance(workspaceId: string): Promise<number> {
   return wallet?.balance ?? 0;
 }
 
+type Tx = Parameters<Parameters<typeof db.transaction>[0]>[0];
+
+async function grantLicenseCreditsInTransaction(
+  tx: Tx,
+  workspaceId: string,
+  input: { amount: number; reason: string; referenceType: string; licenseId: string },
+): Promise<number> {
+  positiveInteger(input.amount, "License credit grant amount");
+  await lockWallet(tx, workspaceId);
+
+  const [existing] = await tx
+    .select({ balanceAfter: creditLedger.balanceAfter })
+    .from(creditLedger)
+    .where(and(
+      eq(creditLedger.workspaceId, workspaceId),
+      eq(creditLedger.type, "GRANT"),
+      eq(creditLedger.referenceType, input.referenceType),
+      eq(creditLedger.referenceId, input.licenseId),
+    ))
+    .limit(1);
+  if (existing) return existing.balanceAfter;
+
+  await tx.insert(creditWallets).values({ workspaceId, balance: 0 }).onConflictDoNothing();
+  const [wallet] = await tx.update(creditWallets).set({
+    balance: sql`${creditWallets.balance} + ${input.amount}`,
+    updatedAt: new Date(),
+  }).where(eq(creditWallets.workspaceId, workspaceId)).returning({ balance: creditWallets.balance });
+  if (!wallet) throw new AppError("CREDIT_WALLET_NOT_FOUND", "Hosted credit wallet not found.", 409);
+
+  await tx.insert(creditLedger).values({
+    workspaceId,
+    type: "GRANT",
+    amount: input.amount,
+    balanceAfter: wallet.balance,
+    reason: input.reason,
+    referenceType: input.referenceType,
+    referenceId: input.licenseId,
+  });
+  return wallet.balance;
+}
+
 export async function grantStarterCredits(workspaceId: string, referenceId: string): Promise<number> {
   const amount = getEnv().STARTER_CREDITS;
+  return db.transaction((tx) => grantLicenseCreditsInTransaction(tx, workspaceId, {
+    amount,
+    reason: "Starter hosted credits",
+    referenceType: "LICENSE",
+    licenseId: referenceId,
+  }));
+}
 
+/**
+ * The Unlimited OTO is not yet purchasable through JVZoo. Once its commerce
+ * lifecycle is enabled, this grants the brief's additional 15,000 credits once
+ * per eligible ACTIVE Unlimited license, on that license's business wallet.
+ * A different workspace, non-Unlimited SKU or revoked receipt cannot grant.
+ */
+export async function grantUnlimitedPurchaseCredits(workspaceId: string, licenseId: string): Promise<number> {
   return db.transaction(async (tx) => {
-    await lockWallet(tx, workspaceId);
-    const existing = await tx
-      .select({ id: creditLedger.id, balanceAfter: creditLedger.balanceAfter })
-      .from(creditLedger)
-      .where(and(
-        eq(creditLedger.workspaceId, workspaceId),
-        eq(creditLedger.type, "GRANT"),
-        eq(creditLedger.referenceType, "LICENSE"),
-        eq(creditLedger.referenceId, referenceId),
-      ))
-      .limit(1);
-    if (existing[0]) return existing[0].balanceAfter;
-
-    const [wallet] = await tx
-      .insert(creditWallets)
-      .values({ workspaceId, balance: 0 })
-      .onConflictDoNothing()
-      .returning();
-
-    const current = wallet?.balance ?? (await tx.select().from(creditWallets).where(eq(creditWallets.workspaceId, workspaceId)).limit(1))[0]?.balance ?? 0;
-    const next = current + amount;
-
-    await tx.update(creditWallets).set({ balance: next, updatedAt: new Date() }).where(eq(creditWallets.workspaceId, workspaceId));
-    await tx.insert(creditLedger).values({
-      workspaceId,
-      type: "GRANT",
-      amount,
-      balanceAfter: next,
-      reason: "Starter hosted credits",
-      referenceType: "LICENSE",
-      referenceId,
+    const [license] = await tx.select({ id: licenses.id }).from(licenses).where(and(
+      eq(licenses.id, licenseId),
+      eq(licenses.workspaceId, workspaceId),
+      eq(licenses.productCode, "UNLIMITED"),
+      eq(licenses.status, "ACTIVE"),
+    )).for("update").limit(1);
+    if (!license) {
+      throw new AppError("FUNNEL_LICENSE_NOT_ELIGIBLE", "An active Unlimited purchase for this business is required.", 409);
+    }
+    const product = FUNNEL_PRODUCTS.find((item) => item.code === "UNLIMITED");
+    if (!product) throw new Error("Unlimited funnel product is not configured.");
+    return grantLicenseCreditsInTransaction(tx, workspaceId, {
+      amount: product.purchaseCredits,
+      reason: "Unlimited purchase bonus hosted credits",
+      referenceType: "LICENSE_BONUS",
+      licenseId,
     });
-
-    return next;
   });
 }
 
