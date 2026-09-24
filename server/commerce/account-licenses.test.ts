@@ -157,6 +157,78 @@ describe("purchaser-owned commercial licenses", () => {
     expect((await getFunnelAccountSummary(partnerId)).businessLimit).toBe(0);
   });
 
+  it("rejects receipt reuse by a different buyer without moving credits or workspace access", async () => {
+    vi.stubEnv("JVZOO_CORE_PRODUCT_IDS", "funnel-account-core");
+    resetEnvForTests();
+    const first = await buyer("Original Buyer");
+    const other = await buyer("Different Buyer");
+    const firstWorkspace = await ownedWorkspace(first);
+    const otherWorkspace = await ownedWorkspace(other);
+    const receipt = randomUUID();
+    await db.insert(licenses).values({
+      workspaceId: firstWorkspace,
+      purchaserUserId: first,
+      source: "JVZOO",
+      externalPurchaseId: receipt,
+      productCode: "CORE",
+      status: "ACTIVE",
+      purchasedAt: new Date(),
+    });
+    const id = randomUUID();
+    eventIds.push(id);
+    const attempt = {
+      source: "JVZOO" as const,
+      externalEventId: id,
+      externalPurchaseId: receipt,
+      eventType: "BILL",
+      productId: "funnel-account-core",
+      customerEmail: "funnel-" + other + "@example.com",
+      customerName: "Different Buyer",
+      purchasedAt: new Date(),
+      raw: {},
+    };
+    await expect(processCommerceEvent(attempt)).rejects.toMatchObject({
+      code: "PURCHASE_OWNERSHIP_CONFLICT",
+      status: 409,
+    });
+    const [assigned] = await db.select().from(licenses).where(eq(licenses.externalPurchaseId, receipt));
+    expect(assigned).toMatchObject({ purchaserUserId: first, workspaceId: firstWorkspace });
+    expect((await getFunnelAccountSummary(other)).businessLimit).toBe(0);
+    const otherWorkspaceLicenses = await db.select().from(licenses).where(eq(licenses.workspaceId, otherWorkspace));
+    expect(otherWorkspaceLicenses).toHaveLength(0);
+  });
+
+  it("replays a legitimate repeat receipt into its original business without double credits", async () => {
+    vi.stubEnv("JVZOO_CORE_PRODUCT_IDS", "funnel-account-core");
+    resetEnvForTests();
+    const ownerId = await buyer("Repeat Buyer");
+    const workspaceId = await ownedWorkspace(ownerId);
+    const receipt = randomUUID();
+    const makeEvent = (eventType: string) => {
+      const id = randomUUID();
+      eventIds.push(id);
+      return {
+        source: "JVZOO" as const,
+        externalEventId: id,
+        externalPurchaseId: receipt,
+        eventType,
+        productId: "funnel-account-core",
+        customerEmail: "funnel-" + ownerId + "@example.com",
+        customerName: "Repeat Buyer",
+        purchasedAt: new Date(),
+        raw: {},
+      };
+    };
+    const first = await processCommerceEvent(makeEvent("SALE"));
+    const second = await processCommerceEvent(makeEvent("BILL"));
+    expect(first).toMatchObject({ result: { workspaceId } });
+    expect(second).toMatchObject({ result: { workspaceId } });
+    expect((second.result as { balance: number }).balance).toBe(
+      (first.result as { balance: number }).balance,
+    );
+    expect((await getFunnelAccountSummary(ownerId)).licenses).toHaveLength(1);
+  });
+
   it("associates manual Core activation with the sole owner and grants credits once", async () => {
     const ownerId = await buyer("Manual Buyer");
     const workspaceId = await ownedWorkspace(ownerId);
