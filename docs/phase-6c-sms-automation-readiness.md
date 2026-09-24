@@ -18,10 +18,11 @@ Baseline: `main` at `e18972a55bd01897411541b8789cc7a863d603f1`. Phase 5 remains 
 - A provider API key or server-level Telnyx authorization never counts as approval of an individual business's managed SMS campaign. A BYOP "connected" flag does not establish external carrier registration.
 - Workflow drafts/publication remain available while carrier approval is pending. The send path is unchanged and still suppresses a message unless current send-time checks pass.
 - SMS message inputs and publication validation now reject content longer than the outbound sender's existing 1,600-character limit; existing immutable published snapshots retain their schema.
+- BYOP **automation SMS** now checks recipient consent and opt-outs both before creating a send and just before calling the provider; explicit promotional language cannot masquerade as transactional. Non-automated BYOP message policies remain a separate Phase 6D concern.
 - No migration, new dependency, second managed number, or provider network call is needed to display readiness.
 
 ## Acceptance boundaries
 
 CI exercises status transitions and tenant isolation, route authentication, existing SMS send-policy and durable-workflow tests, and typecheck/build/regression checks. **No approved business entity or live outbound carrier delivery is claimed.** Once a suitable registration is approved, acceptance needs a real transactional and (only if registered for it) marketing message, opt-out suppression, provider receipt, and send activity reconciliation.
 
-The current BYOP SMS sender does not independently verify carrier campaign scope using AI Caller's managed-registration tables; Phase 6D's broader cross-channel policy work must address any remaining BYOP consent and approval guarantees rather than depicting a connected account as approved.
+The BYOP sender cannot independently verify external carrier campaign scope using AI Caller's managed-registration tables; the readiness UI must not depict a connected account as carrier-approved. Phase 6D must review remaining **non-automation BYOP message** policy and cross-channel controls.
