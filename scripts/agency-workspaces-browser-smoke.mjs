@@ -103,14 +103,16 @@ try {
   await page.screenshot({ path: path.join(outputDir, "agency-desktop.png"), fullPage: true });
 
   // All owned workspaces remain selectable from the original quick switcher.
-  await page.getByRole("combobox", { name: "Active workspace" }).selectOption(originalId);
-  await page.waitForURL(url => new URL(url).pathname === "/workspaces");
+  await Promise.all([
+    page.waitForNavigation({ waitUntil: "networkidle" }),
+    page.getByRole("combobox", { name: "Active workspace" }).selectOption(originalId),
+  ]);
   await page.getByText("2 / 50").waitFor();
   const switchResult = await context.request.post(`${baseUrl}/api/workspaces`, {
     data: { workspaceId: secondId },
   });
   assert(switchResult.ok(), "Existing quick-switch API failed for an Agency client.");
-  await page.reload({ waitUntil: "networkidle" });
+  await page.goto(`${baseUrl}/workspaces`, { waitUntil: "networkidle" });
   assert(await page.getByRole("combobox", { name: "Active workspace" }).inputValue() === secondId,
     "Quick switcher did not reflect the selected client.");
 
