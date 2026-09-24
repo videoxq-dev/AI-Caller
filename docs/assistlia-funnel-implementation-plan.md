@@ -9,7 +9,7 @@ There is **one application** with five offers and six purchasable SKUs:
 | Offer | License product code | Brief-defined commercial difference |
 | --- | --- | --- |
 | Front end: Core | CORE | One business; 15,000 starter credits; one configured AI agent; native appointments and Core channels |
-| OTO 1: Unlimited | UNLIMITED | Up to ten businesses; up to five staff per business; expanded calendars, knowledge, widgets, automations and reporting; an additional 15,000 promotional credits |
+| OTO 1: Unlimited | UNLIMITED | Up to ten businesses; up to five staff per business; expanded calendars, up to two imported website/file knowledge sources per business, widgets, automations and reporting; an additional 15,000 promotional credits |
 | OTO 2: Performance | PERFORMANCE | Advanced custom workflows, AI reactivation and conversion/revenue intelligence |
 | OTO 3: Agency | AGENCY_50, AGENCY_100 | Agency console and 50 or 100 managed client businesses, with a client-capacity expansion path |
 | OTO 4: Whitelabel | WHITELABEL | Custom domain, product name, brand assets and client-facing branded experience |
@@ -44,11 +44,11 @@ Deliver vertical slices with tests before implementation, migrations where neede
 
 ### F3 — Core completeness and acceptance
 
-Confirm inbound phone, SMS, WhatsApp, webchat, unified inbox, knowledge, contacts, qualification, native scheduling, issue-scoped human handoff, basic recipes, dashboard and starter credits operate as one product. Core must not access external calendar connections. Resolve or explicitly gate the existing live acceptance blockers in Issues #24 (US SMS), #28 (deployment DB), #31 (voice), #44 (booking) and #57 (WhatsApp); #48 affects external-calendar appointment management. “Implemented in CI” is not equivalent to provider-approved live delivery.
+Confirm inbound phone, SMS, WhatsApp, webchat, unified inbox, manually entered services/FAQs/policies (without website/file knowledge imports), contacts, qualification, native scheduling, issue-scoped human handoff, basic recipes, dashboard and starter credits operate as one product. Core must not access external calendar connections. Resolve or explicitly gate the existing live acceptance blockers in Issues #24 (US SMS), #28 (deployment DB), #31 (voice), #44 (booking) and #57 (WhatsApp); #48 affects external-calendar appointment management. “Implemented in CI” is not equivalent to provider-approved live delivery.
 
 ### F4–F6 — Unlimited
 
-F4: owner-level ten-business capacity, five-staff seats, access controls, unlimited-supported contacts/history/knowledge/automation limits with bounded storage, pagination and operational safeguards. F5: multiple Google/Microsoft/Calendly/Cal.com calendar connections, service/staff routing and connected-calendar appointment management. F6: multi-widget lifecycle, reusable workflows/configurations, integrations and enhanced reporting; the 15,000 bonus credits arrive through F2.
+F4: owner-level ten-business capacity, five-staff seats, access controls, unlimited-supported contacts/history/automation limits and a combined maximum of two website-or-file imported knowledge sources per owned business with bounded file sizes and operational safeguards. F5: multiple Google/Microsoft/Calendly/Cal.com calendar connections, service/staff routing and connected-calendar appointment management. F6: multi-widget lifecycle, reusable workflows/configurations, integrations and enhanced reporting; the 15,000 bonus credits arrive through F2.
 
 ### F7–F9 — Performance
 
@@ -73,3 +73,7 @@ Exercise Core-only, each OTO combination, Agency 50 to 100, Whitelabel, duplicat
 - Product IDs and credentials must be configured outside source; never derive access from an IPN product name or marketing copy.
 - Preserve legacy buyer data and existing credits during migration; reconcile discrepancies explicitly before enforcement.
 - Never silently grant an unfinished OTO, add multi-number purchasing, or replace native Core scheduling with an external-calendar dependency.
+
+## Imported knowledge clarification — September 24, 2026
+
+The founder subsequently clarified the initial broad Unlimited Knowledge wording: **Core has no imported website/file knowledge upload; an active Unlimited purchase allows at most two imported sources per business, counting website imports and uploaded files together**. Manually entered service, product, FAQ and policy knowledge in Core remains available. On Unlimited refund, keep previously imported content accessible to staff for deletion but block additions and edits until eligible access returns; never silently delete business data. This later product instruction controls the importer source count, not the earlier general wording in the copywriter brief.\n
