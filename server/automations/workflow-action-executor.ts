@@ -418,7 +418,10 @@ async function executeNotifyStaff(input: {
   });
 }
 
-const smsSuppressionCodes = new Set([
+export const smsSuppressionCodes = new Set([
+  "EMPTY_SMS_MESSAGE",
+  "SMS_TOO_LONG",
+  "INVALID_SMS_PHONE",
   "SMS_DESTINATION_REQUIRED",
   "SMS_IDENTITY_NOT_FOUND",
   "SMS_CAMPAIGN_NOT_APPROVED",

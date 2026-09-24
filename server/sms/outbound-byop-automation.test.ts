@@ -1,17 +1,29 @@
 import { afterAll, beforeEach, describe, expect, it, vi } from "vitest";
+import { eq } from "drizzle-orm";
 import { closeDatabase, db } from "@/db";
-import { contacts, workspaces } from "@/db/schema";
-import { getOrCreateOpenConversation } from "@/server/domain/core/repository";
+import { contacts, conversations, messages, workspaces } from "@/db/schema";
+import { appendMessage, getOrCreateOpenConversation } from "@/server/domain/core/repository";
 import type { SmsRuntime } from "@/server/providers/sms/runtime";
+import * as consentService from "./consent";
 import { recordSmsConsent } from "./consent";
-import { sendPreclassifiedAutomationSmsWithRuntime } from "./outbound";
+import { classifySmsPurpose } from "./classification";
+import { sendPreclassifiedAutomationSmsWithRuntime, sendSmsConversationTextWithRuntime } from "./outbound";
 
-describe("automated BYOP SMS consent enforcement", () => {
+vi.mock("./classification", () => ({
+  classifySmsPurpose: vi.fn(async ({ message }: { message: string }) =>
+    /unclassifiable/i.test(message) ? "UNCERTAIN"
+      : /discount|special offer|sale/i.test(message) ? "MARKETING" : "TRANSACTIONAL"),
+}));
+
+describe("unified BYOP SMS consent enforcement", () => {
   let workspaceId = "";
   let contactId = "";
   let conversationId = "";
   const to = "+12025550100";
-  const send = vi.fn(async () => ({ externalId: "byop-message-1", status: "QUEUED" as const }));
+  let nextExternalId = 0;
+  const send = vi.fn(async () => ({
+    externalId: `byop-message-${++nextExternalId}`, status: "QUEUED" as const,
+  }));
 
   function runtime(): SmsRuntime {
     return {
@@ -24,6 +36,7 @@ describe("automated BYOP SMS consent enforcement", () => {
 
   beforeEach(async () => {
     vi.clearAllMocks();
+    nextExternalId = 0;
     await db.delete(workspaces);
     const [workspace] = await db.insert(workspaces).values({ name: "BYOP automation SMS" }).returning();
     workspaceId = workspace.id;
@@ -39,6 +52,128 @@ describe("automated BYOP SMS consent enforcement", () => {
       consentStatement: "Customer SMS preference",
     });
   }
+
+  it("blocks unsolicited AI and staff SMS without consent on the ordinary BYOP path", async () => {
+    await expect(sendSmsConversationTextWithRuntime(workspaceId, conversationId, runtime(), {
+      senderType: "AI", text: "Your appointment is tomorrow.",
+    })).rejects.toMatchObject({ code: "SMS_CONSENT_REQUIRED" });
+    await db.update(conversations).set({ handlingMode: "HUMAN" })
+      .where(eq(conversations.id, conversationId));
+    await expect(sendSmsConversationTextWithRuntime(workspaceId, conversationId, runtime(), {
+      senderType: "USER", text: "Your appointment is tomorrow.",
+    })).rejects.toMatchObject({ code: "SMS_CONSENT_REQUIRED" });
+    expect(classifySmsPurpose).toHaveBeenCalledTimes(2);
+    expect(send).not.toHaveBeenCalled();
+    expect(await db.select().from(messages)).toHaveLength(0);
+  });
+
+  it("allows consented AI and staff replies with the classified purpose in both audit records", async () => {
+    await consent("TRANSACTIONAL", "OPTED_IN");
+    const ai = await sendSmsConversationTextWithRuntime(workspaceId, conversationId, runtime(), {
+      senderType: "AI", text: "Your appointment is confirmed.",
+      metadata: { smsPurpose: "MARKETING" },
+    });
+    await db.update(conversations).set({ handlingMode: "HUMAN" })
+      .where(eq(conversations.id, conversationId));
+    const staff = await sendSmsConversationTextWithRuntime(workspaceId, conversationId, runtime(), {
+      senderType: "USER", text: "Your appointment has been rescheduled.",
+      metadata: { smsPurpose: "MARKETING" },
+    });
+    expect(send).toHaveBeenCalledTimes(2);
+    expect(ai.metadata).toMatchObject({ smsPurpose: "TRANSACTIONAL", mode: "BYOP" });
+    expect(staff.metadata).toMatchObject({ smsPurpose: "TRANSACTIONAL", mode: "BYOP" });
+    expect(classifySmsPurpose).toHaveBeenCalledTimes(2);
+  });
+
+  it("does not allow staff or AI to disguise promotional BYOP SMS as transactional", async () => {
+    await consent("TRANSACTIONAL", "OPTED_IN");
+    const promotionalText = "Your booking is confirmed. Special offer: 20% off.";
+    await expect(sendSmsConversationTextWithRuntime(workspaceId, conversationId, runtime(), {
+      senderType: "AI", text: promotionalText, metadata: { smsPurpose: "TRANSACTIONAL" },
+    })).rejects.toMatchObject({ code: "SMS_CONSENT_REQUIRED" });
+    await db.update(conversations).set({ handlingMode: "HUMAN" })
+      .where(eq(conversations.id, conversationId));
+    await expect(sendSmsConversationTextWithRuntime(workspaceId, conversationId, runtime(), {
+      senderType: "USER", text: promotionalText, metadata: { smsPurpose: "TRANSACTIONAL" },
+    })).rejects.toMatchObject({ code: "SMS_CONSENT_REQUIRED" });
+    expect(send).not.toHaveBeenCalled();
+    await consent("MARKETING", "OPTED_IN");
+    const sent = await sendSmsConversationTextWithRuntime(workspaceId, conversationId, runtime(), {
+      senderType: "USER", text: promotionalText, metadata: { smsPurpose: "TRANSACTIONAL" },
+    });
+    expect(sent.metadata.smsPurpose).toBe("MARKETING");
+    expect(send).toHaveBeenCalledOnce();
+  });
+
+  it("allows a relevant customer-initiated reply but not an unrelated destination or a reply after STOP", async () => {
+    await appendMessage(workspaceId, conversationId, {
+      channel: "SMS", direction: "INBOUND", senderType: "CUSTOMER",
+      contentType: "TEXT", body: "Can you confirm my booking?",
+      provider: "twilio", externalMessageId: "inbound-byop-reply",
+      metadata: { senderNumber: to },
+    });
+    const replied = await sendSmsConversationTextWithRuntime(workspaceId, conversationId, runtime(), {
+      senderType: "AI", text: "Your booking is confirmed.",
+    });
+    expect(replied.metadata.smsPurpose).toBe("TRANSACTIONAL");
+    await expect(sendSmsConversationTextWithRuntime(workspaceId, conversationId, runtime(), {
+      senderType: "AI", text: "Your booking is confirmed.", to: "+12025550111",
+    })).rejects.toMatchObject({ code: "SMS_CONSENT_REQUIRED" });
+    await consent("TRANSACTIONAL", "OPTED_OUT");
+    await expect(sendSmsConversationTextWithRuntime(workspaceId, conversationId, runtime(), {
+      senderType: "AI", text: "Your booking is confirmed.",
+    })).rejects.toMatchObject({ code: "SMS_CONSENT_REQUIRED" });
+    expect(send).toHaveBeenCalledOnce();
+  });
+
+  it("does not treat a recent inbound SMS as marketing consent", async () => {
+    await appendMessage(workspaceId, conversationId, {
+      channel: "SMS", direction: "INBOUND", senderType: "CUSTOMER",
+      contentType: "TEXT", body: "Can I change my appointment?",
+      provider: "twilio", externalMessageId: "inbound-before-offer",
+      metadata: { senderNumber: to },
+    });
+    await expect(sendSmsConversationTextWithRuntime(workspaceId, conversationId, runtime(), {
+      senderType: "AI", text: "Special offer: 20% off this week.",
+    })).rejects.toMatchObject({ code: "SMS_CONSENT_REQUIRED" });
+    expect(send).not.toHaveBeenCalled();
+  });
+
+  it("honors an opt-out added after the first check but before provider dispatch", async () => {
+    await consent("TRANSACTIONAL", "OPTED_IN");
+    const original = consentService.getSmsConsentStatus;
+    let reads = 0;
+    const status = vi.spyOn(consentService, "getSmsConsentStatus")
+      .mockImplementation(async (...args) => {
+        reads += 1;
+        if (reads === 2) await consent("TRANSACTIONAL", "OPTED_OUT");
+        return original(...args);
+      });
+    try {
+      await expect(sendSmsConversationTextWithRuntime(workspaceId, conversationId, runtime(), {
+        senderType: "AI", text: "Your appointment is confirmed.",
+      })).rejects.toMatchObject({ code: "SMS_CONSENT_REQUIRED" });
+      expect(reads).toBe(2);
+      expect(send).not.toHaveBeenCalled();
+      expect(await db.select().from(messages)).toMatchObject([{
+        status: "SUPPRESSED", metadata: expect.objectContaining({ smsPurpose: "TRANSACTIONAL" }),
+      }]);
+    } finally {
+      status.mockRestore();
+    }
+  });
+
+  it("fails closed for uncertain BYOP messages and rejects unsafe links before creating an outbound record", async () => {
+    await consent("TRANSACTIONAL", "OPTED_IN");
+    await expect(sendSmsConversationTextWithRuntime(workspaceId, conversationId, runtime(), {
+      senderType: "AI", text: "Unclassifiable service note.",
+    })).rejects.toMatchObject({ code: "SMS_CAMPAIGN_REVIEW_REQUIRED" });
+    await expect(sendSmsConversationTextWithRuntime(workspaceId, conversationId, runtime(), {
+      senderType: "AI", text: "Book here: http://example.com/booking",
+    })).rejects.toMatchObject({ code: "SMS_UNSAFE_LINK" });
+    expect(send).not.toHaveBeenCalled();
+    expect(await db.select().from(messages)).toHaveLength(0);
+  });
 
   it("does not send proactive SMS through a connected BYOP provider without recipient consent", async () => {
     await expect(sendPreclassifiedAutomationSmsWithRuntime(workspaceId, conversationId, runtime(), {
@@ -56,6 +191,7 @@ describe("automated BYOP SMS consent enforcement", () => {
     });
     expect(result).toMatchObject({ status: "QUEUED", metadata: { smsPurpose: "TRANSACTIONAL" } });
     expect(send).toHaveBeenCalledOnce();
+    expect(classifySmsPurpose).not.toHaveBeenCalled();
     expect(send).toHaveBeenCalledWith(expect.objectContaining({ to, idempotencyKey: "byop-automation-2" }));
   });
 

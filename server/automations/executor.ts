@@ -40,7 +40,7 @@ import {
   releaseAutomationRunForRetry,
   releaseWorkflowActionRunForRetry,
 } from "./repository";
-import { executeWorkflowAction, resolveWorkflowCustomerContext } from "./workflow-action-executor";
+import { executeWorkflowAction, resolveWorkflowCustomerContext, smsSuppressionCodes } from "./workflow-action-executor";
 import { getWorkflowVersion } from "./workflows";
 import type {
   AppointmentConfirmationConfig,
@@ -91,12 +91,14 @@ function isRetryableAutomationError(error: unknown) {
   return true;
 }
 
-function deliveryFailureStatus(error: unknown): "FAILED" | "UNKNOWN" | "SKIPPED" {
+export function deliveryFailureStatus(error: unknown): "FAILED" | "UNKNOWN" | "SKIPPED" {
   if (error instanceof AppError && (
-    error.code === "SMS_IDENTITY_NOT_FOUND"
+    smsSuppressionCodes.has(error.code)
     || error.code === "WHATSAPP_IDENTITY_NOT_FOUND"
     || error.code === "WHATSAPP_TEMPLATE_REQUIRED"
   )) return "SKIPPED";
+  // A known local rejection is not an uncertain carrier send.
+  if (error instanceof AppError && error.status < 500) return "FAILED";
   if (error instanceof ProviderRequestError && error.status >= 400 && error.status < 500) return "FAILED";
   return "UNKNOWN";
 }
