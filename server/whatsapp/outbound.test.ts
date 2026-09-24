@@ -226,6 +226,18 @@ describe("WhatsApp outbound service", () => {
     expect(await db.select().from(messages)).toHaveLength(0);
   });
 
+  it("treats unavailable Meta approval reads as a definite never-sent suppression", async () => {
+    const service = createWhatsAppOutboundService({
+      resolveRuntime: async () => runtime,
+      getApprovedTemplate: async () => { throw new Error("Meta catalog is offline"); },
+    });
+    await expect(service.sendTemplate(workspaceId, conversationId, {
+      senderType: "SYSTEM", templateName: "appointment_reminder", languageCode: "en_US",
+    })).rejects.toMatchObject({ code: "WHATSAPP_TEMPLATE_APPROVAL_UNVERIFIED" });
+    expect(provider.sendTemplate).not.toHaveBeenCalled();
+    expect(await db.select().from(messages)).toHaveLength(0);
+  });
+
   it("requires distinct marketing opt-in and prevents a category swap", async () => {
     const [conversation] = await db.select({ contactId: conversations.contactId })
       .from(conversations).where(eq(conversations.id, conversationId));
