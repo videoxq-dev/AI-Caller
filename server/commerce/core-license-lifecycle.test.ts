@@ -3,8 +3,9 @@ import pg from "pg";
 import { afterAll, afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { and, eq } from "drizzle-orm";
 import { closeDatabase, db } from "@/db";
-import { commerceEvents, licenses, memberships, user, workspaceEntitlements, workspaces } from "@/db/schema";
+import { commerceEvents, creditLedger, creditWallets, licenses, memberships, user, workspaceEntitlements, workspaces } from "@/db/schema";
 import { resetEnvForTests } from "@/server/env";
+import { debitCredits } from "@/server/credits/service";
 import { processCommerceEvent } from "./service";
 import type { NormalizedPurchaseEvent } from "./types";
 
@@ -58,6 +59,75 @@ describe("Core purchase lifecycle", () => {
 
   afterAll(async () => {
     await closeDatabase();
+  });
+
+  it("reverses only the refunded receipt's promotional grant after usage, once", async () => {
+    const receipt = "credit-refund-spent";
+    const first = await processCommerceEvent(purchaseEvent("SALE", receipt));
+    expect(first.duplicate).toBe(false);
+    const licenseId = (first.result as { licenseId: string }).licenseId;
+    const [grant] = await db.select().from(creditLedger).where(and(
+      eq(creditLedger.workspaceId, workspaceId),
+      eq(creditLedger.type, "GRANT"),
+      eq(creditLedger.referenceId, licenseId),
+    ));
+    expect(grant.amount).toBeGreaterThan(7);
+
+    await debitCredits(workspaceId, 7, {
+      reason: "Delivered hosted AI",
+      referenceType: "ORCHESTRATOR_CALL",
+      referenceId: "core-credit-refund-spent",
+    });
+    await processCommerceEvent(purchaseEvent("RFND", receipt));
+    const [wallet] = await db.select().from(creditWallets).where(eq(creditWallets.workspaceId, workspaceId));
+    expect(wallet.balance).toBe(-7);
+    await processCommerceEvent(purchaseEvent("CGBK", receipt));
+    expect((await db.select().from(creditWallets).where(eq(creditWallets.workspaceId, workspaceId)))[0].balance)
+      .toBe(-7);
+    const reversed = await db.select().from(creditLedger).where(and(
+      eq(creditLedger.workspaceId, workspaceId),
+      eq(creditLedger.referenceType, "LICENSE_GRANT_REVERSAL"),
+      eq(creditLedger.referenceId, licenseId),
+    ));
+    expect(reversed).toHaveLength(1);
+    expect(reversed[0]).toMatchObject({ type: "ADJUSTMENT", amount: -grant.amount });
+    const delayed = await processCommerceEvent(purchaseEvent("SALE", receipt));
+    expect(delayed).toMatchObject({ result: { ignored: true, reason: "REVOKED_PURCHASE" } });
+    expect((await db.select().from(creditWallets).where(eq(creditWallets.workspaceId, workspaceId)))[0].balance)
+      .toBe(-7);
+  });
+
+  it("leaves a separate paid Core grant intact when another receipt is refunded", async () => {
+    const first = await processCommerceEvent(purchaseEvent("SALE", "refunded-license-a"));
+    const second = await processCommerceEvent(purchaseEvent("SALE", "active-license-b"));
+    const eachGrant = (first.result as { balance: number }).balance;
+    expect((second.result as { balance: number }).balance).toBe(eachGrant * 2);
+    await processCommerceEvent(purchaseEvent("RFND", "refunded-license-a"));
+
+    expect((await db.select().from(creditWallets).where(eq(creditWallets.workspaceId, workspaceId)))[0].balance)
+      .toBe(eachGrant);
+    expect((await db.select().from(workspaces).where(eq(workspaces.id, workspaceId)))[0].status)
+      .toBe("ACTIVE");
+    const grants = await db.select().from(creditLedger).where(and(
+      eq(creditLedger.workspaceId, workspaceId), eq(creditLedger.type, "GRANT"),
+    ));
+    expect(grants).toHaveLength(2);
+  });
+
+  it("retains promotional credits on rebill cancellation and never double-grants on uncancellation", async () => {
+    const receipt = "rebill-credit-retained";
+    const first = await processCommerceEvent(purchaseEvent("SALE", receipt));
+    const original = (first.result as { balance: number }).balance;
+    await processCommerceEvent(purchaseEvent("CANCEL-REBILL", receipt));
+    expect((await db.select().from(creditWallets).where(eq(creditWallets.workspaceId, workspaceId)))[0].balance)
+      .toBe(original);
+    await processCommerceEvent(purchaseEvent("UNCANCEL-REBILL", receipt));
+    expect((await db.select().from(creditWallets).where(eq(creditWallets.workspaceId, workspaceId)))[0].balance)
+      .toBe(original);
+    expect(await db.select().from(creditLedger).where(and(
+      eq(creditLedger.workspaceId, workspaceId),
+      eq(creditLedger.referenceType, "LICENSE_GRANT_REVERSAL"),
+    ))).toHaveLength(0);
   });
 
   it("keeps an active business open when one of two valid Core receipts is refunded", async () => {
