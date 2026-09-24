@@ -138,6 +138,25 @@ async function activate(event: NormalizedPurchaseEvent) {
 
   // A concurrent IPN with the same receipt must not move access or credit grants
   // to a second account, even if both events raced through the initial lookup.
+  if (!license) {
+    // A refund can win between the initial ACTIVE read and this guarded
+    // upsert. Treat a matching, now-revoked receipt as a stale billing event,
+    // not as a different account trying to claim this receipt.
+    const [current] = await db.select({
+      workspaceId: licenses.workspaceId,
+      purchaserUserId: licenses.purchaserUserId,
+      status: licenses.status,
+    }).from(licenses).where(and(
+      eq(licenses.source, "JVZOO"),
+      eq(licenses.externalPurchaseId, event.externalPurchaseId),
+      eq(licenses.productCode, "CORE"),
+    )).limit(1);
+    if (current?.workspaceId === provisioned.workspace.workspaceId
+      && current.purchaserUserId === provisioned.user.id
+      && current.status !== "ACTIVE") {
+      return { ignored: true as const, reason: "REVOKED_PURCHASE" };
+    }
+  }
   if (!license || license.workspaceId !== provisioned.workspace.workspaceId || license.purchaserUserId !== provisioned.user.id) {
     throw new AppError("PURCHASE_OWNERSHIP_CONFLICT", "This receipt is associated with another purchaser or needs ownership reconciliation.", 409);
   }
