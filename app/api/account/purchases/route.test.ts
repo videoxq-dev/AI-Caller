@@ -20,7 +20,7 @@ describe("authenticated funnel purchase summary", () => {
       user: { id: "buyer-1", email: "buyer@example.com" },
     } as Awaited<ReturnType<typeof auth.api.getSession>>);
     vi.mocked(getFunnelAccountSummary).mockResolvedValue({
-      activeProducts: ["CORE"], businessLimit: 1,
+      activeProducts: ["CORE"], businessLimit: 1, agencyClientLimit: null,
       licenses: [
         { id: "core-license", workspaceId: "buyer-business", productCode: "CORE", status: "ACTIVE", purchasedAt: new Date("2026-09-01T10:00:00Z") },
         { id: "unlimited-license", workspaceId: "buyer-business", productCode: "UNLIMITED", status: "REFUNDED", purchasedAt: new Date("2026-09-02T10:00:00Z") },
