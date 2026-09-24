@@ -13,3 +13,7 @@
 
 /* Phase 4 Home: readable list and starter text at desktop and mobile widths. */
 .customAutomationHeader h2{font-size:16px}.customAutomationHeader span{font-size:12px}.createAutomationButton{font-size:13px}.customAutomationNameRow strong{font-size:14px}.customAutomationCopy small{font-size:12px}.customAutomationStatus{font-size:11px}.customAutomationRuns{font-size:12px}.starterDialogHeader h2{font-size:19px}.starterGrid strong{font-size:14px}.starterGrid span{font-size:12px}.customAutomationMore{font-size:13px}
+
+.performanceAutomationGate{padding:20px;border:1px solid #d9e5f3;border-radius:11px;background:linear-gradient(180deg,#fff,#f8fbff);box-shadow:0 8px 24px rgba(38,60,88,.035)}
+.performanceAutomationGate strong{display:block;color:#20334d;font-size:14px}
+.performanceAutomationGate p{max-width:620px;margin:6px 0 0;color:#6b7d93;font-size:11px;line-height:1.55}
