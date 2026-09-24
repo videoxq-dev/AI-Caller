@@ -1,7 +1,7 @@
 import { betterAuth } from "better-auth";
 import { drizzleAdapter } from "better-auth/adapters/drizzle";
 import { db } from "@/db";
-import { authSchema, licenses } from "@/db/schema";
+import { authSchema } from "@/db/schema";
 import { getEnv } from "@/server/env";
 import { isGuardedE2EFixtureMode } from "@/server/e2e-mode";
 import { enqueueJob } from "@/server/jobs";
@@ -42,27 +42,11 @@ export const auth = betterAuth({
     user: {
       create: {
         after: async (createdUser) => {
-          const workspace = await ensureDefaultWorkspace({
+          await ensureDefaultWorkspace({
             id: createdUser.id,
             name: createdUser.name,
             email: createdUser.email,
           });
-
-          // Browser acceptance runs need commercial entitlements to exercise
-          // already-shipped gated features. Keep this fixture strictly inside
-          // guarded localhost CI; production signups never receive it.
-          if (isGuardedE2EFixtureMode()) {
-            await db.insert(licenses).values({
-              workspaceId: workspace.workspaceId,
-              purchaserUserId: createdUser.id,
-              source: "MANUAL",
-              externalPurchaseId: `e2e-performance-${createdUser.id}`,
-              productCode: "PERFORMANCE",
-              status: "ACTIVE",
-              purchasedAt: new Date(),
-              rawMetadata: { e2eFixture: true },
-            }).onConflictDoNothing();
-          }
         },
       },
     },
