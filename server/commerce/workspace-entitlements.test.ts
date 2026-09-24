@@ -136,6 +136,7 @@ describe("workspace external integration entitlements", () => {
     await grant(owner, workspaceId, "UNLIMITED");
     await expect(getWorkspaceIntegrationEntitlements(workspaceId)).resolves.toEqual({
       purchaserUserId: null,
+      unlimited: false,
       externalCalendar: false,
       agencyByop: false,
     });
