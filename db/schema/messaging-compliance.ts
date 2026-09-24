@@ -59,3 +59,35 @@ export const smsRegistrations = pgTable("sms_registrations", {
   uniqueIndex("sms_registrations_number_uq").on(table.phoneNumberId),
   index("sms_registrations_reconcile_idx").on(table.status, table.checkedAt),
 ]);
+
+/** WhatsApp permissions are channel-specific: SMS consent never authorizes Meta templates. */
+export const whatsappConsents = pgTable("whatsapp_consents", {
+  id: uuid("id").defaultRandom().primaryKey(),
+  workspaceId: uuid("workspace_id").notNull().references(() => workspaces.id, { onDelete: "cascade" }),
+  contactId: uuid("contact_id").notNull().references(() => contacts.id, { onDelete: "cascade" }),
+  waId: text("wa_id").notNull(),
+  category: text("category").$type<"UTILITY" | "MARKETING">().notNull(),
+  status: text("status").$type<"OPTED_IN" | "OPTED_OUT">().notNull(),
+  source: text("source").notNull(),
+  sourceReference: text("source_reference"),
+  consentStatement: text("consent_statement"),
+  updatedAt: timestamp("updated_at", { withTimezone: true, mode: "date" }).defaultNow().notNull(),
+}, table => [
+  uniqueIndex("whatsapp_consents_contact_wa_category_uq").on(table.workspaceId, table.contactId, table.waId, table.category),
+  index("whatsapp_consents_destination_idx").on(table.workspaceId, table.waId, table.category),
+]);
+
+export const whatsappConsentEvents = pgTable("whatsapp_consent_events", {
+  id: uuid("id").defaultRandom().primaryKey(),
+  workspaceId: uuid("workspace_id").notNull().references(() => workspaces.id, { onDelete: "cascade" }),
+  contactId: uuid("contact_id").notNull().references(() => contacts.id, { onDelete: "cascade" }),
+  waId: text("wa_id").notNull(),
+  category: text("category").$type<"UTILITY" | "MARKETING">().notNull(),
+  status: text("status").$type<"OPTED_IN" | "OPTED_OUT">().notNull(),
+  source: text("source").notNull(),
+  sourceReference: text("source_reference"),
+  consentStatement: text("consent_statement"),
+  occurredAt: timestamp("occurred_at", { withTimezone: true, mode: "date" }).defaultNow().notNull(),
+}, table => [
+  index("whatsapp_consent_events_contact_idx").on(table.workspaceId, table.contactId, table.occurredAt),
+]);
