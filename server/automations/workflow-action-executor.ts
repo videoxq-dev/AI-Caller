@@ -663,6 +663,11 @@ async function executeCustomerWhatsApp(input: {
         templateName: input.action.templateName,
         languageCode: input.action.languageCode,
         expectedCategory: input.action.approvedCategory,
+        beforeDispatch: async () => {
+          const current = await appointmentSmsStaleness(input.workspaceId, input.event);
+          if (current) throw new AppError(current,
+            "Appointment changed before WhatsApp provider dispatch.", 409);
+        },
         components: parameters.length
           ? [{ type: "body", parameters: parameters.map(value => ({ type: "text", text: value })) }]
           : undefined,
@@ -682,13 +687,13 @@ async function executeCustomerWhatsApp(input: {
     });
     return "COMPLETED" as const;
   } catch (error) {
-    const suppress = error instanceof AppError && [
+    const suppress = error instanceof AppError && (error.code.startsWith("APPOINTMENT_") || [
       "WHATSAPP_IDENTITY_NOT_FOUND", "WHATSAPP_CONSENT_REQUIRED",
       "WHATSAPP_TEMPLATE_NOT_APPROVED", "WHATSAPP_TEMPLATE_UNSUPPORTED",
       "WHATSAPP_TEMPLATE_APPROVAL_UNVERIFIED",
       "WHATSAPP_CONSENT_UNVERIFIED", "WHATSAPP_NOT_CONNECTED",
       "WHATSAPP_TEMPLATE_VARIABLE_MISSING", "WHATSAPP_TEMPLATE_VARIABLE_MISMATCH",
-    ].includes(error.code);
+    ].includes(error.code));
     const status = suppress ? "SKIPPED" as const
       : error instanceof AppError && error.status < 500 ? "FAILED" as const
       : error instanceof ProviderRequestError && error.status < 500 ? "FAILED" as const
