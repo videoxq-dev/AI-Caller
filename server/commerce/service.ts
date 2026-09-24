@@ -12,6 +12,7 @@ import { auth } from "@/server/auth";
 import { ensureDefaultWorkspace } from "@/server/auth/workspace-repository";
 import { grantStarterCredits } from "@/server/credits/service";
 import { getEnv } from "@/server/env";
+import { AppError } from "@/server/http/errors";
 import { enqueueJob } from "@/server/jobs";
 import { COMMERCE_WELCOME_EMAIL } from "@/server/jobs/queues";
 import type { NormalizedPurchaseEvent } from "./types";
@@ -133,6 +134,14 @@ async function revoke(event: NormalizedPurchaseEvent) {
 }
 
 export async function processCommerceEvent(event: NormalizedPurchaseEvent) {
+  const sku = resolveFunnelProductId(event.productId);
+  if (sku && sku !== "CORE") {
+    // Never acknowledge an OTO purchase as processed while its provisioning
+    // is unavailable. Do this before recording the event so provider retries
+    // cannot be consumed as irrevocable "IGNORED" events.
+    throw new AppError("FUNNEL_OFFER_NOT_READY", "This funnel offer is not yet enabled for purchase provisioning.", 503);
+  }
+
   const [stored] = await db
     .insert(commerceEvents)
     .values({
