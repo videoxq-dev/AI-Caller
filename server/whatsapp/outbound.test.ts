@@ -226,6 +226,17 @@ describe("WhatsApp outbound service", () => {
     expect(await db.select().from(messages)).toHaveLength(0);
   });
 
+  it("does not mistake a disconnected WhatsApp integration for uncertain delivery", async () => {
+    const service = createWhatsAppOutboundService({
+      resolveRuntime: async () => { throw new Error("Disconnected"); },
+    });
+    await expect(service.sendTemplate(workspaceId, conversationId, {
+      senderType: "SYSTEM", templateName: "appointment_reminder", languageCode: "en_US",
+    })).rejects.toMatchObject({ code: "WHATSAPP_NOT_CONNECTED" });
+    expect(provider.sendTemplate).not.toHaveBeenCalled();
+    expect(await db.select().from(messages)).toHaveLength(0);
+  });
+
   it("treats unavailable Meta approval reads as a definite never-sent suppression", async () => {
     const service = createWhatsAppOutboundService({
       resolveRuntime: async () => runtime,
