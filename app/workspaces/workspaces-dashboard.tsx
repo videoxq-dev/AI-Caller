@@ -7,7 +7,7 @@ type AgencyWorkspace = {
   workspaceId: string;
   workspaceName: string;
   workspaceStatus: "ACTIVE" | "SUSPENDED";
-  role: "OWNER";
+  kind: "PRIMARY" | "ADDITIONAL";
 };
 
 type AgencyCapacity = {
