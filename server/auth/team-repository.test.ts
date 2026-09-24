@@ -218,6 +218,34 @@ describe("workspace team invitations", () => {
     await revokeWorkspaceInvitation(workspaceId, first.invitation.id, "OWNER");
   });
 
+  it("does not let an ordinary Admin revoke a pending client-owner invitation", async () => {
+    await db.insert(workspaceCommercialOwners).values({
+      workspaceId,
+      purchaserUserId: ownerId,
+      kind: "ADDITIONAL",
+    });
+    await db.insert(licenses).values({
+      workspaceId,
+      purchaserUserId: ownerId,
+      source: "MANUAL",
+      externalPurchaseId: "agency-protected-client-owner-invite",
+      productCode: "AGENCY_50",
+      status: "ACTIVE",
+      purchasedAt: new Date(),
+    });
+    const created = await createWorkspaceInvitation({
+      workspaceId,
+      invitedByUserId: ownerId,
+      email: "protected-client-owner@example.com",
+      role: "OWNER",
+    });
+
+    await expect(revokeWorkspaceInvitation(workspaceId, created.invitation.id, "ADMIN"))
+      .rejects.toMatchObject({ code: "FORBIDDEN_ROLE_ASSIGNMENT", status: 403 });
+    await expect(revokeWorkspaceInvitation(workspaceId, created.invitation.id, "OWNER"))
+      .resolves.toMatchObject({ id: created.invitation.id });
+  });
+
   it("rechecks active Agency entitlement before a client owner accepts", async () => {
     await db.insert(workspaceCommercialOwners).values({
       workspaceId,
