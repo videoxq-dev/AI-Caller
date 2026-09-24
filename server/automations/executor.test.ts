@@ -12,6 +12,7 @@ import {
   conversationHandlingEvents,
   conversations,
   leads,
+  licenses,
   memberships,
   messages,
   notifications,
@@ -56,6 +57,15 @@ describe("automation executor safety", () => {
       { workspaceId, userId: ownerId, role: "OWNER" },
       { workspaceId, userId: staffId, role: "STAFF" },
     ]);
+    await db.insert(licenses).values({
+      workspaceId,
+      purchaserUserId: ownerId,
+      source: "MANUAL",
+      externalPurchaseId: "executor-performance",
+      productCode: "PERFORMANCE",
+      status: "ACTIVE",
+      purchasedAt: new Date(),
+    });
   });
 
   afterAll(async () => {
@@ -80,6 +90,39 @@ describe("automation executor safety", () => {
     expect(deliveryFailureStatus(
       new AppError("HUMAN_TAKEOVER_REQUIRED", "Take over the conversation.", 409),
     )).toBe("FAILED");
+  });
+
+  it("skips an already queued custom workflow if Performance is revoked before execution", async () => {
+    const definition = await createWorkflowDraft(workspaceId, "Queued custom workflow", {
+      trigger: "LEAD_QUALIFIED",
+      conditions: [],
+      actions: [{ type: "NOTIFY_STAFF", title: "Lead ready", message: "Contact the customer." }],
+    });
+    const version = await publishWorkflow(workspaceId, definition.id);
+    const [event] = await db.insert(automationEvents).values({
+      workspaceId,
+      type: "LEAD_QUALIFIED",
+      aggregateType: "LEAD",
+      aggregateId: "queued-before-refund",
+      payload: { qualificationScore: 90 },
+    }).returning();
+    const run = await createWorkflowRun({
+      workspaceId,
+      eventId: event.id,
+      workflowVersionId: version.id,
+      actions: version.snapshot.actions,
+    });
+    if (!run) throw new Error("Expected custom workflow run.");
+
+    await db.update(licenses).set({ status: "REFUNDED" }).where(eq(licenses.workspaceId, workspaceId));
+    await expect(executeAutomationRun(workspaceId, run.id)).resolves.toMatchObject({
+      claimed: true,
+      status: "SKIPPED",
+    });
+
+    const [stored] = await db.select().from(automationRuns);
+    expect(stored).toMatchObject({ status: "SKIPPED", metadata: { reason: "PERFORMANCE_REQUIRED" } });
+    expect(await db.select().from(notifications)).toHaveLength(0);
   });
 
   it("fails a deterministic invalid assignee instead of retrying forever", async () => {
