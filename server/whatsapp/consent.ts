@@ -1,4 +1,4 @@
-import { and, desc, eq } from "drizzle-orm";
+import { and, desc, eq, or } from "drizzle-orm";
 import { db } from "@/db";
 import { contactIdentities, contacts, whatsappConsentEvents, whatsappConsents } from "@/db/schema";
 import { AppError } from "@/server/http/errors";
@@ -7,10 +7,13 @@ export type WhatsAppCategory = "UTILITY" | "MARKETING";
 export type WhatsAppConsentStatus = "OPTED_IN" | "OPTED_OUT" | "UNKNOWN";
 
 export function validWhatsAppId(value: string) {
-  if (!/^\d{8,15}$/.test(value)) {
+  // Legacy contact identities may store E.164 with '+' whereas Meta webhooks
+  // supply digits. Both spellings refer to the same WhatsApp destination.
+  const normalized = value.startsWith("+") ? value.slice(1) : value;
+  if (!/^\d{8,15}$/.test(normalized)) {
     throw new AppError("WHATSAPP_ID_INVALID", "A valid WhatsApp recipient identity is required.", 422);
   }
-  return value;
+  return normalized;
 }
 
 export function whatsappPreferenceKeyword(text: string): "STOP" | "START" | null {
@@ -53,7 +56,7 @@ async function writeWhatsAppConsents(
       .where(and(eq(contactIdentities.workspaceId, input.workspaceId),
         eq(contactIdentities.contactId, input.contactId),
         eq(contactIdentities.channel, "WHATSAPP"),
-        eq(contactIdentities.externalId, waId))).limit(1);
+        or(eq(contactIdentities.externalId, waId), eq(contactIdentities.externalId, `+${waId}`)))).limit(1);
     if (!identity) throw new AppError("WHATSAPP_IDENTITY_NOT_FOUND",
       "WhatsApp permission requires this contact's verified WhatsApp identity.", 409);
     const now = new Date();
