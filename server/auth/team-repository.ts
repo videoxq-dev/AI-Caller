@@ -9,6 +9,7 @@ import {
 import { AppError } from "@/server/http/errors";
 
 export type InviteRole = "OWNER" | "ADMIN" | "STAFF";
+export type SubUserRole = Exclude<InviteRole, "OWNER">;
 
 function normalizeEmail(email: string) {
   return email.trim().toLowerCase();
@@ -293,7 +294,7 @@ export async function acceptWorkspaceInvitation(input: { userId: string; userEma
   });
 }
 
-export async function updateWorkspaceMemberRole(workspaceId: string, userId: string, role: InviteRole) {
+export async function updateWorkspaceMemberRole(workspaceId: string, userId: string, role: SubUserRole) {
   const [member] = await db.update(memberships).set({ role })
     .where(and(eq(memberships.workspaceId, workspaceId), eq(memberships.userId, userId)))
     .returning({ userId: memberships.userId, role: memberships.role });
