@@ -93,43 +93,41 @@ export function KnowledgeImportEditor({ initialWebsite }: { initialWebsite: stri
         <p>Upgrade to Unlimited to import up to two knowledge sources per business.</p>
       ) : (
         <>
-          <p>Imported knowledge ({sourceCount} / {sourceLimit})</p>
-      <div className="importGrid">
-        <div className="websiteImport">
-          <label className="aiField">
-            <span>Website URL</span>
-            <input type="url" value={website} onChange={(event) => setWebsite(event.target.value)} placeholder="https://example.com" />
-          </label>
-          <button type="button" className="importButton" disabled={busy !== null || !website.trim()} onClick={() => void importWebsite()}>
-            <LinkIcon size={16} /> {busy === "website" ? "Importing..." : "Import from website"}
-          </button>
+        <div className="importGrid">
+          <div className="websiteImport">
+            <label className="aiField">
+              <span>Website URL</span>
+              <input type="url" value={website} onChange={(event) => setWebsite(event.target.value)} placeholder="https://example.com" />
+            </label>
+            <button type="button" className="importButton" disabled={busy !== null || !website.trim()} onClick={() => void importWebsite()}>
+              <LinkIcon size={16} /> {busy === "website" ? "Importing..." : "Import from website"}
+            </button>
+          </div>
+          <div className="fileUploadBlock">
+            <strong>Upload files</strong>
+            <label className="uploadDropzone">
+              <FileIcon size={20} />
+              <span>TXT or MD · max 256 KB</span>
+              <span className="chooseFiles">{busy === "file" ? "Uploading..." : sourceCount >= 2 ? "Two-source limit reached" : "Choose file"}</span>
+              <input
+                type="file"
+                accept=".txt,.md,text/plain,text/markdown"
+                disabled={busy !== null || sourceCount >= 2}
+                onChange={(event) => {
+                  const input = event.currentTarget;
+                  const file = input.files?.[0];
+                  if (file) void uploadFile(file).finally(() => { input.value = ""; });
+                }}
+              />
+            </label>
+          </div>
         </div>
-        <div className="fileUploadBlock">
-          <strong>Upload files</strong>
-          <label className="uploadDropzone">
-            <FileIcon size={20} />
-            <span>TXT or MD · max 256 KB</span>
-            <span className="chooseFiles">{busy === "file" ? "Uploading..." : sourceCount >= 2 ? "Two-source limit reached" : "Choose file"}</span>
-            <input
-              type="file"
-              accept=".txt,.md,text/plain,text/markdown"
-              disabled={busy !== null || sourceCount >= 2}
-              onChange={(event) => {
-                const input = event.currentTarget;
-                const file = input.files?.[0];
-                if (file) void uploadFile(file).finally(() => { input.value = ""; });
-              }}
-            />
-          </label>
-        </div>
-      </div>
-
         </>
       )}
 
       {sources.length > 0 && (
         <div className="knowledgeSourceList">
-          <strong>Imported knowledge</strong>
+          <strong>Imported knowledge ({sourceCount} / {sourceLimit ?? 0})</strong>
           {sources.map((source) => (
             <div className="knowledgeSourceRow" key={source.id}>
               <span className="knowledgeSourceIcon">{source.kind === "WEBSITE" ? <LinkIcon size={14} /> : <FileIcon size={14} />}</span>
