@@ -81,6 +81,20 @@ describe("Phase 6C automation SMS readiness", () => {
     });
   });
 
+  it("treats a suspended managed phone as unavailable even if its carrier campaign is approved", async () => {
+    const id = await hosted("READY");
+    await db.insert(smsRegistrations).values({
+      workspaceId, phoneNumberId: id, numberType: "local", status: "READY",
+      approvedPolicy: { categories: ["TRANSACTIONAL"],
+        allowEmbeddedLinks: false, description: "Confirmations" },
+    });
+    await db.update(hostedPhoneNumbers).set({ status: "SUSPENDED" })
+      .where(eq(hostedPhoneNumbers.id, id));
+    expect(await smsAutomationReadiness(workspaceId)).toMatchObject({
+      status: "PHONE_SUSPENDED", categories: [],
+    });
+  });
+
   it("does not expose another workspace's approved registration", async () => {
     await hosted();
     const [number] = await db.insert(hostedPhoneNumbers).values({
