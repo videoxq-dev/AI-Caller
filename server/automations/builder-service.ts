@@ -6,6 +6,7 @@ import {
   workflowDefinitions,
   workflowVersions,
 } from "@/db/schema";
+import { requirePerformanceAutomationEntitlement } from "@/server/commerce/workspace-entitlements";
 import { AppError } from "@/server/http/errors";
 import { parseInput } from "@/server/http/validation";
 import { validateWorkflowActionsForPublication } from "./action-registry";
@@ -77,6 +78,7 @@ async function workflowRunCounts(workspaceId: string, definitionIds: string[]) {
 }
 
 export async function listBuilderWorkflows(workspaceId: string, offset = 0, limit = 50) {
+  await requirePerformanceAutomationEntitlement(workspaceId);
   if (!Number.isSafeInteger(offset) || offset < 0
     || !Number.isSafeInteger(limit) || limit < 1 || limit > 50) {
     throw new AppError("WORKFLOW_PAGE_INVALID", "Invalid automation page.", 400);
@@ -134,6 +136,7 @@ export async function listBuilderWorkflows(workspaceId: string, offset = 0, limi
 }
 
 export async function getBuilderWorkflow(workspaceId: string, definitionId: string) {
+  await requirePerformanceAutomationEntitlement(workspaceId);
   const [definition] = await db.select().from(workflowDefinitions).where(and(
     eq(workflowDefinitions.workspaceId, workspaceId),
     eq(workflowDefinitions.id, definitionId),
