@@ -4,6 +4,7 @@ import { closeDatabase, db } from "@/db";
 import {
   automationEvents,
   automationRuns,
+  licenses,
   memberships,
   user,
   workflowActionRuns,
@@ -44,6 +45,15 @@ describe("versioned deterministic workflows", () => {
     const [workspace] = await db.insert(workspaces).values({ name: "Workflow Test" }).returning();
     workspaceId = workspace.id;
     await db.insert(memberships).values({ workspaceId, userId: "workflow-owner", role: "OWNER" });
+    await db.insert(licenses).values({
+      workspaceId,
+      purchaserUserId: "workflow-owner",
+      source: "MANUAL",
+      externalPurchaseId: "workflow-performance",
+      productCode: "PERFORMANCE",
+      status: "ACTIVE",
+      purchasedAt: new Date(),
+    });
   });
 
   afterAll(async () => { await closeDatabase(); });
