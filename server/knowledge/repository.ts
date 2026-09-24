@@ -45,7 +45,7 @@ export async function getKnowledgeSourceUsage(workspaceId: string) {
 }
 
 export async function listKnowledgeSources(workspaceId: string, limit = 20, offset = 0) {
-  if (!Number.isSafeInteger(limit) || limit < 1 || limit > LIST_PAGE_LIMIT
+  if (!Number.isSafeInteger(limit) || limit < 1
     || !Number.isSafeInteger(offset) || offset < 0) {
     throw new AppError("KNOWLEDGE_PAGE_INVALID", "Invalid imported knowledge page.", 400);
   }
@@ -60,7 +60,7 @@ export async function listKnowledgeSources(workspaceId: string, limit = 20, offs
   }).from(knowledgeSources)
     .where(eq(knowledgeSources.workspaceId, workspaceId))
     .orderBy(desc(knowledgeSources.updatedAt), desc(knowledgeSources.id))
-    .offset(offset).limit(limit);
+    .offset(offset).limit(Math.min(limit, LIST_PAGE_LIMIT));
 }
 
 export async function saveKnowledgeSource(
