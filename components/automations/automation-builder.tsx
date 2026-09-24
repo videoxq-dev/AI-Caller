@@ -188,7 +188,7 @@ export function AutomationBuilder() {
     setError(null);
     // Meta's remote template catalog can take up to the provider timeout.
     // Loading it must not hold up editing unrelated SMS or staff workflows.
-    setWhatsappLoading(true);
+    setWhatsAppLoading(true);
     const whatsappResponse = fetch("/api/automations/whatsapp-templates", { cache: "no-store" })
       .catch(() => null);
     try {
@@ -235,7 +235,7 @@ export function AutomationBuilder() {
         setWhatsAppNext(response?.ok ? data?.nextCursor ?? null : null);
         setWhatsAppError(response?.ok ? null
           : data?.error?.message ?? "WhatsApp templates could not be loaded.");
-      }).finally(() => setWhatsappLoading(false));
+      }).finally(() => setWhatsAppLoading(false));
       setCanManage(Boolean(workflowData.canManage));
       setMembers(teamData?.members ?? []);
       setDirty(false);
