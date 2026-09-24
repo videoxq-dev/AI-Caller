@@ -97,6 +97,21 @@ describe("Unlimited receipt lifecycle (not connected to live ingress)", () => {
     expect(license.status).toBe("ACTIVE");
   });
 
+  it("can reconcile a signed refund after the buyer no longer owns the original business", async () => {
+    const receipt = "unlimited-buyer-left-business";
+    await reconcileUnlimitedReceipt(event("SALE", receipt));
+    await db.delete(memberships).where(and(
+      eq(memberships.workspaceId, workspaceId), eq(memberships.userId, buyerId),
+    ));
+    await expect(reconcileUnlimitedReceipt(event("BILL", receipt)))
+      .rejects.toMatchObject({ code: "PURCHASE_OWNERSHIP_CONFLICT", status: 409 });
+    await reconcileUnlimitedReceipt(event("RFND", receipt));
+    expect((await db.select().from(creditWallets).where(eq(creditWallets.workspaceId, workspaceId)))[0].balance)
+      .toBe(0);
+    const [upgrade] = await db.select().from(licenses).where(eq(licenses.externalPurchaseId, receipt));
+    expect(upgrade.status).toBe("REFUNDED");
+  });
+
   it("reverses only its bonus on refund after usage and leaves Core access untouched", async () => {
     const receipt = "unlimited-spent-refund";
     await reconcileUnlimitedReceipt(event("SALE", receipt));
