@@ -87,6 +87,9 @@ try {
   });
   assert(blockedCreate.status() === 403,
     `Custom workflow API was not Performance-gated: ${blockedCreate.status()} ${await blockedCreate.text()}`);
+  const blockedCatalog = await context.request.get(`${baseUrl}/api/automations/catalog`);
+  assert(blockedCatalog.status() === 403,
+    `Automation Builder catalog was not Performance-gated: ${blockedCatalog.status()} ${await blockedCatalog.text()}`);
 
   // The Automation Builder is a Performance entitlement. Grant the purchase
   // explicitly, then verify the same workspace gains the existing Builder.
