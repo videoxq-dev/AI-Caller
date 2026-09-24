@@ -12,6 +12,7 @@ await mkdir(outputDir, { recursive: true });
 const pool = new Pool({ connectionString: process.env.DATABASE_URL, max: 1 });
 const browser = await chromium.launch({ headless: true });
 const context = await browser.newContext({ viewport: { width: 1440, height: 960 } });
+let clientContext;
 const page = await context.newPage();
 const failures = [];
 page.on("pageerror", error => failures.push(`pageerror: ${error.message}`));
@@ -34,6 +35,8 @@ async function noOverflow(label) {
 const stamp = Date.now();
 const email = `agency-browser-${stamp}@example.com`;
 const password = "AgencyBrowserPass123!";
+const clientEmail = `agency-client-${stamp}@example.com`;
+const clientPassword = "AgencyClientPass123!";
 
 async function grant(userId, workspaceId, productCode) {
   await pool.query(
@@ -99,6 +102,66 @@ try {
   await page.getByText("2 / 50").waitFor();
   assert(await page.getByText("Agency Second Client").count() >= 1, "New client is missing from dashboard.");
   assert(await page.getByText("3 total").count() === 1, "Original business not counted in total.");
+
+  const agencyInventory = await (await context.request.get(`${baseUrl}/api/agency/workspaces`)).json();
+  const clientWorkspace = agencyInventory.workspaces.find((workspace) => workspace.workspaceName === "Agency Second Client");
+  assert(clientWorkspace, "Could not resolve the newly created Agency client workspace.");
+
+  const clientRow = page.locator(".agencyWorkspaceRow").filter({ hasText: "Agency Second Client" });
+  await clientRow.getByRole("button", { name: "Manage access" }).click();
+  await page.getByRole("heading", { name: "Agency Second Client", exact: true }).last().waitFor();
+  await page.getByText("0 / 0", { exact: true }).waitFor();
+  await page.getByLabel("Invite someone").fill(clientEmail);
+  await page.getByRole("combobox", { name: "Access role" }).selectOption("CLIENT_OWNER");
+  const inviteResponsePromise = page.waitForResponse(response =>
+    response.url().endsWith(`/api/agency/workspaces/${clientWorkspace.workspaceId}/access/invitations`)
+      && response.request().method() === "POST",
+  );
+  await page.getByRole("button", { name: "Send invite" }).click();
+  const inviteResponse = await inviteResponsePromise;
+  assert(inviteResponse.status() === 201, `Client-owner invitation failed: ${await inviteResponse.text()}`);
+  const invitePayload = await inviteResponse.json();
+  assert(invitePayload.e2eToken, "Agency E2E client-owner invitation did not expose its guarded token.");
+  await page.getByText("Client owner", { exact: true }).last().waitFor();
+
+  clientContext = await browser.newContext();
+  const clientSignup = await clientContext.request.post(`${baseUrl}/api/auth/sign-up/email`, {
+    data: { name: "Agency Client Owner", email: clientEmail, password: clientPassword },
+  });
+  assert(clientSignup.ok(), `Client signup failed: ${await clientSignup.text()}`);
+  const accepted = await clientContext.request.post(`${baseUrl}/api/team/invitations/accept`, {
+    data: { token: invitePayload.e2eToken },
+  });
+  assert(accepted.ok(), `Client-owner invitation acceptance failed: ${await accepted.text()}`);
+  const acceptedPayload = await accepted.json();
+  assert(acceptedPayload.membership.workspaceId === clientWorkspace.workspaceId
+    && acceptedPayload.membership.role === "OWNER",
+    "Client was not granted operational OWNER access to the intended workspace.");
+
+  const clientWorkspaces = await clientContext.request.get(`${baseUrl}/api/workspaces`);
+  assert(clientWorkspaces.ok(), `Client workspace list failed: ${await clientWorkspaces.text()}`);
+  const clientWorkspaceData = await clientWorkspaces.json();
+  assert(clientWorkspaceData.workspaces.some((workspace) =>
+    workspace.workspaceId === clientWorkspace.workspaceId && workspace.role === "OWNER"),
+    "Client owner cannot see their assigned workspace.");
+  assert(!clientWorkspaceData.workspaces.some((workspace) => workspace.workspaceId === originalId),
+    "Client owner gained sibling/original Agency workspace membership.");
+
+  const siblingSwitch = await clientContext.request.post(`${baseUrl}/api/workspaces`, {
+    data: { workspaceId: originalId },
+  });
+  assert(siblingSwitch.status() === 404, "Client owner was able to switch into the Agency original workspace.");
+  assert((await clientContext.request.get(`${baseUrl}/api/agency/workspaces`)).status() === 403,
+    "Client owner gained Agency commercial dashboard access.");
+
+  const ownership = await pool.query(
+    `SELECT purchaser_user_id FROM workspace_commercial_owners WHERE workspace_id = $1`,
+    [clientWorkspace.workspaceId],
+  );
+  assert(ownership.rows[0]?.purchaser_user_id === userId,
+    "Delegating client OWNER access changed the workspace commercial owner.");
+
+  await page.getByRole("button", { name: "Close" }).click();
   await noOverflow("Agency desktop");
   await page.screenshot({ path: path.join(outputDir, "agency-desktop.png"), fullPage: true });
 
@@ -146,6 +209,7 @@ try {
   assert(failures.length === 0, `Browser errors: ${failures.join("; ")}`);
   console.log("Agency workspace browser acceptance passed.");
 } finally {
+  if (clientContext) await clientContext.close();
   await browser.close();
   await pool.end();
 }
