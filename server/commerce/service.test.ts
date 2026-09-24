@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { afterAll, afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterAll, afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { eq } from "drizzle-orm";
 import { db, closeDatabase } from "@/db";
 import { commerceEvents, licenses } from "@/db/schema";
@@ -9,7 +9,6 @@ import type { NormalizedPurchaseEvent } from "./types";
 
 const previousCore = process.env.JVZOO_CORE_PRODUCT_IDS;
 const previousUnlimited = process.env.JVZOO_UNLIMITED_PRODUCT_IDS;
-const previousNodeEnv = process.env.NODE_ENV;
 const testEventIds: string[] = [];
 
 function event(productId: string): NormalizedPurchaseEvent {
@@ -48,8 +47,7 @@ describe("funnel purchase ingress", () => {
     else process.env.JVZOO_CORE_PRODUCT_IDS = previousCore;
     if (previousUnlimited === undefined) delete process.env.JVZOO_UNLIMITED_PRODUCT_IDS;
     else process.env.JVZOO_UNLIMITED_PRODUCT_IDS = previousUnlimited;
-    if (previousNodeEnv === undefined) delete process.env.NODE_ENV;
-    else process.env.NODE_ENV = previousNodeEnv;
+    vi.unstubAllEnvs();
     resetEnvForTests();
   });
 
@@ -69,7 +67,7 @@ describe("funnel purchase ingress", () => {
   });
 
   it("retries an event that failed during misconfiguration without granting unintended Core access", async () => {
-    process.env.NODE_ENV = "production";
+    vi.stubEnv("NODE_ENV", "production");
     process.env.JVZOO_CORE_PRODUCT_IDS = "";
     resetEnvForTests();
     const purchase = event("unmapped-during-misconfiguration");
