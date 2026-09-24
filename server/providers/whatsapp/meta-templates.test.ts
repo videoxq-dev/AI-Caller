@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { createMetaTemplateClient, createWhatsAppTemplateSchema } from "./meta-templates";
+import { approvedWhatsAppParameterCount, createMetaTemplateClient, createWhatsAppTemplateSchema } from "./meta-templates";
 
 const options = { accessToken: "private-token", wabaId: "123456789", graphApiVersion: "v22.0" };
 const valid = {
@@ -16,6 +16,14 @@ function json(data: unknown, status = 200) {
 }
 
 describe("Meta WhatsApp template management", () => {
+  it("counts unique positional placeholders and rejects malformed body references", () => {
+    expect(approvedWhatsAppParameterCount("Hi {{1}}, welcome back {{1}}!")).toBe(1);
+    expect(approvedWhatsAppParameterCount("Hi {{1}}, see {{2}}.")).toBe(2);
+    expect(() => approvedWhatsAppParameterCount("Hi {{2}}")).toThrow();
+    expect(() => approvedWhatsAppParameterCount("Hi {{name}}")).toThrow();
+  });
+
+
   it("submits text and body examples to the authorized WABA, preserving Meta's pending status", async () => {
     const fetcher = vi.fn(async () => json({ id: "template-123", status: "PENDING", category: "UTILITY" }));
     const client = createMetaTemplateClient(options, fetcher as typeof fetch);
