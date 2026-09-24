@@ -11,7 +11,7 @@ import {
 } from "@/db/schema";
 import { auth } from "@/server/auth";
 import { createWorkspaceForUser, ensureDefaultWorkspace, getMembership, getPrimaryOwnedWorkspace } from "@/server/auth/workspace-repository";
-import { grantStarterCredits } from "@/server/credits/service";
+import { grantStarterCreditsInTx, reverseStarterCreditsInTx } from "@/server/credits/service";
 import { getEnv } from "@/server/env";
 import { AppError } from "@/server/http/errors";
 import { enqueueJob } from "@/server/jobs";
@@ -163,18 +163,19 @@ async function activate(event: NormalizedPurchaseEvent) {
   // Purchase and refund IPNs can overlap. Use the same per-business lock as
   // revocation and re-check the row after acquiring it: an earlier ACTIVE
   // upsert is not proof the receipt is still ACTIVE when access is written.
-  const canActivate = await db.transaction(async (tx) => {
+  const balance = await db.transaction(async (tx) => {
     await tx.execute(sql`select pg_advisory_xact_lock(hashtext(${`core-license:${license.workspaceId}`}))`);
     const [current] = await tx.select({ status: licenses.status }).from(licenses)
       .where(eq(licenses.id, license.id)).limit(1);
-    if (current?.status !== "ACTIVE") return false;
+    if (current?.status !== "ACTIVE") return null;
     await tx.update(workspaces).set({ status: "ACTIVE", updatedAt: new Date() })
       .where(eq(workspaces.id, license.workspaceId));
     await grantCoreEntitlements(license.workspaceId, tx);
-    return true;
+    // Hold the same Core lock until the credit grant is persisted, so a
+    // competing refund cannot reverse a grant that has not yet been written.
+    return grantStarterCreditsInTx(tx, license.workspaceId, license.id);
   });
-  if (!canActivate) return { ignored: true as const, reason: "REVOKED_PURCHASE" };
-  const balance = await grantStarterCredits(license.workspaceId, license.id);
+  if (balance === null) return { ignored: true as const, reason: "REVOKED_PURCHASE" };
 
   if (provisioned.created && provisioned.temporaryPassword) {
     await enqueueJob(COMMERCE_WELCOME_EMAIL, {
@@ -222,6 +223,11 @@ async function revoke(event: NormalizedPurchaseEvent) {
         : "CANCELLED";
     await tx.update(licenses).set({ status, rawMetadata: event.raw, updatedAt: new Date() })
       .where(eq(licenses.id, license.id));
+    // Only refund/chargeback actually reverses the paid Core promotion.
+    // Cancelling rebills keeps its existing grant, should it be restored.
+    if (event.eventType === "RFND" || event.eventType === "CGBK") {
+      await reverseStarterCreditsInTx(tx, license.workspaceId, license.id);
+    }
     const [stillActive] = await tx.select({ id: licenses.id }).from(licenses).where(and(
       eq(licenses.workspaceId, license.workspaceId),
       eq(licenses.productCode, "CORE"),
@@ -326,7 +332,10 @@ export async function activateManualCoreLicense(workspaceId: string) {
       set: { status: "ACTIVE", updatedAt: new Date() },
     })
     .returning();
-  await db.transaction((tx) => grantCoreEntitlements(workspaceId, tx));
-  const balance = await grantStarterCredits(workspaceId, license.id);
+  const balance = await db.transaction(async (tx) => {
+    await tx.execute(sql`select pg_advisory_xact_lock(hashtext(${`core-license:${workspaceId}`}))`);
+    await grantCoreEntitlements(workspaceId, tx);
+    return grantStarterCreditsInTx(tx, workspaceId, license.id);
+  });
   return { license, balance };
 }
