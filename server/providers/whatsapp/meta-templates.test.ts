@@ -117,6 +117,21 @@ describe("Meta WhatsApp template management", () => {
     expect(fetcher).toHaveBeenCalledTimes(4);
   });
 
+  it("rejects approved rich templates that need header or button components", async () => {
+    const fetcher = vi.fn(async () => json({ data: [{
+      id: "rich", name: "appointment_reminder", language: "en_US",
+      status: "APPROVED", category: "UTILITY",
+      components: [
+        { type: "HEADER", format: "IMAGE" },
+        { type: "BODY", text: "Appointment confirmed." },
+      ],
+    }] }));
+    const client = createMetaTemplateClient(options, fetcher as typeof fetch);
+    await expect(client.approved("appointment_reminder", "en_US"))
+      .rejects.toMatchObject({ code: "WHATSAPP_TEMPLATE_UNSUPPORTED" });
+    expect((await client.list()).items[0]).toMatchObject({ textOnly: false });
+  });
+
   it("does not authorize a stale PENDING template or a Meta read failure", async () => {
     const pending = createMetaTemplateClient(options, vi.fn(async () => json({
       data: [{ id: "t", name: "appointment_reminder", language: "en_US",
