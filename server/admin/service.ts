@@ -30,6 +30,7 @@ import {
   workspaces,
 } from "@/db/schema";
 import { auth } from "@/server/auth";
+import { getEffectiveWorkspaceSeatPlanInTransaction } from "@/server/billing/plans";
 import { getEnv } from "@/server/env";
 import { isGuardedE2EFixtureMode } from "@/server/e2e-mode";
 import { AppError } from "@/server/http/errors";
@@ -395,10 +396,12 @@ async function assignPlanInTx(
     pending: sql<number>`(select count(*)::int from workspace_invitations wi where wi.workspace_id = ${workspaceId} and wi.status = 'PENDING' and wi.expires_at > now())`,
   }).from(workspaces).where(eq(workspaces.id, workspaceId)).limit(1);
   const used = (seatUsage?.active ?? 0) + (seatUsage?.pending ?? 0);
-  if (used > target.subUserLimit) {
+  const commercial = await getEffectiveWorkspaceSeatPlanInTransaction(tx, workspaceId);
+  const effectiveLimit = Math.max(target.subUserLimit, commercial.commercialSeatPackage === "UNLIMITED" ? 5 : 0);
+  if (used > effectiveLimit) {
     throw new AppError("PLAN_DOWNGRADE_BLOCKED", "Remove team members or pending invitations before changing to this plan.", 409, {
       usedSeats: used,
-      subUserLimit: target.subUserLimit,
+      subUserLimit: effectiveLimit,
     });
   }
 
