@@ -149,7 +149,13 @@ export function createWhatsAppOutboundService(dependencies: OutboundDependencies
         throw new AppError("WHATSAPP_TEMPLATE_REQUIRED", "The 24-hour WhatsApp customer service window has closed. Send an approved template instead.", 409);
       }
 
-      const runtime = await dependencies.resolveRuntime(workspaceId);
+      let runtime: WhatsAppRuntime;
+      try {
+        runtime = await dependencies.resolveRuntime(workspaceId);
+      } catch {
+        throw new AppError("WHATSAPP_NOT_CONNECTED",
+          "Connect WhatsApp before sending a customer reply.", 409);
+      }
       const to = await destination(workspaceId, conversationId);
       const text = whatsappText(input.text);
       const category = classifySmsForPolicy(text, "TRANSACTIONAL") === "MARKETING"
