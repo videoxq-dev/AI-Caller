@@ -62,6 +62,8 @@ The founder's September 24 clarification locks Performance to the **existing Aut
 
 Core and Unlimited retain the built-in automation recipes. An active `PERFORMANCE` purchase is required to access the Automation Builder, create or edit custom workflows, publish/resume them, inspect their custom-workflow activity, and execute published custom workflows. Later OTO purchases such as Agency or Whitelabel do not implicitly grant Performance. If Performance is refunded or otherwise inactive, preserve custom workflow definitions and history but stop dispatching or executing them until Performance access is restored.
 
+**Frozen-feature guard — Phase 6C SMS:** Phase 6C SMS readiness and its acceptance behavior are concluded. Do not modify SMS runtime behavior, SMS workflow behavior, or the Phase 6C acceptance script while implementing unrelated funnel/entitlement work unless the founder explicitly reopens SMS scope. If a new cross-cutting entitlement causes a Phase 6C regression, fix the new entitlement or generic test scaffolding outside the SMS feature boundary; do not rewrite the concluded SMS workflow to accommodate the new work.
+
 ### F10–F11 — Agency
 
 F10: agency owner/client hierarchy, capacity SKUs, delegated team and client access, client provisioning and central dashboard. Non-calendar bring-your-own-provider (BYOP) integrations—such as customer-supplied AI, telephony or messaging provider credentials—are Agency-only. Unlimited external-calendar access is the explicit exception and must not be generalized into broader BYOP access. F11: cloning with safe secret exclusion, templates, unified agency reports and additional-capacity purchase behavior.
