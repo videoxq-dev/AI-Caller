@@ -51,7 +51,7 @@ export async function getWorkspacePlanInTransaction(tx: Tx, workspaceId: string)
   return { ...personal, source: "DEFAULT" };
 }
 
-async function getEffectiveWorkspaceSeatPlan(tx: Tx, workspaceId: string) {
+export async function getEffectiveWorkspaceSeatPlanInTransaction(tx: Tx, workspaceId: string) {
   const plan = await getWorkspacePlanInTransaction(tx, workspaceId);
   // Commercial entitlements belong to the buyer, not to STAFF members of
   // another business. Multiple OWNERs are ambiguous until account ownership
@@ -79,7 +79,7 @@ export async function getWorkspacePlan(workspaceId: string) {
 export async function getWorkspaceSeatUsage(workspaceId: string) {
   return db.transaction(async (tx) => {
     const now = new Date();
-    const { plan, commercialSeatPackage } = await getEffectiveWorkspaceSeatPlan(tx, workspaceId);
+    const { plan, commercialSeatPackage } = await getEffectiveWorkspaceSeatPlanInTransaction(tx, workspaceId);
     const [members, pending] = await Promise.all([
       activeSubUsers(tx, workspaceId),
       pendingInvitations(tx, workspaceId, now),
@@ -111,7 +111,7 @@ export async function assignWorkspacePlan(
       activeSubUsers(tx, workspaceId),
       pendingInvitations(tx, workspaceId, now),
     ]);
-    const commercial = await getEffectiveWorkspaceSeatPlan(tx, workspaceId);
+    const commercial = await getEffectiveWorkspaceSeatPlanInTransaction(tx, workspaceId);
     const effectiveTargetLimit = Math.max(target.subUserLimit, commercial.commercialSeatPackage === "UNLIMITED" ? 5 : 0);
     if (members + pending > effectiveTargetLimit) {
       throw new AppError(
@@ -179,14 +179,17 @@ export async function assertCanCreateWorkspaceInvitation(tx: Tx, workspaceId: st
   await lockPlanEntitlements(tx);
   await lockSeats(tx, workspaceId);
   const now = new Date();
-  const { plan } = await getEffectiveWorkspaceSeatPlan(tx, workspaceId);
+  const { plan, commercialSeatPackage } = await getEffectiveWorkspaceSeatPlanInTransaction(tx, workspaceId);
   if (!plan.active) throw new AppError("PLAN_INACTIVE", "This workspace plan is inactive.", 403);
 
   const [members, pending] = await Promise.all([
     activeSubUsers(tx, workspaceId),
     pendingInvitations(tx, workspaceId, now),
   ]);
-  if (members + pending >= plan.subUserLimit) throw seatLimitError(plan);
+  if (members + pending >= plan.subUserLimit) throw seatLimitError({
+    ...plan,
+    name: commercialSeatPackage === "UNLIMITED" ? "Unlimited" : plan.name,
+  });
   return { plan, members, pending };
 }
 
@@ -204,8 +207,11 @@ export async function assertCanAcceptWorkspaceInvitation(
     .limit(1);
   if (existing) return;
 
-  const plan = await getWorkspacePlanInTransaction(tx, workspaceId);
+  const { plan, commercialSeatPackage } = await getEffectiveWorkspaceSeatPlanInTransaction(tx, workspaceId);
   if (!plan.active) throw new AppError("PLAN_INACTIVE", "This workspace plan is inactive.", 403);
   const members = await activeSubUsers(tx, workspaceId);
-  if (members >= plan.subUserLimit) throw seatLimitError(plan);
+  if (members >= plan.subUserLimit) throw seatLimitError({
+    ...plan,
+    name: commercialSeatPackage === "UNLIMITED" ? "Unlimited" : plan.name,
+  });
 }
