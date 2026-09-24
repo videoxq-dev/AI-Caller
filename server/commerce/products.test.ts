@@ -52,10 +52,10 @@ describe("Assistlia commercial funnel product mapping", () => {
 
   it("records the approved funnel limits without confusing credits with unlimited usage", () => {
     expect(FUNNEL_PRODUCTS.find(({ code }) => code === "CORE")).toMatchObject({
-      businessLimit: 1, bonusCredits: 15_000,
+      businessLimit: 1, purchaseCredits: 15_000,
     });
     expect(FUNNEL_PRODUCTS.find(({ code }) => code === "UNLIMITED")).toMatchObject({
-      businessLimit: 10, bonusCredits: 15_000,
+      businessLimit: 10, purchaseCredits: 15_000,
     });
     expect(FUNNEL_PRODUCTS.filter(({ offer }) => offer === "AGENCY").map(({ businessLimit }) => businessLimit)).toEqual([50, 100]);
   });
