@@ -25,7 +25,7 @@ import {
   releaseProviderWebhookEventForRetry,
 } from "@/server/providers/webhooks/repository";
 import { resolveWhatsAppContact } from "./identity";
-import { recordWhatsAppConsent, whatsappPreferenceKeyword } from "./consent";
+import { recordWhatsAppKeywordConsent, whatsappPreferenceKeyword } from "./consent";
 import { sendWhatsAppConversationText } from "./outbound";
 import { updateWhatsAppDeliveryStatus } from "./repository";
 
@@ -234,16 +234,11 @@ export function createWhatsAppWebhookService(dependencies: WhatsAppServiceDepend
         if (preference) {
           // STOP suppresses both kinds of outbound WhatsApp messages. START
           // resumes service updates only; it never creates marketing consent.
-          const categories = preference === "STOP"
-            ? ["UTILITY", "MARKETING"] as const : ["UTILITY"] as const;
-          for (const category of categories) {
-            await recordWhatsAppConsent({
-              workspaceId: job.workspaceId, contactId: contact.id, waId: job.customerWaId,
-              category, status: preference === "STOP" ? "OPTED_OUT" : "OPTED_IN",
-              source: "INBOUND_WHATSAPP", sourceReference: job.externalMessageId,
-              consentStatement: job.text,
-            });
-          }
+          await recordWhatsAppKeywordConsent({
+            workspaceId: job.workspaceId, contactId: contact.id, waId: job.customerWaId,
+            keyword: preference, source: "INBOUND_WHATSAPP",
+            sourceReference: job.externalMessageId, consentStatement: job.text,
+          });
           await completeProviderWebhookEvent(job.workspaceId, job.webhookEventId);
           return { skipped: false as const, replied: false as const, consentUpdated: true as const };
         }
