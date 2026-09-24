@@ -67,7 +67,7 @@ type Catalog = {
 };
 type SmsReadiness = {
   status: "NOT_CONFIGURED" | "PROVIDER_DISCONNECTED" | "CARRIER_UNVERIFIED"
-    | "REGISTRATION_REQUIRED" | "IN_REVIEW" | "REJECTED" | "READY";
+    | "REGISTRATION_REQUIRED" | "IN_REVIEW" | "REJECTED" | "PHONE_SUSPENDED" | "READY";
   categories: Array<"TRANSACTIONAL" | "MARKETING">;
   message: string;
   setupUrl: string;
