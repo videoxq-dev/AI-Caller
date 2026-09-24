@@ -119,7 +119,7 @@ try {
   );
   await page.getByRole("button", { name: "Send invite" }).click();
   const inviteResponse = await inviteResponsePromise;
-  assert(inviteResponse.status() === 201, `Client-owner invitation failed: ${await inviteResponse.text()}`);
+  if (inviteResponse.status() !== 201) throw new Error(`Client-owner invitation failed: ${await inviteResponse.text()}`);
   const invitePayload = await inviteResponse.json();
   assert(invitePayload.e2eToken, "Agency E2E client-owner invitation did not expose its guarded token.");
   await page.getByText("Client owner", { exact: true }).last().waitFor();
@@ -132,14 +132,14 @@ try {
   const accepted = await clientContext.request.post(`${baseUrl}/api/team/invitations/accept`, {
     data: { token: invitePayload.e2eToken },
   });
-  assert(accepted.ok(), `Client-owner invitation acceptance failed: ${await accepted.text()}`);
+  if (!accepted.ok()) throw new Error(`Client-owner invitation acceptance failed: ${await accepted.text()}`);
   const acceptedPayload = await accepted.json();
   assert(acceptedPayload.membership.workspaceId === clientWorkspace.workspaceId
     && acceptedPayload.membership.role === "OWNER",
     "Client was not granted operational OWNER access to the intended workspace.");
 
   const clientWorkspaces = await clientContext.request.get(`${baseUrl}/api/workspaces`);
-  assert(clientWorkspaces.ok(), `Client workspace list failed: ${await clientWorkspaces.text()}`);
+  if (!clientWorkspaces.ok()) throw new Error(`Client workspace list failed: ${await clientWorkspaces.text()}`);
   const clientWorkspaceData = await clientWorkspaces.json();
   assert(clientWorkspaceData.workspaces.some((workspace) =>
     workspace.workspaceId === clientWorkspace.workspaceId && workspace.role === "OWNER"),
