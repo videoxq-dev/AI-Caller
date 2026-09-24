@@ -151,9 +151,21 @@ export async function processCommerceEvent(event: NormalizedPurchaseEvent) {
       status: "RECEIVED",
       payload: event.raw,
     })
-    .onConflictDoNothing()
+    .onConflictDoUpdate({
+      target: [commerceEvents.source, commerceEvents.externalEventId],
+      set: {
+        status: "RECEIVED",
+        eventType: event.eventType,
+        payload: event.raw,
+        error: null,
+        processedAt: null,
+      },
+      setWhere: eq(commerceEvents.status, "FAILED"),
+    })
     .returning();
 
+  // Only FAILED events are claimable again. PROCESSED, IGNORED and an
+  // in-flight RECEIVED event retain their idempotent duplicate behavior.
   if (!stored) return { duplicate: true as const };
 
   try {
