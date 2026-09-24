@@ -9,6 +9,7 @@ import {
 } from "@/db/schema";
 import { getBusinessSetup, markSetupStep } from "@/server/domain/onboarding/repository";
 import { AppError } from "@/server/http/errors";
+import { getWorkspaceIntegrationEntitlements } from "@/server/commerce/workspace-entitlements";
 import {
   decryptIntegrationCredentials,
   encryptIntegrationCredentials,
@@ -273,8 +274,12 @@ export async function getCalendarSetup(workspaceId: string) {
 }
 
 export async function saveCalendarSetup(workspaceId: string, input: CalendarSetupInput) {
-  const connected = await getPrivateIntegration(workspaceId, input.provider);
-  if (input.completeStep && connected?.status !== "CONNECTED") {
+  const [connected, entitlements] = await Promise.all([
+    getPrivateIntegration(workspaceId, input.provider),
+    getWorkspaceIntegrationEntitlements(workspaceId),
+  ]);
+  const externalCalendarActive = entitlements.externalCalendar && connected?.status === "CONNECTED";
+  if (input.completeStep && !externalCalendarActive) {
     const business = await getBusinessSetup(workspaceId);
     if (!business.profile || !business.hours.some(day => day.enabled)) {
       throw new AppError("BUSINESS_HOURS_NOT_CONFIGURED",
@@ -297,7 +302,7 @@ export async function saveCalendarSetup(workspaceId: string, input: CalendarSetu
   };
   const now = new Date();
   await db.insert(calendarSetupSettings).values({ workspaceId, settings, updatedAt: now }).onConflictDoUpdate({ target: calendarSetupSettings.workspaceId, set: { settings, updatedAt: now } });
-  if (connected?.status === "CONNECTED") {
+  if (externalCalendarActive) {
     await bindCapability(workspaceId, "CALENDAR", "BYOP", input.provider);
   } else {
     // Native scheduling is authoritative when no selected provider is connected.
