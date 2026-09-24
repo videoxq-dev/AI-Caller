@@ -16,7 +16,13 @@ await client.connect();
 try {
   if (mode === "remove") {
     await client.query(`
-      DROP TRIGGER IF EXISTS ci_e2e_entitlement_grant ON memberships;
+      DO $
+      BEGIN
+        IF to_regclass('public.memberships') IS NOT NULL THEN
+          DROP TRIGGER IF EXISTS ci_e2e_entitlement_grant ON memberships;
+        END IF;
+      END
+      $;
       DROP FUNCTION IF EXISTS ci_e2e_entitlement_grant();
     `);
     process.exitCode = 0;
