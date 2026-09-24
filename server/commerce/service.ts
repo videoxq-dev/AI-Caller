@@ -113,12 +113,16 @@ async function activate(event: NormalizedPurchaseEvent) {
     .onConflictDoUpdate({
       target: [licenses.source, licenses.externalPurchaseId, licenses.productCode],
       set: { status: "ACTIVE", rawMetadata: event.raw, updatedAt: new Date() },
+      setWhere: and(
+        eq(licenses.workspaceId, provisioned.workspace.workspaceId),
+        eq(licenses.purchaserUserId, provisioned.user.id),
+      ),
     })
     .returning();
 
   // A concurrent IPN with the same receipt must not move access or credit grants
   // to a second account, even if both events raced through the initial lookup.
-  if (license.workspaceId !== provisioned.workspace.workspaceId || license.purchaserUserId !== provisioned.user.id) {
+  if (!license || license.workspaceId !== provisioned.workspace.workspaceId || license.purchaserUserId !== provisioned.user.id) {
     throw new AppError("PURCHASE_OWNERSHIP_CONFLICT", "This receipt is associated with another purchaser or needs ownership reconciliation.", 409);
   }
   await db.update(workspaces).set({ status: "ACTIVE", updatedAt: new Date() }).where(eq(workspaces.id, license.workspaceId));
