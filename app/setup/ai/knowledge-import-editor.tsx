@@ -15,15 +15,37 @@ type KnowledgeSource = {
 export function KnowledgeImportEditor({ initialWebsite }: { initialWebsite: string }) {
   const [website, setWebsite] = useState(initialWebsite);
   const [sources, setSources] = useState<KnowledgeSource[]>([]);
+  const [sourceCount, setSourceCount] = useState(0);
+  const [sourceLimit, setSourceLimit] = useState(50);
+  const [nextOffset, setNextOffset] = useState<number | null>(null);
+  const [loadingMore, setLoadingMore] = useState(false);
   const [busy, setBusy] = useState<"website" | "file" | null>(null);
 
   useEffect(() => setWebsite(initialWebsite), [initialWebsite]);
 
-  async function refresh() {
-    const response = await fetch("/api/knowledge", { cache: "no-store" });
+  async function refresh(offset = 0) {
+    const response = await fetch(`/api/knowledge?offset=${offset}&limit=30`, { cache: "no-store" });
     const payload = await response.json().catch(() => null);
     if (!response.ok) throw new Error(payload?.error?.message ?? "Unable to load imported knowledge.");
-    setSources(Array.isArray(payload?.sources) ? payload.sources : []);
+    const page = Array.isArray(payload?.sources) ? payload.sources as KnowledgeSource[] : [];
+    setSources((current) => offset === 0 ? page : [
+      ...current, ...page.filter((item) => !current.some((existing) => existing.id === item.id)),
+    ]);
+    setSourceCount(typeof payload?.total === "number" ? payload.total : page.length);
+    setSourceLimit(typeof payload?.limit === "number" ? payload.limit : 50);
+    setNextOffset(typeof payload?.nextOffset === "number" ? payload.nextOffset : null);
+  }
+
+  async function loadMore() {
+    if (nextOffset === null || loadingMore) return;
+    setLoadingMore(true);
+    try {
+      await refresh(nextOffset);
+    } catch (error) {
+      showToast(error instanceof Error ? error.message : "Unable to load more knowledge.", "error");
+    } finally {
+      setLoadingMore(false);
+    }
   }
 
   useEffect(() => {
@@ -74,6 +96,8 @@ export function KnowledgeImportEditor({ initialWebsite }: { initialWebsite: stri
       const payload = await response.json().catch(() => null);
       if (!response.ok) throw new Error(payload?.error?.message ?? "Unable to remove knowledge source.");
       setSources((current) => current.filter((source) => source.id !== sourceId));
+      setSourceCount((current) => Math.max(0, current - 1));
+      setNextOffset((current) => current === null ? null : Math.max(0, current - 1));
       showToast("Knowledge source removed.", "success");
     } catch (error) {
       showToast(error instanceof Error ? error.message : "Unable to remove knowledge source.", "error");
@@ -114,7 +138,7 @@ export function KnowledgeImportEditor({ initialWebsite }: { initialWebsite: stri
 
       {sources.length > 0 && (
         <div className="knowledgeSourceList">
-          <strong>Imported knowledge</strong>
+          <strong>Imported knowledge ({sourceCount} / {sourceLimit})</strong>
           {sources.map((source) => (
             <div className="knowledgeSourceRow" key={source.id}>
               <span className="knowledgeSourceIcon">{source.kind === "WEBSITE" ? <LinkIcon size={14} /> : <FileIcon size={14} />}</span>
@@ -125,6 +149,12 @@ export function KnowledgeImportEditor({ initialWebsite }: { initialWebsite: stri
               <button type="button" onClick={() => void removeSource(source.id)}>Remove</button>
             </div>
           ))}
+          {nextOffset !== null && (
+            <button type="button" className="importButton" disabled={loadingMore || busy !== null}
+              onClick={() => void loadMore()}>
+              {loadingMore ? "Loading..." : `Show more (${sources.length} of ${sourceCount})`}
+            </button>
+          )}
         </div>
       )}
     </>
