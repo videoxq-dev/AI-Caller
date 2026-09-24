@@ -97,6 +97,20 @@ describe("Core purchase lifecycle", () => {
     expect((await db.select().from(workspaces).where(eq(workspaces.id, workspaceId)))[0].status).toBe("ACTIVE");
   });
 
+  it("repeats uncancellation safely without a second promotional grant", async () => {
+    await coreLicense("uncancel-twice");
+    await processCommerceEvent(purchaseEvent("CANCEL-REBILL", "uncancel-twice"));
+    const first = await processCommerceEvent(purchaseEvent("UNCANCEL-REBILL", "uncancel-twice"));
+    const second = await processCommerceEvent(purchaseEvent("UNCANCEL-REBILL", "uncancel-twice"));
+    expect(first).toMatchObject({ duplicate: false, result: { workspaceId } });
+    expect(second).toMatchObject({ duplicate: false, result: { workspaceId } });
+    expect((first.result as { balance: number }).balance)
+      .toBe((second.result as { balance: number }).balance);
+    const [license] = await db.select().from(licenses)
+      .where(eq(licenses.externalPurchaseId, "uncancel-twice"));
+    expect(license.status).toBe("ACTIVE");
+  });
+
   it("does not reactivate refunded receipts from delayed sale messages", async () => {
     await coreLicense("refunded-core");
     await processCommerceEvent(purchaseEvent("RFND", "refunded-core"));
