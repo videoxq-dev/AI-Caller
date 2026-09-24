@@ -29,7 +29,8 @@ describe("WhatsApp channel-specific permission", () => {
       workspaceId, contactId, waId: "15551230000", category: "MARKETING",
       status: "OPTED_IN", source: "STAFF_ENTRY",
     })).rejects.toMatchObject({ code: "WHATSAPP_IDENTITY_NOT_FOUND" });
-    expect(() => validWhatsAppId("+15551234567")).toThrow();
+    expect(validWhatsAppId("+15551234567")).toBe("15551234567");
+    expect(() => validWhatsAppId("++15551234567")).toThrow();
     expect(await db.select().from(whatsappConsentEvents)).toHaveLength(0);
   });
 
