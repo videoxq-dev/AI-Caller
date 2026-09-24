@@ -10,7 +10,7 @@ There is **one application** with five offers and six purchasable SKUs:
 | --- | --- | --- |
 | Front end: Core | CORE | One business; 15,000 starter credits; one configured AI agent; native appointments and Core channels |
 | OTO 1: Unlimited | UNLIMITED | Up to ten businesses; up to five staff per business; expanded calendars, up to two imported website/file knowledge sources per business, widgets, automations and reporting; an additional 15,000 promotional credits |
-| OTO 2: Performance | PERFORMANCE | Advanced custom workflows, AI reactivation and conversion/revenue intelligence |
+| OTO 2: Performance | PERFORMANCE | Unlocks the existing Automation Builder and custom automations |
 | OTO 3: Agency | AGENCY_50, AGENCY_100 | Agency console and 50 or 100 managed client businesses, with a client-capacity expansion path |
 | OTO 4: Whitelabel | WHITELABEL | Custom domain, product name, brand assets and client-facing branded experience |
 
@@ -52,9 +52,11 @@ The revised funnel brief plus the founder's later clarifications define the impl
 
 Once the Core 500-contact maximum and Unlimited uncapped-contact entitlement are verified and merged, the founder has confirmed the agreed **Core and OTO 1 Unlimited implementation scope is complete**. Do not infer additional Unlimited engineering work from the superseded F4/F5/F6 milestone language.
 
-### F7–F9 — Performance
+### OTO 2 — Performance
 
-F7: typed workflow conditions, branches, delays, follow-ups and suppression/cancellation with quotas, consent and auditability. F8: consent-aware segmentation, AI reactivation and message/call handling with rate limits and deduplication. F9: conversion events, source attribution, recovered opportunities and revenue intelligence with defensible denominators and reports. The current six-trigger/four-action sequential builder is the starting point, not evidence that Performance is complete.
+The founder's September 24 clarification locks Performance to the **existing Automation Builder and custom automations**. Do not build new advanced workflow logic as part of this upgrade. AI reactivation, segmentation, conversion/revenue intelligence, additional follow-up systems, and other previously described Performance expansion features are deferred.
+
+Core and Unlimited retain the built-in automation recipes. An active `PERFORMANCE` purchase is required to access the Automation Builder, create or edit custom workflows, publish/resume them, inspect their custom-workflow activity, and execute published custom workflows. Later OTO purchases such as Agency or Whitelabel do not implicitly grant Performance. If Performance is refunded or otherwise inactive, preserve custom workflow definitions and history but stop dispatching or executing them until Performance access is restored.
 
 ### F10–F11 — Agency
 
