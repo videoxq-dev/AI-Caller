@@ -1,3 +1,4 @@
+import { randomInt } from "node:crypto";
 import { mkdir } from "node:fs/promises";
 import path from "node:path";
 import pg from "pg";
@@ -50,12 +51,24 @@ try {
     VALUES ($1, 'SMS', 'HOSTED')
     ON CONFLICT (workspace_id, capability) DO UPDATE SET mode = 'HOSTED', integration_id = NULL`,
   [workspaceId]);
-  const added = await pool.query(`INSERT INTO hosted_phone_numbers
-     (workspace_id, phone_number, country_code, number_type, status, messaging_readiness,
-      provider_monthly_cost_micros, purchase_credits, monthly_credits)
-     VALUES ($1, '+12025550200', 'US', 'local', 'ACTIVE', 'NOT_REGISTERED', 1000000, 1, 1)
-     RETURNING id`, [workspaceId]);
-  const numberId = added.rows[0].id;
+  // Earlier browser suites use fixed numbers in the same CI database.
+  // Generate a valid, isolated fixture and retry only on a number collision.
+  let numberId;
+  for (let attempt = 0; attempt < 5; attempt++) {
+    try {
+      const phoneNumber = `+1202${randomInt(2_000_000, 10_000_000)}`;
+      const added = await pool.query(`INSERT INTO hosted_phone_numbers
+        (workspace_id, phone_number, country_code, number_type, status, messaging_readiness,
+         provider_monthly_cost_micros, purchase_credits, monthly_credits)
+        VALUES ($1, $2, 'US', 'local', 'ACTIVE', 'NOT_REGISTERED', 1000000, 1, 1)
+        RETURNING id`, [workspaceId, phoneNumber]);
+      numberId = added.rows[0].id;
+      break;
+    } catch (error) {
+      if (error.code !== "23505" || attempt === 4) throw error;
+    }
+  }
+  assert(numberId, "Could not allocate a unique SMS readiness test number");
 
   await page.goto(`${baseUrl}/automations/${id}`, { waitUntil: "networkidle" });
   const banner = page.locator(".builderSmsReadiness");
