@@ -183,18 +183,8 @@ try {
        (capability, provider, model, unit, cost_micros, units_per_cost, target_margin_bps, effective_from, metadata)
      VALUES ('SMS', 'telnyx', '', 'SMS_SEGMENT', 450, 1, 5000, now(), '{"fixture":"milestone5"}'::jsonb)`,
   );
-  const calendarIntegration = await pool.query(
-    `INSERT INTO integrations (workspace_id, category, provider, mode, status, settings)
-     VALUES ($1, 'CALENDAR', 'calcom', 'BYOP', 'CONNECTED', '{}'::jsonb)
-     RETURNING id`,
-    [workspaceId],
-  );
-  await pool.query(
-    `INSERT INTO capability_bindings (workspace_id, capability, integration_id, mode)
-     VALUES ($1, 'CALENDAR', $2, 'BYOP')
-     ON CONFLICT (workspace_id, capability) DO UPDATE SET integration_id = EXCLUDED.integration_id, mode = EXCLUDED.mode, updated_at = now()`,
-    [workspaceId, calendarIntegration.rows[0].id],
-  );
+  // Core uses the native in-app appointment calendar. Do not seed an external
+  // calendar binding here: external calendar integrations are an Unlimited entitlement.
   const hostedCommunicationSettings = {
     voice: { mode: "HOSTED", provider: null, numberMode: "new", number: "+12025550200" },
     sms: { mode: "HOSTED", provider: null, numberMode: "same", number: "+12025550200", displayName: "Milestone Five Auto Spa", replyWindow: "Always respond", afterHoursBehavior: "Auto-reply + collect details" },
@@ -414,12 +404,13 @@ try {
   assert(lead.rows[0]?.service_requested === "QA Consultation", "SMS lead service request was not persisted.");
 
   const appointment = await pool.query(
-    `SELECT status, title, booking_source, external_event_id FROM appointments WHERE workspace_id = $1 AND contact_id = $2 ORDER BY created_at DESC LIMIT 1`,
+    `SELECT status, title, booking_source, external_event_id, integration_id FROM appointments WHERE workspace_id = $1 AND contact_id = $2 ORDER BY created_at DESC LIMIT 1`,
     [workspaceId, contact.rows[0].id],
   );
   assert(appointment.rows[0]?.status === "CONFIRMED", "SMS booking did not persist a confirmed appointment.");
   assert(appointment.rows[0]?.booking_source === "SMS_AI", `Expected SMS_AI booking source, received ${appointment.rows[0]?.booking_source ?? "none"}.`);
-  assert(Boolean(appointment.rows[0]?.external_event_id), "SMS booking did not persist provider event id.");
+  assert(appointment.rows[0]?.external_event_id === null, "Core SMS booking unexpectedly created an external calendar event.");
+  assert(appointment.rows[0]?.integration_id === null, "Core SMS booking unexpectedly persisted an external calendar integration.");
 
   const timeline = await pool.query(
     `SELECT channel, direction, sender_type, content_type, body, provider, external_message_id, status
