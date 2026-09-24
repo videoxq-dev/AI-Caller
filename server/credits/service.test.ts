@@ -1,11 +1,12 @@
 import { afterAll, beforeEach, describe, expect, it } from "vitest";
 import { eq } from "drizzle-orm";
 import { closeDatabase, db } from "@/db";
-import { creditLedger, creditReservations, creditWallets, workspaces } from "@/db/schema";
+import { creditLedger, creditReservations, creditWallets, licenses, workspaces } from "@/db/schema";
 import {
   chargeUnavoidableCredits,
   debitCredits,
   grantStarterCredits,
+  grantUnlimitedPurchaseCredits,
   refundCredits,
   releaseCreditReservation,
   reserveCredits,
@@ -53,6 +54,87 @@ describe("credits", () => {
     const entries = await db.select().from(creditLedger).where(eq(creditLedger.workspaceId, workspaceId));
     expect(wallet.balance).toBe(amount * 3);
     expect(entries.filter((entry) => entry.type === "GRANT")).toHaveLength(3);
+  });
+
+  it("grants 15,000 additional credits once for an ACTIVE Unlimited receipt", async () => {
+    const [license] = await db.insert(licenses).values({
+      workspaceId,
+      source: "MANUAL",
+      externalPurchaseId: "unlimited-bonus-one",
+      productCode: "UNLIMITED",
+      status: "ACTIVE",
+      purchasedAt: new Date(),
+    }).returning();
+    const first = await grantUnlimitedPurchaseCredits(workspaceId, license.id);
+    const repeated = await grantUnlimitedPurchaseCredits(workspaceId, license.id);
+    expect(first).toBe(15_000);
+    expect(repeated).toBe(first);
+    const [wallet] = await db.select().from(creditWallets).where(eq(creditWallets.workspaceId, workspaceId));
+    const rows = await db.select().from(creditLedger).where(eq(creditLedger.workspaceId, workspaceId));
+    expect(wallet.balance).toBe(15_000);
+    expect(rows).toHaveLength(1);
+    expect(rows[0]).toMatchObject({
+      type: "GRANT",
+      amount: 15_000,
+      referenceType: "LICENSE_BONUS",
+      referenceId: license.id,
+    });
+  });
+
+  it("keeps Core starter and Unlimited bonus grants separate on the same business", async () => {
+    const [license] = await db.insert(licenses).values({
+      workspaceId,
+      source: "MANUAL",
+      externalPurchaseId: "unlimited-plus-core",
+      productCode: "UNLIMITED",
+      status: "ACTIVE",
+      purchasedAt: new Date(),
+    }).returning();
+    const starter = await grantStarterCredits(workspaceId, "core-license-id");
+    const combined = await grantUnlimitedPurchaseCredits(workspaceId, license.id);
+    expect(combined).toBe(starter + 15_000);
+    expect(await grantUnlimitedPurchaseCredits(workspaceId, license.id)).toBe(combined);
+    const entries = await db.select().from(creditLedger).where(eq(creditLedger.workspaceId, workspaceId));
+    expect(entries).toHaveLength(2);
+    expect(entries.map((entry) => entry.referenceType).sort()).toEqual(["LICENSE", "LICENSE_BONUS"]);
+  });
+
+  it("rejects refunded, wrong-SKU and wrong-workspace receipts without granting credits", async () => {
+    const [refunded, core] = await db.insert(licenses).values([
+      {
+        workspaceId, source: "MANUAL", externalPurchaseId: "refunded-unlimited",
+        productCode: "UNLIMITED", status: "REFUNDED", purchasedAt: new Date(),
+      },
+      {
+        workspaceId, source: "MANUAL", externalPurchaseId: "core-no-unlimited-bonus",
+        productCode: "CORE", status: "ACTIVE", purchasedAt: new Date(),
+      },
+    ]).returning();
+    const [other] = await db.insert(workspaces).values({ name: "Other Credits Workspace" }).returning();
+    for (const [targetWorkspace, id] of [
+      [workspaceId, refunded.id], [workspaceId, core.id], [other.id, core.id], [other.id, refunded.id],
+    ]) {
+      await expect(grantUnlimitedPurchaseCredits(targetWorkspace, id))
+        .rejects.toMatchObject({ code: "FUNNEL_LICENSE_NOT_ELIGIBLE", status: 409 });
+    }
+    expect(await db.select().from(creditLedger).where(eq(creditLedger.workspaceId, workspaceId))).toHaveLength(0);
+    expect(await db.select().from(creditWallets).where(eq(creditWallets.workspaceId, workspaceId))).toHaveLength(0);
+  });
+
+  it("does not grant a promotion twice when two workers process the same Unlimited purchase", async () => {
+    const [license] = await db.insert(licenses).values({
+      workspaceId,
+      source: "MANUAL", externalPurchaseId: "concurrent-unlimited-bonus",
+      productCode: "UNLIMITED", status: "ACTIVE", purchasedAt: new Date(),
+    }).returning();
+    const results = await Promise.all([
+      grantUnlimitedPurchaseCredits(workspaceId, license.id),
+      grantUnlimitedPurchaseCredits(workspaceId, license.id),
+    ]);
+    expect(results).toEqual([15_000, 15_000]);
+    const entries = await db.select().from(creditLedger).where(eq(creditLedger.workspaceId, workspaceId));
+    expect(entries).toHaveLength(1);
+    expect((await db.select().from(creditWallets))[0].balance).toBe(15_000);
   });
 
   it("makes hosted debit and refund references idempotent", async () => {
