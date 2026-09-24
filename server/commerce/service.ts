@@ -173,7 +173,13 @@ async function revoke(event: NormalizedPurchaseEvent) {
     }
   }
 
-  const status = event.eventType === "CGBK" ? "CHARGEBACK" : event.eventType === "RFND" ? "REFUNDED" : "CANCELLED";
+  // A late cancellation/refund must not overwrite a more severe terminal
+  // financial status (chargeback > refund > cancellation).
+  const status = license.status === "CHARGEBACK" || event.eventType === "CGBK"
+    ? "CHARGEBACK"
+    : license.status === "REFUNDED" || event.eventType === "RFND"
+      ? "REFUNDED"
+      : "CANCELLED";
   return db.transaction(async (tx) => {
     await tx.execute(sql`select pg_advisory_xact_lock(hashtext(${`core-license:${license.workspaceId}`}))`);
     await tx.update(licenses).set({ status, rawMetadata: event.raw, updatedAt: new Date() })
