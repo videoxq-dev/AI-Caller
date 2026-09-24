@@ -46,9 +46,11 @@ Deliver vertical slices with tests before implementation, migrations where neede
 
 Confirm inbound phone, SMS, WhatsApp, webchat, unified inbox, manually entered services/FAQs/policies (without website/file knowledge imports), contacts, qualification, native scheduling, issue-scoped human handoff, basic recipes, dashboard and starter credits operate as one product. Core must not access external calendar connections. Resolve or explicitly gate the existing live acceptance blockers in Issues #24 (US SMS), #28 (deployment DB), #31 (voice), #44 (booking) and #57 (WhatsApp); #48 affects external-calendar appointment management. “Implemented in CI” is not equivalent to provider-approved live delivery.
 
-### F4–F6 — Unlimited
+### OTO 1 — Unlimited
 
-F4: owner-level ten-business capacity, five-staff seats, access controls, unlimited-supported contacts/history/automation limits and a combined maximum of two website-or-file imported knowledge sources per owned business with bounded file sizes and operational safeguards. F5: multiple Google/Microsoft/Calendly/Cal.com calendar connections, service/staff routing and connected-calendar appointment management. F6: multi-widget lifecycle, reusable workflows/configurations, integrations and enhanced reporting; the 15,000 bonus credits arrive through F2.
+The revised funnel brief plus the founder's later clarifications define the implemented Unlimited boundary. Unlimited supports up to ten owned businesses, up to five staff per business, removes Core's 500-contact cap, unlocks up to two combined website/file knowledge imports per business, unlocks the existing supported external-calendar connection capability, and grants an additional 15,000 promotional hosted credits. Core retains native in-app scheduling. Unlimited does **not** mean unlimited calendar connections, does not authorize a new multi-calendar architecture, and does not unlock non-calendar BYOP; other customer-supplied provider integrations remain Agency-only.
+
+Once the Core 500-contact maximum and Unlimited uncapped-contact entitlement are verified and merged, the founder has confirmed the agreed **Core and OTO 1 Unlimited implementation scope is complete**. Do not infer additional Unlimited engineering work from the superseded F4/F5/F6 milestone language.
 
 ### F7–F9 — Performance
 
@@ -80,3 +82,7 @@ The founder subsequently clarified the initial broad Unlimited Knowledge wording
 ## External integration entitlement clarification — September 24, 2026
 
 Core uses AI Caller’s native in-app booking and **cannot connect external calendars**. Unlimited unlocks the existing external calendar integration capability (Google Calendar, Microsoft Outlook, Calendly and Cal.com); it does **not** imply unlimited calendar connections or require new multi-calendar functionality. All other customer-supplied BYOP integrations are reserved for Agency. Meta Embedded Signup for the Core WhatsApp channel and AI Caller-managed hosted voice/SMS/AI services are not treated as Agency BYOP.
+
+## Contact capacity clarification — September 24, 2026
+
+The founder clarified the revised funnel offer: **Core supports a maximum of 500 contacts per business. Active Unlimited removes the contact-count cap.** Enforce this on the server at the shared contact-creation boundary so manual entry and inbound channel-created contacts cannot bypass it. Existing contacts are never deleted after an Unlimited refund or downgrade; if the business is already at or above 500, block only new contact creation until the count is below the Core limit or Unlimited is restored. This clarification completes the agreed Core/Unlimited entitlement scope once verified and merged.

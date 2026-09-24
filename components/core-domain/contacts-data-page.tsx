@@ -22,7 +22,8 @@ type Contact = {
   appointments?: Appointment[];
 };
 
-type ContactListResponse = { items: Contact[]; total: number; limit: number; offset: number };
+type ContactCapacity = { count: number; limit: number | null; remaining: number | null; package: "UNLIMITED" | null };
+type ContactListResponse = { items: Contact[]; total: number; limit: number; offset: number; capacity: ContactCapacity };
 
 const channelLabels: Record<Identity["channel"], string> = {
   PHONE: "Phone",
@@ -45,6 +46,7 @@ function formatRelative(value: string) {
 export function ContactsDataPage() {
   const [contacts, setContacts] = useState<Contact[]>([]);
   const [total, setTotal] = useState(0);
+  const [capacity, setCapacity] = useState<ContactCapacity | null>(null);
   const [query, setQuery] = useState("");
   const [leadStatus, setLeadStatus] = useState("all");
   const [channel, setChannel] = useState("all");
@@ -68,6 +70,7 @@ export function ContactsDataPage() {
       const data = await response.json() as ContactListResponse;
       setContacts(data.items);
       setTotal(data.total);
+      setCapacity(data.capacity);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Unable to load contacts.");
     } finally {
@@ -131,7 +134,7 @@ export function ContactsDataPage() {
 
         <div className={`contactsContentFrame ${detail ? "drawerOpen" : ""}`}>
           <div className="contactsBody">
-            <div className="contactsTitleRow"><h1>Contacts</h1><button className="addContactButton" type="button" onClick={() => setShowAdd((value) => !value)}>＋ Add contact</button></div>
+            <div className="contactsTitleRow"><h1>Contacts</h1><button className="addContactButton" type="button" disabled={capacity?.limit !== null && capacity?.remaining === 0} onClick={() => setShowAdd((value) => !value)}>{capacity?.limit !== null && capacity?.remaining === 0 ? "Contact limit reached" : "＋ Add contact"}</button></div>
 
             {showAdd && <section className="contactsTableCard" style={{ padding: 16, marginBottom: 16 }}>
               <div style={{ display: "grid", gridTemplateColumns: "repeat(3,minmax(0,1fr)) auto", gap: 10 }}>
@@ -167,7 +170,7 @@ export function ContactsDataPage() {
                 {!loading && !contacts.length && <tr><td colSpan={6}><div className="emptyContacts">No contacts yet. Add the first contact or let a channel create one automatically.</div></td></tr>}
               </tbody>
             </table></div></section>
-            <footer className="contactsFooter"><span>Showing {contacts.length} of {total} contacts</span><span>{knownTags.length} tags</span></footer>
+            <footer className="contactsFooter"><span>Showing {contacts.length} of {total} contacts</span><span>{capacity ? (capacity.limit === null ? `${capacity.count} contacts · Unlimited` : `${capacity.count} / ${capacity.limit} contacts`) : "Contact capacity loading…"}</span><span>{knownTags.length} tags</span></footer>
           </div>
 
           {detail && <aside className="contactDrawer">
