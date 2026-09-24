@@ -4,6 +4,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { MessageIcon, PhoneIcon } from "@/components/icons";
 import { AppNav } from "./app-nav";
 import { ContactSmsConsent } from "./contact-sms-consent";
+import { ContactWhatsAppConsent } from "./contact-whatsapp-consent";
 
 type Identity = { id: string; channel: "PHONE" | "SMS" | "WHATSAPP" | "WEBCHAT"; externalId: string };
 type Lead = { status: "NEW" | "QUALIFIED" | "BOOKED" | "WON" | "LOST"; intent: string | null; serviceRequested: string | null } | null;
@@ -174,6 +175,7 @@ export function ContactsDataPage() {
             <div className="drawerQuickActions"><button type="button"><PhoneIcon size={15} />Call</button><button type="button"><MessageIcon size={15} />Message</button></div>
             <section className="drawerSection"><h3>Contact details</h3><div className="drawerDetails"><div><span>Email</span><strong>{detail.email ?? "—"}</strong></div><div><span>Phone</span><strong>{detail.phone ?? "—"}</strong></div><div><span>Notes</span><strong>{detail.notes ?? "—"}</strong></div></div></section>
             <ContactSmsConsent contactId={detail.id} phone={detail.phone} />
+            <ContactWhatsAppConsent contactId={detail.id} waIds={detail.identities.filter(identity => identity.channel === "WHATSAPP").map(identity => identity.externalId)} />
             <section className="drawerSection"><h3>Channel identities</h3><div className="tagList">{detail.identities.map((identity) => <span key={identity.id}>{channelLabels[identity.channel]} · {identity.externalId}</span>)}</div></section>
             <section className="drawerSection"><h3>Lead</h3><div className="drawerDetails"><div><span>Intent</span><strong>{detail.lead?.intent ?? "—"}</strong></div><div><span>Service</span><strong>{detail.lead?.serviceRequested ?? "—"}</strong></div></div></section>
             <section className="drawerSection"><h3>Appointments</h3>{detail.appointments?.length ? detail.appointments.map((appointment) => <div className="drawerAppointmentCard" key={appointment.id}><strong>{appointment.title}</strong><small>{formatRelative(appointment.startsAt)} · {appointment.status}</small></div>) : <p>No appointments yet.</p>}</section>
