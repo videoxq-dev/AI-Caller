@@ -2,7 +2,7 @@ import { randomUUID } from "node:crypto";
 import { afterAll, afterEach, describe, expect, it } from "vitest";
 import { and, eq } from "drizzle-orm";
 import { closeDatabase, db } from "@/db";
-import { licenses, memberships, user, workspacePlans, workspaceInvitations, workspaces } from "@/db/schema";
+import { licenses, memberships, user, workspacePlans, workspaces } from "@/db/schema";
 import { getWorkspaceSeatUsage, assignWorkspacePlan } from "./plans";
 import { createWorkspaceInvitation, acceptWorkspaceInvitation } from "@/server/auth/team-repository";
 
