@@ -9,6 +9,7 @@ import type { NormalizedPurchaseEvent } from "./types";
 
 const previousCore = process.env.JVZOO_CORE_PRODUCT_IDS;
 const previousUnlimited = process.env.JVZOO_UNLIMITED_PRODUCT_IDS;
+const previousNodeEnv = process.env.NODE_ENV;
 const testEventIds: string[] = [];
 
 function event(productId: string): NormalizedPurchaseEvent {
@@ -47,6 +48,8 @@ describe("funnel purchase ingress", () => {
     else process.env.JVZOO_CORE_PRODUCT_IDS = previousCore;
     if (previousUnlimited === undefined) delete process.env.JVZOO_UNLIMITED_PRODUCT_IDS;
     else process.env.JVZOO_UNLIMITED_PRODUCT_IDS = previousUnlimited;
+    if (previousNodeEnv === undefined) delete process.env.NODE_ENV;
+    else process.env.NODE_ENV = previousNodeEnv;
     resetEnvForTests();
   });
 
@@ -63,6 +66,31 @@ describe("funnel purchase ingress", () => {
     const assigned = await db.select().from(licenses)
       .where(eq(licenses.externalPurchaseId, purchase.externalPurchaseId));
     expect(assigned).toHaveLength(0);
+  });
+
+  it("retries an event that failed during misconfiguration without granting unintended Core access", async () => {
+    process.env.NODE_ENV = "production";
+    process.env.JVZOO_CORE_PRODUCT_IDS = "";
+    resetEnvForTests();
+    const purchase = event("unmapped-during-misconfiguration");
+
+    await expect(processCommerceEvent(purchase)).rejects.toThrow(
+      "JVZOO_CORE_PRODUCT_IDS must be configured in production",
+    );
+    const [failed] = await db.select().from(commerceEvents)
+      .where(eq(commerceEvents.externalEventId, purchase.externalEventId));
+    expect(failed.status).toBe("FAILED");
+
+    process.env.JVZOO_CORE_PRODUCT_IDS = "real-core-only";
+    resetEnvForTests();
+    expect(await processCommerceEvent(purchase)).toMatchObject({
+      duplicate: false,
+      result: { ignored: true, reason: "UNMAPPED_PRODUCT" },
+    });
+    const [retried] = await db.select().from(commerceEvents)
+      .where(eq(commerceEvents.externalEventId, purchase.externalEventId));
+    expect(retried.status).toBe("IGNORED");
+    expect(retried.error).toBeNull();
   });
 
   it("ignores unknown product IDs without granting them a Core license", async () => {
