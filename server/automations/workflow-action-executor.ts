@@ -15,6 +15,7 @@ import {
 import { AppError } from "@/server/http/errors";
 import { ProviderRequestError } from "@/server/providers/http";
 import { sendPreclassifiedAutomationSms } from "@/server/sms/outbound";
+import { sendWhatsAppConversationTemplate } from "@/server/whatsapp/outbound";
 import type { PublishedWorkflowAction } from "./action-registry";
 import {
   claimAutomationDelivery,
@@ -618,6 +619,95 @@ async function executeCustomerSms(input: {
   }
 }
 
+
+async function executeCustomerWhatsApp(input: {
+  workspaceId: string;
+  runId: string;
+  actionRunId: string;
+  action: Extract<PublishedWorkflowAction, { type: "SEND_CUSTOMER_WHATSAPP" }>;
+  context: CustomerContext;
+  event: AutomationEvent;
+}) {
+  const stale = await appointmentSmsStaleness(input.workspaceId, input.event);
+  if (stale) {
+    await finishWorkflowActionRun(input.workspaceId, input.actionRunId, {
+      status: "SKIPPED", errorCode: stale,
+      errorMessage: "Appointment state changed before WhatsApp delivery.",
+    });
+    return "SKIPPED" as const;
+  }
+  if (!input.context.conversationId) {
+    await finishWorkflowActionRun(input.workspaceId, input.actionRunId, {
+      status: "SKIPPED", errorCode: "WHATSAPP_CONVERSATION_UNAVAILABLE",
+      errorMessage: "No current customer conversation is available for this workflow event.",
+    });
+    return "SKIPPED" as const;
+  }
+  const claimed = await claimAutomationDelivery({
+    workspaceId: input.workspaceId, runId: input.runId,
+    actionRunId: input.actionRunId, channel: "WHATSAPP",
+    recipient: input.context.conversationId,
+  });
+  if (!claimed.created) {
+    return finishActionFromExistingDelivery(input.workspaceId, input.actionRunId, claimed.delivery);
+  }
+  const parameters = input.action.variables.map(variable => input.context.variables[variable] ?? "");
+  try {
+    if (parameters.some(value => !value.trim())) {
+      throw new AppError("WHATSAPP_TEMPLATE_VARIABLE_MISSING",
+        "The event is missing a required WhatsApp template value.", 409);
+    }
+    const message = await sendWhatsAppConversationTemplate(
+      input.workspaceId, input.context.conversationId, {
+        senderType: "SYSTEM",
+        templateName: input.action.templateName,
+        languageCode: input.action.languageCode,
+        expectedCategory: input.action.approvedCategory,
+        components: parameters.length
+          ? [{ type: "body", parameters: parameters.map(value => ({ type: "text", text: value })) }]
+          : undefined,
+      },
+    );
+    const finished = await finishPendingAutomationDelivery(input.workspaceId, claimed.delivery.id, {
+      status: "SENT", messageId: message.id, providerExternalId: message.externalMessageId,
+    });
+    if (!finished) {
+      const existing = await getAutomationDelivery(input.workspaceId, claimed.delivery.id);
+      if (!existing) throw new AppError("AUTOMATION_DELIVERY_NOT_FOUND", "WhatsApp delivery record disappeared.", 409);
+      return finishActionFromExistingDelivery(input.workspaceId, input.actionRunId, existing);
+    }
+    await finishWorkflowActionRun(input.workspaceId, input.actionRunId, {
+      status: "COMPLETED",
+      result: { deliveryId: finished.id, messageId: message.id, providerExternalId: message.externalMessageId },
+    });
+    return "COMPLETED" as const;
+  } catch (error) {
+    const suppress = error instanceof AppError && [
+      "WHATSAPP_IDENTITY_NOT_FOUND", "WHATSAPP_CONSENT_REQUIRED",
+      "WHATSAPP_TEMPLATE_NOT_APPROVED", "WHATSAPP_TEMPLATE_UNSUPPORTED",
+      "WHATSAPP_TEMPLATE_VARIABLE_MISSING", "WHATSAPP_TEMPLATE_VARIABLE_MISMATCH",
+    ].includes(error.code);
+    const status = suppress ? "SKIPPED" as const
+      : error instanceof AppError && error.status < 500 ? "FAILED" as const
+      : error instanceof ProviderRequestError && error.status < 500 ? "FAILED" as const
+      : "UNKNOWN" as const;
+    const errorCode = error instanceof AppError ? error.code : "WHATSAPP_DELIVERY_UNCERTAIN";
+    const errorMessage = error instanceof Error ? error.message : "WhatsApp delivery did not complete.";
+    const finished = await finishPendingAutomationDelivery(input.workspaceId, claimed.delivery.id, {
+      status, errorCode, errorMessage,
+    });
+    if (!finished) {
+      const existing = await getAutomationDelivery(input.workspaceId, claimed.delivery.id);
+      if (!existing) throw new AppError("AUTOMATION_DELIVERY_NOT_FOUND", "WhatsApp delivery record disappeared.", 409);
+      return finishActionFromExistingDelivery(input.workspaceId, input.actionRunId, existing);
+    }
+    await finishWorkflowActionRun(input.workspaceId, input.actionRunId, {
+      status, errorCode, errorMessage, result: { deliveryId: finished.id },
+    });
+    return status;
+  }
+}
+
 export async function executeWorkflowAction(input: {
   workspaceId: string;
   runId: string;
@@ -646,6 +736,9 @@ export async function executeWorkflowAction(input: {
     }
     if (input.action.type === "SEND_CUSTOMER_SMS") {
       return await executeCustomerSms({ ...input, action: input.action });
+    }
+    if (input.action.type === "SEND_CUSTOMER_WHATSAPP") {
+      return await executeCustomerWhatsApp({ ...input, action: input.action });
     }
     await finishWorkflowActionRun(input.workspaceId, input.actionRunId, {
       status: "FAILED",
