@@ -1,14 +1,14 @@
 import { createHash, randomBytes } from "node:crypto";
 import { and, asc, eq, gt, lte, sql } from "drizzle-orm";
 import { db } from "@/db";
-import { automationSettings, conversations, leads, memberships, user, workspaceInvitations } from "@/db/schema";
+import { automationSettings, conversations, leads, licenses, memberships, user, workspaceCommercialOwners, workspaceInvitations } from "@/db/schema";
 import {
   assertCanAcceptWorkspaceInvitation,
   assertCanCreateWorkspaceInvitation,
 } from "@/server/billing/plans";
 import { AppError } from "@/server/http/errors";
 
-export type InviteRole = "ADMIN" | "STAFF";
+export type InviteRole = "OWNER" | "ADMIN" | "STAFF";
 
 function normalizeEmail(email: string) {
   return email.trim().toLowerCase();
@@ -22,6 +22,95 @@ function isUniqueViolation(error: unknown): boolean {
   if (typeof error !== "object" || error === null) return false;
   if ("code" in error && (error as { code?: string }).code === "23505") return true;
   return "cause" in error && isUniqueViolation((error as { cause?: unknown }).cause);
+}
+
+type Tx = Parameters<Parameters<typeof db.transaction>[0]>[0];
+
+async function lockAgencyClientOwner(tx: Tx, workspaceId: string) {
+  await tx.execute(sql`select pg_advisory_xact_lock(hashtext(${`agency-client-owner:${workspaceId}`}))`);
+}
+
+async function requireActiveAgencyClientWorkspace(
+  tx: Tx,
+  workspaceId: string,
+  actorUserId?: string,
+) {
+  const [commercial] = await tx.select({
+    purchaserUserId: workspaceCommercialOwners.purchaserUserId,
+    kind: workspaceCommercialOwners.kind,
+  }).from(workspaceCommercialOwners)
+    .where(eq(workspaceCommercialOwners.workspaceId, workspaceId))
+    .limit(1);
+
+  if (!commercial || commercial.kind !== "ADDITIONAL") {
+    throw new AppError(
+      "AGENCY_CLIENT_WORKSPACE_REQUIRED",
+      "Client-owner access is available only for an Agency-managed client workspace.",
+      403,
+    );
+  }
+  if (actorUserId && commercial.purchaserUserId !== actorUserId) {
+    throw new AppError(
+      "AGENCY_COMMERCIAL_OWNER_REQUIRED",
+      "Only the Agency commercial owner can invite a client owner.",
+      403,
+    );
+  }
+
+  const [agency] = await tx.select({ id: licenses.id }).from(licenses).where(and(
+    eq(licenses.purchaserUserId, commercial.purchaserUserId),
+    eq(licenses.status, "ACTIVE"),
+    sql`${licenses.productCode} in ('AGENCY_50', 'AGENCY_100')`,
+  )).limit(1);
+  if (!agency) {
+    throw new AppError("AGENCY_REQUIRED", "An active Agency package is required.", 403);
+  }
+  return commercial;
+}
+
+async function assertCanCreateClientOwnerInvitation(
+  tx: Tx,
+  workspaceId: string,
+  actorUserId: string,
+  now: Date,
+) {
+  await lockAgencyClientOwner(tx, workspaceId);
+  const commercial = await requireActiveAgencyClientWorkspace(tx, workspaceId, actorUserId);
+  const [delegatedOwner] = await tx.select({ userId: memberships.userId }).from(memberships).where(and(
+    eq(memberships.workspaceId, workspaceId),
+    eq(memberships.role, "OWNER"),
+    sql`${memberships.userId} <> ${commercial.purchaserUserId}`,
+  )).limit(1);
+  if (delegatedOwner) {
+    throw new AppError("CLIENT_OWNER_EXISTS", "This client workspace already has a delegated client owner.", 409);
+  }
+
+  const [pendingOwner] = await tx.select({ id: workspaceInvitations.id }).from(workspaceInvitations).where(and(
+    eq(workspaceInvitations.workspaceId, workspaceId),
+    eq(workspaceInvitations.role, "OWNER"),
+    eq(workspaceInvitations.status, "PENDING"),
+    gt(workspaceInvitations.expiresAt, now),
+  )).limit(1);
+  if (pendingOwner) {
+    throw new AppError(
+      "CLIENT_OWNER_INVITATION_EXISTS",
+      "A client-owner invitation is already pending for this workspace.",
+      409,
+    );
+  }
+}
+
+async function assertCanAcceptClientOwnerInvitation(tx: Tx, workspaceId: string) {
+  await lockAgencyClientOwner(tx, workspaceId);
+  const commercial = await requireActiveAgencyClientWorkspace(tx, workspaceId);
+  const [delegatedOwner] = await tx.select({ userId: memberships.userId }).from(memberships).where(and(
+    eq(memberships.workspaceId, workspaceId),
+    eq(memberships.role, "OWNER"),
+    sql`${memberships.userId} <> ${commercial.purchaserUserId}`,
+  )).limit(1);
+  if (delegatedOwner) {
+    throw new AppError("CLIENT_OWNER_EXISTS", "This client workspace already has a delegated client owner.", 409);
+  }
 }
 
 export async function listWorkspaceTeam(workspaceId: string) {
@@ -97,7 +186,11 @@ export async function createWorkspaceInvitation(input: {
           lte(workspaceInvitations.expiresAt, now),
         ));
 
-      await assertCanCreateWorkspaceInvitation(tx, input.workspaceId);
+      if (input.role === "OWNER") {
+        await assertCanCreateClientOwnerInvitation(tx, input.workspaceId, input.invitedByUserId, now);
+      } else {
+        await assertCanCreateWorkspaceInvitation(tx, input.workspaceId);
+      }
 
       const expiresAt = new Date(now.getTime() + 7 * 24 * 60 * 60 * 1000);
       const [invitation] = await tx.insert(workspaceInvitations).values({
@@ -170,7 +263,11 @@ export async function acceptWorkspaceInvitation(input: { userId: string; userEma
       throw new AppError("INVITATION_EMAIL_MISMATCH", "Sign in with the email address that was invited.", 403);
     }
 
-    await assertCanAcceptWorkspaceInvitation(tx, invitation.workspaceId, input.userId);
+    if (invitation.role === "OWNER") {
+      await assertCanAcceptClientOwnerInvitation(tx, invitation.workspaceId);
+    } else {
+      await assertCanAcceptWorkspaceInvitation(tx, invitation.workspaceId, input.userId);
+    }
 
     await tx.insert(memberships).values({
       workspaceId: invitation.workspaceId,
