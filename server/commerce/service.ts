@@ -137,8 +137,20 @@ async function activate(event: NormalizedPurchaseEvent) {
   if (!license || license.workspaceId !== provisioned.workspace.workspaceId || license.purchaserUserId !== provisioned.user.id) {
     throw new AppError("PURCHASE_OWNERSHIP_CONFLICT", "This receipt is associated with another purchaser or needs ownership reconciliation.", 409);
   }
-  await db.update(workspaces).set({ status: "ACTIVE", updatedAt: new Date() }).where(eq(workspaces.id, license.workspaceId));
-  await grantCoreEntitlements(license.workspaceId);
+  // Purchase and refund IPNs can overlap. Use the same per-business lock as
+  // revocation and re-check the row after acquiring it: an earlier ACTIVE
+  // upsert is not proof the receipt is still ACTIVE when access is written.
+  const canActivate = await db.transaction(async (tx) => {
+    await tx.execute(sql`select pg_advisory_xact_lock(hashtext(${`core-license:${license.workspaceId}`}))`);
+    const [current] = await tx.select({ status: licenses.status }).from(licenses)
+      .where(eq(licenses.id, license.id)).limit(1);
+    if (current?.status !== "ACTIVE") return false;
+    await tx.update(workspaces).set({ status: "ACTIVE", updatedAt: new Date() })
+      .where(eq(workspaces.id, license.workspaceId));
+    await grantCoreEntitlements(license.workspaceId);
+    return true;
+  });
+  if (!canActivate) return { ignored: true as const, reason: "REVOKED_PURCHASE" };
   const balance = await grantStarterCredits(license.workspaceId, license.id);
 
   if (provisioned.created && provisioned.temporaryPassword) {
