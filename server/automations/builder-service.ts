@@ -209,6 +209,7 @@ function actionPreview(action: WorkflowDefinition["actions"][number]) {
   if (action.type === "NOTIFY_STAFF") {
     return { type: action.type, label: "Notify", userId: action.userId, title: action.title };
   }
+  if (action.type === "SEND_CUSTOMER_WHATSAPP") return { type: action.type, label: "Send approved WhatsApp template" };
   return { type: action.type, label: "Send customer an SMS" };
 }
 
