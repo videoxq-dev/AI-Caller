@@ -6,6 +6,8 @@ import {
   automationSettings,
   memberships,
   user,
+  workflowDefinitions,
+  workflowVersions,
   workspaces,
 } from "@/db/schema";
 import {
@@ -62,11 +64,22 @@ describe("automation run claiming", () => {
       eventId,
       key: "QUALIFIED_LEAD_ASSIGNMENT",
     });
+    const [definition] = await db.insert(workflowDefinitions).values({
+      workspaceId,
+      name: "Historical custom workflow",
+      draft: {},
+    }).returning();
+    const [version] = await db.insert(workflowVersions).values({
+      workspaceId,
+      definitionId: definition.id,
+      version: 1,
+      snapshot: {},
+    }).returning();
     await db.insert(automationRuns).values({
       workspaceId,
       eventId,
       key: null,
-      workflowVersionId: null,
+      workflowVersionId: version.id,
       occurrenceKey: "custom-history",
       status: "COMPLETED",
       completedAt: new Date(),
