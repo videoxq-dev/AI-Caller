@@ -72,13 +72,25 @@ The Agency-only Workspaces page lists purchaser-owned workspaces, displays clien
 
 This scope delivers Agency **workspace management**, not completion of the broader Agency commercial package: JVZoo Agency sale/refund provisioning, delegated client access, cloning, BYOP connection UX, and cross-client reporting require separate acceptance before Agency can be declared commercially ready.
 
+### Agency commercial lifecycle clarification — September 24, 2026
+
+Agency 50 and Agency 100 are purchaser-owned add-on licenses anchored to the buyer's active original Core business. A verified Agency purchase grants capacity only; it must not create client workspaces automatically. Agency 50 grants 50 client slots plus the original workspace and Agency 100 grants 100 client slots plus the original. If both are active, the highest allowance applies rather than stacking to 150.
+
+Agency sale, billing, cancellation, explicit reinstatement, refund and chargeback events are reconciled independently from Core. Agency cancellation/refund/chargeback removes Agency-only access and future capacity but does not delete, suspend or reassign existing client workspaces. If Agency 100 becomes inactive while Agency 50 remains active, capacity falls back to 50 client slots. Existing over-cap workspaces remain intact and further creation is blocked until entitlement once again covers the current count.
+
+Commercial ownership is separate from operational workspace administration. The Agency purchasing account remains the commercial owner of Agency capacity; later delegated-access work may grant agency staff or client administrators operational access without transferring the commercial license.
+
+**Credit policy:** newly created client workspaces receive no Agency-funded credits automatically. Credit top-ups are final and non-refundable. Future Agency credit-sharing must be implemented as auditable allocation from an Agency-owned credit pool into isolated workspace wallets; individual client workspaces may also purchase their own top-ups. Runtime usage remains workspace-scoped rather than drawing directly from one shared cross-client wallet.
+
+**Provider policy:** non-calendar BYOP is not an Agency feature. Agency workspaces use Assistlia-hosted provider infrastructure. BYOP is reserved for Whitelabel. Unlimited external-calendar access remains its explicit separate entitlement.
+
 ### F10–F11 — Agency
 
-F10: agency owner/client hierarchy, capacity SKUs, delegated team and client access, client provisioning and central dashboard. Non-calendar bring-your-own-provider (BYOP) integrations—such as customer-supplied AI, telephony or messaging provider credentials—are Agency-only. Unlimited external-calendar access is the explicit exception and must not be generalized into broader BYOP access. F11: cloning with safe secret exclusion, templates, unified agency reports and additional-capacity purchase behavior.
+F10: agency commercial ownership, agency owner/client hierarchy, capacity SKUs, delegated agency-team and client access, client provisioning, client-specific credit funding and the central workspace dashboard. Agency workspaces remain on Assistlia-hosted providers; BYOP is not part of Agency. F11: agency credit-pool allocation, client self-funded workspace credits, cloning with safe secret exclusion, templates, unified agency reports and additional-capacity purchase behavior.
 
 ### F12 — Whitelabel
 
-Domain ownership verification and TLS/routing; branding isolation for client app, login, widget, reports and permitted emails; safe defaults and custom-domain rollback. Brand customization must not change platform security or license isolation.
+Domain ownership verification and TLS/routing; branding isolation for client app, login, widget, reports and permitted emails; safe defaults and custom-domain rollback. Whitelabel is also the package for non-calendar bring-your-own-provider (BYOP) connections such as customer-supplied AI, telephony or messaging provider credentials. Brand or provider customization must not change platform security, secret isolation or license isolation.
 
 ### F13 — Entire purchase funnel and release
 
@@ -103,7 +115,7 @@ Later product-entitlement changes must adapt around the concluded SMS implementa
 The founder subsequently clarified the initial broad Unlimited Knowledge wording: **Core has no imported website/file knowledge upload; an active Unlimited purchase allows at most two imported sources per business, counting website imports and uploaded files together**. Manually entered service, product, FAQ and policy knowledge in Core remains available. On Unlimited refund, keep previously imported content accessible to staff for deletion but block additions and edits until eligible access returns; never silently delete business data. This later product instruction controls the importer source count, not the earlier general wording in the copywriter brief.\n
 ## External integration entitlement clarification — September 24, 2026
 
-Core uses AI Caller’s native in-app booking and **cannot connect external calendars**. Unlimited unlocks the existing external calendar integration capability (Google Calendar, Microsoft Outlook, Calendly and Cal.com); it does **not** imply unlimited calendar connections or require new multi-calendar functionality. All other customer-supplied BYOP integrations are reserved for Agency. Meta Embedded Signup for the Core WhatsApp channel and AI Caller-managed hosted voice/SMS/AI services are not treated as Agency BYOP.
+Core uses AI Caller’s native in-app booking and **cannot connect external calendars**. Unlimited unlocks the existing external calendar integration capability (Google Calendar, Microsoft Outlook, Calendly and Cal.com); it does **not** imply unlimited calendar connections or require new multi-calendar functionality. All other customer-supplied BYOP integrations are reserved for Whitelabel. Meta Embedded Signup for the Core WhatsApp channel and AI Caller-managed hosted voice/SMS/AI services are not treated as Agency BYOP.
 
 ## Contact capacity clarification — September 24, 2026
 
