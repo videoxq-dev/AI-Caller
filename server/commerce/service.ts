@@ -12,26 +12,23 @@ import { auth } from "@/server/auth";
 import { ensureDefaultWorkspace } from "@/server/auth/workspace-repository";
 import { grantStarterCredits } from "@/server/credits/service";
 import { getEnv } from "@/server/env";
+import { AppError } from "@/server/http/errors";
 import { enqueueJob } from "@/server/jobs";
 import { COMMERCE_WELCOME_EMAIL } from "@/server/jobs/queues";
 import type { NormalizedPurchaseEvent } from "./types";
+import { resolveFunnelProductId } from "./products";
 
 const ACTIVE_EVENTS = new Set(["SALE", "BILL", "UNCANCEL-REBILL"]);
 const REVOKE_EVENTS = new Set(["RFND", "CGBK", "INSF"]);
 
-function configuredCoreProducts(): Set<string> {
-  return new Set(getEnv().JVZOO_CORE_PRODUCT_IDS.split(",").map((value) => value.trim()).filter(Boolean));
-}
-
 function isCoreProduct(productId: string): boolean {
-  const configured = configuredCoreProducts();
-  if (configured.size === 0) {
-    if (getEnv().NODE_ENV === "production") {
-      throw new Error("JVZOO_CORE_PRODUCT_IDS must be configured in production.");
-    }
-    return true;
+  const env = getEnv();
+  if (env.NODE_ENV === "production" && !env.JVZOO_CORE_PRODUCT_IDS.split(",").some((id) => id.trim())) {
+    throw new Error("JVZOO_CORE_PRODUCT_IDS must be configured in production.");
   }
-  return configured.has(productId);
+  // Only Core has purchase provisioning at this milestone. Mapping an OTO in
+  // configuration must never grant Core or unlock an unfinished offer.
+  return resolveFunnelProductId(productId, env) === "CORE";
 }
 
 async function grantCoreEntitlements(workspaceId: string) {
@@ -137,6 +134,14 @@ async function revoke(event: NormalizedPurchaseEvent) {
 }
 
 export async function processCommerceEvent(event: NormalizedPurchaseEvent) {
+  const sku = resolveFunnelProductId(event.productId);
+  if (sku && sku !== "CORE") {
+    // Never acknowledge an OTO purchase as processed while its provisioning
+    // is unavailable. Do this before recording the event so provider retries
+    // cannot be consumed as irrevocable "IGNORED" events.
+    throw new AppError("FUNNEL_OFFER_NOT_READY", "This funnel offer is not yet enabled for purchase provisioning.", 503);
+  }
+
   const [stored] = await db
     .insert(commerceEvents)
     .values({
@@ -146,9 +151,21 @@ export async function processCommerceEvent(event: NormalizedPurchaseEvent) {
       status: "RECEIVED",
       payload: event.raw,
     })
-    .onConflictDoNothing()
+    .onConflictDoUpdate({
+      target: [commerceEvents.source, commerceEvents.externalEventId],
+      set: {
+        status: "RECEIVED",
+        eventType: event.eventType,
+        payload: event.raw,
+        error: null,
+        processedAt: null,
+      },
+      setWhere: eq(commerceEvents.status, "FAILED"),
+    })
     .returning();
 
+  // Only FAILED events are claimable again. PROCESSED, IGNORED and an
+  // in-flight RECEIVED event retain their idempotent duplicate behavior.
   if (!stored) return { duplicate: true as const };
 
   try {
