@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterAll, afterEach, beforeEach, describe, expect, it } from "vitest";
 import { eq } from "drizzle-orm";
 import { db, closeDatabase } from "@/db";
 import { commerceEvents, licenses } from "@/db/schema";
@@ -32,7 +32,11 @@ describe("funnel purchase ingress", () => {
     resetEnvForTests();
   });
 
-  afterEach(async () => {
+  afterAll(async () => {
+    await closeDatabase();
+  });
+
+  afterEach(() => {
     if (previousCore === undefined) delete process.env.JVZOO_CORE_PRODUCT_IDS;
     else process.env.JVZOO_CORE_PRODUCT_IDS = previousCore;
     if (previousUnlimited === undefined) delete process.env.JVZOO_UNLIMITED_PRODUCT_IDS;
