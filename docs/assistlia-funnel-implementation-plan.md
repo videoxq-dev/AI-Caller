@@ -20,6 +20,10 @@ Keep **commercial purchase licenses** separate from the existing PERSONAL/GROWTH
 
 A buyer can provide Core as a service to another business, but the Core license still covers one business. Unlimited permits up to ten; Agency has separate 50- and 100-client SKUs. Define effective capacity from **active purchases**, not from the latest webhook or an unvalidated UI selection. OTO entitlements add their documented capabilities; purchasing a later OTO does not implicitly grant every earlier OTO unless that is explicitly part of the commercial offer.
 
+## Frozen completed surfaces
+
+**Phase 6C SMS is closed scope.** Do not change SMS runtime behavior, SMS readiness/registration logic, outbound SMS policy, delivery behavior, or concluded SMS product flows while implementing unrelated funnel or entitlement work unless the founder explicitly reopens SMS scope. If a later feature changes a prerequisite used by an SMS acceptance fixture, adapt only that fixture's external setup as narrowly as necessary; do not change the SMS behavior being verified. Treat unexpected SMS regressions as blockers to the unrelated change, not as permission to redesign SMS.
+
 ## Delivery method
 
 Deliver vertical slices with tests before implementation, migrations where needed, scoped API/UI updates, an independently reviewable pull request and CI evidence on the exact final head. Do not merge because a subset of checks is green. Distinguish CI fixture/browser coverage from live Telnyx, Meta, DeployOS and payment acceptance.
