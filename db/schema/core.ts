@@ -74,6 +74,7 @@ export const licenses = pgTable(
   {
     id: uuid("id").defaultRandom().primaryKey(),
     workspaceId: uuid("workspace_id").notNull().references(() => workspaces.id, { onDelete: "cascade" }),
+    purchaserUserId: text("purchaser_user_id").references(() => user.id, { onDelete: "set null" }),
     source: licenseSource("source").notNull(),
     externalPurchaseId: text("external_purchase_id").notNull(),
     productCode: text("product_code").notNull(),
@@ -86,6 +87,7 @@ export const licenses = pgTable(
   (table) => [
     uniqueIndex("licenses_source_purchase_product_uq").on(table.source, table.externalPurchaseId, table.productCode),
     index("licenses_workspace_idx").on(table.workspaceId),
+    index("licenses_purchaser_status_idx").on(table.purchaserUserId, table.status, table.productCode),
   ],
 );
 
