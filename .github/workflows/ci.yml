@@ -216,10 +216,7 @@ jobs:
         run: node scripts/ci-e2e-entitlement-grant.mjs install phase6c- PERFORMANCE
 
       - name: Phase 6C SMS automation readiness browser acceptance verification
-        run: |
-          node scripts/ci-browser-entitlement-trigger.mjs install phase6c- PERFORMANCE
-          trap 'node scripts/ci-browser-entitlement-trigger.mjs remove phase6c- PERFORMANCE' EXIT
-          npm run test:browser:phase6c
+        run: npm run test:browser:phase6c
 
       - name: Remove Phase 6C test entitlement provisioner
         if: always()
