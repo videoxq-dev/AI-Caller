@@ -9,6 +9,7 @@ import { parseInput } from "@/server/http/validation";
 import { resolveProviderRoute } from "@/server/providers/resolver";
 import { parseTelnyxWebhookPublicKey } from "@/server/providers/sms/telnyx";
 import { decryptIntegrationCredentials, type EncryptedSecretEnvelope } from "@/server/security/secrets";
+import { requireProviderIntegrationEntitlement } from "@/server/commerce/workspace-entitlements";
 
 const providerSchema = z.enum(["telnyx", "twilio", "plivo"]);
 const updateSchema = z.object({
@@ -76,6 +77,7 @@ export async function PUT(request: Request) {
     const context = await resolveWorkspaceContext(request.headers);
     requireWorkspacePermission(context.membership.role, "integration.manage");
     const input = parseInput(updateSchema, await request.json());
+    await requireProviderIntegrationEntitlement(context.workspace.id, input.provider);
     const integration = await getPrivateIntegration(context.workspace.id, input.provider);
     if (!integration || integration.status !== "CONNECTED") {
       throw new AppError("SMS_INTEGRATION_NOT_CONNECTED", "The SMS integration must be connected before updating webhook settings.", 409);
