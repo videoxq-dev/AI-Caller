@@ -1,6 +1,7 @@
 import { afterAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { closeDatabase, db } from "@/db";
 import { eq } from "drizzle-orm";
+import { AppError } from "@/server/http/errors";
 import { conversations, messages, providerWebhookEvents, workspaces } from "@/db/schema";
 import {
   getOrCreateContactByIdentity,
@@ -307,6 +308,37 @@ describe("WhatsApp outbound service", () => {
     expect(await db.select().from(messages)).toMatchObject([{
       status: "SUPPRESSED",
       metadata: expect.objectContaining({ suppressedReason: "WHATSAPP_TEMPLATE_APPROVAL_UNVERIFIED" }),
+    }]);
+  });
+
+  it("suppresses stale appointment state after Meta approval, before provider dispatch", async () => {
+    const [conversation] = await db.select({ contactId: conversations.contactId })
+      .from(conversations).where(eq(conversations.id, conversationId));
+    await recordWhatsAppConsent({
+      workspaceId, contactId: conversation.contactId, waId: "15551230000",
+      category: "UTILITY", status: "OPTED_IN", source: "STAFF_ENTRY",
+      consentStatement: "Customer requested appointment WhatsApp updates.",
+    });
+    const beforeDispatch = vi.fn(async () => {
+      throw new AppError("APPOINTMENT_REVISION_CHANGED",
+        "The appointment was rescheduled before dispatch.", 409);
+    });
+    const service = createWhatsAppOutboundService({
+      resolveRuntime: async () => runtime,
+      getApprovedTemplate: async () => ({
+        name: "appointment_reminder", language: "en_US",
+        category: "UTILITY", status: "APPROVED", body: "Your reminder.",
+      }),
+    });
+    await expect(service.sendTemplate(workspaceId, conversationId, {
+      senderType: "SYSTEM", templateName: "appointment_reminder", languageCode: "en_US",
+      beforeDispatch,
+    })).rejects.toMatchObject({ code: "APPOINTMENT_REVISION_CHANGED" });
+    expect(beforeDispatch).toHaveBeenCalledOnce();
+    expect(provider.sendTemplate).not.toHaveBeenCalled();
+    expect(await db.select().from(messages)).toMatchObject([{
+      status: "SUPPRESSED",
+      metadata: expect.objectContaining({ suppressedReason: "APPOINTMENT_REVISION_CHANGED" }),
     }]);
   });
 
