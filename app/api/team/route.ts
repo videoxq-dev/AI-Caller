@@ -20,6 +20,7 @@ export async function GET(request: Request) {
         id: seats.plan.id,
         name: seats.plan.name,
         subUserLimit: seats.plan.subUserLimit,
+        commercialSeatPackage: seats.commercialSeatPackage,
         activeSubUsers: seats.activeSubUsers,
         pendingInvitations: seats.pendingInvitations,
         usedSeats: seats.usedSeats,

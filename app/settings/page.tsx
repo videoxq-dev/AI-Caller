@@ -18,7 +18,7 @@ type SettingsTab = "general" | "phone" | "team" | "channels";
 type WorkspaceRole = "OWNER" | "ADMIN" | "STAFF";
 type TeamMember = { userId: string; name: string; email: string; image: string | null; role: WorkspaceRole; joinedAt: string };
 type TeamInvitation = { id: string; email: string; role: "ADMIN" | "STAFF"; status: "PENDING"; expiresAt: string; createdAt: string; invitedByUserId: string };
-type TeamPlan = { id: "PERSONAL" | "GROWTH"; name: string; subUserLimit: number; activeSubUsers: number; pendingInvitations: number; usedSeats: number; availableSeats: number };
+type TeamPlan = { id: "PERSONAL" | "GROWTH"; name: string; commercialSeatPackage?: "UNLIMITED" | null; subUserLimit: number; activeSubUsers: number; pendingInvitations: number; usedSeats: number; availableSeats: number };
 
 const settingsTabs: Array<{ id: SettingsTab; label: string }> = [
   { id: "general", label: "General" },
@@ -197,7 +197,7 @@ export default function SettingsPage() {
           {tab === "team" && (
             <section className="settingsGrid settingsGridTeam">
               <article className="settingsCard">
-                <div className="sectionHeading"><div><h2>Team</h2><p>{teamPlan ? `${teamPlan.name} · ${teamPlan.usedSeats} of ${teamPlan.subUserLimit} sub-user seats used` : `${activeMembers} active members`}</p></div><span className="statusPill">{team.length + pendingInvitations.length} total</span></div>
+                <div className="sectionHeading"><div><h2>Team</h2><p>{teamPlan ? `${teamPlan.commercialSeatPackage === "UNLIMITED" ? "Unlimited" : teamPlan.name} · ${teamPlan.usedSeats} of ${teamPlan.subUserLimit} sub-user seats used` : `${activeMembers} active members`}</p></div><span className="statusPill">{team.length + pendingInvitations.length} total</span></div>
                 {teamError && <p className="teamSettingsError" role="alert">{teamError}</p>}
                 {teamPlan?.subUserLimit === 0 && canManageTeam && <div className="teamPlanNotice"><span>Personal is owner-only. Growth enables up to 3 sub-users.</span><Link href="/settings/billing">View billing &amp; plan</Link></div>}
                 {canManageTeam && teamPlan?.subUserLimit !== 0 && <div className="inviteRow"><input value={inviteEmail} onChange={(event) => setInviteEmail(event.target.value)} placeholder="name@business.com" type="email" /><select aria-label="Invitation role" value={inviteRole} onChange={(event) => setInviteRole(event.target.value as "ADMIN" | "STAFF")}><option value="STAFF">Staff</option>{currentRole === "OWNER" && <option value="ADMIN">Admin</option>}</select><button type="button" disabled={teamActionPending || !inviteEmail.trim()} onClick={() => void invite()}>Invite member</button></div>}
