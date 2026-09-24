@@ -22,7 +22,7 @@ import {
 } from "@/db/schema";
 import { deliveryFailureStatus, executeAutomationRun } from "./executor";
 import { createAutomationRun, createWorkflowRun } from "./repository";
-import { createWorkflowDraft, publishWorkflow, updateWorkflowDraft } from "./workflows";
+import { createWorkflowDraft, getWorkflowVersion, publishWorkflow, updateWorkflowDraft } from "./workflows";
 
 let workspaceId = "";
 let ownerId = "executor-owner";
@@ -100,6 +100,8 @@ describe("automation executor safety", () => {
       actions: [{ type: "NOTIFY_STAFF", title: "Lead ready", message: "Contact the customer." }],
     });
     const version = await publishWorkflow(workspaceId, definition.id);
+    const storedVersion = await getWorkflowVersion(workspaceId, version.id);
+    if (!storedVersion) throw new Error("Published workflow version missing.");
     const [event] = await db.insert(automationEvents).values({
       workspaceId,
       type: "LEAD_QUALIFIED",
@@ -111,7 +113,7 @@ describe("automation executor safety", () => {
       workspaceId,
       eventId: event.id,
       workflowVersionId: version.id,
-      actions: version.snapshot.actions,
+      actions: storedVersion.snapshot.actions,
     });
     if (!run) throw new Error("Expected custom workflow run.");
 
