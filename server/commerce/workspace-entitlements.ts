@@ -7,6 +7,7 @@ export const CALENDAR_PROVIDERS = new Set(["google", "outlook", "calendly", "cal
 
 export type WorkspaceIntegrationEntitlements = {
   purchaserUserId: string | null;
+  unlimited: boolean;
   externalCalendar: boolean;
   agencyByop: boolean;
 };
@@ -18,7 +19,7 @@ export async function getWorkspaceIntegrationEntitlements(
     .where(and(eq(memberships.workspaceId, workspaceId), eq(memberships.role, "OWNER")))
     .limit(2);
   if (owners.length !== 1) {
-    return { purchaserUserId: null, externalCalendar: false, agencyByop: false };
+    return { purchaserUserId: null, unlimited: false, externalCalendar: false, agencyByop: false };
   }
 
   const rows = await db.select({ productCode: licenses.productCode }).from(licenses).where(and(
@@ -26,9 +27,11 @@ export async function getWorkspaceIntegrationEntitlements(
     eq(licenses.status, "ACTIVE"),
   ));
   const products = new Set(rows.map((row) => row.productCode));
+  const unlimited = products.has("UNLIMITED");
   return {
     purchaserUserId: owners[0].userId,
-    externalCalendar: products.has("UNLIMITED"),
+    unlimited,
+    externalCalendar: unlimited,
     agencyByop: products.has("AGENCY_50") || products.has("AGENCY_100"),
   };
 }
