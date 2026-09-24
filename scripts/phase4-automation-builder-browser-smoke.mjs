@@ -76,6 +76,16 @@ try {
   );
   const workspaceId = owner.rows[0].workspace_id;
 
+  // The Automation Builder is a Performance entitlement. This acceptance user
+  // explicitly receives that purchase so the browser scenario exercises the
+  // same commercial boundary as production instead of bypassing it.
+  await pool.query(
+    `INSERT INTO licenses
+       (workspace_id, purchaser_user_id, source, external_purchase_id, product_code, status, purchased_at)
+     VALUES ($1, $2, 'MANUAL', $3, 'PERFORMANCE', 'ACTIVE', now())`,
+    [workspaceId, owner.rows[0].user_id, `phase4-browser-performance-${stamp}`],
+  );
+
   await page.goto(`${baseUrl}/automations`, { waitUntil: "networkidle" });
   await page.getByRole("heading", { name: "Automations", exact: true }).waitFor();
   await page.getByRole("button", { name: /Create automation/ }).click();
