@@ -71,6 +71,10 @@ export function AppNav({ active, className = "appSidebar" }: { active: string; c
   const unread = useMemo(() => notifications.filter((item) => !item.readAt).length, [notifications]);
   const activeWorkspace = workspaces.find((workspace) => workspace.workspaceId === activeWorkspaceId) ?? null;
   const atCapacity = capacity !== null && capacity.availableBusinesses <= 0;
+  const hasAgency = capacity?.activeProducts.some((code) => code === "AGENCY_50" || code === "AGENCY_100") ?? false;
+  const navigationItems = hasAgency
+    ? [items[0], { label: "Workspaces", href: "/workspaces", icon: <DatabaseIcon size={20} /> }, ...items.slice(1)]
+    : items;
 
   async function switchWorkspace(workspaceId: string) {
     if (!workspaceId || workspaceId === activeWorkspaceId || switching) return;
@@ -201,7 +205,7 @@ export function AppNav({ active, className = "appSidebar" }: { active: string; c
       </div>
 
       <nav className="appNav" aria-label="Main navigation">
-        {items.map((item) => (
+        {navigationItems.map((item) => (
           <Link
             key={item.label}
             href={item.href}
