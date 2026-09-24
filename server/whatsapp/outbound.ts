@@ -53,7 +53,14 @@ async function verifyApprovedTemplate(
 async function requireWhatsAppConsent(
   workspaceId: string, to: string, category: "UTILITY" | "MARKETING", requireOptIn: boolean,
 ) {
-  const status = await getWhatsAppConsentStatus(workspaceId, to, category);
+  let status;
+  try {
+    status = await getWhatsAppConsentStatus(workspaceId, to, category);
+  } catch (error) {
+    if (error instanceof AppError && error.status < 500) throw error;
+    throw new AppError("WHATSAPP_CONSENT_UNVERIFIED",
+      "WhatsApp consent could not be verified; no message was sent.", 503);
+  }
   if (status === "OPTED_OUT" || (requireOptIn && status !== "OPTED_IN")) {
     throw new AppError("WHATSAPP_CONSENT_REQUIRED",
       "This customer has not opted in to this WhatsApp message type or has opted out.", 409);
@@ -215,7 +222,13 @@ export function createWhatsAppOutboundService(dependencies: OutboundDependencies
         );
       }
 
-      const runtime = await dependencies.resolveRuntime(workspaceId);
+      let runtime: WhatsAppRuntime;
+      try {
+        runtime = await dependencies.resolveRuntime(workspaceId);
+      } catch {
+        throw new AppError("WHATSAPP_NOT_CONNECTED",
+          "Connect WhatsApp before sending an approved template.", 409);
+      }
       const to = await destination(workspaceId, conversationId);
       const getTemplate = dependencies.getApprovedTemplate ?? approvedTemplate;
       const eligibility = await verifyApprovedTemplate(getTemplate, workspaceId, input.templateName, input.languageCode);
