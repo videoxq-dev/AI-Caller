@@ -38,7 +38,7 @@ describe("WhatsApp template API workspace permissions", () => {
   });
   it("lists only the authenticated workspace WABA with a validated cursor", async () => {
     const list = vi.fn(async () => ({ items: [], nextCursor: null }));
-    vi.mocked(resolveWhatsAppTemplatesForWorkspace).mockResolvedValue({ list, submit: vi.fn() });
+    vi.mocked(resolveWhatsAppTemplatesForWorkspace).mockResolvedValue({ list, approved: vi.fn(), submit: vi.fn() });
     const response = await GET(request("GET", undefined, "?after=cDoxOjc%3D"));
     expect(response.status).toBe(200);
     expect(response.headers.get("cache-control")).toBe("no-store");
@@ -55,7 +55,7 @@ describe("WhatsApp template API workspace permissions", () => {
   it("permits an admin to submit a pending template without claiming approval", async () => {
     workspace("ADMIN");
     const submit = vi.fn(async () => ({ id: "1", name: "hello", language: "en_US", status: "PENDING", category: "UTILITY" }));
-    vi.mocked(resolveWhatsAppTemplatesForWorkspace).mockResolvedValue({ list: vi.fn(), submit });
+    vi.mocked(resolveWhatsAppTemplatesForWorkspace).mockResolvedValue({ list: vi.fn(), approved: vi.fn(), submit });
     const response = await POST(request("POST", template));
     expect(response.status).toBe(201);
     expect(await response.json()).toMatchObject({ template: { status: "PENDING" } });
