@@ -8,6 +8,7 @@ import {
   grantStarterCredits,
   grantUnlimitedPurchaseCredits,
   reverseStarterCreditsInTx,
+  reverseUnlimitedPurchaseCreditsInTx,
   refundCredits,
   releaseCreditReservation,
   reserveCredits,
@@ -136,6 +137,125 @@ describe("credits", () => {
     const entries = await db.select().from(creditLedger).where(eq(creditLedger.workspaceId, workspaceId));
     expect(entries).toHaveLength(1);
     expect((await db.select().from(creditWallets))[0].balance).toBe(15_000);
+  });
+
+  it("reverses only the refunded Unlimited bonus, preserving Core and paid credit history", async () => {
+    const [license] = await db.insert(licenses).values({
+      workspaceId,
+      source: "MANUAL",
+      externalPurchaseId: "unlimited-refund-credits",
+      productCode: "UNLIMITED",
+      status: "ACTIVE",
+      purchasedAt: new Date(),
+    }).returning();
+    await grantStarterCredits(workspaceId, "independent-core");
+    await grantUnlimitedPurchaseCredits(workspaceId, license.id);
+    await refundCredits(workspaceId, 2_000, {
+      reason: "Paid hosted credit top-up",
+      referenceType: "PAID_TOPUP",
+      referenceId: "topup-remains",
+    });
+    await debitCredits(workspaceId, 17_500, {
+      reason: "Delivered hosted AI",
+      referenceType: "ORCHESTRATOR_CALL",
+      referenceId: "unlimited-spend-remains",
+    });
+    await db.update(licenses).set({ status: "REFUNDED" }).where(eq(licenses.id, license.id));
+
+    const first = await db.transaction((tx) => reverseUnlimitedPurchaseCreditsInTx(tx, workspaceId, license.id));
+    const again = await db.transaction((tx) => reverseUnlimitedPurchaseCreditsInTx(tx, workspaceId, license.id));
+    expect(first).toBe(-500);
+    expect(again).toBe(-500);
+
+    const [wallet] = await db.select().from(creditWallets).where(eq(creditWallets.workspaceId, workspaceId));
+    expect(wallet.balance).toBe(-500);
+    const rows = await db.select().from(creditLedger).where(eq(creditLedger.workspaceId, workspaceId));
+    expect(rows.filter((row) => row.referenceType === "LICENSE_BONUS_REVERSAL")).toMatchObject([{
+      type: "ADJUSTMENT",
+      referenceId: license.id,
+      amount: -15_000,
+      balanceAfter: -500,
+    }]);
+    expect(rows.filter((row) => row.referenceType === "LICENSE")).toHaveLength(1);
+    expect(rows.filter((row) => row.referenceType === "PAID_TOPUP")).toHaveLength(1);
+    expect(rows.filter((row) => row.referenceType === "ORCHESTRATOR_CALL")).toHaveLength(1);
+  });
+
+  it("rejects bonus reversal for an active, cancelled, wrong-SKU or other-business purchase", async () => {
+    const [unlimited, core] = await db.insert(licenses).values([
+      {
+        workspaceId, source: "MANUAL", externalPurchaseId: "unlimited-reversal-ineligible",
+        productCode: "UNLIMITED", status: "ACTIVE", purchasedAt: new Date(),
+      },
+      {
+        workspaceId, source: "MANUAL", externalPurchaseId: "core-reversal-ineligible",
+        productCode: "CORE", status: "REFUNDED", purchasedAt: new Date(),
+      },
+    ]).returning();
+    await grantUnlimitedPurchaseCredits(workspaceId, unlimited.id);
+    const [other] = await db.insert(workspaces).values({ name: "Other Bonus Reversal Business" }).returning();
+    const reverse = (targetWorkspace: string, licenseId: string) =>
+      db.transaction((tx) => reverseUnlimitedPurchaseCreditsInTx(tx, targetWorkspace, licenseId));
+    for (const [targetWorkspace, licenseId] of [
+      [workspaceId, unlimited.id], [workspaceId, core.id], [other.id, unlimited.id],
+    ]) {
+      await expect(reverse(targetWorkspace, licenseId))
+        .rejects.toMatchObject({ code: "FUNNEL_LICENSE_NOT_ELIGIBLE", status: 409 });
+    }
+    await db.update(licenses).set({ status: "CANCELLED" }).where(eq(licenses.id, unlimited.id));
+    await expect(reverse(workspaceId, unlimited.id))
+      .rejects.toMatchObject({ code: "FUNNEL_LICENSE_NOT_ELIGIBLE", status: 409 });
+    expect((await db.select().from(creditWallets).where(eq(creditWallets.workspaceId, workspaceId)))[0].balance)
+      .toBe(15_000);
+    expect(await db.select().from(creditLedger).where(eq(creditLedger.referenceType, "LICENSE_BONUS_REVERSAL")))
+      .toHaveLength(0);
+  });
+
+  it("uses historical bonus amount and handles a missing grant without inventing a debit", async () => {
+    const [historical, missing] = await db.insert(licenses).values([
+      {
+        workspaceId, source: "MANUAL", externalPurchaseId: "historical-unlimited-bonus",
+        productCode: "UNLIMITED", status: "REFUNDED", purchasedAt: new Date(),
+      },
+      {
+        workspaceId, source: "MANUAL", externalPurchaseId: "no-unlimited-bonus",
+        productCode: "UNLIMITED", status: "CHARGEBACK", purchasedAt: new Date(),
+      },
+    ]).returning();
+    await db.insert(creditWallets).values({ workspaceId, balance: 2_500 });
+    await db.insert(creditLedger).values({
+      workspaceId,
+      type: "GRANT",
+      amount: 2_500,
+      balanceAfter: 2_500,
+      reason: "Historical Unlimited promotion",
+      referenceType: "LICENSE_BONUS",
+      referenceId: historical.id,
+    });
+
+    expect(await db.transaction((tx) => reverseUnlimitedPurchaseCreditsInTx(tx, workspaceId, missing.id)))
+      .toBeNull();
+    expect(await db.transaction((tx) => reverseUnlimitedPurchaseCreditsInTx(tx, workspaceId, historical.id)))
+      .toBe(0);
+    const [adjustment] = await db.select().from(creditLedger)
+      .where(eq(creditLedger.referenceType, "LICENSE_BONUS_REVERSAL"));
+    expect(adjustment).toMatchObject({ referenceId: historical.id, amount: -2_500 });
+  });
+
+  it("serializes two refund workers so an Unlimited bonus is reversed just once", async () => {
+    const [license] = await db.insert(licenses).values({
+      workspaceId, source: "MANUAL", externalPurchaseId: "concurrent-unlimited-refund",
+      productCode: "UNLIMITED", status: "ACTIVE", purchasedAt: new Date(),
+    }).returning();
+    await grantUnlimitedPurchaseCredits(workspaceId, license.id);
+    await db.update(licenses).set({ status: "CHARGEBACK" }).where(eq(licenses.id, license.id));
+    const balances = await Promise.all([
+      db.transaction((tx) => reverseUnlimitedPurchaseCreditsInTx(tx, workspaceId, license.id)),
+      db.transaction((tx) => reverseUnlimitedPurchaseCreditsInTx(tx, workspaceId, license.id)),
+    ]);
+    expect(balances).toEqual([0, 0]);
+    expect(await db.select().from(creditLedger)
+      .where(eq(creditLedger.referenceType, "LICENSE_BONUS_REVERSAL"))).toHaveLength(1);
   });
 
   it("makes hosted debit and refund references idempotent", async () => {
