@@ -4,12 +4,13 @@ import { db } from "@/db";
 import {
   commerceEvents,
   licenses,
+  memberships,
   user,
   workspaceEntitlements,
   workspaces,
 } from "@/db/schema";
 import { auth } from "@/server/auth";
-import { ensureDefaultWorkspace } from "@/server/auth/workspace-repository";
+import { createWorkspaceForUser, ensureDefaultWorkspace, getMembership, getPrimaryOwnedWorkspace } from "@/server/auth/workspace-repository";
 import { grantStarterCredits } from "@/server/credits/service";
 import { getEnv } from "@/server/env";
 import { AppError } from "@/server/http/errors";
@@ -53,7 +54,8 @@ async function grantCoreEntitlements(workspaceId: string) {
 async function provisionUser(event: NormalizedPurchaseEvent) {
   const [existing] = await db.select().from(user).where(eq(user.email, event.customerEmail)).limit(1);
   if (existing) {
-    const membership = await ensureDefaultWorkspace(existing);
+    const membership = await getPrimaryOwnedWorkspace(existing.id)
+      ?? await createWorkspaceForUser(existing.id, existing.name.trim() ? `${existing.name.trim()}'s Business` : "My Business");
     return { user: existing, workspace: membership, created: false, temporaryPassword: null as string | null };
   }
 
@@ -75,13 +77,31 @@ async function provisionUser(event: NormalizedPurchaseEvent) {
 async function activate(event: NormalizedPurchaseEvent) {
   if (!isCoreProduct(event.productId)) return { ignored: true as const, reason: "UNMAPPED_PRODUCT" };
 
-  const provisioned = await provisionUser(event);
-  await db.update(workspaces).set({ status: "ACTIVE", updatedAt: new Date() }).where(eq(workspaces.id, provisioned.workspace.workspaceId));
+  const [existingLicense] = await db.select().from(licenses).where(and(
+    eq(licenses.source, "JVZOO"),
+    eq(licenses.externalPurchaseId, event.externalPurchaseId),
+    eq(licenses.productCode, "CORE"),
+  )).limit(1);
+
+  let provisioned: Awaited<ReturnType<typeof provisionUser>>;
+  if (existingLicense) {
+    const [buyer] = existingLicense.purchaserUserId
+      ? await db.select().from(user).where(eq(user.id, existingLicense.purchaserUserId)).limit(1)
+      : [];
+    const owned = buyer ? await getMembership(buyer.id, existingLicense.workspaceId) : null;
+    if (!buyer || buyer.email.toLowerCase() !== event.customerEmail.toLowerCase() || owned?.role !== "OWNER") {
+      throw new AppError("PURCHASE_OWNERSHIP_CONFLICT", "This receipt is associated with another purchaser or needs ownership reconciliation.", 409);
+    }
+    provisioned = { user: buyer, workspace: owned, created: false, temporaryPassword: null };
+  } else {
+    provisioned = await provisionUser(event);
+  }
 
   const [license] = await db
     .insert(licenses)
     .values({
       workspaceId: provisioned.workspace.workspaceId,
+      purchaserUserId: provisioned.user.id,
       source: "JVZOO",
       externalPurchaseId: event.externalPurchaseId,
       productCode: "CORE",
@@ -93,11 +113,21 @@ async function activate(event: NormalizedPurchaseEvent) {
     .onConflictDoUpdate({
       target: [licenses.source, licenses.externalPurchaseId, licenses.productCode],
       set: { status: "ACTIVE", rawMetadata: event.raw, updatedAt: new Date() },
+      setWhere: and(
+        eq(licenses.workspaceId, provisioned.workspace.workspaceId),
+        eq(licenses.purchaserUserId, provisioned.user.id),
+      ),
     })
     .returning();
 
-  await grantCoreEntitlements(provisioned.workspace.workspaceId);
-  const balance = await grantStarterCredits(provisioned.workspace.workspaceId, license.id);
+  // A concurrent IPN with the same receipt must not move access or credit grants
+  // to a second account, even if both events raced through the initial lookup.
+  if (!license || license.workspaceId !== provisioned.workspace.workspaceId || license.purchaserUserId !== provisioned.user.id) {
+    throw new AppError("PURCHASE_OWNERSHIP_CONFLICT", "This receipt is associated with another purchaser or needs ownership reconciliation.", 409);
+  }
+  await db.update(workspaces).set({ status: "ACTIVE", updatedAt: new Date() }).where(eq(workspaces.id, license.workspaceId));
+  await grantCoreEntitlements(license.workspaceId);
+  const balance = await grantStarterCredits(license.workspaceId, license.id);
 
   if (provisioned.created && provisioned.temporaryPassword) {
     await enqueueJob(COMMERCE_WELCOME_EMAIL, {
@@ -200,11 +230,19 @@ export async function processCommerceEvent(event: NormalizedPurchaseEvent) {
 }
 
 export async function activateManualCoreLicense(workspaceId: string) {
+  // Manual licensing may apply to unowned/bootstrap workspaces. Never guess
+  // which purchaser owns a workspace with multiple OWNER memberships.
+  const owners = await db.select({ userId: memberships.userId })
+    .from(memberships)
+    .where(and(eq(memberships.workspaceId, workspaceId), eq(memberships.role, "OWNER")))
+    .limit(2);
+  const purchaserUserId = owners.length === 1 ? owners[0].userId : null;
   const externalPurchaseId = `manual:${workspaceId}`;
   const [license] = await db
     .insert(licenses)
     .values({
       workspaceId,
+      purchaserUserId,
       source: "MANUAL",
       externalPurchaseId,
       productCode: "CORE",
