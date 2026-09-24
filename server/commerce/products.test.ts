@@ -62,7 +62,10 @@ describe("Assistlia commercial funnel product mapping", () => {
     expect(getAgencyClientLimit(["CORE", "AGENCY_50"])).toBe(50);
     expect(getPurchasedBusinessLimit(["CORE", "AGENCY_50"])).toBe(51);
     expect(getPurchasedBusinessLimit(["AGENCY_100"])).toBe(101);
-    expect(getPurchasedBusinessLimit(["AGENCY_50", "AGENCY_100"])).toBe(101);
+    expect(getAgencyClientLimit(["AGENCY_50", "AGENCY_100"])).toBe(150);
+    expect(getPurchasedBusinessLimit(["AGENCY_50", "AGENCY_100"])).toBe(151);
+    expect(getAgencyClientLimit(["AGENCY_50", "AGENCY_50"])).toBe(100);
+    expect(getPurchasedBusinessLimit(["AGENCY_50", "AGENCY_50"])).toBe(101);
     expect(getAgencyClientLimit(["CORE", "UNLIMITED"])).toBeNull();
   });
 });
