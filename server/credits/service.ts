@@ -1,4 +1,4 @@
-import { and, eq, gte, lte, sql } from "drizzle-orm";
+import { and, eq, gte, inArray, lte, sql } from "drizzle-orm";
 import { db } from "@/db";
 import { creditLedger, creditReservations, creditWallets, licenses } from "@/db/schema";
 import { FUNNEL_PRODUCTS } from "@/server/commerce/products";
@@ -149,21 +149,22 @@ export async function grantUnlimitedPurchaseCredits(workspaceId: string, license
 }
 
 /**
- * Reverse the precise historical promotional grant once on refund/chargeback.
- * Preserve paid credits and recorded provider spending. When the grant has
- * already been spent, a negative wallet records the remaining debit.
+ * Reverse only the historical grant identified by SKU-specific ledger references.
+ * This does not unwind paid top-ups, settled provider use or other licenses.
+ * An exhausted promotion can leave a negative wallet balance.
  */
-export async function reverseStarterCreditsInTx(
+async function reverseLicenseCreditsInTx(
   tx: Tx,
   workspaceId: string,
   referenceId: string,
+  input: { grantReferenceType: string; reversalReferenceType: string },
 ): Promise<number | null> {
   await lockWallet(tx, workspaceId);
   const [existing] = await tx.select({ balanceAfter: creditLedger.balanceAfter })
     .from(creditLedger).where(and(
       eq(creditLedger.workspaceId, workspaceId),
       eq(creditLedger.type, "ADJUSTMENT"),
-      eq(creditLedger.referenceType, "LICENSE_GRANT_REVERSAL"),
+      eq(creditLedger.referenceType, input.reversalReferenceType),
       eq(creditLedger.referenceId, referenceId),
     )).limit(1);
   if (existing) return existing.balanceAfter;
@@ -172,7 +173,7 @@ export async function reverseStarterCreditsInTx(
     .from(creditLedger).where(and(
       eq(creditLedger.workspaceId, workspaceId),
       eq(creditLedger.type, "GRANT"),
-      eq(creditLedger.referenceType, "LICENSE"),
+      eq(creditLedger.referenceType, input.grantReferenceType),
       eq(creditLedger.referenceId, referenceId),
     )).limit(1);
   if (!grant) return null;
@@ -195,10 +196,48 @@ export async function reverseStarterCreditsInTx(
     amount: -grant.amount,
     balanceAfter: wallet.balance,
     reason: "Promotional credits reversed after purchase refund or chargeback",
-    referenceType: "LICENSE_GRANT_REVERSAL",
+    referenceType: input.reversalReferenceType,
     referenceId,
   });
   return wallet.balance;
+}
+
+/** Preserve Core's existing ledger references and refund behavior. */
+export async function reverseStarterCreditsInTx(
+  tx: Tx,
+  workspaceId: string,
+  referenceId: string,
+): Promise<number | null> {
+  return reverseLicenseCreditsInTx(tx, workspaceId, referenceId, {
+    grantReferenceType: "LICENSE",
+    reversalReferenceType: "LICENSE_GRANT_REVERSAL",
+  });
+}
+
+/**
+ * Call from the same transaction that marks an Unlimited purchase refunded or
+ * charged back. Lock the license first, just as its bonus grant does, so a
+ * concurrent grant cannot arrive after the refund's reversal check.
+ * Cancellation does not reverse a purchase's already-granted promotion.
+ */
+export async function reverseUnlimitedPurchaseCreditsInTx(
+  tx: Tx,
+  workspaceId: string,
+  licenseId: string,
+): Promise<number | null> {
+  const [eligible] = await tx.select({ id: licenses.id }).from(licenses).where(and(
+    eq(licenses.id, licenseId),
+    eq(licenses.workspaceId, workspaceId),
+    eq(licenses.productCode, "UNLIMITED"),
+    inArray(licenses.status, ["REFUNDED", "CHARGEBACK"]),
+  )).for("update").limit(1);
+  if (!eligible) {
+    throw new AppError("FUNNEL_LICENSE_NOT_ELIGIBLE", "A refunded Unlimited purchase for this business is required.", 409);
+  }
+  return reverseLicenseCreditsInTx(tx, workspaceId, licenseId, {
+    grantReferenceType: "LICENSE_BONUS",
+    reversalReferenceType: "LICENSE_BONUS_REVERSAL",
+  });
 }
 
 export async function reserveCredits(
