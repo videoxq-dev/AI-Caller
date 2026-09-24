@@ -1,4 +1,5 @@
 import { afterAll, beforeEach, describe, expect, it } from "vitest";
+import { eq } from "drizzle-orm";
 import { closeDatabase, db } from "@/db";
 import { AppError } from "@/server/http/errors";
 import {
