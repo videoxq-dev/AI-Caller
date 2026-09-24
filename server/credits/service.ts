@@ -126,26 +126,32 @@ export async function grantStarterCredits(workspaceId: string, referenceId: stri
  * per eligible ACTIVE Unlimited license, on that license's business wallet.
  * A different workspace, non-Unlimited SKU or revoked receipt cannot grant.
  */
-export async function grantUnlimitedPurchaseCredits(workspaceId: string, licenseId: string): Promise<number> {
-  return db.transaction(async (tx) => {
-    const [license] = await tx.select({ id: licenses.id }).from(licenses).where(and(
-      eq(licenses.id, licenseId),
-      eq(licenses.workspaceId, workspaceId),
-      eq(licenses.productCode, "UNLIMITED"),
-      eq(licenses.status, "ACTIVE"),
-    )).for("update").limit(1);
-    if (!license) {
-      throw new AppError("FUNNEL_LICENSE_NOT_ELIGIBLE", "An active Unlimited purchase for this business is required.", 409);
-    }
-    const product = FUNNEL_PRODUCTS.find((item) => item.code === "UNLIMITED");
-    if (!product) throw new Error("Unlimited funnel product is not configured.");
-    return grantLicenseCreditsInTransaction(tx, workspaceId, {
-      amount: product.purchaseCredits,
-      reason: "Unlimited purchase bonus hosted credits",
-      referenceType: "LICENSE_BONUS",
-      licenseId,
-    });
+export async function grantUnlimitedPurchaseCreditsInTx(
+  tx: Tx,
+  workspaceId: string,
+  licenseId: string,
+): Promise<number> {
+  const [license] = await tx.select({ id: licenses.id }).from(licenses).where(and(
+    eq(licenses.id, licenseId),
+    eq(licenses.workspaceId, workspaceId),
+    eq(licenses.productCode, "UNLIMITED"),
+    eq(licenses.status, "ACTIVE"),
+  )).for("update").limit(1);
+  if (!license) {
+    throw new AppError("FUNNEL_LICENSE_NOT_ELIGIBLE", "An active Unlimited purchase for this business is required.", 409);
+  }
+  const product = FUNNEL_PRODUCTS.find((item) => item.code === "UNLIMITED");
+  if (!product) throw new Error("Unlimited funnel product is not configured.");
+  return grantLicenseCreditsInTransaction(tx, workspaceId, {
+    amount: product.purchaseCredits,
+    reason: "Unlimited purchase bonus hosted credits",
+    referenceType: "LICENSE_BONUS",
+    licenseId,
   });
+}
+
+export async function grantUnlimitedPurchaseCredits(workspaceId: string, licenseId: string): Promise<number> {
+  return db.transaction((tx) => grantUnlimitedPurchaseCreditsInTx(tx, workspaceId, licenseId));
 }
 
 /**
