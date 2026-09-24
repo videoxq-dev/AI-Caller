@@ -240,10 +240,11 @@ async function sendSmsConversationTextWithRuntimeInternal(
   } else if (input.preclassifiedPurpose) {
     // Automated BYOP SMS still needs recipient consent and opt-out enforcement.
     // An external provider connection alone is not authorization to market.
-    actualPurpose = classifySmsForPolicy(text, input.preclassifiedPurpose);
-    if (actualPurpose === "UNCERTAIN") {
+    const purpose = classifySmsForPolicy(text, input.preclassifiedPurpose);
+    if (purpose === "UNCERTAIN") {
       throw new AppError("SMS_CAMPAIGN_REVIEW_REQUIRED", "Please review this message before sending.", 409);
     }
+    actualPurpose = purpose;
     const reply = await smsReplyContext(workspaceId, conversationId, to);
     const consent = await getSmsConsentStatus(workspaceId, to, actualPurpose);
     if (!consentAllowsSend({ consent, purpose: actualPurpose, currentConversationReply: reply.currentConversationReply })) {
