@@ -48,7 +48,7 @@ Confirm inbound phone, SMS, WhatsApp, webchat, unified inbox, manually entered s
 
 ### F4–F6 — Unlimited
 
-F4: owner-level ten-business capacity, five-staff seats, access controls, unlimited-supported contacts/history/automation limits and a combined maximum of two website-or-file imported knowledge sources per owned business with bounded file sizes and operational safeguards. F5: multiple Google/Microsoft/Calendly/Cal.com calendar connections, service/staff routing and connected-calendar appointment management. F6: multi-widget lifecycle, reusable workflows/configurations, integrations and enhanced reporting; the 15,000 bonus credits arrive through F2.
+F4: owner-level ten-business capacity, five-staff seats, access controls, a **500-contact maximum for Core with the contact cap removed by active Unlimited**, conversation-history/automation support and a combined maximum of two website-or-file imported knowledge sources per owned business with bounded file sizes and operational safeguards. F5: multiple Google/Microsoft/Calendly/Cal.com calendar connections, service/staff routing and connected-calendar appointment management. F6: multi-widget lifecycle, reusable workflows/configurations, integrations and enhanced reporting; the 15,000 bonus credits arrive through F2.
 
 ### F7–F9 — Performance
 
@@ -80,3 +80,7 @@ The founder subsequently clarified the initial broad Unlimited Knowledge wording
 ## External integration entitlement clarification — September 24, 2026
 
 Core uses AI Caller’s native in-app booking and **cannot connect external calendars**. Unlimited unlocks the existing external calendar integration capability (Google Calendar, Microsoft Outlook, Calendly and Cal.com); it does **not** imply unlimited calendar connections or require new multi-calendar functionality. All other customer-supplied BYOP integrations are reserved for Agency. Meta Embedded Signup for the Core WhatsApp channel and AI Caller-managed hosted voice/SMS/AI services are not treated as Agency BYOP.
+
+## Contact capacity clarification — September 24, 2026
+
+The founder clarified the revised funnel offer: **Core supports a maximum of 500 contacts per business. Active Unlimited removes the contact-count cap.** Enforce this on the server at the shared contact-creation boundary so manual entry and inbound channel-created contacts cannot bypass it. Existing contacts are never deleted after an Unlimited refund or downgrade; if the business is already at or above 500, block only new contact creation until the count is below the Core limit or Unlimited is restored. This clarification completes the agreed Core/Unlimited entitlement scope once verified and merged.
