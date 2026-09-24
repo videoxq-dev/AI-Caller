@@ -4,12 +4,13 @@ import { db } from "@/db";
 import {
   commerceEvents,
   licenses,
+  memberships,
   user,
   workspaceEntitlements,
   workspaces,
 } from "@/db/schema";
 import { auth } from "@/server/auth";
-import { ensureDefaultWorkspace } from "@/server/auth/workspace-repository";
+import { createWorkspaceForUser, ensureDefaultWorkspace, getPrimaryOwnedWorkspace } from "@/server/auth/workspace-repository";
 import { grantStarterCredits } from "@/server/credits/service";
 import { getEnv } from "@/server/env";
 import { AppError } from "@/server/http/errors";
@@ -53,7 +54,8 @@ async function grantCoreEntitlements(workspaceId: string) {
 async function provisionUser(event: NormalizedPurchaseEvent) {
   const [existing] = await db.select().from(user).where(eq(user.email, event.customerEmail)).limit(1);
   if (existing) {
-    const membership = await ensureDefaultWorkspace(existing);
+    const membership = await getPrimaryOwnedWorkspace(existing.id)
+      ?? await createWorkspaceForUser(existing.id, existing.name.trim() ? `${existing.name.trim()}\u0027s Business` : "My Business");
     return { user: existing, workspace: membership, created: false, temporaryPassword: null as string | null };
   }
 
@@ -82,6 +84,7 @@ async function activate(event: NormalizedPurchaseEvent) {
     .insert(licenses)
     .values({
       workspaceId: provisioned.workspace.workspaceId,
+      purchaserUserId: provisioned.user.id,
       source: "JVZOO",
       externalPurchaseId: event.externalPurchaseId,
       productCode: "CORE",
@@ -200,11 +203,19 @@ export async function processCommerceEvent(event: NormalizedPurchaseEvent) {
 }
 
 export async function activateManualCoreLicense(workspaceId: string) {
+  // Manual licensing may apply to unowned/bootstrap workspaces. Never guess
+  // which purchaser owns a workspace with multiple OWNER memberships.
+  const owners = await db.select({ userId: memberships.userId })
+    .from(memberships)
+    .where(and(eq(memberships.workspaceId, workspaceId), eq(memberships.role, "OWNER")))
+    .limit(2);
+  const purchaserUserId = owners.length === 1 ? owners[0].userId : null;
   const externalPurchaseId = `manual:${workspaceId}`;
   const [license] = await db
     .insert(licenses)
     .values({
       workspaceId,
+      purchaserUserId,
       source: "MANUAL",
       externalPurchaseId,
       productCode: "CORE",
