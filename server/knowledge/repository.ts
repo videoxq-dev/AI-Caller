@@ -5,8 +5,8 @@ import { db } from "@/db";
 import { knowledgeSources, licenses, memberships } from "@/db/schema";
 
 export type KnowledgeKind = "WEBSITE" | "FILE";
-const CORE_SOURCE_LIMIT = 0;
-const UNLIMITED_SOURCE_LIMIT = 2;
+const CORE_SOURCE_LIMIT = 50;
+const UNLIMITED_SOURCE_LIMIT = 500;
 const LIST_PAGE_LIMIT = 50;
 type Tx = Parameters<Parameters<typeof db.transaction>[0]>[0];
 
@@ -82,10 +82,6 @@ export async function saveKnowledgeSource(
       : [];
 
     if (existing[0]) {
-      const entitlement = await getKnowledgeLimit(tx, workspaceId);
-      if (entitlement.limit === 0) {
-        throw new AppError("KNOWLEDGE_IMPORT_REQUIRES_UNLIMITED", "Upgrade to Unlimited to import business knowledge.", 403);
-      }
       const [updated] = await tx.update(knowledgeSources).set({
         label: input.label.trim(),
         content,
@@ -102,9 +98,6 @@ export async function saveKnowledgeSource(
       getKnowledgeLimit(tx, workspaceId),
       tx.select({ value: count() }).from(knowledgeSources).where(eq(knowledgeSources.workspaceId, workspaceId)),
     ]);
-    if (entitlement.limit === 0) {
-      throw new AppError("KNOWLEDGE_IMPORT_REQUIRES_UNLIMITED", "Upgrade to Unlimited to import business knowledge.", 403);
-    }
     if ((total?.value ?? 0) >= entitlement.limit) {
       throw new AppError(
         "KNOWLEDGE_SOURCE_LIMIT",
