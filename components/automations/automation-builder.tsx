@@ -65,6 +65,13 @@ type Catalog = {
   variables: Array<{ id: string; label: string }>;
   maxActions: number;
 };
+type SmsReadiness = {
+  status: "NOT_CONFIGURED" | "PROVIDER_DISCONNECTED" | "CARRIER_UNVERIFIED"
+    | "REGISTRATION_REQUIRED" | "IN_REVIEW" | "REJECTED" | "PHONE_SUSPENDED" | "READY";
+  categories: Array<"TRANSACTIONAL" | "MARKETING">;
+  message: string;
+  setupUrl: string;
+};
 type TestResult = {
   matches: boolean;
   conditions: Array<{
@@ -123,7 +130,12 @@ function actionOutcome(action: ActivityItem["actions"][number]) {
   if (action.status === "UNKNOWN" || action.errorCode === "INTERRUPTED_DELIVERY") {
     return "Could not confirm delivery. It was not sent again automatically.";
   }
-  if (action.errorCode === "SMS_CONSENT_REQUIRED") return "Customer has not opted in to SMS.";
+  if (action.errorCode === "SMS_CONSENT_REQUIRED") return "Customer has not opted in to this type of SMS, or has opted out."; 
+  if (action.errorCode === "SMS_REGISTRATION_REQUIRED" || action.errorCode === "SMS_CAMPAIGN_NOT_APPROVED")
+    return "SMS business registration is not approved yet.";
+  if (action.errorCode === "SMS_REGISTRATION_REJECTED") return "SMS business registration needs attention.";
+  if (action.errorCode === "SMS_CAMPAIGN_PURPOSE_NOT_APPROVED") return "This message type is outside the approved SMS campaign.";
+  if (action.errorCode === "SMS_CAMPAIGN_LINKS_NOT_APPROVED") return "Links are not approved for this SMS campaign.";
   if (action.errorCode?.startsWith("SMS_CAMPAIGN_")
     || action.errorCode === "SMS_REGISTRATION_REQUIRED"
     || action.errorCode === "SMS_REGISTRATION_REJECTED") {
@@ -145,6 +157,7 @@ export function AutomationBuilder() {
   const [workflow, setWorkflow] = useState<BuilderWorkflow | null>(null);
   const [catalog, setCatalog] = useState<Catalog | null>(null);
   const [members, setMembers] = useState<TeamMember[]>([]);
+  const [smsReadiness, setSmsReadiness] = useState<SmsReadiness | null>(null);
   const [canManage, setCanManage] = useState(false);
   const [name, setName] = useState("");
   const [draft, setDraft] = useState<WorkflowDraft | null>(null);
@@ -164,10 +177,11 @@ export function AutomationBuilder() {
   const load = useCallback(async () => {
     setError(null);
     try {
-      const [workflowResponse, catalogResponse, teamResponse] = await Promise.all([
+      const [workflowResponse, catalogResponse, teamResponse, smsResponse] = await Promise.all([
         fetch(`/api/automations/workflows/${id}`, { cache: "no-store" }),
         fetch("/api/automations/catalog", { cache: "no-store" }),
         fetch("/api/team", { cache: "no-store" }),
+        fetch("/api/automations/sms-readiness", { cache: "no-store" }).catch(() => null),
       ]);
       const workflowData = await workflowResponse.json().catch(() => null) as {
         workflow?: BuilderWorkflow;
@@ -194,6 +208,8 @@ export function AutomationBuilder() {
       setName(workflowData.workflow.name);
       setDraft(workflowData.workflow.draft);
       setCatalog(catalogData.catalog);
+      const smsData = smsResponse?.ok ? await smsResponse.json().catch(() => null) as { readiness?: SmsReadiness } | null : null;
+      setSmsReadiness(smsData?.readiness ?? null);
       setCanManage(Boolean(workflowData.canManage));
       setMembers(teamData?.members ?? []);
       setDirty(false);
@@ -569,6 +585,13 @@ export function AutomationBuilder() {
             <section className="builderStep">
               <div className="stepHeader"><span>3</span><h2>DO</h2><small>{draft.actions.length} of {catalog.maxActions}</small></div>
               <div className="stepBody actionsBody">
+                {draft.actions.some(action => action.type === "SEND_CUSTOMER_SMS") && smsReadiness && (
+                  <div className={`builderSmsReadiness ${smsReadiness.status === "READY" ? "ready" : "waiting"}`} role="status">
+                    <strong>{smsReadiness.status === "READY" ? "SMS sending is ready" : "SMS sending status"}</strong>
+                    <span>{smsReadiness.message}</span>
+                    {smsReadiness.status !== "READY" && <Link href={smsReadiness.setupUrl}>View SMS setup →</Link>}
+                  </div>
+                )}
                 {draft.actions.map((action, index) => (
                   <ActionCard
                     key={index}
@@ -736,7 +759,7 @@ function ActionCard({
       </>}
 
       {action.type === "SEND_CUSTOMER_SMS" && <>
-        <label><span>Message</span><textarea disabled={disabled} maxLength={2000} value={action.message} onChange={event => onChange({ ...action, message: event.target.value })} /></label>
+        <label><span>Message</span><textarea disabled={disabled} maxLength={1600} value={action.message} onChange={event => onChange({ ...action, message: event.target.value })} /></label>
         {!disabled && <div className="variableChips">
           {variables.map(variable => <button key={variable.id} onClick={() => insertVariable(variable.id)}>+ {variable.label}</button>)}
         </div>}

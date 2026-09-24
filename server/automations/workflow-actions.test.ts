@@ -132,6 +132,20 @@ describe("Phase 3C durable workflow actions", () => {
     await closeDatabase();
   });
 
+  it("rejects an unsendably long SMS before classification or publication", async () => {
+    const definition = await createWorkflowDraft(workspaceId, "Overlong SMS", {
+      trigger: "LEAD_QUALIFIED",
+      conditions: [],
+      actions: [{ type: "SEND_CUSTOMER_SMS", message: "A".repeat(1601) }],
+    });
+    await expect(publishWorkflow(workspaceId, definition.id)).rejects.toMatchObject({
+      code: "WORKFLOW_SMS_TOO_LONG",
+      status: 422,
+    });
+    expect(classifySmsPurpose).not.toHaveBeenCalled();
+    expect(sendPreclassifiedAutomationSms).not.toHaveBeenCalled();
+  });
+
   it("refuses to publish an SMS workflow when server-side purpose classification is uncertain", async () => {
     vi.mocked(classifySmsPurpose).mockResolvedValueOnce("UNCERTAIN");
     const definition = await createWorkflowDraft(workspaceId, "Unclear SMS", {
