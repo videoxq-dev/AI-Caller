@@ -15,23 +15,19 @@ import { getEnv } from "@/server/env";
 import { enqueueJob } from "@/server/jobs";
 import { COMMERCE_WELCOME_EMAIL } from "@/server/jobs/queues";
 import type { NormalizedPurchaseEvent } from "./types";
+import { resolveFunnelProductId } from "./products";
 
 const ACTIVE_EVENTS = new Set(["SALE", "BILL", "UNCANCEL-REBILL"]);
 const REVOKE_EVENTS = new Set(["RFND", "CGBK", "INSF"]);
 
-function configuredCoreProducts(): Set<string> {
-  return new Set(getEnv().JVZOO_CORE_PRODUCT_IDS.split(",").map((value) => value.trim()).filter(Boolean));
-}
-
 function isCoreProduct(productId: string): boolean {
-  const configured = configuredCoreProducts();
-  if (configured.size === 0) {
-    if (getEnv().NODE_ENV === "production") {
-      throw new Error("JVZOO_CORE_PRODUCT_IDS must be configured in production.");
-    }
-    return true;
+  const env = getEnv();
+  if (env.NODE_ENV === "production" && !env.JVZOO_CORE_PRODUCT_IDS.split(",").some((id) => id.trim())) {
+    throw new Error("JVZOO_CORE_PRODUCT_IDS must be configured in production.");
   }
-  return configured.has(productId);
+  // Only Core has purchase provisioning at this milestone. Mapping an OTO in
+  // configuration must never grant Core or unlock an unfinished offer.
+  return resolveFunnelProductId(productId, env) === "CORE";
 }
 
 async function grantCoreEntitlements(workspaceId: string) {
