@@ -46,9 +46,11 @@ Deliver vertical slices with tests before implementation, migrations where neede
 
 Confirm inbound phone, SMS, WhatsApp, webchat, unified inbox, manually entered services/FAQs/policies (without website/file knowledge imports), contacts, qualification, native scheduling, issue-scoped human handoff, basic recipes, dashboard and starter credits operate as one product. Core must not access external calendar connections. Resolve or explicitly gate the existing live acceptance blockers in Issues #24 (US SMS), #28 (deployment DB), #31 (voice), #44 (booking) and #57 (WhatsApp); #48 affects external-calendar appointment management. “Implemented in CI” is not equivalent to provider-approved live delivery.
 
-### F4–F6 — Unlimited
+### OTO 1 — Unlimited
 
-F4: owner-level ten-business capacity, five-staff seats, access controls, a **500-contact maximum for Core with the contact cap removed by active Unlimited**, conversation-history/automation support and a combined maximum of two website-or-file imported knowledge sources per owned business with bounded file sizes and operational safeguards. F5: multiple Google/Microsoft/Calendly/Cal.com calendar connections, service/staff routing and connected-calendar appointment management. F6: multi-widget lifecycle, reusable workflows/configurations, integrations and enhanced reporting; the 15,000 bonus credits arrive through F2.
+The revised funnel brief plus the founder's later clarifications define the implemented Unlimited boundary. Unlimited supports up to ten owned businesses, up to five staff per business, removes Core's 500-contact cap, unlocks up to two combined website/file knowledge imports per business, unlocks the existing supported external-calendar connection capability, and grants an additional 15,000 promotional hosted credits. Core retains native in-app scheduling. Unlimited does **not** mean unlimited calendar connections, does not authorize a new multi-calendar architecture, and does not unlock non-calendar BYOP; other customer-supplied provider integrations remain Agency-only.
+
+Once the Core 500-contact maximum and Unlimited uncapped-contact entitlement are verified and merged, the founder has confirmed the agreed **Core and OTO 1 Unlimited implementation scope is complete**. Do not infer additional Unlimited engineering work from the superseded F4/F5/F6 milestone language.
 
 ### F7–F9 — Performance
 
