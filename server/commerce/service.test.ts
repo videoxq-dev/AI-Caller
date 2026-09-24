@@ -9,9 +9,11 @@ import type { NormalizedPurchaseEvent } from "./types";
 
 const previousCore = process.env.JVZOO_CORE_PRODUCT_IDS;
 const previousUnlimited = process.env.JVZOO_UNLIMITED_PRODUCT_IDS;
+const testEventIds: string[] = [];
 
 function event(productId: string): NormalizedPurchaseEvent {
   const id = randomUUID();
+  testEventIds.push(id);
   return {
     source: "JVZOO",
     externalEventId: id,
@@ -36,7 +38,11 @@ describe("funnel purchase ingress", () => {
     await closeDatabase();
   });
 
-  afterEach(() => {
+  afterEach(async () => {
+    for (const id of testEventIds) {
+      await db.delete(commerceEvents).where(eq(commerceEvents.externalEventId, id));
+    }
+    testEventIds.length = 0;
     if (previousCore === undefined) delete process.env.JVZOO_CORE_PRODUCT_IDS;
     else process.env.JVZOO_CORE_PRODUCT_IDS = previousCore;
     if (previousUnlimited === undefined) delete process.env.JVZOO_UNLIMITED_PRODUCT_IDS;
