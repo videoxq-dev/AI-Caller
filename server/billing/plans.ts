@@ -1,6 +1,6 @@
 import { and, eq, gt, ne, sql } from "drizzle-orm";
 import { db } from "@/db";
-import { licenses, memberships, plans, workspaceInvitations, workspacePlans } from "@/db/schema";
+import { licenses, memberships, plans, workspaceCommercialOwners, workspaceInvitations, workspacePlans } from "@/db/schema";
 import { AppError } from "@/server/http/errors";
 
 export type PlanCode = "PERSONAL" | "GROWTH";
@@ -53,15 +53,23 @@ export async function getWorkspacePlanInTransaction(tx: Tx, workspaceId: string)
 
 export async function getEffectiveWorkspaceSeatPlanInTransaction(tx: Tx, workspaceId: string) {
   const plan = await getWorkspacePlanInTransaction(tx, workspaceId);
-  // Commercial entitlements belong to the buyer, not to STAFF members of
-  // another business. Multiple OWNERs are ambiguous until account ownership
-  // can be explicitly reconciled; never guess which purchase to inherit.
-  const owners = await tx.select({ userId: memberships.userId }).from(memberships)
-    .where(and(eq(memberships.workspaceId, workspaceId), eq(memberships.role, "OWNER")))
-    .limit(2);
-  if (owners.length !== 1) return { plan, commercialSeatPackage: null as "UNLIMITED" | null };
+  // Commercial entitlements follow the explicit purchaser, independent of
+  // operational OWNER/ADMIN/STAFF roles. Fall back only for unreconciled
+  // historical workspaces that still have exactly one OWNER membership.
+  const [commercialOwner] = await tx.select({ userId: workspaceCommercialOwners.purchaserUserId })
+    .from(workspaceCommercialOwners)
+    .where(eq(workspaceCommercialOwners.workspaceId, workspaceId))
+    .limit(1);
+  let purchaserUserId = commercialOwner?.userId ?? null;
+  if (!purchaserUserId) {
+    const owners = await tx.select({ userId: memberships.userId }).from(memberships)
+      .where(and(eq(memberships.workspaceId, workspaceId), eq(memberships.role, "OWNER")))
+      .limit(2);
+    if (owners.length !== 1) return { plan, commercialSeatPackage: null as "UNLIMITED" | null };
+    purchaserUserId = owners[0].userId;
+  }
   const [unlimited] = await tx.select({ id: licenses.id }).from(licenses).where(and(
-    eq(licenses.purchaserUserId, owners[0].userId),
+    eq(licenses.purchaserUserId, purchaserUserId),
     eq(licenses.productCode, "UNLIMITED"),
     eq(licenses.status, "ACTIVE"),
   )).limit(1);
