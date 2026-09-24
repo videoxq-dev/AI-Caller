@@ -41,3 +41,10 @@ export function resolveFunnelProductId(
   }
   return assigned.get(productId.trim()) ?? null;
 }
+
+/** Effective purchased business slots. The initial signup business is handled separately. */
+export function getPurchasedBusinessLimit(activeCodes: readonly string[]): number {
+  return Math.max(0, ...FUNNEL_PRODUCTS
+    .filter((product) => activeCodes.includes(product.code))
+    .map((product) => product.businessLimit ?? 0));
+}
