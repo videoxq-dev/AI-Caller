@@ -9,34 +9,38 @@ vi.mock("@/server/knowledge/repository", () => ({
   listKnowledgeSources: vi.fn(), getKnowledgeSourceUsage: vi.fn(),
 }));
 
-describe("workspace knowledge entitlement API", () => {
+describe("paginated workspace knowledge API", () => {
   beforeEach(() => {
     vi.resetAllMocks();
     vi.mocked(resolveWorkspaceContext).mockResolvedValue({
       workspace: { id: "workspace-a" },
       membership: { role: "STAFF" },
     } as Awaited<ReturnType<typeof resolveWorkspaceContext>>);
-    vi.mocked(listKnowledgeSources).mockResolvedValue([]);
+    vi.mocked(listKnowledgeSources).mockResolvedValue([{
+      id: "source-one", kind: "FILE", label: "handbook.md", sourceUrl: null,
+      contentHash: "safe-hash", createdAt: new Date(), updatedAt: new Date(),
+    }] as Awaited<ReturnType<typeof listKnowledgeSources>>);
     vi.mocked(getKnowledgeSourceUsage).mockResolvedValue({
-      count: 0, limit: 0, package: null,
+      count: 51, limit: 500, package: "UNLIMITED",
     });
   });
 
-  it("shows Core has no knowledge upload entitlement", async () => {
-    const response = await GET(new Request("https://app.example.com/api/knowledge"));
+  it("returns only workspace-scoped metadata and a bounded next page", async () => {
+    const response = await GET(new Request("https://app.example.com/api/knowledge?offset=30&limit=20"));
     expect(response.status).toBe(200);
     expect(response.headers.get("cache-control")).toBe("no-store");
-    expect(listKnowledgeSources).toHaveBeenCalledExactlyOnceWith("workspace-a", 30);
+    expect(listKnowledgeSources).toHaveBeenCalledExactlyOnceWith("workspace-a", 20, 30);
     expect(getKnowledgeSourceUsage).toHaveBeenCalledExactlyOnceWith("workspace-a");
-    expect(await response.json()).toEqual({ sources: [], count: 0, limit: 0, package: null });
+    expect(await response.json()).toMatchObject({
+      sources: [{ id: "source-one", label: "handbook.md" }],
+      total: 51, limit: 500, package: "UNLIMITED", nextOffset: 31,
+    });
   });
 
-  it("shows Unlimited has exactly two source slots", async () => {
-    vi.mocked(getKnowledgeSourceUsage).mockResolvedValue({
-      count: 1, limit: 2, package: "UNLIMITED",
-    });
-    const response = await GET(new Request("https://app.example.com/api/knowledge"));
-    expect(await response.json()).toMatchObject({ count: 1, limit: 2, package: "UNLIMITED" });
+  it("does not fetch unbounded or invalid pages", async () => {
+    const response = await GET(new Request("https://app.example.com/api/knowledge?offset=-1&limit=1000000"));
+    expect(response.status).toBe(422);
+    expect(listKnowledgeSources).not.toHaveBeenCalled();
   });
 
   it("rejects unauthenticated access before fetching knowledge", async () => {
