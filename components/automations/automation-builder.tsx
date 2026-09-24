@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useParams, useRouter } from "next/navigation";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { AppNav } from "@/components/core-domain/app-nav";
 import "@/app/dashboard/dashboard.css";
 
@@ -168,6 +168,7 @@ export function AutomationBuilder() {
   const [whatsappNext, setWhatsAppNext] = useState<string | null>(null);
   const [whatsappError, setWhatsAppError] = useState<string | null>(null);
   const [whatsappLoading, setWhatsAppLoading] = useState(true);
+  const whatsappRequest = useRef(0);
   const [canManage, setCanManage] = useState(false);
   const [name, setName] = useState("");
   const [draft, setDraft] = useState<WorkflowDraft | null>(null);
@@ -186,6 +187,10 @@ export function AutomationBuilder() {
 
   const load = useCallback(async () => {
     setError(null);
+    const requestId = ++whatsappRequest.current;
+    setWhatsAppTemplates([]);
+    setWhatsAppNext(null);
+    setWhatsAppError(null);
     // Meta's remote template catalog can take up to the provider timeout.
     // Loading it must not hold up editing unrelated SMS or staff workflows.
     setWhatsAppLoading(true);
@@ -231,11 +236,16 @@ export function AutomationBuilder() {
               items?: WhatsAppTemplate[]; nextCursor?: string | null; error?: { message?: string };
             } | null
           : null;
+        // A slow Meta read for a previous workspace/workflow cannot populate
+        // the current Builder with another business's template catalog.
+        if (requestId !== whatsappRequest.current) return;
         setWhatsAppTemplates(response?.ok ? data?.items ?? [] : []);
         setWhatsAppNext(response?.ok ? data?.nextCursor ?? null : null);
         setWhatsAppError(response?.ok ? null
           : data?.error?.message ?? "WhatsApp templates could not be loaded.");
-      }).finally(() => setWhatsAppLoading(false));
+      }).finally(() => {
+        if (requestId === whatsappRequest.current) setWhatsAppLoading(false);
+      });
       setCanManage(Boolean(workflowData.canManage));
       setMembers(teamData?.members ?? []);
       setDirty(false);
@@ -246,7 +256,10 @@ export function AutomationBuilder() {
     }
   }, [id]);
 
-  useEffect(() => { void load(); }, [load]);
+  useEffect(() => {
+    void load();
+    return () => { whatsappRequest.current += 1; };
+  }, [load]);
 
   async function loadMoreWhatsAppTemplates() {
     if (!whatsappNext) return;
