@@ -70,6 +70,12 @@ Domain ownership verification and TLS/routing; branding isolation for client app
 
 Exercise Core-only, each OTO combination, Agency 50 to 100, Whitelabel, duplicate IPNs, disputed/refunded purchases, old-account upgrades, credit top-ups and business-limit edges. Match customer-facing copy and actual purchase receipts to enabled features; only declare an offer commercially ready after exact-head CI, browser acceptance and relevant real integration checks.
 
+## Protected concluded scope — Phase 6C SMS
+
+Phase 6C SMS readiness is **concluded work**. Do not modify SMS runtime behavior, consent rules, registration/readiness logic, delivery handling, provider integration, SMS automation semantics, or established SMS acceptance expectations unless the founder explicitly reopens SMS work.
+
+Later product-entitlement changes must adapt around the concluded SMS implementation. When an unrelated entitlement change affects an SMS browser fixture because that fixture happens to create a custom automation, change only the fixture setup required to satisfy the new entitlement; do not alter SMS product behavior to make the test pass.
+
 ## Cross-cutting acceptance rules
 
 - Authorize on the server on every sensitive action; UI visibility does not enforce product boundaries.
