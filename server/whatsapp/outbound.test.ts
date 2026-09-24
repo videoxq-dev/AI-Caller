@@ -1,6 +1,7 @@
 import { afterAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { closeDatabase, db } from "@/db";
-import { messages, providerWebhookEvents, workspaces } from "@/db/schema";
+import { eq } from "drizzle-orm";
+import { conversations, messages, providerWebhookEvents, workspaces } from "@/db/schema";
 import {
   getOrCreateContactByIdentity,
   getOrCreateOpenConversation,
@@ -9,6 +10,7 @@ import {
 import type { WhatsAppProvider } from "@/server/providers/contracts";
 import type { WhatsAppRuntime } from "@/server/providers/whatsapp/runtime";
 import { createWhatsAppOutboundService } from "./outbound";
+import { recordWhatsAppConsent } from "./consent";
 
 describe("WhatsApp outbound service", () => {
   let workspaceId = "";
@@ -158,12 +160,24 @@ describe("WhatsApp outbound service", () => {
     const old = new Date(Date.now() - 25 * 60 * 60 * 1000);
     await addInbound({ createdAt: old, occurredAt: old });
     await setConversationHandlingMode(workspaceId, conversationId, "HUMAN", null);
-    const service = createWhatsAppOutboundService({ resolveRuntime: async () => runtime });
+    const service = createWhatsAppOutboundService({
+      resolveRuntime: async () => runtime,
+      getApprovedTemplate: async () => ({
+        name: "appointment_reminder", language: "en_US",
+        category: "UTILITY", status: "APPROVED", body: "See you soon.",
+      }),
+    });
 
     await expect(service.sendText(workspaceId, conversationId, { senderType: "USER", text: "Checking in" }))
       .rejects.toMatchObject({ code: "WHATSAPP_TEMPLATE_REQUIRED" });
     expect(provider.sendText).not.toHaveBeenCalled();
-
+    const [conversation] = await db.select({ contactId: conversations.contactId })
+      .from(conversations).where(eq(conversations.id, conversationId));
+    await recordWhatsAppConsent({
+      workspaceId, contactId: conversation.contactId, waId: "15551230000",
+      category: "UTILITY", status: "OPTED_IN", source: "STAFF_ENTRY",
+      consentStatement: "Customer agreed to appointment updates on WhatsApp.",
+    });
     const sent = await service.sendTemplate(workspaceId, conversationId, {
       senderType: "USER",
       templateName: "appointment_reminder",
@@ -176,4 +190,81 @@ describe("WhatsApp outbound service", () => {
     });
     expect(provider.sendTemplate).toHaveBeenCalledTimes(1);
   });
+  it("rejects pending templates before storing a message or calling the provider", async () => {
+    await setConversationHandlingMode(workspaceId, conversationId, "HUMAN", null);
+    const service = createWhatsAppOutboundService({
+      resolveRuntime: async () => runtime,
+      getApprovedTemplate: async () => ({
+        name: "appointment_reminder", language: "en_US",
+        category: "UTILITY", status: "PENDING", body: "See you soon.",
+      }),
+    });
+    await expect(service.sendTemplate(workspaceId, conversationId, {
+      senderType: "USER", templateName: "appointment_reminder", languageCode: "en_US",
+    })).rejects.toMatchObject({ code: "WHATSAPP_TEMPLATE_NOT_APPROVED" });
+    expect(provider.sendTemplate).not.toHaveBeenCalled();
+    expect(await db.select().from(messages)).toHaveLength(0);
+  });
+
+  it("requires distinct marketing opt-in and prevents a category swap", async () => {
+    const [conversation] = await db.select({ contactId: conversations.contactId })
+      .from(conversations).where(eq(conversations.id, conversationId));
+    await recordWhatsAppConsent({
+      workspaceId, contactId: conversation.contactId, waId: "15551230000",
+      category: "UTILITY", status: "OPTED_IN", source: "STAFF_ENTRY",
+      consentStatement: "Customer agreed to appointment updates.",
+    });
+    const service = createWhatsAppOutboundService({
+      resolveRuntime: async () => runtime,
+      getApprovedTemplate: async () => ({
+        name: "special_offer", language: "en_US",
+        category: "MARKETING", status: "APPROVED", body: "Offer.",
+      }),
+    });
+    await expect(service.sendTemplate(workspaceId, conversationId, {
+      senderType: "SYSTEM", templateName: "special_offer", languageCode: "en_US",
+    })).rejects.toMatchObject({ code: "WHATSAPP_CONSENT_REQUIRED" });
+    await recordWhatsAppConsent({
+      workspaceId, contactId: conversation.contactId, waId: "15551230000",
+      category: "MARKETING", status: "OPTED_IN", source: "STAFF_ENTRY",
+      consentStatement: "Customer requested marketing updates on WhatsApp.",
+    });
+    await expect(service.sendTemplate(workspaceId, conversationId, {
+      senderType: "SYSTEM", templateName: "special_offer", languageCode: "en_US",
+      expectedCategory: "UTILITY",
+    })).rejects.toMatchObject({ code: "WHATSAPP_TEMPLATE_NOT_APPROVED" });
+    await expect(service.sendTemplate(workspaceId, conversationId, {
+      senderType: "SYSTEM", templateName: "special_offer", languageCode: "en_US",
+      expectedCategory: "MARKETING",
+    })).resolves.toMatchObject({ status: "SENT" });
+    expect(provider.sendTemplate).toHaveBeenCalledOnce();
+  });
+
+  it("suppresses a template when approval or consent changes before dispatch", async () => {
+    const [conversation] = await db.select({ contactId: conversations.contactId })
+      .from(conversations).where(eq(conversations.id, conversationId));
+    await recordWhatsAppConsent({
+      workspaceId, contactId: conversation.contactId, waId: "15551230000",
+      category: "UTILITY", status: "OPTED_IN", source: "STAFF_ENTRY",
+      consentStatement: "Customer requested WhatsApp appointment updates.",
+    });
+    let reads = 0;
+    const service = createWhatsAppOutboundService({
+      resolveRuntime: async () => runtime,
+      getApprovedTemplate: async () => ({
+        name: "appointment_reminder", language: "en_US",
+        category: "UTILITY", status: ++reads === 1 ? "APPROVED" : "PAUSED",
+        body: "Your reminder.",
+      }),
+    });
+    await expect(service.sendTemplate(workspaceId, conversationId, {
+      senderType: "SYSTEM", templateName: "appointment_reminder", languageCode: "en_US",
+    })).rejects.toMatchObject({ code: "WHATSAPP_TEMPLATE_NOT_APPROVED" });
+    expect(provider.sendTemplate).not.toHaveBeenCalled();
+    expect(await db.select().from(messages)).toMatchObject([{
+      status: "SUPPRESSED",
+      metadata: expect.objectContaining({ suppressedReason: "WHATSAPP_TEMPLATE_NOT_APPROVED" }),
+    }]);
+  });
+
 });
