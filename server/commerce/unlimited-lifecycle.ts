@@ -41,12 +41,7 @@ export async function reconcileUnlimitedReceipt(event: NormalizedPurchaseEvent) 
         ? await tx.select({ email: user.email }).from(user)
           .where(eq(user.id, license.purchaserUserId)).limit(1)
         : [];
-      const [owner] = await tx.select({ userId: memberships.userId }).from(memberships).where(and(
-        eq(memberships.workspaceId, license.workspaceId),
-        eq(memberships.userId, license.purchaserUserId ?? ""),
-        eq(memberships.role, "OWNER"),
-      )).limit(1);
-      if (!buyer || !owner || buyer.email.toLowerCase() !== event.customerEmail.toLowerCase()) {
+      if (!buyer || buyer.email.toLowerCase() !== event.customerEmail.toLowerCase()) {
         throw new AppError("PURCHASE_OWNERSHIP_CONFLICT", "The Unlimited receipt belongs to another buyer.", 409);
       }
     } else {
@@ -99,6 +94,17 @@ export async function reconcileUnlimitedReceipt(event: NormalizedPurchaseEvent) 
       if (license.status === "REFUNDED" || license.status === "CHARGEBACK"
         || (license.status === "CANCELLED" && event.eventType !== "UNCANCEL-REBILL")) {
         return { ignored: true as const, reason: "REVOKED_PURCHASE" };
+      }
+      // Refunded receipts must still reverse credits if business ownership has
+      // changed. Activation is different: never grant an old buyer's bonus to
+      // a business they no longer own.
+      const [currentOwner] = await tx.select({ userId: memberships.userId }).from(memberships).where(and(
+        eq(memberships.workspaceId, license.workspaceId),
+        eq(memberships.userId, license.purchaserUserId ?? ""),
+        eq(memberships.role, "OWNER"),
+      )).limit(1);
+      if (!currentOwner) {
+        throw new AppError("PURCHASE_OWNERSHIP_CONFLICT", "The Unlimited business is no longer owned by its purchaser.", 409);
       }
       if (license.status === "CANCELLED") {
         const [reactivated] = await tx.update(licenses).set({
