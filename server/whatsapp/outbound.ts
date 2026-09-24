@@ -6,7 +6,13 @@ import { AppError } from "@/server/http/errors";
 import { hasOpenConversationIssue } from "@/server/collaboration/service";
 import { logger } from "@/server/observability/logger";
 import { ProviderRequestError } from "@/server/providers/http";
-import { resolveWhatsAppRuntimeForWorkspace, type WhatsAppRuntime } from "@/server/providers/whatsapp/runtime";
+import {
+  resolveWhatsAppRuntimeForWorkspace, resolveWhatsAppTemplatesForWorkspace,
+  type WhatsAppRuntime,
+} from "@/server/providers/whatsapp/runtime";
+import { getWhatsAppConsentStatus } from "./consent";
+import { classifySmsForPolicy } from "@/server/sms/policy";
+import { approvedWhatsAppParameterCount } from "@/server/providers/whatsapp/meta-templates";
 import {
   attachWhatsAppProviderMessage,
   getWhatsAppConversationRecipient,
@@ -19,9 +25,47 @@ const CUSTOMER_WINDOW_MS = 24 * 60 * 60 * 1000;
 const CUSTOMER_WINDOW_FUTURE_TOLERANCE_MS = 5 * 60 * 1000;
 const MAX_WHATSAPP_TEXT_CHARACTERS = 4096;
 
+type ApprovedTemplate = { name: string; language: string; category: string; status: string; body: string };
 type OutboundDependencies = {
   resolveRuntime: (workspaceId: string) => Promise<WhatsAppRuntime>;
+  getApprovedTemplate?: (workspaceId: string, name: string, language: string) => Promise<ApprovedTemplate>;
 };
+
+async function approvedTemplate(workspaceId: string, name: string, language: string) {
+  return (await resolveWhatsAppTemplatesForWorkspace(workspaceId)).approved(name, language);
+}
+
+async function verifyApprovedTemplate(
+  lookup: (workspaceId: string, name: string, language: string) => Promise<ApprovedTemplate>,
+  workspaceId: string, name: string, language: string,
+) {
+  try {
+    return await lookup(workspaceId, name, language);
+  } catch (error) {
+    // All template reads precede provider dispatch. An unavailable Meta
+    // approval read is a definite local suppression, never a sent-unknown.
+    if (error instanceof AppError && error.status < 500) throw error;
+    throw new AppError("WHATSAPP_TEMPLATE_APPROVAL_UNVERIFIED",
+      "Meta template approval could not be verified; no WhatsApp message was sent.", 503);
+  }
+}
+
+async function requireWhatsAppConsent(
+  workspaceId: string, to: string, category: "UTILITY" | "MARKETING", requireOptIn: boolean,
+) {
+  let status;
+  try {
+    status = await getWhatsAppConsentStatus(workspaceId, to, category);
+  } catch (error) {
+    if (error instanceof AppError && error.status < 500) throw error;
+    throw new AppError("WHATSAPP_CONSENT_UNVERIFIED",
+      "WhatsApp consent could not be verified; no message was sent.", 503);
+  }
+  if (status === "OPTED_OUT" || (requireOptIn && status !== "OPTED_IN")) {
+    throw new AppError("WHATSAPP_CONSENT_REQUIRED",
+      "This customer has not opted in to this WhatsApp message type or has opted out.", 409);
+  }
+}
 
 function whatsappText(value: string) {
   const text = value.trim();
@@ -105,9 +149,18 @@ export function createWhatsAppOutboundService(dependencies: OutboundDependencies
         throw new AppError("WHATSAPP_TEMPLATE_REQUIRED", "The 24-hour WhatsApp customer service window has closed. Send an approved template instead.", 409);
       }
 
-      const runtime = await dependencies.resolveRuntime(workspaceId);
+      let runtime: WhatsAppRuntime;
+      try {
+        runtime = await dependencies.resolveRuntime(workspaceId);
+      } catch {
+        throw new AppError("WHATSAPP_NOT_CONNECTED",
+          "Connect WhatsApp before sending a customer reply.", 409);
+      }
       const to = await destination(workspaceId, conversationId);
       const text = whatsappText(input.text);
+      const category = classifySmsForPolicy(text, "TRANSACTIONAL") === "MARKETING"
+        ? "MARKETING" as const : "UTILITY" as const;
+      await requireWhatsAppConsent(workspaceId, to, category, category === "MARKETING");
       const outbound = await appendMessage(workspaceId, conversationId, {
         channel: "WHATSAPP",
         direction: "OUTBOUND",
@@ -117,7 +170,7 @@ export function createWhatsAppOutboundService(dependencies: OutboundDependencies
         provider: "whatsapp",
         externalMessageId: null,
         status: "SENDING",
-        metadata: { ...input.metadata, mode: runtime.mode },
+        metadata: { ...input.metadata, mode: runtime.mode, whatsappCategory: category },
       });
 
       if (input.senderType === "AI") {
@@ -131,6 +184,15 @@ export function createWhatsAppOutboundService(dependencies: OutboundDependencies
         }
       }
 
+      try {
+        await requireWhatsAppConsent(workspaceId, to, category, category === "MARKETING");
+      } catch (error) {
+        await db.update(messages).set({ status: "SUPPRESSED",
+          metadata: { ...outbound.metadata, suppressedReason:
+            error instanceof AppError ? error.code : "WHATSAPP_CONSENT_UNVERIFIED" },
+        }).where(and(eq(messages.workspaceId, workspaceId), eq(messages.id, outbound.id)));
+        throw error;
+      }
       try {
         const sent = await runtime.provider.sendText({ phoneNumberId: runtime.phoneNumberId, to, text });
         const updated = await attachWhatsAppProviderMessage(workspaceId, outbound.id, sent.externalId, sent.status);
@@ -153,6 +215,8 @@ export function createWhatsAppOutboundService(dependencies: OutboundDependencies
         templateName: string;
         languageCode: string;
         components?: unknown[];
+        expectedCategory?: "UTILITY" | "MARKETING";
+        beforeDispatch?: () => Promise<void>;
       },
     ) {
       const conversation = await conversationState(workspaceId, conversationId);
@@ -165,8 +229,38 @@ export function createWhatsAppOutboundService(dependencies: OutboundDependencies
         );
       }
 
-      const runtime = await dependencies.resolveRuntime(workspaceId);
+      let runtime: WhatsAppRuntime;
+      try {
+        runtime = await dependencies.resolveRuntime(workspaceId);
+      } catch {
+        throw new AppError("WHATSAPP_NOT_CONNECTED",
+          "Connect WhatsApp before sending an approved template.", 409);
+      }
       const to = await destination(workspaceId, conversationId);
+      const getTemplate = dependencies.getApprovedTemplate ?? approvedTemplate;
+      const eligibility = await verifyApprovedTemplate(getTemplate, workspaceId, input.templateName, input.languageCode);
+      if (eligibility.status !== "APPROVED"
+        || !["UTILITY", "MARKETING"].includes(eligibility.category)) {
+        throw new AppError("WHATSAPP_TEMPLATE_NOT_APPROVED",
+          "This WhatsApp template is not currently approved.", 409);
+      }
+      const category = eligibility.category as "UTILITY" | "MARKETING";
+      if (input.expectedCategory && input.expectedCategory !== category) {
+        throw new AppError("WHATSAPP_TEMPLATE_NOT_APPROVED",
+          "The template category changed since this workflow was published.", 409);
+      }
+      const slotCount = approvedWhatsAppParameterCount(eligibility.body);
+      const component = input.components?.find((item): item is {
+        type: string; parameters?: Array<{ type: string; text: string }>;
+      } => Boolean(item && typeof item === "object" && "type" in item
+        && (item as { type: unknown }).type === "body"));
+      const params = component?.parameters ?? [];
+      if (slotCount !== params.length || params.some(param =>
+        param.type !== "text" || typeof param.text !== "string" || !param.text.trim())) {
+        throw new AppError("WHATSAPP_TEMPLATE_VARIABLE_MISMATCH",
+          "Supply one nonempty text value for each approved template placeholder.", 409);
+      }
+      await requireWhatsAppConsent(workspaceId, to, category, true);
       const outbound = await appendMessage(workspaceId, conversationId, {
         channel: "WHATSAPP",
         direction: "OUTBOUND",
@@ -176,9 +270,36 @@ export function createWhatsAppOutboundService(dependencies: OutboundDependencies
         provider: "whatsapp",
         externalMessageId: null,
         status: "SENDING",
-        metadata: { mode: runtime.mode, templateName: input.templateName, languageCode: input.languageCode },
+        metadata: { mode: runtime.mode, templateName: input.templateName, languageCode: input.languageCode, templateCategory: category },
       });
 
+      if (input.senderType === "AI") {
+        const latest = await conversationState(workspaceId, conversationId);
+        if (latest.handlingMode !== "AI") {
+          await db.update(messages).set({ status: "SUPPRESSED",
+            metadata: { ...outbound.metadata, suppressedReason: "HUMAN_TAKEOVER" },
+          }).where(and(eq(messages.workspaceId, workspaceId), eq(messages.id, outbound.id)));
+          throw new AppError("AI_HANDLING_PAUSED", "AI reply suppressed because a human took over.", 409);
+        }
+      }
+      // Policy failures happen before carrier dispatch; do not label them as
+      // an uncertain provider send or automatically retry them.
+      try {
+        const current = await verifyApprovedTemplate(getTemplate, workspaceId, input.templateName, input.languageCode);
+        if (current.status !== "APPROVED" || current.category !== category
+          || current.body !== eligibility.body) {
+          throw new AppError("WHATSAPP_TEMPLATE_NOT_APPROVED",
+            "Template approval or category changed before sending.", 409);
+        }
+        await requireWhatsAppConsent(workspaceId, to, category, true);
+        await input.beforeDispatch?.();
+      } catch (error) {
+        await db.update(messages).set({ status: "SUPPRESSED",
+          metadata: { ...outbound.metadata,
+            suppressedReason: error instanceof AppError ? error.code : "WHATSAPP_APPROVAL_UNVERIFIED" },
+        }).where(and(eq(messages.workspaceId, workspaceId), eq(messages.id, outbound.id)));
+        throw error;
+      }
       try {
         const sent = await runtime.provider.sendTemplate({
           phoneNumberId: runtime.phoneNumberId,
@@ -219,6 +340,8 @@ export function sendWhatsAppConversationTemplate(
     templateName: string;
     languageCode: string;
     components?: unknown[];
+    expectedCategory?: "UTILITY" | "MARKETING";
+    beforeDispatch?: () => Promise<void>;
   },
 ) {
   return whatsAppOutboundService.sendTemplate(workspaceId, conversationId, input);

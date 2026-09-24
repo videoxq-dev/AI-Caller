@@ -96,6 +96,13 @@ export function deliveryFailureStatus(error: unknown): "FAILED" | "UNKNOWN" | "S
     smsSuppressionCodes.has(error.code)
     || error.code === "WHATSAPP_IDENTITY_NOT_FOUND"
     || error.code === "WHATSAPP_TEMPLATE_REQUIRED"
+    || error.code === "WHATSAPP_CONSENT_REQUIRED"
+    || error.code === "WHATSAPP_TEMPLATE_NOT_APPROVED"
+    || error.code === "WHATSAPP_TEMPLATE_UNSUPPORTED"
+    || error.code === "WHATSAPP_TEMPLATE_VARIABLE_MISMATCH"
+    || error.code === "WHATSAPP_TEMPLATE_APPROVAL_UNVERIFIED"
+    || error.code === "WHATSAPP_CONSENT_UNVERIFIED"
+    || error.code === "WHATSAPP_NOT_CONNECTED"
   )) return "SKIPPED";
   // A known local rejection is not an uncertain carrier send.
   if (error instanceof AppError && error.status < 500) return "FAILED";

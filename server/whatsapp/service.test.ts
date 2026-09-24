@@ -7,6 +7,7 @@ import type { WhatsAppInboundResponseJob } from "@/server/jobs/queues";
 import type { WhatsAppProvider } from "@/server/providers/contracts";
 import type { WhatsAppRuntime } from "@/server/providers/whatsapp/runtime";
 import { createWhatsAppOutboundService } from "./outbound";
+import { getWhatsAppConsentStatus } from "./consent";
 import { createWhatsAppWebhookService } from "./service";
 
 const APP_SECRET = "whatsapp-test-secret";
@@ -192,6 +193,34 @@ describe("WhatsApp webhook service", () => {
     expect(respond).toHaveBeenCalledTimes(1);
     expect(sendText).toHaveBeenCalledTimes(1);
     expect((await db.select().from(providerWebhookEvents))[0].status).toBe("PROCESSED");
+  });
+
+  it("records signed STOP/START without running AI and never restores marketing via START", async () => {
+    const sendText = vi.fn(async () => ({ externalId: "wamid.no-reply", status: "SENT" as const }));
+    const provider: WhatsAppProvider = {
+      sendText,
+      sendTemplate: vi.fn(async () => ({ externalId: "wamid.template", status: "SENT" as const })),
+      verifyWebhook: vi.fn(async () => true),
+      normalizeWebhook: vi.fn(async () => []),
+    };
+    const respond = vi.fn(async () => orchestratorReply("Should not run"));
+    const { service, jobs } = harness(runtimeFor(workspaceId, provider), respond);
+    const stop = inboundPayload("wamid.stop", "15551234567").replace("I need an appointment", "STOP");
+    await service.ingest(signedRequest(stop));
+    await expect(service.processInboundJob(jobs[0])).resolves.toMatchObject({
+      replied: false, consentUpdated: true,
+    });
+    expect(await getWhatsAppConsentStatus(workspaceId, "15551234567", "UTILITY")).toBe("OPTED_OUT");
+    expect(await getWhatsAppConsentStatus(workspaceId, "15551234567", "MARKETING")).toBe("OPTED_OUT");
+    const start = inboundPayload("wamid.start", "15551234567").replace("I need an appointment", "START");
+    await service.ingest(signedRequest(start));
+    await expect(service.processInboundJob(jobs[1])).resolves.toMatchObject({
+      replied: false, consentUpdated: true,
+    });
+    expect(await getWhatsAppConsentStatus(workspaceId, "15551234567", "UTILITY")).toBe("OPTED_IN");
+    expect(await getWhatsAppConsentStatus(workspaceId, "15551234567", "MARKETING")).toBe("OPTED_OUT");
+    expect(respond).not.toHaveBeenCalled();
+    expect(sendText).not.toHaveBeenCalled();
   });
 
   it("fails closed once orchestration begins so retries cannot replay calendar/provider tools", async () => {

@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useParams, useRouter } from "next/navigation";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { AppNav } from "@/components/core-domain/app-nav";
 import "@/app/dashboard/dashboard.css";
 
@@ -18,7 +18,8 @@ type Operator = "EQ" | "GTE" | "LTE";
 type Action =
   | { type: "ASSIGN_LEAD"; userId: string }
   | { type: "NOTIFY_STAFF"; userId: string | null; title: string; message: string }
-  | { type: "SEND_CUSTOMER_SMS"; message: string };
+  | { type: "SEND_CUSTOMER_SMS"; message: string }
+  | { type: "SEND_CUSTOMER_WHATSAPP"; templateName: string; languageCode: string; variables: string[] };
 type Condition =
   | { field: "qualificationScore"; operator: Operator; value: number }
   | { field: "channel"; operator: "EQ"; value: "PHONE" | "SMS" | "WHATSAPP" | "WEBCHAT" };
@@ -64,6 +65,10 @@ type Catalog = {
   actions: Array<{ id: Action["type"]; label: string }>;
   variables: Array<{ id: string; label: string }>;
   maxActions: number;
+};
+type WhatsAppTemplate = {
+  name: string; language: string; category: "UTILITY" | "MARKETING";
+  status: string; body: string;
 };
 type SmsReadiness = {
   status: "NOT_CONFIGURED" | "PROVIDER_DISCONNECTED" | "CARRIER_UNVERIFIED"
@@ -114,6 +119,7 @@ function statusLabel(status: BuilderWorkflow["status"]) {
 function actionName(type: Action["type"]) {
   if (type === "ASSIGN_LEAD") return "Assign lead";
   if (type === "NOTIFY_STAFF") return "Notify";
+  if (type === "SEND_CUSTOMER_WHATSAPP") return "Send approved WhatsApp template";
   return "Send customer an SMS";
 }
 
@@ -158,6 +164,11 @@ export function AutomationBuilder() {
   const [catalog, setCatalog] = useState<Catalog | null>(null);
   const [members, setMembers] = useState<TeamMember[]>([]);
   const [smsReadiness, setSmsReadiness] = useState<SmsReadiness | null>(null);
+  const [whatsappTemplates, setWhatsAppTemplates] = useState<WhatsAppTemplate[]>([]);
+  const [whatsappNext, setWhatsAppNext] = useState<string | null>(null);
+  const [whatsappError, setWhatsAppError] = useState<string | null>(null);
+  const [whatsappLoading, setWhatsAppLoading] = useState(true);
+  const whatsappRequest = useRef(0);
   const [canManage, setCanManage] = useState(false);
   const [name, setName] = useState("");
   const [draft, setDraft] = useState<WorkflowDraft | null>(null);
@@ -176,6 +187,15 @@ export function AutomationBuilder() {
 
   const load = useCallback(async () => {
     setError(null);
+    const requestId = ++whatsappRequest.current;
+    setWhatsAppTemplates([]);
+    setWhatsAppNext(null);
+    setWhatsAppError(null);
+    // Meta's remote template catalog can take up to the provider timeout.
+    // Loading it must not hold up editing unrelated SMS or staff workflows.
+    setWhatsAppLoading(true);
+    const whatsappResponse = fetch("/api/automations/whatsapp-templates", { cache: "no-store" })
+      .catch(() => null);
     try {
       const [workflowResponse, catalogResponse, teamResponse, smsResponse] = await Promise.all([
         fetch(`/api/automations/workflows/${id}`, { cache: "no-store" }),
@@ -210,6 +230,22 @@ export function AutomationBuilder() {
       setCatalog(catalogData.catalog);
       const smsData = smsResponse?.ok ? await smsResponse.json().catch(() => null) as { readiness?: SmsReadiness } | null : null;
       setSmsReadiness(smsData?.readiness ?? null);
+      void whatsappResponse.then(async response => {
+        const data = response
+          ? await response.json().catch(() => null) as {
+              items?: WhatsAppTemplate[]; nextCursor?: string | null; error?: { message?: string };
+            } | null
+          : null;
+        // A slow Meta read for a previous workspace/workflow cannot populate
+        // the current Builder with another business's template catalog.
+        if (requestId !== whatsappRequest.current) return;
+        setWhatsAppTemplates(response?.ok ? data?.items ?? [] : []);
+        setWhatsAppNext(response?.ok ? data?.nextCursor ?? null : null);
+        setWhatsAppError(response?.ok ? null
+          : data?.error?.message ?? "WhatsApp templates could not be loaded.");
+      }).finally(() => {
+        if (requestId === whatsappRequest.current) setWhatsAppLoading(false);
+      });
       setCanManage(Boolean(workflowData.canManage));
       setMembers(teamData?.members ?? []);
       setDirty(false);
@@ -220,7 +256,28 @@ export function AutomationBuilder() {
     }
   }, [id]);
 
-  useEffect(() => { void load(); }, [load]);
+  useEffect(() => {
+    void load();
+    return () => { whatsappRequest.current += 1; };
+  }, [load]);
+
+  async function loadMoreWhatsAppTemplates() {
+    if (!whatsappNext) return;
+    const response = await fetch(
+      `/api/automations/whatsapp-templates?after=${encodeURIComponent(whatsappNext)}`,
+      { cache: "no-store" },
+    );
+    const data = await response.json().catch(() => null) as {
+      items?: WhatsAppTemplate[]; nextCursor?: string | null; error?: { message?: string };
+    } | null;
+    if (!response.ok) {
+      setWhatsAppError(data?.error?.message ?? "Unable to load more WhatsApp templates.");
+      return;
+    }
+    setWhatsAppTemplates(current => [...current, ...(data?.items ?? [])]);
+    setWhatsAppNext(data?.nextCursor ?? null);
+    setWhatsAppError(null);
+  }
 
   const trigger = useMemo(
     () => catalog?.triggers.find(item => item.id === draft?.trigger) ?? null,
@@ -248,6 +305,12 @@ export function AutomationBuilder() {
     if (type === "ASSIGN_LEAD") return { type, userId: firstMember };
     if (type === "NOTIFY_STAFF") {
       return { type, userId: null, title: "New notification", message: "A customer needs attention." };
+    }
+    if (type === "SEND_CUSTOMER_WHATSAPP") {
+      const template = whatsappTemplates[0];
+      const count = template ? new Set([...template.body.matchAll(/{{(\d+)}}/g)].map(match => match[1])).size : 0;
+      return { type, templateName: template?.name ?? "", languageCode: template?.language ?? "en_US",
+        variables: Array.from({ length: count }, () => "name") };
     }
     return { type, message: "Hi {{name}}, thanks for contacting {{business_name}}." };
   }
@@ -488,7 +551,8 @@ export function AutomationBuilder() {
   }
 
   const canAddCondition = Boolean(trigger?.conditions.length) && draft.conditions.length < 10;
-  const availableActions = catalog.actions.filter(action => trigger?.actions.includes(action.id));
+  const availableActions = catalog.actions.filter(action => trigger?.actions.includes(action.id)
+    && (action.id !== "SEND_CUSTOMER_WHATSAPP" || whatsappTemplates.length > 0));
   const showPublish = workflow.status === "DRAFT"
     || (workflow.status === "ACTIVE" && (dirty || workflow.hasUnpublishedChanges));
   const memberName = (userId?: string | null) =>
@@ -585,11 +649,31 @@ export function AutomationBuilder() {
             <section className="builderStep">
               <div className="stepHeader"><span>3</span><h2>DO</h2><small>{draft.actions.length} of {catalog.maxActions}</small></div>
               <div className="stepBody actionsBody">
+                {!whatsappTemplates.length && trigger?.actions.includes("SEND_CUSTOMER_WHATSAPP")
+                  && !draft.actions.some(action => action.type === "SEND_CUSTOMER_WHATSAPP") && (
+                  <div className="builderWhatsAppReadiness waiting" role="status">
+                    <span>{whatsappLoading ? "Checking approved WhatsApp templates…" : whatsappError ?? "To add WhatsApp messages, connect WhatsApp and get a text template approved."}</span>
+                    <Link href="/integrations/whatsapp/templates">Manage WhatsApp templates →</Link>
+                    {whatsappNext && <button type="button" onClick={() => void loadMoreWhatsAppTemplates()}>
+                      Check more WhatsApp templates</button>}
+                  </div>
+                )}
                 {draft.actions.some(action => action.type === "SEND_CUSTOMER_SMS") && smsReadiness && (
                   <div className={`builderSmsReadiness ${smsReadiness.status === "READY" ? "ready" : "waiting"}`} role="status">
                     <strong>{smsReadiness.status === "READY" ? "SMS sending is ready" : "SMS sending status"}</strong>
                     <span>{smsReadiness.message}</span>
                     {smsReadiness.status !== "READY" && <Link href={smsReadiness.setupUrl}>View SMS setup →</Link>}
+                  </div>
+                )}
+                {draft.actions.some(action => action.type === "SEND_CUSTOMER_WHATSAPP") && (
+                  <div className="builderWhatsAppReadiness" role="status">
+                    <strong>WhatsApp approved templates</strong>
+                    <span>{whatsappTemplates.length
+                      ? "Only Meta-approved templates can be selected. Approval and customer consent are rechecked before every send."
+                      : whatsappError ?? "No approved text templates available for this account."}</span>
+                    <Link href="/integrations/whatsapp/templates">Manage WhatsApp templates →</Link>
+                    {whatsappNext && <button type="button" onClick={() => void loadMoreWhatsAppTemplates()}>
+                      Load more approved templates</button>}
                   </div>
                 )}
                 {draft.actions.map((action, index) => (
@@ -598,6 +682,7 @@ export function AutomationBuilder() {
                     index={index}
                     action={action}
                     members={members}
+                    whatsappTemplates={whatsappTemplates}
                     variables={catalog.variables.filter(variable => trigger?.variables.includes(variable.id))}
                     disabled={!canManage}
                     canRemove={draft.actions.length > 1}
@@ -709,6 +794,7 @@ function ActionCard({
   action,
   members,
   variables,
+  whatsappTemplates,
   disabled,
   canRemove,
   onChange,
@@ -719,6 +805,7 @@ function ActionCard({
   action: Action;
   members: TeamMember[];
   variables: Array<{ id: string; label: string }>;
+  whatsappTemplates: WhatsAppTemplate[];
   disabled: boolean;
   canRemove: boolean;
   onChange: (action: Action) => void;
@@ -758,6 +845,49 @@ function ActionCard({
         <label><span>Message</span><textarea disabled={disabled} maxLength={500} value={action.message} onChange={event => onChange({ ...action, message: event.target.value })} /></label>
       </>}
 
+      {action.type === "SEND_CUSTOMER_WHATSAPP" && <>
+        <label><span>Approved template</span>
+          <select disabled={disabled} value={`${action.templateName}:${action.languageCode}`}
+            onChange={event => {
+              const next = whatsappTemplates.find(template =>
+                `${template.name}:${template.language}` === event.target.value);
+              if (!next) return;
+              const count = new Set([...next.body.matchAll(/{{(\d+)}}/g)].map(match => match[1])).size;
+              onChange({ ...action, templateName: next.name, languageCode: next.language,
+                variables: Array.from({ length: count }, (_value, index) => action.variables[index] ?? variables[0]?.id ?? "name") });
+            }}>
+            {!whatsappTemplates.some(template =>
+              template.name === action.templateName && template.language === action.languageCode)
+              && <option value={`${action.templateName}:${action.languageCode}`}>
+                {action.templateName || "Select an approved template"} ({action.languageCode})
+              </option>}
+            {whatsappTemplates.map(template => <option
+              key={`${template.name}:${template.language}`}
+              value={`${template.name}:${template.language}`}>
+              {template.name} · {template.language} · {template.category.toLowerCase()}
+            </option>)}
+          </select>
+        </label>
+        {(() => {
+          const template = whatsappTemplates.find(item =>
+            item.name === action.templateName && item.language === action.languageCode);
+          const slots = template ? [...new Set([...template.body.matchAll(/{{(\d+)}}/g)].map(match => match[1]))] : [];
+          return <>
+            {template && <p>{template.body}</p>}
+            {slots.map((_slot, slot) => <label key={slot}>
+              <span>Template value {slot + 1}</span>
+              <select disabled={disabled} value={action.variables[slot] ?? ""}
+                onChange={event => onChange({ ...action,
+                  variables: slots.map((_item, index) =>
+                    index === slot ? event.target.value : action.variables[index] ?? "") })}>
+                <option value="">Choose a value</option>
+                {variables.map(variable => <option key={variable.id} value={variable.id}>
+                  {variable.label}</option>)}
+              </select>
+            </label>)}
+          </>;
+        })()}
+      </>}
       {action.type === "SEND_CUSTOMER_SMS" && <>
         <label><span>Message</span><textarea disabled={disabled} maxLength={1600} value={action.message} onChange={event => onChange({ ...action, message: event.target.value })} /></label>
         {!disabled && <div className="variableChips">

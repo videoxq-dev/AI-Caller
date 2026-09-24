@@ -25,6 +25,7 @@ import {
   releaseProviderWebhookEventForRetry,
 } from "@/server/providers/webhooks/repository";
 import { resolveWhatsAppContact } from "./identity";
+import { recordWhatsAppKeywordConsent, whatsappPreferenceKeyword } from "./consent";
 import { sendWhatsAppConversationText } from "./outbound";
 import { updateWhatsAppDeliveryStatus } from "./repository";
 
@@ -228,6 +229,19 @@ export function createWhatsAppWebhookService(dependencies: WhatsAppServiceDepend
             ...(job.occurredAt ? { occurredAt: job.occurredAt } : {}),
           },
         });
+
+        const preference = whatsappPreferenceKeyword(job.text);
+        if (preference) {
+          // STOP suppresses both kinds of outbound WhatsApp messages. START
+          // resumes service updates only; it never creates marketing consent.
+          await recordWhatsAppKeywordConsent({
+            workspaceId: job.workspaceId, contactId: contact.id, waId: job.customerWaId,
+            keyword: preference, source: "INBOUND_WHATSAPP",
+            sourceReference: job.externalMessageId, consentStatement: job.text,
+          });
+          await completeProviderWebhookEvent(job.workspaceId, job.webhookEventId);
+          return { skipped: false as const, replied: false as const, consentUpdated: true as const };
+        }
 
         // The durable booking engine and the legacy orchestrator are both
         // consequential. Once either begins, a provider retry must not replay

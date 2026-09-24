@@ -27,6 +27,19 @@ export const createWhatsAppTemplateSchema = z.object({
 });
 export type CreateWhatsAppTemplate = z.infer<typeof createWhatsAppTemplateSchema>;
 
+/** A BODY may reuse {{1}}, but its unique positional parameters must be consecutive. */
+export function approvedWhatsAppParameterCount(body: string) {
+  const matches = [...body.matchAll(/{{(\d+)}}/g)].map(match => Number(match[1]));
+  const unique = [...new Set(matches)].sort((left, right) => left - right);
+  if (unique.length > 10 || unique.some((value, index) => value !== index + 1)
+    || /{{|}}/.test(body.replace(/{{\d+}}/g, ""))) {
+    throw new AppError("WHATSAPP_TEMPLATE_UNSUPPORTED",
+      "This template does not use supported consecutive BODY placeholders.", 409);
+  }
+  return unique.length;
+}
+
+
 const graphTemplate = z.object({
   id: z.string().min(1),
   name: z.string().min(1),
@@ -62,6 +75,7 @@ function publicTemplate(item: z.infer<typeof graphTemplate>) {
     body: item.components.find(component => component.type.toUpperCase() === "BODY")?.text ?? "",
     footer: item.components.find(component => component.type.toUpperCase() === "FOOTER")?.text ?? "",
     rejectionReason: item.rejected_reason ?? null,
+    textOnly: item.components.every(component => ["BODY", "FOOTER"].includes(component.type.toUpperCase())),
   };
 }
 
@@ -88,6 +102,34 @@ export function createMetaTemplateClient(
         throw new AppError("WHATSAPP_TEMPLATE_PAGE_INVALID", "Meta returned an invalid template page.", 502);
       }
       return { items: result.data.map(publicTemplate), nextCursor: next };
+    },
+    async approved(name: string, languageCode: string) {
+      const parsedName = templateName.parse(name);
+      const parsedLanguage = language.parse(languageCode);
+      // Name-filtered and bounded on the connected WABA; never trust a
+      // client-supplied account or follow an arbitrary provider URL.
+      const result = graphList.parse(await providerJson<unknown>(
+        `${endpoint}?name=${encodeURIComponent(parsedName)}&limit=100`,
+        { headers }, fetcher,
+      ));
+      const match = result.data.find(item =>
+        item.name === parsedName && item.language === parsedLanguage);
+      if (!match || match.status !== "APPROVED"
+        || !["UTILITY", "MARKETING"].includes(match.category)) {
+        throw new AppError("WHATSAPP_TEMPLATE_NOT_APPROVED",
+          "This template and language are not currently approved for sending.", 409);
+      }
+      const template = publicTemplate(match);
+      if (!template.textOnly) {
+        throw new AppError("WHATSAPP_TEMPLATE_UNSUPPORTED",
+          "This template includes a header or buttons; choose a text-only template.", 409);
+      }
+      if (!template.body) {
+        throw new AppError("WHATSAPP_TEMPLATE_UNSUPPORTED",
+          "This template has no text body usable by this automation.", 409);
+      }
+      approvedWhatsAppParameterCount(template.body);
+      return template;
     },
     async submit(input: CreateWhatsAppTemplate) {
       const parsed = createWhatsAppTemplateSchema.parse(input);

@@ -20,6 +20,8 @@ import {
 import { AppError } from "@/server/http/errors";
 import { classifySmsPurpose } from "@/server/sms/classification";
 import { sendPreclassifiedAutomationSms } from "@/server/sms/outbound";
+import { resolveWhatsAppTemplatesForWorkspace } from "@/server/providers/whatsapp/runtime";
+import { sendWhatsAppConversationTemplate } from "@/server/whatsapp/outbound";
 import { executeAutomationRun } from "./executor";
 import { createWorkflowRun, listAutomationActivity, listWorkflowActionRuns } from "./repository";
 import { createWorkflowDraft, getWorkflowVersion, publishWorkflow, setWorkflowStatus } from "./workflows";
@@ -30,6 +32,12 @@ vi.mock("@/server/sms/classification", () => ({
 
 vi.mock("@/server/sms/outbound", () => ({
   sendPreclassifiedAutomationSms: vi.fn(),
+}));
+vi.mock("@/server/providers/whatsapp/runtime", () => ({
+  resolveWhatsAppTemplatesForWorkspace: vi.fn(),
+}));
+vi.mock("@/server/whatsapp/outbound", () => ({
+  sendWhatsAppConversationTemplate: vi.fn(),
 }));
 
 const ownerId = "phase3c-owner";
@@ -115,6 +123,12 @@ describe("Phase 3C durable workflow actions", () => {
   beforeEach(async () => {
     vi.resetAllMocks();
     vi.mocked(classifySmsPurpose).mockResolvedValue("TRANSACTIONAL");
+    vi.mocked(resolveWhatsAppTemplatesForWorkspace).mockResolvedValue({
+      approved: vi.fn(async () => ({
+        name: "appointment_update", language: "en_US", category: "UTILITY",
+        status: "APPROVED", body: "Hello {{1}}",
+      })),
+    } as never);
     await clean();
     await db.insert(user).values([
       { id: ownerId, name: "Owner", email: "phase3c-owner@example.com", emailVerified: true },
@@ -130,6 +144,80 @@ describe("Phase 3C durable workflow actions", () => {
 
   afterAll(async () => {
     await closeDatabase();
+  });
+
+  it("publishes an approved WhatsApp action with registered placeholders and sends once", async () => {
+    const { lead } = await leadContext();
+    const { version, snapshot } = await publishedWorkflow([
+      { type: "SEND_CUSTOMER_WHATSAPP", templateName: "appointment_update",
+        languageCode: "en_US", variables: ["name"] },
+      { type: "NOTIFY_STAFF", userId: staffId, title: "Follow up", message: "WhatsApp sent." },
+    ]);
+    expect(snapshot.actions[0]).toMatchObject({
+      type: "SEND_CUSTOMER_WHATSAPP", approvedCategory: "UTILITY",
+    });
+    const { run } = await eventAndRun(lead, version, snapshot.actions);
+    vi.mocked(sendWhatsAppConversationTemplate).mockResolvedValue({
+      id: "11111111-1111-4111-8111-111111111111",
+      externalMessageId: "wamid.workflow-1",
+    } as never);
+    const results = await Promise.all([
+      executeAutomationRun(workspaceId, run.id),
+      executeAutomationRun(workspaceId, run.id),
+    ]);
+    expect(results.some(result => result.claimed && result.status === "COMPLETED")).toBe(true);
+    expect(sendWhatsAppConversationTemplate).toHaveBeenCalledOnce();
+    expect(vi.mocked(sendWhatsAppConversationTemplate).mock.calls[0]?.[2]).toMatchObject({
+      templateName: "appointment_update", expectedCategory: "UTILITY",
+      components: [{ type: "body", parameters: [{ type: "text", text: "Priority Customer" }] }],
+    });
+    const actions = await listWorkflowActionRuns(workspaceId, run.id);
+    expect(actions.map(action => action.status)).toEqual(["COMPLETED", "COMPLETED"]);
+    expect((await db.select().from(automationDeliveries)).map(delivery => delivery.channel))
+      .toEqual(expect.arrayContaining(["WHATSAPP", "IN_APP"]));
+  });
+
+  it("rejects mismatched WhatsApp placeholders at publication without contacting a sender", async () => {
+    const definition = await createWorkflowDraft(workspaceId, "Wrong template values", {
+      trigger: "LEAD_QUALIFIED", conditions: [],
+      actions: [{ type: "SEND_CUSTOMER_WHATSAPP", templateName: "appointment_update",
+        languageCode: "en_US", variables: [] }],
+    });
+    await expect(publishWorkflow(workspaceId, definition.id)).rejects.toMatchObject({
+      code: "WHATSAPP_TEMPLATE_VARIABLE_MISMATCH",
+    });
+    expect(sendWhatsAppConversationTemplate).not.toHaveBeenCalled();
+  });
+
+  it("continues after a blocked WhatsApp send but stops on uncertain provider acceptance", async () => {
+    const { lead } = await leadContext();
+    const actions = [
+      { type: "SEND_CUSTOMER_WHATSAPP", templateName: "appointment_update",
+        languageCode: "en_US", variables: ["name"] },
+      { type: "NOTIFY_STAFF", userId: staffId, title: "Later action", message: "Continue." },
+    ];
+    const { version, snapshot } = await publishedWorkflow(actions);
+    const { run } = await eventAndRun(lead, version, snapshot.actions);
+    vi.mocked(sendWhatsAppConversationTemplate).mockRejectedValue(
+      new AppError("WHATSAPP_CONSENT_REQUIRED", "Customer declined.", 409),
+    );
+    await expect(executeAutomationRun(workspaceId, run.id))
+      .resolves.toMatchObject({ status: "COMPLETED" });
+    expect((await listWorkflowActionRuns(workspaceId, run.id)).map(action => action.status))
+      .toEqual(["SKIPPED", "COMPLETED"]);
+    expect((await db.select().from(automationDeliveries))
+      .find(delivery => delivery.channel === "WHATSAPP")?.status).toBe("SKIPPED");
+    const second = await eventAndRun(
+      (await leadContext()).lead, version, snapshot.actions,
+    );
+    vi.mocked(sendWhatsAppConversationTemplate).mockRejectedValue(
+      new Error("Meta connection reset after dispatch"),
+    );
+    await expect(executeAutomationRun(workspaceId, second.run.id))
+      .resolves.toMatchObject({ status: "FAILED" });
+    expect((await listWorkflowActionRuns(workspaceId, second.run.id)).map(action => action.status))
+      .toEqual(["UNKNOWN", "PENDING"]);
+    expect(await executeAutomationRun(workspaceId, second.run.id)).toMatchObject({ claimed: false });
   });
 
   it("rejects an unsendably long SMS before classification or publication", async () => {
