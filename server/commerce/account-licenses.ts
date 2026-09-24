@@ -1,7 +1,7 @@
 import { desc, eq } from "drizzle-orm";
 import { db } from "@/db";
 import { licenses } from "@/db/schema";
-import { FUNNEL_PRODUCTS, getPurchasedBusinessLimit, type FunnelProductCode } from "./products";
+import { FUNNEL_PRODUCTS, getAgencyClientLimit, getPurchasedBusinessLimit, type FunnelProductCode } from "./products";
 
 export type PurchaserLicense = {
   id: string;
@@ -14,6 +14,7 @@ export type PurchaserLicense = {
 export type FunnelAccountSummary = {
   activeProducts: FunnelProductCode[];
   businessLimit: number;
+  agencyClientLimit: number | null;
   licenses: PurchaserLicense[];
 };
 
@@ -28,8 +29,12 @@ export function summarizeFunnelAccountLicenses(rows: PurchaserLicense[]): Funnel
     .filter((product) => rows.some((license) =>
       license.status === "ACTIVE" && license.productCode === product.code))
     .map((product) => product.code);
-  const businessLimit = getPurchasedBusinessLimit(activeProducts);
-  return { activeProducts, businessLimit, licenses: rows };
+  const activeLicenseCodes = rows
+    .filter((license) => license.status === "ACTIVE")
+    .map((license) => license.productCode);
+  const businessLimit = getPurchasedBusinessLimit(activeLicenseCodes);
+  const agencyClientLimit = getAgencyClientLimit(activeLicenseCodes);
+  return { activeProducts, businessLimit, agencyClientLimit, licenses: rows };
 }
 
 export async function getFunnelAccountSummary(purchaserUserId: string): Promise<FunnelAccountSummary> {
