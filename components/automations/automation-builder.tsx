@@ -288,7 +288,7 @@ export function AutomationBuilder() {
     }
     if (type === "SEND_CUSTOMER_WHATSAPP") {
       const template = whatsappTemplates[0];
-      const count = template ? [...template.body.matchAll(/{{(\d+)}}/g)].length : 0;
+      const count = template ? new Set([...template.body.matchAll(/{{(\d+)}}/g)].map(match => match[1])).size : 0;
       return { type, templateName: template?.name ?? "", languageCode: template?.language ?? "en_US",
         variables: Array.from({ length: count }, () => "name") };
     }
@@ -830,7 +830,7 @@ function ActionCard({
               const next = whatsappTemplates.find(template =>
                 `${template.name}:${template.language}` === event.target.value);
               if (!next) return;
-              const count = [...next.body.matchAll(/{{(\d+)}}/g)].length;
+              const count = new Set([...next.body.matchAll(/{{(\d+)}}/g)].map(match => match[1])).size;
               onChange({ ...action, templateName: next.name, languageCode: next.language,
                 variables: Array.from({ length: count }, (_value, index) => action.variables[index] ?? variables[0]?.id ?? "name") });
             }}>
@@ -849,7 +849,7 @@ function ActionCard({
         {(() => {
           const template = whatsappTemplates.find(item =>
             item.name === action.templateName && item.language === action.languageCode);
-          const slots = template ? [...template.body.matchAll(/{{(\d+)}}/g)] : [];
+          const slots = template ? [...new Set([...template.body.matchAll(/{{(\d+)}}/g)].map(match => match[1]))] : [];
           return <>
             {template && <p>{template.body}</p>}
             {slots.map((_slot, slot) => <label key={slot}>
