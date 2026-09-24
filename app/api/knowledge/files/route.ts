@@ -1,7 +1,7 @@
 import { resolveWorkspaceContext } from "@/server/auth/workspace-context";
 import { requireWorkspacePermission } from "@/server/auth/permissions";
 import { AppError, toErrorResponse } from "@/server/http/errors";
-import { getKnowledgeSourceUsage, saveKnowledgeSource } from "@/server/knowledge/repository";
+import { saveKnowledgeSource } from "@/server/knowledge/repository";
 
 const MAX_FILE_BYTES = 256 * 1024;
 const ALLOWED_EXTENSIONS = new Set([".txt", ".md"]);
@@ -38,9 +38,6 @@ export async function POST(request: Request) {
   try {
     const context = await resolveWorkspaceContext(request.headers);
     requireWorkspacePermission(context.membership.role, "integration.manage");
-    if ((await getKnowledgeSourceUsage(context.workspace.id)).limit === 0) {
-      throw new AppError("KNOWLEDGE_IMPORT_REQUIRES_UNLIMITED", "Upgrade to Unlimited to import business knowledge.", 403);
-    }
     const declaredLength = Number(request.headers.get("content-length"));
     if (Number.isFinite(declaredLength) && declaredLength > MAX_FILE_BYTES + 65_536)
       throw new AppError("KNOWLEDGE_FILE_TOO_LARGE", "Knowledge files must be 256 KB or smaller.", 413);
