@@ -1,5 +1,5 @@
 import { randomBytes } from "node:crypto";
-import { and, eq } from "drizzle-orm";
+import { and, eq, sql } from "drizzle-orm";
 import { db } from "@/db";
 import {
   commerceEvents,
@@ -20,7 +20,7 @@ import type { NormalizedPurchaseEvent } from "./types";
 import { resolveFunnelProductId } from "./products";
 
 const ACTIVE_EVENTS = new Set(["SALE", "BILL", "UNCANCEL-REBILL"]);
-const REVOKE_EVENTS = new Set(["RFND", "CGBK", "INSF"]);
+const REVOKE_EVENTS = new Set(["RFND", "CGBK", "INSF", "CANCEL-REBILL"]);
 
 function isCoreProduct(productId: string): boolean {
   const env = getEnv();
@@ -83,6 +83,17 @@ async function activate(event: NormalizedPurchaseEvent) {
     eq(licenses.productCode, "CORE"),
   )).limit(1);
 
+  // A late SALE/BILL cannot revive a refunded or chargeback receipt. Only an
+  // explicit uncancellation may restore a cancelled recurring receipt.
+  if (existingLicense && (
+    existingLicense.status === "REFUNDED"
+    || existingLicense.status === "CHARGEBACK"
+    || (existingLicense.status === "CANCELLED" && event.eventType !== "UNCANCEL-REBILL")
+  )) return { ignored: true as const, reason: "REVOKED_PURCHASE" };
+  if (!existingLicense && event.eventType === "UNCANCEL-REBILL") {
+    throw new AppError("LICENSE_NOT_FOUND", "Cannot restore a receipt before its original purchase is known.", 503);
+  }
+
   let provisioned: Awaited<ReturnType<typeof provisionUser>>;
   if (existingLicense) {
     const [buyer] = existingLicense.purchaserUserId
@@ -116,6 +127,7 @@ async function activate(event: NormalizedPurchaseEvent) {
       setWhere: and(
         eq(licenses.workspaceId, provisioned.workspace.workspaceId),
         eq(licenses.purchaserUserId, provisioned.user.id),
+        eq(licenses.status, event.eventType === "UNCANCEL-REBILL" ? "CANCELLED" : "ACTIVE"),
       ),
     })
     .returning();
@@ -148,19 +160,42 @@ async function revoke(event: NormalizedPurchaseEvent) {
     .from(licenses)
     .where(and(eq(licenses.source, "JVZOO"), eq(licenses.externalPurchaseId, event.externalPurchaseId), eq(licenses.productCode, "CORE")))
     .limit(1);
-  if (!license) return { ignored: true as const, reason: "LICENSE_NOT_FOUND" };
+  if (!license) {
+    // Provider IPNs are not guaranteed to be delivered in purchase-first order.
+    // A missing refund must be retryable after its purchase is recorded.
+    throw new AppError("LICENSE_NOT_FOUND", "This receipt has not been recorded yet; retry after its sale arrives.", 503);
+  }
+  if (license.purchaserUserId) {
+    const [buyer] = await db.select({ email: user.email }).from(user)
+      .where(eq(user.id, license.purchaserUserId)).limit(1);
+    if (!buyer || buyer.email.toLowerCase() !== event.customerEmail.toLowerCase()) {
+      throw new AppError("PURCHASE_OWNERSHIP_CONFLICT", "This receipt is associated with another purchaser.", 409);
+    }
+  }
 
   const status = event.eventType === "CGBK" ? "CHARGEBACK" : event.eventType === "RFND" ? "REFUNDED" : "CANCELLED";
-  await db.update(licenses).set({ status, rawMetadata: event.raw, updatedAt: new Date() }).where(eq(licenses.id, license.id));
-  await db.update(workspaces).set({ status: "SUSPENDED", updatedAt: new Date() }).where(eq(workspaces.id, license.workspaceId));
-  await db
-    .insert(workspaceEntitlements)
-    .values({ workspaceId: license.workspaceId, key: "core_access", value: false, updatedAt: new Date() })
-    .onConflictDoUpdate({
-      target: [workspaceEntitlements.workspaceId, workspaceEntitlements.key],
-      set: { value: false, updatedAt: new Date() },
-    });
-  return { ignored: false as const, workspaceId: license.workspaceId, licenseId: license.id };
+  return db.transaction(async (tx) => {
+    await tx.execute(sql`select pg_advisory_xact_lock(hashtext(${`core-license:${license.workspaceId}`}))`);
+    await tx.update(licenses).set({ status, rawMetadata: event.raw, updatedAt: new Date() })
+      .where(eq(licenses.id, license.id));
+    const [stillActive] = await tx.select({ id: licenses.id }).from(licenses).where(and(
+      eq(licenses.workspaceId, license.workspaceId),
+      eq(licenses.productCode, "CORE"),
+      eq(licenses.status, "ACTIVE"),
+    )).limit(1);
+    const coreAccess = Boolean(stillActive);
+    if (!coreAccess) {
+      await tx.update(workspaces).set({ status: "SUSPENDED", updatedAt: new Date() })
+        .where(eq(workspaces.id, license.workspaceId));
+    }
+    await tx.insert(workspaceEntitlements)
+      .values({ workspaceId: license.workspaceId, key: "core_access", value: coreAccess, updatedAt: new Date() })
+      .onConflictDoUpdate({
+        target: [workspaceEntitlements.workspaceId, workspaceEntitlements.key],
+        set: { value: coreAccess, updatedAt: new Date() },
+      });
+    return { ignored: false as const, workspaceId: license.workspaceId, licenseId: license.id, coreAccess };
+  });
 }
 
 export async function processCommerceEvent(event: NormalizedPurchaseEvent) {
@@ -202,15 +237,7 @@ export async function processCommerceEvent(event: NormalizedPurchaseEvent) {
     let result: unknown;
     if (ACTIVE_EVENTS.has(event.eventType)) result = await activate(event);
     else if (REVOKE_EVENTS.has(event.eventType)) result = await revoke(event);
-    else if (event.eventType === "CANCEL-REBILL") {
-      const [license] = await db
-        .select()
-        .from(licenses)
-        .where(and(eq(licenses.source, "JVZOO"), eq(licenses.externalPurchaseId, event.externalPurchaseId), eq(licenses.productCode, "CORE")))
-        .limit(1);
-      if (license) await db.update(licenses).set({ status: "CANCELLED", updatedAt: new Date(), rawMetadata: event.raw }).where(eq(licenses.id, license.id));
-      result = { ignored: false, cancellationRecorded: Boolean(license) };
-    } else {
+    else {
       result = { ignored: true, reason: "UNSUPPORTED_EVENT" };
     }
 
