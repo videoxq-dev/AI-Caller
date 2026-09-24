@@ -1,4 +1,19 @@
 .webchatSetupCard{padding-bottom:12px}
+.webchatWidgetManager{margin-top:14px;padding:12px;border:1px solid #dbe3ee;border-radius:10px;background:#f9fbfe}
+.webchatWidgetManagerHeader{display:flex;align-items:center;justify-content:space-between;gap:12px}
+.webchatWidgetManagerHeader strong,.webchatWidgetManagerHeader small{display:block}
+.webchatWidgetManagerHeader strong{color:#1b2c47;font-size:12px}
+.webchatWidgetManagerHeader small{margin-top:2px;color:#70809a;font-size:9.5px}
+.webchatAddWidgetButton{height:34px;padding:0 12px;border:0;border-radius:7px;color:#fff;background:#1769ee;font-size:10.5px;font-weight:750;cursor:pointer;white-space:nowrap}
+.webchatAddWidgetButton:disabled{opacity:.55;cursor:not-allowed}
+.webchatWidgetTabs{display:flex;gap:8px;margin-top:10px;overflow-x:auto;padding-bottom:2px}
+.webchatWidgetTabs button{min-width:150px;padding:9px 10px;border:1px solid #d8e1ed;border-radius:8px;text-align:left;background:#fff;cursor:pointer}
+.webchatWidgetTabs button.active{border-color:#1769ee;box-shadow:0 0 0 1px #1769ee}
+.webchatWidgetTabs span,.webchatWidgetTabs small{display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.webchatWidgetTabs span{color:#263650;font-size:10.5px;font-weight:750}
+.webchatWidgetTabs small{margin-top:3px;color:#7c899b;font-size:9px}
+.webchatWidgetActions{display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-top:10px}
+.webchatWidgetActions .webchatSaveButton{margin-top:0}
 .webchatWorkspace{display:grid;grid-template-columns:minmax(0,1.55fr) minmax(240px,.78fr);gap:12px;margin-top:14px}
 .webchatConfigColumn{display:grid;gap:12px}
 .webchatPanel{border:1px solid #dbe3ee;border-radius:10px;background:#fff}
@@ -38,4 +53,4 @@
 .webchatInstallNote{margin-top:22px}
 .webchatInstallNote p{line-height:1.6}
 @media(max-width:1120px){.webchatWorkspace{grid-template-columns:1fr}.livePreviewPanel{max-width:420px}}
-@media(max-width:680px){.webchatWorkspace{grid-template-columns:1fr}.embedCodeBox{padding-right:12px;padding-top:48px}.embedCodeBox button{left:10px;right:auto}.livePreviewPanel{max-width:none}}
+@media(max-width:680px){.webchatWidgetManagerHeader{align-items:flex-start;flex-direction:column}.webchatWidgetTabs button{min-width:138px}.webchatWorkspace{grid-template-columns:1fr}.embedCodeBox{padding-right:12px;padding-top:48px}.embedCodeBox button{left:10px;right:auto}.livePreviewPanel{max-width:none}}
