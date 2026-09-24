@@ -1,6 +1,8 @@
-import { and, asc, eq } from "drizzle-orm";
+import { and, asc, eq, sql } from "drizzle-orm";
 import { db } from "@/db";
-import { memberships, user, workspacePlans, workspaces } from "@/db/schema";
+import { licenses, memberships, user, workspacePlans, workspaces } from "@/db/schema";
+import { FUNNEL_PRODUCTS } from "@/server/commerce/products";
+import { AppError } from "@/server/http/errors";
 
 type WorkspaceUser = {
   id: string;
@@ -142,6 +144,30 @@ export async function ensureDefaultWorkspace(user: WorkspaceUser): Promise<Works
 export async function createWorkspaceForUser(userId: string, name: string): Promise<WorkspaceMembership> {
   const workspaceName = name.trim();
   return db.transaction(async (tx) => {
+    // Lock first, count and create in the SAME transaction. Independent API
+    // requests cannot consume the last account business slot concurrently.
+    await tx.execute(sql`select pg_advisory_xact_lock(hashtext(${`funnel-business-capacity:${userId}`}))`);
+    const [usage] = await tx.select({ count: sql<number>`count(*)::int` })
+      .from(memberships)
+      .where(and(eq(memberships.userId, userId), eq(memberships.role, "OWNER")));
+    const activePurchases = await tx.selectDistinct({ code: licenses.productCode })
+      .from(licenses)
+      .where(and(eq(licenses.purchaserUserId, userId), eq(licenses.status, "ACTIVE")));
+    const purchasedCapacity = Math.max(0, ...activePurchases.map(
+      ({ code }) => FUNNEL_PRODUCTS.find((product) => product.code === code)?.businessLimit ?? 0,
+    ));
+    // A buyer can set up the initial business before checkout. Existing older
+    // workspaces remain intact, but extra creation requires purchased capacity.
+    const limit = Math.max(1, purchasedCapacity);
+    if ((usage?.count ?? 0) >= limit) {
+      throw new AppError(
+        "WORKSPACE_LIMIT_REACHED",
+        "You have reached the number of businesses included with your purchase.",
+        403,
+        { ownedBusinesses: usage?.count ?? 0, businessLimit: limit },
+      );
+    }
+
     const [workspace] = await tx.insert(workspaces).values({ name: workspaceName })
       .returning({ id: workspaces.id, name: workspaces.name, status: workspaces.status });
     await tx.insert(memberships).values({
