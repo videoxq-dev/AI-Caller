@@ -30,6 +30,8 @@ type Provider = {
   brand: string;
 };
 
+type IntegrationEntitlements = { externalCalendar: boolean; agencyByop: boolean };
+type ProviderAccess = { allowed: boolean; requiredPlan: "Unlimited" | "Agency" | null };
 type MetaConfig = { enabled: boolean; appId: string | null; configId: string | null; graphApiVersion: string };
 type MetaSession = { wabaId: string; phoneNumberId: string; businessId?: string | null };
 
@@ -73,6 +75,7 @@ export default function IntegrationsPage() {
   const [selectedId, setSelectedId] = useState<ProviderId | null>(null);
   const [connected, setConnected] = useState<Record<ProviderId, boolean>>(emptyConnected);
   const [records, setRecords] = useState<Partial<Record<ProviderId, IntegrationRecord>>>({});
+  const [entitlements, setEntitlements] = useState<IntegrationEntitlements>({ externalCalendar: false, agencyByop: false });
   const [pageNotice, setPageNotice] = useState<{ tone: "success" | "error"; text: string } | null>(null);
 
   useEffect(() => {
@@ -98,6 +101,10 @@ export default function IntegrationsPage() {
         }
         setConnected(nextConnected);
         setRecords(nextRecords);
+        setEntitlements({
+          externalCalendar: payload?.entitlements?.externalCalendar === true,
+          agencyByop: payload?.entitlements?.agencyByop === true,
+        });
       })
       .catch(() => setPageNotice({ tone: "error", text: "Unable to load saved integrations." }));
   }, []);
@@ -125,6 +132,14 @@ export default function IntegrationsPage() {
     setRecords((current) => ({ ...current, [providerId]: record ?? undefined }));
   }
 
+  function accessFor(provider: Provider): ProviderAccess {
+    if (provider.id === "credits" || provider.id === "whatsapp") return { allowed: true, requiredPlan: null };
+    if (provider.category === "scheduling") {
+      return { allowed: entitlements.externalCalendar, requiredPlan: "Unlimited" };
+    }
+    return { allowed: entitlements.agencyByop, requiredPlan: "Agency" };
+  }
+
   return (
     <main className="appShell integrationsShell">
       <AppNav active="Integrations" className="appSidebar integrationsSidebar" />
@@ -143,18 +158,19 @@ export default function IntegrationsPage() {
           {(["communication", "ai", "scheduling"] as const).map((section) => {
             const sectionProviders = visible.filter((provider) => provider.category === section);
             if (!sectionProviders.length) return null;
-            return <section className="integrationSection" key={section}><div className="integrationSectionHeading"><h2>{section === "communication" ? "Communication" : section === "ai" ? "AI" : "Scheduling"}</h2><p>{section === "communication" ? "Connect communication providers for calls and messaging." : section === "ai" ? "Choose how your agent processes conversations." : "Connect calendars and scheduling platforms."}</p></div><div className="integrationGrid">{sectionProviders.map((provider) => <IntegrationCard key={provider.id} provider={provider} connected={connected[provider.id]} selected={selectedId === provider.id} onOpen={() => setSelectedId(provider.id)} />)}</div></section>;
+            return <section className="integrationSection" key={section}><div className="integrationSectionHeading"><h2>{section === "communication" ? "Communication" : section === "ai" ? "AI" : "Scheduling"}</h2><p>{section === "communication" ? "Connect communication providers for calls and messaging." : section === "ai" ? "Choose how your agent processes conversations." : "Connect calendars and scheduling platforms."}</p></div><div className="integrationGrid">{sectionProviders.map((provider) => <IntegrationCard key={provider.id} provider={provider} connected={connected[provider.id]} selected={selectedId === provider.id} access={accessFor(provider)} onOpen={() => setSelectedId(provider.id)} />)}</div></section>;
           })}
           {visible.length === 0 && <div className="emptyIntegrations">No integrations match your filters.</div>}
         </div>
-        {selected && <IntegrationDrawer key={selected.id} provider={selected} connected={connected[selected.id]} record={records[selected.id]} onClose={() => setSelectedId(null)} onRecordChange={(record) => updateRecord(record, selected.id)} />}
+        {selected && <IntegrationDrawer key={selected.id} provider={selected} connected={connected[selected.id]} record={records[selected.id]} access={accessFor(selected)} onClose={() => setSelectedId(null)} onRecordChange={(record) => updateRecord(record, selected.id)} />}
       </section>
     </main>
   );
 }
 
-function IntegrationCard({ provider, connected, selected, onOpen }: { provider: Provider; connected: boolean; selected: boolean; onOpen: () => void }) {
-  return <article className={`integrationCard ${selected ? "selected" : ""}`}><div className="integrationCardTop"><span className={`providerMark ${provider.id}`}>{provider.brand}</span><div><strong>{provider.name}</strong><span className={`connectionBadge ${connected ? "connected" : ""}`}>{provider.id === "credits" ? (connected ? "● Server configured" : "Not configured") : (connected ? "● Connected" : "+ Not connected")}</span></div></div><p>{provider.description}</p><ul>{provider.features.map((feature) => <li key={feature}>✓ {feature}</li>)}</ul><button type="button" className={connected ? "manageIntegration" : "connectIntegration"} onClick={onOpen}>{connected ? "Manage" : "Connect"}</button></article>;
+function IntegrationCard({ provider, connected, selected, access, onOpen }: { provider: Provider; connected: boolean; selected: boolean; access: ProviderAccess; onOpen: () => void }) {
+  const action = connected ? "Manage" : access.allowed ? "Connect" : `${access.requiredPlan} required`;
+  return <article className={`integrationCard ${selected ? "selected" : ""}`}><div className="integrationCardTop"><span className={`providerMark ${provider.id}`}>{provider.brand}</span><div><strong>{provider.name}</strong><span className={`connectionBadge ${connected ? "connected" : ""}`}>{provider.id === "credits" ? (connected ? "● Server configured" : "Not configured") : (connected ? "● Connected" : !access.allowed ? `Locked · ${access.requiredPlan}` : "+ Not connected")}</span></div></div><p>{provider.description}</p><ul>{provider.features.map((feature) => <li key={feature}>✓ {feature}</li>)}</ul><button type="button" className={connected ? "manageIntegration" : "connectIntegration"} onClick={onOpen}>{action}</button></article>;
 }
 
 function categoryFor(provider: Provider): "AI" | "COMMUNICATION" | "WHATSAPP" | "CALENDAR" {
@@ -171,7 +187,7 @@ const credentialKeys: Partial<Record<ProviderId, string[]>> = {
   openai: ["apiKey"], gemini: ["apiKey"], openrouter: ["apiKey"], calendly: ["token"], calcom: ["apiKey"],
 };
 
-function IntegrationDrawer({ provider, connected, record, onClose, onRecordChange }: { provider: Provider; connected: boolean; record?: IntegrationRecord; onClose: () => void; onRecordChange: (record: IntegrationRecord | null) => void }) {
+function IntegrationDrawer({ provider, connected, record, access, onClose, onRecordChange }: { provider: Provider; connected: boolean; record?: IntegrationRecord; access: ProviderAccess; onClose: () => void; onRecordChange: (record: IntegrationRecord | null) => void }) {
   const [showSecret, setShowSecret] = useState(false);
   const [saving, setSaving] = useState(false);
   const [notice, setNotice] = useState<{ tone: "success" | "error"; text: string } | null>(null);
@@ -242,14 +258,14 @@ function IntegrationDrawer({ provider, connected, record, onClose, onRecordChang
     <aside className="integrationDrawer" aria-label={`${provider.name} integration settings`}>
       <button type="button" className="drawerClose" onClick={onClose} aria-label="Close integration panel">×</button>
       <div className="drawerProviderHeader"><span className={`providerMark large ${provider.id}`}>{provider.brand}</span><div><h2>{provider.name}</h2><span className={`connectionBadge ${connected ? "connected" : ""}`}>{provider.id === "credits" ? (connected ? "● Server configured" : "Not configured") : connected ? "● Connected" : record?.status === "ERROR" ? "Connection error" : "Not connected"}</span><p>{provider.description}</p></div></div>
-      {provider.id === "credits" ? <CreditsPanel onUseHosted={useHostedAI} busy={saving} /> : provider.id === "whatsapp" ? <MetaEmbeddedSignupPanel record={record} onRecordChange={onRecordChange} setNotice={setNotice} /> : oauthCalendar ? <OAuthCalendarPanel provider={provider.id as "google" | "outlook"} record={record} /> : provider.category === "communication" ? <CommunicationPanel provider={provider.id} values={values} update={update} showSecret={showSecret} setShowSecret={setShowSecret} hasSavedSecret={hasSavedSecret} /> : provider.category === "ai" ? <AiPanel provider={provider.id} values={values} update={update} showSecret={showSecret} setShowSecret={setShowSecret} hasSavedSecret={hasSavedSecret} /> : <SchedulingPanel provider={provider.id} values={values} update={update} showSecret={showSecret} setShowSecret={setShowSecret} hasSavedSecret={hasSavedSecret} />}
+      {!access.allowed ? <section className="providerConnectCard"><h3>Available on {access.requiredPlan}</h3><p>{access.requiredPlan === "Unlimited" ? "External calendar connections are unlocked with Unlimited. Core continues to use AI Caller’s built-in appointment calendar." : "Bring-your-own AI, voice and messaging providers are reserved for Agency."}</p>{connected && <p>Your saved connection is retained, but it is not used while this entitlement is inactive. You can disconnect it below.</p>}</section> : provider.id === "credits" ? <CreditsPanel onUseHosted={useHostedAI} busy={saving} /> : provider.id === "whatsapp" ? <MetaEmbeddedSignupPanel record={record} onRecordChange={onRecordChange} setNotice={setNotice} /> : oauthCalendar ? <OAuthCalendarPanel provider={provider.id as "google" | "outlook"} record={record} /> : provider.category === "communication" ? <CommunicationPanel provider={provider.id} values={values} update={update} showSecret={showSecret} setShowSecret={setShowSecret} hasSavedSecret={hasSavedSecret} /> : provider.category === "ai" ? <AiPanel provider={provider.id} values={values} update={update} showSecret={showSecret} setShowSecret={setShowSecret} hasSavedSecret={hasSavedSecret} /> : <SchedulingPanel provider={provider.id} values={values} update={update} showSecret={showSecret} setShowSecret={setShowSecret} hasSavedSecret={hasSavedSecret} />}
       {provider.id === "whatsapp" && connected && <Link className="whatsappTemplatesLink" href="/integrations/whatsapp/templates">Manage message templates →</Link>}
       {record?.lastTestedAt && <div className="providerLastTest">Last tested {new Date(record.lastTestedAt).toLocaleString()}</div>}
       {record?.lastError && <div className="providerErrorText">{record.lastError}</div>}
       {notice && <div className={`integrationNotice ${notice.tone}`}>{notice.text}</div>}
       {provider.id !== "credits" && <div className="providerActionRow">
-        {!oauthCalendar && provider.id !== "whatsapp" && <button type="button" className="primaryDrawerAction" disabled={saving} onClick={save}>{saving ? "Checking..." : connected ? "Save & verify changes" : "Connect & verify"}</button>}
-        {record && <button type="button" className="secondaryDrawerAction" disabled={saving} onClick={testConnection}>Test connection</button>}
+        {access.allowed && !oauthCalendar && provider.id !== "whatsapp" && <button type="button" className="primaryDrawerAction" disabled={saving} onClick={save}>{saving ? "Checking..." : connected ? "Save & verify changes" : "Connect & verify"}</button>}
+        {access.allowed && record && <button type="button" className="secondaryDrawerAction" disabled={saving} onClick={testConnection}>Test connection</button>}
         {connected && <button type="button" className="dangerDrawerAction" disabled={saving} onClick={disconnect}>Disconnect</button>}
       </div>}
     </aside>
