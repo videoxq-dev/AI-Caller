@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { resolveWorkspaceContext } from "@/server/auth/workspace-context";
 import { getKnowledgeSourceUsage, listKnowledgeSources } from "@/server/knowledge/repository";
+import { AppError } from "@/server/http/errors";
 import { GET } from "./route";
 
 vi.mock("@/server/auth/workspace-context", () => ({ resolveWorkspaceContext: vi.fn() }));
@@ -43,9 +44,9 @@ describe("paginated workspace knowledge API", () => {
   });
 
   it("rejects unauthenticated access before fetching knowledge", async () => {
-    vi.mocked(resolveWorkspaceContext).mockRejectedValue(new Error("Unauthorized"));
+    vi.mocked(resolveWorkspaceContext).mockRejectedValue(new AppError("UNAUTHORIZED", "Sign in required.", 401));
     const response = await GET(new Request("https://app.example.com/api/knowledge"));
-    expect(response.status).toBe(500);
+    expect(response.status).toBe(401);
     expect(listKnowledgeSources).not.toHaveBeenCalled();
   });
 });
