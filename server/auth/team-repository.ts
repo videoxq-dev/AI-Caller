@@ -231,8 +231,12 @@ export async function revokeWorkspaceInvitation(
       eq(workspaceInvitations.status, "PENDING"),
     )).limit(1);
     if (!pending) throw new AppError("INVITATION_NOT_FOUND", "Pending invitation not found.", 404);
-    if (actorRole === "ADMIN" && pending.role === "ADMIN") {
-      throw new AppError("FORBIDDEN_ROLE_ASSIGNMENT", "Only the workspace owner can manage admin invitations.", 403);
+    if (actorRole === "ADMIN" && pending.role !== "STAFF") {
+      throw new AppError(
+        "FORBIDDEN_ROLE_ASSIGNMENT",
+        "Only a workspace owner can manage Admin or client-owner invitations.",
+        403,
+      );
     }
 
     const [invitation] = await tx.update(workspaceInvitations)
