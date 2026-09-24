@@ -94,7 +94,7 @@ try {
   await page.getByRole("button", { name: "New workspace" }).click();
   await page.getByLabel("Business name").fill("Agency Second Client");
   await page.getByRole("button", { name: "Create workspace", exact: true }).click();
-  await page.waitForURL(/\\/setup\\/business/);
+  await page.waitForURL(url => new URL(url).pathname === "/setup/business");
   await page.goto(`${baseUrl}/workspaces`, { waitUntil: "networkidle" });
   await page.getByText("2 / 50").waitFor();
   assert(await page.getByText("Agency Second Client").count() >= 1, "New client is missing from dashboard.");
@@ -104,7 +104,7 @@ try {
 
   // All owned workspaces remain selectable from the original quick switcher.
   await page.getByRole("combobox", { name: "Active workspace" }).selectOption(originalId);
-  await page.waitForURL(/\\/workspaces/);
+  await page.waitForURL(url => new URL(url).pathname === "/workspaces");
   await page.getByText("2 / 50").waitFor();
   const switchResult = await context.request.post(`${baseUrl}/api/workspaces`, {
     data: { workspaceId: secondId },
