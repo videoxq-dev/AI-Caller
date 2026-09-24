@@ -27,6 +27,19 @@ export const createWhatsAppTemplateSchema = z.object({
 });
 export type CreateWhatsAppTemplate = z.infer<typeof createWhatsAppTemplateSchema>;
 
+/** A BODY may reuse {{1}}, but its unique positional parameters must be consecutive. */
+export function approvedWhatsAppParameterCount(body: string) {
+  const matches = [...body.matchAll(/{{(\d+)}}/g)].map(match => Number(match[1]));
+  const unique = [...new Set(matches)].sort((left, right) => left - right);
+  if (unique.length > 10 || unique.some((value, index) => value !== index + 1)
+    || /{{|}}/.test(body.replace(/{{\d+}}/g, ""))) {
+    throw new AppError("WHATSAPP_TEMPLATE_UNSUPPORTED",
+      "This template does not use supported consecutive BODY placeholders.", 409);
+  }
+  return unique.length;
+}
+
+
 const graphTemplate = z.object({
   id: z.string().min(1),
   name: z.string().min(1),
@@ -115,6 +128,7 @@ export function createMetaTemplateClient(
         throw new AppError("WHATSAPP_TEMPLATE_UNSUPPORTED",
           "This template has no text body usable by this automation.", 409);
       }
+      approvedWhatsAppParameterCount(template.body);
       return template;
     },
     async submit(input: CreateWhatsAppTemplate) {
