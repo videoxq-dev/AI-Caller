@@ -5,6 +5,7 @@ import { automationEventType, memberships } from "@/db/schema";
 import { AppError } from "@/server/http/errors";
 import { classifySmsPurpose } from "@/server/sms/classification";
 import { resolveWhatsAppTemplatesForWorkspace } from "@/server/providers/whatsapp/runtime";
+import { approvedWhatsAppParameterCount } from "@/server/providers/whatsapp/meta-templates";
 
 export const MAX_WORKFLOW_ACTIONS = 5;
 
@@ -201,12 +202,7 @@ export async function prepareWorkflowActionsForPublication(input: {
     if (action.type === "SEND_CUSTOMER_WHATSAPP") {
       const provider = await resolveWhatsAppTemplatesForWorkspace(input.workspaceId);
       const approved = await provider.approved(action.templateName, action.languageCode);
-      const matches = [...approved.body.matchAll(/{{(\d+)}}/g)].map(match => Number(match[1]));
-      if (matches.some(value => value < 1 || value > 10)
-        || matches.length !== action.variables.length
-        || new Set(matches).size !== action.variables.length
-        || [...new Set(matches)].some((value, index) => value !== index + 1)
-        || /{{|}}/.test(approved.body.replace(/{{\d+}}/g, ""))) {
+      if (approvedWhatsAppParameterCount(approved.body) !== action.variables.length) {
         throw new AppError("WHATSAPP_TEMPLATE_VARIABLE_MISMATCH",
           "Select one variable for each approved WhatsApp template placeholder.", 409);
       }
