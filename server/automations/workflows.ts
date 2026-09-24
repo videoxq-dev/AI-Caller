@@ -11,6 +11,10 @@ import {
   workflowVersions,
   workspaces,
 } from "@/db/schema";
+import {
+  getWorkspaceIntegrationEntitlements,
+  requirePerformanceAutomationEntitlement,
+} from "@/server/commerce/workspace-entitlements";
 import { AppError } from "@/server/http/errors";
 import {
   actionAllowedForTrigger,
@@ -131,6 +135,7 @@ export function matchesWorkflow(
 }
 
 export async function createWorkflowDraft(workspaceId: string, name: string, input: unknown) {
+  await requirePerformanceAutomationEntitlement(workspaceId);
   const draft = workflowDefinitionSchema.parse(input);
   const cleanName = z.string().trim().min(1).max(120).parse(name);
   const [created] = await db.insert(workflowDefinitions).values({
@@ -140,6 +145,7 @@ export async function createWorkflowDraft(workspaceId: string, name: string, inp
 }
 
 export async function updateWorkflowDraft(workspaceId: string, definitionId: string, name: string, input: unknown) {
+  await requirePerformanceAutomationEntitlement(workspaceId);
   const draft = workflowDefinitionSchema.parse(input);
   const cleanName = z.string().trim().min(1).max(120).parse(name);
   const [updated] = await db.update(workflowDefinitions).set({
@@ -173,6 +179,7 @@ function publishedSnapshotAsDraft(snapshot: PublishedWorkflowDefinition): Workfl
 }
 
 export async function publishWorkflow(workspaceId: string, definitionId: string) {
+  await requirePerformanceAutomationEntitlement(workspaceId);
   // Purpose classification can call the model. Never hold workflow/workspace locks
   // across that external work: prepare from a stable draft, then compare-and-publish.
   const [candidate] = await db.select().from(workflowDefinitions).where(and(
@@ -301,6 +308,7 @@ export async function setWorkflowStatus(
   definitionId: string,
   status: "PUBLISHED" | "PAUSED" | "ARCHIVED",
 ) {
+  await requirePerformanceAutomationEntitlement(workspaceId);
   return db.transaction(async tx => {
     const [workspace] = await tx.select({ id: workspaces.id }).from(workspaces)
       .where(eq(workspaces.id, workspaceId)).for("update").limit(1);
@@ -393,6 +401,9 @@ export async function setWorkflowStatus(
 }
 
 export async function listPublishedWorkflowVersions(workspaceId: string, eventId?: string) {
+  const entitlement = await getWorkspaceIntegrationEntitlements(workspaceId);
+  if (!entitlement.performanceAutomations) return [];
+
   // Keep event/version/status comparisons at PostgreSQL precision. JS Date truncates
   // PostgreSQL microseconds and can move a boundary event across a publish/pause edge.
   const occurrence = eventId
