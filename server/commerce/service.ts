@@ -55,7 +55,7 @@ async function provisionUser(event: NormalizedPurchaseEvent) {
   const [existing] = await db.select().from(user).where(eq(user.email, event.customerEmail)).limit(1);
   if (existing) {
     const membership = await getPrimaryOwnedWorkspace(existing.id)
-      ?? await createWorkspaceForUser(existing.id, existing.name.trim() ? `${existing.name.trim()}\u0027s Business` : "My Business");
+      ?? await createWorkspaceForUser(existing.id, existing.name.trim() ? `${existing.name.trim()}'s Business` : "My Business");
     return { user: existing, workspace: membership, created: false, temporaryPassword: null as string | null };
   }
 
