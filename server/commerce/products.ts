@@ -42,15 +42,23 @@ export function resolveFunnelProductId(
   return assigned.get(productId.trim()) ?? null;
 }
 
-/** Agency capacity is a client allowance, excluding the buyer's original business. */
+/** Agency capacity is a stackable client allowance, excluding the buyer's original business. */
 export function getAgencyClientLimit(activeCodes: readonly string[]): number | null {
-  const limit = Math.max(0, ...FUNNEL_PRODUCTS
-    .filter((product) => product.offer === "AGENCY" && activeCodes.includes(product.code))
-    .map((product) => product.businessLimit ?? 0));
+  const productsByCode = new Map(FUNNEL_PRODUCTS.map((product) => [product.code, product] as const));
+  const limit = activeCodes.reduce((total, code) => {
+    const product = productsByCode.get(code as FunnelProductCode);
+    return product?.offer === "AGENCY" ? total + (product.businessLimit ?? 0) : total;
+  }, 0);
   return limit > 0 ? limit : null;
 }
 
-/** Total owned-business capacity; Agency client slots are in addition to the original business. */
+/**
+ * Total owned-business capacity.
+ *
+ * Non-Agency packages keep their highest included business allowance. Every
+ * active Agency receipt contributes its client slots, and those slots are in
+ * addition to the buyer's original business.
+ */
 export function getPurchasedBusinessLimit(activeCodes: readonly string[]): number {
   const standardLimit = Math.max(0, ...FUNNEL_PRODUCTS
     .filter((product) => product.offer !== "AGENCY" && activeCodes.includes(product.code))
