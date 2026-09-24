@@ -1,4 +1,5 @@
 import { and, asc, eq, sql } from "drizzle-orm";
+import { getFunnelAccountSummary } from "@/server/commerce/account-licenses";
 import { db } from "@/db";
 import { licenses, memberships, user, workspacePlans, workspaces } from "@/db/schema";
 import { getPurchasedBusinessLimit } from "@/server/commerce/products";
@@ -139,6 +140,23 @@ export async function ensureDefaultWorkspace(user: WorkspaceUser): Promise<Works
       role: "OWNER",
     };
   });
+}
+
+export async function getOwnedWorkspaceCapacity(userId: string) {
+  const [summary, counts] = await Promise.all([
+    getFunnelAccountSummary(userId),
+    db.select({ count: sql<number>`count(*)::int` })
+      .from(memberships)
+      .where(and(eq(memberships.userId, userId), eq(memberships.role, "OWNER"))),
+  ]);
+  const ownedBusinesses = counts[0]?.count ?? 0;
+  const businessLimit = Math.max(1, summary.businessLimit);
+  return {
+    ownedBusinesses,
+    businessLimit,
+    availableBusinesses: Math.max(0, businessLimit - ownedBusinesses),
+    activeProducts: summary.activeProducts,
+  };
 }
 
 export async function createWorkspaceForUser(userId: string, name: string): Promise<WorkspaceMembership> {
