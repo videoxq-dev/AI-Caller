@@ -159,9 +159,15 @@ function publishedSnapshotAsDraft(snapshot: PublishedWorkflowDefinition): Workfl
   return workflowDefinitionSchema.parse({
     ...snapshot,
     actions: snapshot.actions.map(action => {
-      if (action.type !== "SEND_CUSTOMER_SMS") return action;
-      const { classifiedPurpose: _classifiedPurpose, ...draftAction } = action;
-      return draftAction;
+      if (action.type === "SEND_CUSTOMER_SMS") {
+        const { classifiedPurpose: _classifiedPurpose, ...draftAction } = action;
+        return draftAction;
+      }
+      if (action.type === "SEND_CUSTOMER_WHATSAPP") {
+        const { approvedCategory: _approvedCategory, ...draftAction } = action;
+        return draftAction;
+      }
+      return action;
     }),
   });
 }
