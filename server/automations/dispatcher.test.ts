@@ -1,10 +1,12 @@
 import { afterAll, beforeEach, describe, expect, it, vi } from "vitest";
+import { eq } from "drizzle-orm";
 import { closeDatabase, db } from "@/db";
 import { enqueueUniqueJob } from "@/server/jobs";
 import {
   automationEvents,
   automationRuns,
   automationSettings,
+  licenses,
   memberships,
   notifications,
   user,
@@ -33,6 +35,15 @@ describe("automation dispatcher", () => {
     const [workspace] = await db.insert(workspaces).values({ name: "Automation Test" }).returning();
     workspaceId = workspace.id;
     await db.insert(memberships).values({ workspaceId, userId: "automation-owner", role: "OWNER" });
+    await db.insert(licenses).values({
+      workspaceId,
+      purchaserUserId: "automation-owner",
+      source: "MANUAL",
+      externalPurchaseId: "dispatcher-performance",
+      productCode: "PERFORMANCE",
+      status: "ACTIVE",
+      purchasedAt: new Date(),
+    });
   });
 
   afterAll(async () => {
@@ -49,6 +60,26 @@ describe("automation dispatcher", () => {
 
     await expect(dispatchAutomationEvent(workspaceId, event.id)).resolves.toMatchObject({ runs: 0 });
     expect(await db.select().from(automationRuns)).toHaveLength(0);
+  });
+
+  it("keeps built-in recipes available when Performance is not active", async () => {
+    await db.update(licenses).set({ status: "REFUNDED" }).where(eq(licenses.workspaceId, workspaceId));
+    await db.insert(automationSettings).values({
+      workspaceId,
+      key: "QUALIFIED_LEAD_ASSIGNMENT",
+      enabled: true,
+      config: { assignedUserId: null, notifyInApp: true },
+    });
+    const [event] = await db.insert(automationEvents).values({
+      workspaceId,
+      type: "LEAD_QUALIFIED",
+      aggregateType: "LEAD",
+      aggregateId: "core-built-in",
+    }).returning();
+
+    await expect(dispatchAutomationEvent(workspaceId, event.id)).resolves.toMatchObject({ runs: 1 });
+    const [run] = await db.select().from(automationRuns);
+    expect(run).toMatchObject({ key: "QUALIFIED_LEAD_ASSIGNMENT" });
   });
 
   it("creates exactly one run when the same event is dispatched twice", async () => {
@@ -126,6 +157,26 @@ describe("automation dispatcher", () => {
     const [run] = await db.select().from(automationRuns);
     expect(run.metadata.expectedAppointmentRevision).toBe(7);
     expect(run.metadata.expectedStartsAt).toBe(startsAt);
+  });
+
+  it("does not dispatch published custom workflows after Performance is revoked", async () => {
+    const definition = await createWorkflowDraft(workspaceId, "Performance gated", {
+      trigger: "LEAD_QUALIFIED",
+      conditions: [],
+      actions: [{ type: "NOTIFY_STAFF", title: "Lead ready", message: "Contact the customer." }],
+    });
+    await publishWorkflow(workspaceId, definition.id);
+    await db.update(licenses).set({ status: "REFUNDED" }).where(eq(licenses.workspaceId, workspaceId));
+    const [event] = await db.insert(automationEvents).values({
+      workspaceId,
+      type: "LEAD_QUALIFIED",
+      aggregateType: "LEAD",
+      aggregateId: "performance-revoked",
+      payload: { qualificationScore: 90 },
+    }).returning();
+
+    await expect(dispatchAutomationEvent(workspaceId, event.id)).resolves.toMatchObject({ runs: 0 });
+    expect(await db.select().from(automationRuns)).toHaveLength(0);
   });
 
   it("matches a published threshold workflow without duplicating runs or changing legacy recipes", async () => {

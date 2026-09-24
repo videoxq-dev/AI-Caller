@@ -9,8 +9,8 @@ There is **one application** with five offers and six purchasable SKUs:
 | Offer | License product code | Brief-defined commercial difference |
 | --- | --- | --- |
 | Front end: Core | CORE | One business; 15,000 starter credits; one configured AI agent; native appointments and Core channels |
-| OTO 1: Unlimited | UNLIMITED | Up to ten businesses; up to five staff per business; expanded calendars, up to two imported website/file knowledge sources per business, widgets, automations and reporting; an additional 15,000 promotional credits |
-| OTO 2: Performance | PERFORMANCE | Advanced custom workflows, AI reactivation and conversion/revenue intelligence |
+| OTO 1: Unlimited | UNLIMITED | Up to ten businesses; up to five staff per business; expanded calendars, up to two imported website/file knowledge sources per business, widgets and reporting; an additional 15,000 promotional credits |
+| OTO 2: Performance | PERFORMANCE | Unlocks the existing Automation Builder and custom automations |
 | OTO 3: Agency | AGENCY_50, AGENCY_100 | Agency console and 50 or 100 managed client businesses, with a client-capacity expansion path |
 | OTO 4: Whitelabel | WHITELABEL | Custom domain, product name, brand assets and client-facing branded experience |
 
@@ -19,6 +19,10 @@ There is **one application** with five offers and six purchasable SKUs:
 Keep **commercial purchase licenses** separate from the existing PERSONAL/GROWTH workspace billing plan. The latter currently governs seat quotas, whereas the funnel grants access and business capacity to the purchasing account. Do not treat a workspace-level JSON entitlement as an authoritative account-level workspace quota.
 
 A buyer can provide Core as a service to another business, but the Core license still covers one business. Unlimited permits up to ten; Agency has separate 50- and 100-client SKUs. Define effective capacity from **active purchases**, not from the latest webhook or an unvalidated UI selection. OTO entitlements add their documented capabilities; purchasing a later OTO does not implicitly grant every earlier OTO unless that is explicitly part of the commercial offer.
+
+## Frozen completed surfaces
+
+**Phase 6C SMS is closed scope.** Do not change SMS runtime behavior, SMS readiness/registration logic, outbound SMS policy, delivery behavior, or concluded SMS product flows while implementing unrelated funnel or entitlement work unless the founder explicitly reopens SMS scope. If a later feature changes a prerequisite used by an SMS acceptance fixture, adapt only that fixture's external setup as narrowly as necessary; do not change the SMS behavior being verified. Treat unexpected SMS regressions as blockers to the unrelated change, not as permission to redesign SMS.
 
 ## Delivery method
 
@@ -52,9 +56,13 @@ The revised funnel brief plus the founder's later clarifications define the impl
 
 Once the Core 500-contact maximum and Unlimited uncapped-contact entitlement are verified and merged, the founder has confirmed the agreed **Core and OTO 1 Unlimited implementation scope is complete**. Do not infer additional Unlimited engineering work from the superseded F4/F5/F6 milestone language.
 
-### F7–F9 — Performance
+### OTO 2 — Performance
 
-F7: typed workflow conditions, branches, delays, follow-ups and suppression/cancellation with quotas, consent and auditability. F8: consent-aware segmentation, AI reactivation and message/call handling with rate limits and deduplication. F9: conversion events, source attribution, recovered opportunities and revenue intelligence with defensible denominators and reports. The current six-trigger/four-action sequential builder is the starting point, not evidence that Performance is complete.
+The founder's September 24 clarification locks Performance to the **existing Automation Builder and custom automations**. Do not build new advanced workflow logic as part of this upgrade. AI reactivation, segmentation, conversion/revenue intelligence, additional follow-up systems, and other previously described Performance expansion features are deferred.
+
+Core and Unlimited retain the built-in automation recipes. An active `PERFORMANCE` purchase is required to access the Automation Builder, create or edit custom workflows, publish/resume them, inspect their custom-workflow activity, and execute published custom workflows. Later OTO purchases such as Agency or Whitelabel do not implicitly grant Performance. If Performance is refunded or otherwise inactive, preserve custom workflow definitions and history but stop dispatching or executing them until Performance access is restored.
+
+**Frozen-feature guard — Phase 6C SMS:** Phase 6C SMS readiness and its acceptance behavior are concluded. Do not modify SMS runtime behavior, SMS workflow behavior, or the Phase 6C acceptance script while implementing unrelated funnel/entitlement work unless the founder explicitly reopens SMS scope. If a new cross-cutting entitlement causes a Phase 6C regression, fix the new entitlement or generic test scaffolding outside the SMS feature boundary; do not rewrite the concluded SMS workflow to accommodate the new work.
 
 ### F10–F11 — Agency
 
@@ -67,6 +75,12 @@ Domain ownership verification and TLS/routing; branding isolation for client app
 ### F13 — Entire purchase funnel and release
 
 Exercise Core-only, each OTO combination, Agency 50 to 100, Whitelabel, duplicate IPNs, disputed/refunded purchases, old-account upgrades, credit top-ups and business-limit edges. Match customer-facing copy and actual purchase receipts to enabled features; only declare an offer commercially ready after exact-head CI, browser acceptance and relevant real integration checks.
+
+## Protected concluded scope — Phase 6C SMS
+
+Phase 6C SMS readiness is **concluded work**. Do not modify SMS runtime behavior, consent rules, registration/readiness logic, delivery handling, provider integration, SMS automation semantics, or established SMS acceptance expectations unless the founder explicitly reopens SMS work.
+
+Later product-entitlement changes must adapt around the concluded SMS implementation. When an unrelated entitlement change affects an SMS browser fixture because that fixture happens to create a custom automation, change only the fixture setup required to satisfy the new entitlement; do not alter SMS product behavior to make the test pass.
 
 ## Cross-cutting acceptance rules
 

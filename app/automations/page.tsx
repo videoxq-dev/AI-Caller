@@ -137,6 +137,7 @@ export default function AutomationsPage() {
   const [selectedKey, setSelectedKey] = useState<AutomationKey | null>(null);
   const [activityOpen, setActivityOpen] = useState(false);
   const [canManage, setCanManage] = useState(false);
+  const [canUseAutomationBuilder, setCanUseAutomationBuilder] = useState(false);
   const [loading, setLoading] = useState(true);
   const [savingKey, setSavingKey] = useState<AutomationKey | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -153,6 +154,7 @@ export default function AutomationsPage() {
       const settingsData = await settingsResponse.json().catch(() => null) as {
         settings?: AutomationSetting[];
         canManage?: boolean;
+        canUseAutomationBuilder?: boolean;
         error?: { message?: string };
       } | null;
       if (!settingsResponse.ok) throw new Error(settingsData?.error?.message ?? "Unable to load automations.");
@@ -166,6 +168,7 @@ export default function AutomationsPage() {
 
       setSettings(settingsData?.settings ?? []);
       setCanManage(Boolean(settingsData?.canManage));
+      setCanUseAutomationBuilder(Boolean(settingsData?.canUseAutomationBuilder));
       setMembers(teamResponse.ok ? teamData?.members ?? [] : []);
       setActivity(activityResponse.ok ? activityData?.items ?? [] : []);
     } catch (err) {
@@ -308,7 +311,7 @@ export default function AutomationsPage() {
             {loading && <div className="automationLoading">Loading workspace automations…</div>}
           </section>
 
-          <CustomAutomationHome canManage={canManage} />
+          <CustomAutomationHome canManage={canManage} canUseAutomationBuilder={canUseAutomationBuilder} />
         </div>
 
         {selected && selectedSetting && (

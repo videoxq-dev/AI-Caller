@@ -1,4 +1,4 @@
-import { and, asc, desc, eq, inArray, isNull, lt, lte, or, sql } from "drizzle-orm";
+import { and, asc, desc, eq, inArray, isNotNull, isNull, lt, lte, or, sql } from "drizzle-orm";
 import { db } from "@/db";
 import {
   automationDeliveries,
@@ -420,7 +420,12 @@ export async function getAutomationRun(workspaceId: string, runId: string) {
   return run ?? null;
 }
 
-export async function listAutomationActivity(workspaceId: string, limit = 100, definitionId?: string) {
+export async function listAutomationActivity(
+  workspaceId: string,
+  limit = 100,
+  definitionId?: string,
+  includeCustomWorkflows = true,
+) {
   const rows = await db.select({
     run: automationRuns,
     event: automationEvents,
@@ -441,7 +446,9 @@ export async function listAutomationActivity(workspaceId: string, limit = 100, d
     ))
     .where(definitionId
       ? and(eq(automationRuns.workspaceId, workspaceId), eq(workflowDefinitions.id, definitionId))
-      : eq(automationRuns.workspaceId, workspaceId))
+      : includeCustomWorkflows
+        ? eq(automationRuns.workspaceId, workspaceId)
+        : and(eq(automationRuns.workspaceId, workspaceId), isNotNull(automationRuns.key)))
     .orderBy(desc(automationRuns.createdAt))
     .limit(Math.min(Math.max(limit, 1), 200));
 

@@ -13,6 +13,7 @@ import {
   messages,
   notifications,
 } from "@/db/schema";
+import { getWorkspaceIntegrationEntitlements } from "@/server/commerce/workspace-entitlements";
 import { AppError } from "@/server/http/errors";
 import { ProviderRequestError } from "@/server/providers/http";
 import { sendSmsConversationText } from "@/server/sms/outbound";
@@ -702,6 +703,19 @@ export async function executeAutomationRun(workspaceId: string, runId: string) {
 
   if (run.workflowVersionId) {
     try {
+      const entitlement = await getWorkspaceIntegrationEntitlements(workspaceId);
+      if (!entitlement.performanceAutomations) {
+        await cancelPendingWorkflowActions(
+          workspaceId,
+          run.id,
+          "Performance access is required to run custom automations.",
+        );
+        await completeAutomationRun(workspaceId, run.id, "SKIPPED", {
+          reason: "PERFORMANCE_REQUIRED",
+        });
+        return { claimed: true as const, status: "SKIPPED" as const };
+      }
+
       const event = await getAutomationEvent(workspaceId, run.eventId);
       if (!event) throw new AppError("AUTOMATION_EVENT_NOT_FOUND", "Automation event not found.", 404);
       return await executeCustomWorkflowRun(workspaceId, run, event);

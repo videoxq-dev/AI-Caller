@@ -10,6 +10,7 @@ import {
   conversationHandlingEvents,
   conversations,
   leads,
+  licenses,
   memberships,
   notifications,
   user,
@@ -140,6 +141,15 @@ describe("Phase 3C durable workflow actions", () => {
       { workspaceId, userId: ownerId, role: "OWNER" },
       { workspaceId, userId: staffId, role: "STAFF" },
     ]);
+    await db.insert(licenses).values({
+      workspaceId,
+      purchaserUserId: ownerId,
+      source: "MANUAL",
+      externalPurchaseId: "phase3c-performance",
+      productCode: "PERFORMANCE",
+      status: "ACTIVE",
+      purchasedAt: new Date(),
+    });
   });
 
   afterAll(async () => {

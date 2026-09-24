@@ -1,11 +1,12 @@
 import { randomUUID } from "node:crypto";
 import { afterAll, afterEach, describe, expect, it } from "vitest";
-import { eq } from "drizzle-orm";
+import { and, eq } from "drizzle-orm";
 import { closeDatabase, db } from "@/db";
 import { licenses, memberships, user, workspaces } from "@/db/schema";
 import {
   getWorkspaceIntegrationEntitlements,
   requireCapabilityBindingEntitlement,
+  requirePerformanceAutomationEntitlement,
   requireProviderIntegrationEntitlement,
 } from "./workspace-entitlements";
 
@@ -62,6 +63,7 @@ describe("workspace external integration entitlements", () => {
       purchaserUserId: owner,
       externalCalendar: false,
       agencyByop: false,
+      performanceAutomations: false,
     });
     await expect(requireProviderIntegrationEntitlement(workspaceId, "google"))
       .rejects.toMatchObject({ code: "EXTERNAL_CALENDAR_REQUIRES_UNLIMITED", status: 403 });
@@ -78,6 +80,7 @@ describe("workspace external integration entitlements", () => {
     await expect(getWorkspaceIntegrationEntitlements(workspaceId)).resolves.toMatchObject({
       externalCalendar: true,
       agencyByop: false,
+      performanceAutomations: false,
     });
     await expect(requireProviderIntegrationEntitlement(workspaceId, "google")).resolves.toBeUndefined();
     await expect(requireProviderIntegrationEntitlement(workspaceId, "calcom")).resolves.toBeUndefined();
@@ -94,6 +97,7 @@ describe("workspace external integration entitlements", () => {
     await expect(getWorkspaceIntegrationEntitlements(workspaceId)).resolves.toMatchObject({
       externalCalendar: false,
       agencyByop: true,
+      performanceAutomations: false,
     });
     await expect(requireProviderIntegrationEntitlement(workspaceId, "openrouter")).resolves.toBeUndefined();
     await expect(requireCapabilityBindingEntitlement(workspaceId, "VOICE", "BYOP", "twilio")).resolves.toBeUndefined();
@@ -108,6 +112,33 @@ describe("workspace external integration entitlements", () => {
 
     await expect(requireProviderIntegrationEntitlement(workspaceId, "whatsapp")).resolves.toBeUndefined();
     await expect(requireCapabilityBindingEntitlement(workspaceId, "WHATSAPP", "BYOP", "whatsapp")).resolves.toBeUndefined();
+  });
+
+  it("unlocks the Automation Builder only with an active Performance purchase", async () => {
+    const owner = await createBuyer("Performance Buyer");
+    const workspaceId = await createOwnedWorkspace(owner);
+    await grant(owner, workspaceId, "CORE");
+    await grant(owner, workspaceId, "UNLIMITED");
+    await grant(owner, workspaceId, "AGENCY_50");
+
+    await expect(getWorkspaceIntegrationEntitlements(workspaceId)).resolves.toMatchObject({
+      performanceAutomations: false,
+    });
+    await expect(requirePerformanceAutomationEntitlement(workspaceId))
+      .rejects.toMatchObject({ code: "AUTOMATION_BUILDER_REQUIRES_PERFORMANCE", status: 403 });
+
+    await grant(owner, workspaceId, "PERFORMANCE");
+    await expect(getWorkspaceIntegrationEntitlements(workspaceId)).resolves.toMatchObject({
+      performanceAutomations: true,
+    });
+    await expect(requirePerformanceAutomationEntitlement(workspaceId)).resolves.toBeUndefined();
+
+    await db.update(licenses).set({ status: "REFUNDED" }).where(and(
+      eq(licenses.purchaserUserId, owner),
+      eq(licenses.productCode, "PERFORMANCE"),
+    ));
+    await expect(requirePerformanceAutomationEntitlement(workspaceId))
+      .rejects.toMatchObject({ code: "AUTOMATION_BUILDER_REQUIRES_PERFORMANCE", status: 403 });
   });
 
   it("revokes calendar access after Unlimited refund without deleting ownership", async () => {
@@ -138,6 +169,7 @@ describe("workspace external integration entitlements", () => {
       purchaserUserId: null,
       externalCalendar: false,
       agencyByop: false,
+      performanceAutomations: false,
     });
   });
 });

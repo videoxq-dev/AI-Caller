@@ -4,6 +4,7 @@ import { closeDatabase, db } from "@/db";
 import {
   automationEvents,
   automationRuns,
+  licenses,
   memberships,
   user,
   workflowDefinitions,
@@ -54,10 +55,38 @@ describe("Phase 4 automation builder service", () => {
       { workspaceId, userId: ownerId, role: "OWNER" },
       { workspaceId: otherWorkspaceId, userId: otherOwnerId, role: "OWNER" },
     ]);
+    await db.insert(licenses).values([
+      {
+        workspaceId,
+        purchaserUserId: ownerId,
+        source: "MANUAL",
+        externalPurchaseId: "phase4-performance-owner",
+        productCode: "PERFORMANCE",
+        status: "ACTIVE",
+        purchasedAt: new Date(),
+      },
+      {
+        workspaceId: otherWorkspaceId,
+        purchaserUserId: otherOwnerId,
+        source: "MANUAL",
+        externalPurchaseId: "phase4-performance-other",
+        productCode: "PERFORMANCE",
+        status: "ACTIVE",
+        purchasedAt: new Date(),
+      },
+    ]);
   });
 
   afterAll(async () => {
     await closeDatabase();
+  });
+
+  it("rejects access after the Performance entitlement is revoked", async () => {
+    await db.update(licenses).set({ status: "REFUNDED" }).where(eq(licenses.workspaceId, workspaceId));
+    await expect(listBuilderWorkflows(workspaceId)).rejects.toMatchObject({
+      code: "AUTOMATION_BUILDER_REQUIRES_PERFORMANCE",
+      status: 403,
+    });
   });
 
   it("rejects malformed route IDs and dry-run samples as client validation errors", async () => {

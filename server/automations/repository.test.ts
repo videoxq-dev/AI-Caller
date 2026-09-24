@@ -6,11 +6,14 @@ import {
   automationSettings,
   memberships,
   user,
+  workflowDefinitions,
+  workflowVersions,
   workspaces,
 } from "@/db/schema";
 import {
   claimAutomationRun,
   createAutomationRun,
+  listAutomationActivity,
   listRecoverableAutomationRuns,
   releaseAutomationRunForRetry,
   saveAutomationSetting,
@@ -53,6 +56,41 @@ describe("automation run claiming", () => {
       code: "AUTOMATION_ASSIGNEE_INVALID",
       status: 400,
     });
+  });
+
+  it("can exclude custom workflow history while retaining built-in automation activity", async () => {
+    await createAutomationRun({
+      workspaceId,
+      eventId,
+      key: "QUALIFIED_LEAD_ASSIGNMENT",
+    });
+    const [definition] = await db.insert(workflowDefinitions).values({
+      workspaceId,
+      name: "Historical custom workflow",
+      draft: {},
+    }).returning();
+    const [version] = await db.insert(workflowVersions).values({
+      workspaceId,
+      definitionId: definition.id,
+      version: 1,
+      snapshot: {},
+    }).returning();
+    await db.insert(automationRuns).values({
+      workspaceId,
+      eventId,
+      key: null,
+      workflowVersionId: version.id,
+      occurrenceKey: "custom-history",
+      status: "COMPLETED",
+      completedAt: new Date(),
+    });
+
+    const allActivity = await listAutomationActivity(workspaceId, 20);
+    expect(allActivity).toHaveLength(2);
+
+    const builtInOnly = await listAutomationActivity(workspaceId, 20, undefined, false);
+    expect(builtInOnly).toHaveLength(1);
+    expect(builtInOnly[0]?.run.key).toBe("QUALIFIED_LEAD_ASSIGNMENT");
   });
 
   it("does not claim a scheduled run before its due time", async () => {

@@ -4,6 +4,7 @@ import { closeDatabase, db } from "@/db";
 import {
   automationEvents,
   automationRuns,
+  licenses,
   memberships,
   user,
   workflowActionRuns,
@@ -44,6 +45,15 @@ describe("versioned deterministic workflows", () => {
     const [workspace] = await db.insert(workspaces).values({ name: "Workflow Test" }).returning();
     workspaceId = workspace.id;
     await db.insert(memberships).values({ workspaceId, userId: "workflow-owner", role: "OWNER" });
+    await db.insert(licenses).values({
+      workspaceId,
+      purchaserUserId: "workflow-owner",
+      source: "MANUAL",
+      externalPurchaseId: "workflow-performance",
+      productCode: "PERFORMANCE",
+      status: "ACTIVE",
+      purchasedAt: new Date(),
+    });
   });
 
   afterAll(async () => { await closeDatabase(); });
@@ -273,6 +283,11 @@ describe("versioned deterministic workflows", () => {
     const draft = await createWorkflowDraft(workspaceId, "Private", original);
     const version = await publishWorkflow(workspaceId, draft.id);
     const [other] = await db.insert(workspaces).values({ name: "Other Workspace" }).returning();
+    await db.insert(memberships).values({
+      workspaceId: other.id,
+      userId: "workflow-owner",
+      role: "OWNER",
+    });
     expect(await listPublishedWorkflowVersions(other.id)).toHaveLength(0);
     expect(await getWorkflowVersion(other.id, version.id)).toBeNull();
     await expect(updateWorkflowDraft(other.id, draft.id, "Hijacked", original)).rejects.toMatchObject({
