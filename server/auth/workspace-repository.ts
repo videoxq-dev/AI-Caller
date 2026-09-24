@@ -2,7 +2,7 @@ import { and, asc, eq, isNull, sql } from "drizzle-orm";
 import { getFunnelAccountSummary } from "@/server/commerce/account-licenses";
 import { db } from "@/db";
 import { licenses, memberships, user, workspaceCommercialOwners, workspacePlans, workspaces } from "@/db/schema";
-import { getAgencyClientLimit, getPurchasedBusinessLimit } from "@/server/commerce/products";
+import { getPurchasedBusinessLimit } from "@/server/commerce/products";
 import { AppError } from "@/server/http/errors";
 
 type WorkspaceUser = {
@@ -212,7 +212,7 @@ export async function getOwnedWorkspaceCapacity(userId: string) {
   ]);
   const ownedBusinesses = (commercial[0]?.count ?? 0) + (legacy[0]?.count ?? 0);
   const businessLimit = Math.max(1, summary.businessLimit);
-  const agencyClientLimit = getAgencyClientLimit(summary.activeProducts);
+  const agencyClientLimit = summary.agencyClientLimit;
   const agencyClientsUsed = Math.max(0, ownedBusinesses - 1);
   return {
     ownedBusinesses,
@@ -243,7 +243,7 @@ export async function createWorkspaceForUser(userId: string, name: string): Prom
         isNull(workspaceCommercialOwners.workspaceId),
       ));
     const ownedBusinesses = (commercialUsage?.count ?? 0) + (legacyUsage?.count ?? 0);
-    const activePurchases = await tx.selectDistinct({ code: licenses.productCode })
+    const activePurchases = await tx.select({ code: licenses.productCode })
       .from(licenses)
       .where(and(eq(licenses.purchaserUserId, userId), eq(licenses.status, "ACTIVE")));
     const purchasedCapacity = getPurchasedBusinessLimit(activePurchases.map(({ code }) => code));
