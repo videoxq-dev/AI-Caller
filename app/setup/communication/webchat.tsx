@@ -66,6 +66,10 @@ export function WebChatSetup() {
     setWelcomeMessage(selected.greeting ?? "Hi! 👋 How can we help you today?");
   }, [selected?.id]);
 
+  function replaceWidget(updated: WidgetConfig) {
+    setWidgets((current) => current.map((widget) => widget.id === updated.id ? updated : widget));
+  }
+
   async function saveWidget() {
     if (!selected) return;
     setSaving(true);
@@ -77,8 +81,7 @@ export function WebChatSetup() {
       });
       const payload = await response.json().catch(() => null);
       if (!response.ok) throw new Error(payload?.error?.message ?? "Unable to save the web chat widget.");
-      const updated = payload.widget as WidgetConfig;
-      setWidgets((current) => current.map((widget) => widget.id === updated.id ? updated : widget));
+      replaceWidget(payload.widget as WidgetConfig);
       showToast("Web chat widget saved.", "success");
     } catch (error) {
       showToast(error instanceof Error ? error.message : "Unable to save the web chat widget.", "error");
@@ -125,7 +128,7 @@ export function WebChatSetup() {
       const payload = await response.json().catch(() => null);
       if (!response.ok) throw new Error(payload?.error?.message ?? "Unable to update widget status.");
       const updated = payload.widget as WidgetConfig;
-      setWidgets((current) => current.map((widget) => widget.id === updated.id ? updated : widget));
+      replaceWidget(updated);
       showToast(updated.enabled ? "Website widget enabled." : "Website widget disabled.", "success");
     } catch (error) {
       showToast(error instanceof Error ? error.message : "Unable to update widget status.", "error");
@@ -138,39 +141,6 @@ export function WebChatSetup() {
     if (!selected?.embedCode) return;
     try {
       await navigator.clipboard.writeText(selected.embedCode);
-      setCopied(true);
-      window.setTimeout(() => setCopied(false), 1400);
-    } catch {
-      showToast("Your browser blocked clipboard access. Select and copy the embed code manually.", "error");
-    }
-  }
-
-  return () => { cancelled = true; };
-  }, []);
-
-  async function saveGreeting() {
-    setSaving(true);
-    try {
-      const response = await fetch("/api/widget/config", {
-        method: "PATCH",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({ greeting: welcomeMessage }),
-      });
-      const payload = await response.json().catch(() => null);
-      if (!response.ok) throw new Error(payload?.error?.message ?? "Unable to save the web chat greeting.");
-      setConfig(payload as WidgetConfig);
-      showToast("Web chat greeting saved.", "success");
-    } catch (error) {
-      showToast(error instanceof Error ? error.message : "Unable to save the web chat greeting.", "error");
-    } finally {
-      setSaving(false);
-    }
-  }
-
-  async function copyEmbedCode() {
-    if (!config?.embedCode) return;
-    try {
-      await navigator.clipboard.writeText(config.embedCode);
       setCopied(true);
       window.setTimeout(() => setCopied(false), 1400);
     } catch {
@@ -196,10 +166,12 @@ export function WebChatSetup() {
         <div className="webchatWidgetTabs">
           {widgets.map((widget) => {
             const available = widget.isPrimary || unlimitedWidgets;
-            return <button key={widget.id} type="button" className={selected?.id === widget.id ? "active" : ""} onClick={() => setSelectedId(widget.id)}>
-              <span>{widget.name}</span>
-              <small>{widget.isPrimary ? "Core primary" : available ? (widget.enabled ? "Active" : "Disabled") : "Unlimited required"}</small>
-            </button>;
+            return (
+              <button key={widget.id} type="button" className={selected?.id === widget.id ? "active" : ""} onClick={() => setSelectedId(widget.id)}>
+                <span>{widget.name}</span>
+                <small>{widget.isPrimary ? "Core primary" : available ? (widget.enabled ? "Active" : "Disabled") : "Unlimited required"}</small>
+              </button>
+            );
           })}
         </div>
       </div>
@@ -217,10 +189,15 @@ export function WebChatSetup() {
             </label>
             <label className="communicationField welcomeField">
               <span>Greeting</span>
-              <textarea rows={3} maxLength={500} value={welcomeMessage} onChange={(event) => setWelcomeMessage(event.target.value)} />
+              <textarea rows={3} maxLength={500} value={welcomeMessage} onChange={(event) => setWelcomeMessage(event.target.value)} disabled={!selectedPlanAvailable} />
               <small className="fieldCounter">{welcomeMessage.length}/500</small>
             </label>
-            {!selectedPlanAvailable && selected && !selected.isPrimary && <div className="editableNote communicationEditableNote"><span className="infoBubble"><InfoIcon size={18} /></span><div><strong>Unlimited required</strong><p>This saved widget is retained, but it is not served publicly and cannot be edited until Unlimited is active again.</p></div></div>}
+            {!selectedPlanAvailable && selected && !selected.isPrimary && (
+              <div className="editableNote communicationEditableNote">
+                <span className="infoBubble"><InfoIcon size={18} /></span>
+                <div><strong>Unlimited required</strong><p>This saved widget is retained, but it is not served publicly and cannot be edited until Unlimited is active again.</p></div>
+              </div>
+            )}
             <div className="webchatWidgetActions">
               <button type="button" className="webchatSaveButton" disabled={saving || loading || !selectedPlanAvailable} onClick={() => void saveWidget()}>{saving ? "Saving..." : "Save widget"}</button>
               {selected && <button type="button" className="outlineAction" disabled={saving || (!selectedPlanAvailable && !selected.enabled)} onClick={() => void toggleWidget()}>{selected.enabled ? "Disable widget" : "Enable widget"}</button>}
@@ -240,7 +217,7 @@ export function WebChatSetup() {
         </div>
 
         <section className="webchatPanel livePreviewPanel">
-          <div className="livePreviewHeading"><h3>Live preview</h3><p>The greeting below uses the same content saved to the real widget.</p></div>
+          <div className="livePreviewHeading"><h3>Live preview</h3><p>The greeting below uses the selected widget&apos;s content.</p></div>
           <div className="widgetPreview rounded">
             <div className="widgetPreviewHeader">
               <span className="widgetPreviewAvatar">AI</span>
