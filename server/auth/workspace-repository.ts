@@ -61,6 +61,22 @@ export async function listWorkspaceMembers(workspaceId: string) {
     .orderBy(asc(memberships.createdAt));
 }
 
+export async function getPrimaryOwnedWorkspace(userId: string): Promise<WorkspaceMembership | null> {
+  const [row] = await db
+    .select({
+      workspaceId: workspaces.id,
+      workspaceName: workspaces.name,
+      workspaceStatus: workspaces.status,
+      role: memberships.role,
+    })
+    .from(memberships)
+    .innerJoin(workspaces, eq(memberships.workspaceId, workspaces.id))
+    .where(and(eq(memberships.userId, userId), eq(memberships.role, "OWNER")))
+    .orderBy(asc(memberships.createdAt), asc(workspaces.createdAt), asc(workspaces.id))
+    .limit(1);
+  return row ?? null;
+}
+
 export async function getPrimaryMembership(userId: string): Promise<WorkspaceMembership | null> {
   const [row] = await db
     .select({
