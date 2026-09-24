@@ -133,6 +133,15 @@ export async function validateWorkflowActionsForPublication(input: {
     }
     if (action.type === "SEND_CUSTOMER_SMS") {
       assertSupportedTemplateVariables(input.trigger, action.message);
+      // The send path has always enforced 1,600 characters. Validate before
+      // publication as well; do not narrow the schema for existing snapshots.
+      if (Array.from(action.message).length > 1600) {
+        throw new AppError(
+          "WORKFLOW_SMS_TOO_LONG",
+          "SMS automation messages cannot exceed 1,600 characters.",
+          422,
+        );
+      }
     }
     if (action.type === "ASSIGN_LEAD") staffIds.add(action.userId);
     if (action.type === "NOTIFY_STAFF" && action.userId) staffIds.add(action.userId);
