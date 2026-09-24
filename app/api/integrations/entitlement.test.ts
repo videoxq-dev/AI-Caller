@@ -10,6 +10,7 @@ import { exchangeOAuthCode, getOAuthAuthorizationUrl } from "@/server/providers/
 import { POST as saveProvider } from "./route";
 import { PUT as bindProvider } from "./capabilities/route";
 import { GET as startOAuth } from "./oauth/[provider]/start/route";
+import { PUT as updateSmsConfig } from "./sms/config/route";
 
 vi.mock("@/server/auth/workspace-context", () => ({ resolveWorkspaceContext: vi.fn() }));
 vi.mock("@/server/auth/permissions", () => ({ requireWorkspacePermission: vi.fn() }));
@@ -71,6 +72,19 @@ describe("external integration route entitlements", () => {
     expect(response.status).toBe(403);
     expect(getOAuthAuthorizationUrl).not.toHaveBeenCalled();
     expect(exchangeOAuthCode).not.toHaveBeenCalled();
+  });
+
+  it("blocks direct BYOP SMS configuration before reading saved provider state", async () => {
+    vi.mocked(requireProviderIntegrationEntitlement).mockRejectedValueOnce(
+      new AppError("BYOP_REQUIRES_AGENCY", "Bring-your-own-provider integrations are available on Agency.", 403),
+    );
+    const response = await updateSmsConfig(new Request("https://app.example.com/api/integrations/sms/config", {
+      method: "PUT",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ provider: "twilio", phone: "+15551234567" }),
+    }));
+    expect(response.status).toBe(403);
+    expect(saveIntegration).not.toHaveBeenCalled();
   });
 
   it("blocks non-calendar BYOP capability binding before changing runtime routing", async () => {
