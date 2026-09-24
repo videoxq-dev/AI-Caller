@@ -114,11 +114,23 @@ describe("workspace provisioning", () => {
       .rejects.toMatchObject({ code: "WORKSPACE_LIMIT_REACHED", status: 403 });
   });
 
-  it("uses Agency 100 capacity rather than stacking 50 and 100 entitlements", async () => {
+  it("stacks Agency 50 and Agency 100 capacity from separate active receipts", async () => {
     const original = await createWorkspaceForUser(TEST_USER_ID, "Original Business");
     await db.insert(licenses).values([
       { workspaceId: original.workspaceId, purchaserUserId: TEST_USER_ID, source: "MANUAL", externalPurchaseId: randomUUID(), productCode: "AGENCY_50", status: "ACTIVE", purchasedAt: new Date() },
       { workspaceId: original.workspaceId, purchaserUserId: TEST_USER_ID, source: "MANUAL", externalPurchaseId: randomUUID(), productCode: "AGENCY_100", status: "ACTIVE", purchasedAt: new Date() },
+    ]);
+    expect(await getOwnedWorkspaceCapacity(TEST_USER_ID)).toMatchObject({
+      ownedBusinesses: 1, businessLimit: 151, availableBusinesses: 150,
+      agencyClientLimit: 150, agencyClientsUsed: 0, agencyClientsAvailable: 150,
+    });
+  });
+
+  it("stacks repeated purchases of the same Agency SKU", async () => {
+    const original = await createWorkspaceForUser(TEST_USER_ID, "Original Business");
+    await db.insert(licenses).values([
+      { workspaceId: original.workspaceId, purchaserUserId: TEST_USER_ID, source: "MANUAL", externalPurchaseId: randomUUID(), productCode: "AGENCY_50", status: "ACTIVE", purchasedAt: new Date() },
+      { workspaceId: original.workspaceId, purchaserUserId: TEST_USER_ID, source: "MANUAL", externalPurchaseId: randomUUID(), productCode: "AGENCY_50", status: "ACTIVE", purchasedAt: new Date() },
     ]);
     expect(await getOwnedWorkspaceCapacity(TEST_USER_ID)).toMatchObject({
       ownedBusinesses: 1, businessLimit: 101, availableBusinesses: 100,

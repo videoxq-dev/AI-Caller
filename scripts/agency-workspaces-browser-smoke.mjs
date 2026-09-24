@@ -124,10 +124,10 @@ try {
 
   await grant(userId, originalId, "AGENCY_100");
   await page.goto(`${baseUrl}/workspaces`, { waitUntil: "networkidle" });
-  await page.getByText("2 / 100").waitFor();
+  await page.getByText("2 / 150").waitFor();
   const higher = await (await context.request.get(`${baseUrl}/api/agency/workspaces`)).json();
-  assert(higher.capacity.businessLimit === 101 && higher.capacity.agencyClientsAvailable === 98,
-    "Agency 100 upgrade stacked or omitted client slots.");
+  assert(higher.capacity.businessLimit === 151 && higher.capacity.agencyClientsAvailable === 148,
+    "Agency 50 + 100 purchases did not stack to 150 client slots.");
 
   await pool.query(`UPDATE licenses SET status = 'REFUNDED'
     WHERE purchaser_user_id = $1 AND product_code IN ('AGENCY_50', 'AGENCY_100')`, [userId]);

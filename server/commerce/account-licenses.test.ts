@@ -94,7 +94,20 @@ describe("purchaser-owned commercial licenses", () => {
       make("CORE", "ACTIVE"),
       make("AGENCY_50", "ACTIVE"),
       make("AGENCY_100", "ACTIVE"),
-    ]).businessLimit).toBe(101);
+    ])).toMatchObject({
+      businessLimit: 151,
+      agencyClientLimit: 150,
+      activeProducts: ["CORE", "AGENCY_50", "AGENCY_100"],
+    });
+    expect(summarizeFunnelAccountLicenses([
+      make("CORE", "ACTIVE"),
+      make("AGENCY_50", "ACTIVE"),
+      make("AGENCY_50", "ACTIVE"),
+    ])).toMatchObject({
+      businessLimit: 101,
+      agencyClientLimit: 100,
+      activeProducts: ["CORE", "AGENCY_50"],
+    });
   });
 
   it("isolates buyer licenses even when buyers share a workspace membership", async () => {
