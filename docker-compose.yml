@@ -93,6 +93,11 @@ services:
     volumes:
       - recordings:/app/.data/recordings
       - brand_assets:/app/.data/brand-assets
+    networks:
+      default: {}
+      edge:
+        aliases:
+          - aicaller-web
 
   worker:
     <<: *app
