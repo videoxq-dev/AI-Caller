@@ -25,7 +25,7 @@ function normalizeAddress(address: string) {
 
 function dnsMissing(error: unknown) {
   return Boolean(error && typeof error === "object" && "code" in error
-    && ["ENOTFOUND", "ENODATA", "ESERVFAIL"].includes(String((error as { code?: unknown }).code)));
+    && ["ENOTFOUND", "ENODATA"].includes(String((error as { code?: unknown }).code)));
 }
 
 async function optionalLookup<T>(work: () => Promise<T>, empty: T) {
