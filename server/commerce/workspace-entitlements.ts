@@ -57,6 +57,18 @@ export async function getWorkspaceIntegrationEntitlements(
     primaryId = workspaceId;
   }
 
+  if (commercial) {
+    // A stale commercial-owner record is not sufficient to exercise a buyer's
+    // purchases after that buyer loses OWNER access to the original business.
+    const [primaryOwner] = await db.select({ userId: memberships.userId }).from(memberships)
+      .where(and(
+        eq(memberships.workspaceId, primaryId),
+        eq(memberships.userId, purchaserUserId),
+        eq(memberships.role, "OWNER"),
+      )).limit(1);
+    if (!primaryOwner) return denied(purchaserUserId);
+  }
+
   const rows = await db.select({ code: licenses.productCode, workspaceId: licenses.workspaceId })
     .from(licenses).where(and(
       eq(licenses.purchaserUserId, purchaserUserId),
