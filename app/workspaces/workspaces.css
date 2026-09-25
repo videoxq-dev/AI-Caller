@@ -64,3 +64,27 @@
 .agencyDangerButton{min-height:34px;padding:0 11px;border:1px solid #efb7bf;border-radius:8px;color:#a2293d;background:#fff;font-size:11px;font-weight:750;cursor:pointer}
 .agencyDangerButton:hover:not(:disabled){background:#fff4f5}.agencyDangerButton:disabled{opacity:.55;cursor:not-allowed}
 @media(max-width:760px){.agencyAccessSummary{grid-template-columns:1fr}.agencyAccessInviteFields{grid-template-columns:1fr}.agencyAccessRow{grid-template-columns:minmax(0,1fr) auto}.agencyAccessRow>select,.agencyAccessRow>span:nth-child(3){grid-column:1}.agencyAccessRow>.agencyDangerButton{grid-column:2;grid-row:1/3}.agencyAccessHeader{flex-wrap:wrap}.agencyWorkspaceActions{grid-column:2;justify-content:flex-start}}
+
+.agencyCreditCard{display:grid;gap:22px;padding:24px;border:1px solid #dde5ef;border-radius:14px;background:#fff;box-shadow:0 10px 30px rgba(42,63,91,.045)}
+.agencyCreditHeader{display:flex;align-items:start;justify-content:space-between;gap:24px}
+.agencyCreditHeader h2{margin:6px 0;font-size:22px}
+.agencyCreditHeader p:not(.agencyEyebrow){margin:0;max-width:650px;color:#718198;font-size:12px;line-height:1.6}
+.agencyCreditBalance{display:grid;gap:9px;justify-items:end;min-width:190px}
+.agencyCreditBalance span{color:#52647d;font-size:12px;font-weight:700}
+.agencyCreditBalance strong{font-size:33px;color:#1769ee}
+.agencyCreditSection{display:grid;gap:12px;padding-top:20px;border-top:1px solid #e8edf5}
+.agencyCreditSection h3{margin:0;font-size:15px}
+.agencyCreditSection>p{margin:0;color:#718198;font-size:12px;line-height:1.5}
+.agencyCreditPacks{display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:12px}
+.agencyCreditPack{display:grid;gap:10px;padding:16px;border:1px solid #dde5ef;border-radius:11px}
+.agencyCreditPack strong{color:#20314b;font-size:17px}
+.agencyCreditPack span{color:#52647d;font-size:13px}
+.agencyCreditFields{display:grid;grid-template-columns:105px minmax(180px,1fr) 60px minmax(110px,150px) auto;gap:10px;align-items:center}
+.agencyCreditFields label{font-size:12px;color:#52647d;font-weight:700}
+.agencyCreditFields input,.agencyCreditFields select{min-height:42px;max-width:100%;padding:0 10px;border:1px solid #cdd9e9;border-radius:8px;background:#fff;font-size:12px}
+.agencyCreditPreview{color:#1769ee!important}
+.agencyCreditNotice{margin:0;padding:12px;border-radius:9px;color:#136a43;background:#e7f7ee;font-size:12px}
+.agencyCreditActivity{display:grid;grid-template-columns:minmax(0,1fr) auto auto;gap:14px;align-items:center;padding:12px 0;border-top:1px solid #ecf0f5;font-size:12px}
+.agencyCreditActivity strong{color:#136a43}.agencyCreditActivity small{color:#718198}
+@media(max-width:850px){.agencyCreditFields{grid-template-columns:1fr 1fr}.agencyCreditFields label{grid-column:1/-1}.agencyCreditFields select,.agencyCreditFields input{grid-column:1/-1}.agencyCreditFields button{grid-column:1/-1}.agencyCreditHeader{flex-wrap:wrap}.agencyCreditBalance{justify-items:start}}
+@media(max-width:620px){.agencyCreditCard{padding:15px}.agencyCreditActivity{grid-template-columns:minmax(0,1fr) auto}.agencyCreditActivity small{grid-column:1/-1}}
