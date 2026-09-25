@@ -7,6 +7,8 @@ import {
 import { claimWhitelabelDomainSchema } from "@/server/whitelabel/domain-schema";
 import { parseInput } from "@/server/http/validation";
 import { toErrorResponse } from "@/server/http/errors";
+import { enqueueUniqueJob } from "@/server/jobs";
+import { WHITELABEL_DOMAIN_RECONCILE } from "@/server/jobs/queues";
 
 export async function GET(request: Request) {
   try {
@@ -34,6 +36,7 @@ export async function DELETE(request: Request) {
   try {
     const context = await requireWhitelabelAdmin(request.headers);
     const domain = await disconnectWhitelabelDomain(context.session.user.id);
+    await enqueueUniqueJob(WHITELABEL_DOMAIN_RECONCILE, domain.id, { domainId: domain.id });
     return Response.json({ domain }, { headers: { "cache-control": "no-store" } });
   } catch (error) {
     return toErrorResponse(error);
