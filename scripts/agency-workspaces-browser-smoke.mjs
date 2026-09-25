@@ -169,6 +169,8 @@ try {
   const clientBillingData = await clientBillingBefore.json();
   assert(clientBillingData.canPurchaseCredits === false && clientBillingData.packs.length === 0,
     "Agency client was offered direct platform credit purchases.");
+  assert(clientBillingData.topups.length === 0,
+    "Agency client could inspect the Agency's private credit purchase prices.");
   assert(clientBillingData.balance === 0, "New Agency client unexpectedly received credits.");
   const deniedTopup = await clientContext.request.post(`${baseUrl}/api/billing/checkout`, {
     data: { packCode: "CREDITS_10000" },
