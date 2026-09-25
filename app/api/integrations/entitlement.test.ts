@@ -23,6 +23,7 @@ vi.mock("@/server/auth/commercial-ownership", () => ({
 vi.mock("@/server/auth/permissions", () => ({ requireWorkspacePermission: vi.fn() }));
 vi.mock("@/server/commerce/workspace-entitlements", () => ({
   getWorkspaceIntegrationEntitlements: vi.fn().mockResolvedValue({ externalCalendar: false, nonCalendarByopEnabled: false }),
+  isExternalCalendarProvider: vi.fn((provider: string) => ["google", "outlook", "calendly", "calcom"].includes(provider)),
   requireCapabilityBindingEntitlement: vi.fn(),
   requireProviderIntegrationEntitlement: vi.fn(),
 }));
