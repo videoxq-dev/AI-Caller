@@ -102,10 +102,7 @@ describe("purchaser-owned Agency credit pool", () => {
     }
   });
 
-  afterAll(async () => {
-    await db.delete(creditPacks).where(eq(creditPacks.code, "AGENCY_POOL_TEST"));
-    await closeDatabase();
-  });
+  afterAll(async () => closeDatabase());
 
   it("starts client wallets at zero and grants a verified purchase only to the Agency pool", async () => {
     expect(await getCreditBalance(clientId)).toBe(0);
