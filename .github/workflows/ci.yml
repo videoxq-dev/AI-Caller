@@ -45,6 +45,8 @@ jobs:
       BRAND_ASSET_STORAGE_BACKEND: filesystem
       BRAND_ASSET_ALLOW_PERSISTENT_FILESYSTEM: "true"
       BRAND_ASSET_DIR: /tmp/ai-caller-brand-assets
+      WHITELABEL_PUBLIC_IPV4: 203.0.113.25
+      WHITELABEL_CANONICAL_HOST: app.aicaller.com
 
     services:
       postgres:
@@ -216,6 +218,9 @@ jobs:
       - name: F12-C Whitelabel brand browser acceptance verification
         run: npm run test:browser:f12c
 
+      - name: F12-D custom-domain DNS browser acceptance verification
+        run: npm run test:browser:f12d-domain
+
       - name: Phase 4 Automation Builder browser acceptance verification
         run: npm run test:browser:phase4
 
@@ -235,6 +240,15 @@ jobs:
 
       - name: Booking remediation browser acceptance verification
         run: npm run test:browser:booking
+
+      - name: Upload F12-D custom-domain DNS screenshots
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: f12d-domain-dns-verification
+          path: artifacts/f12d-domain-dns
+          if-no-files-found: warn
+          retention-days: 14
 
       - name: Upload F12-C Whitelabel brand screenshots
         if: always()
