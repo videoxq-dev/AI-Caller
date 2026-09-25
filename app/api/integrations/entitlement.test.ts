@@ -89,11 +89,20 @@ describe("external integration route entitlements", () => {
     vi.mocked(getCommercialWorkspaceOwner).mockResolvedValueOnce({
       purchaserUserId: "purchaser", kind: "ADDITIONAL", agencyClient: true, createdAt: new Date(),
     });
+    const publicIntegration = (
+      provider: "openai" | "whatsapp" | "calcom",
+      category: "AI" | "WHATSAPP" | "CALENDAR",
+      settings: Record<string, unknown>,
+    ) => ({
+      id: provider, provider, category, mode: "BYOP" as const,
+      status: "CONNECTED" as const, settings, maskedCredentials: {},
+      lastTestedAt: null, lastError: null, updatedAt: new Date(),
+    });
     vi.mocked(listIntegrations).mockResolvedValueOnce([
-      { provider: "openai", settings: { model: "private-model" } },
-      { provider: "whatsapp", settings: { businessId: "own-business" } },
-      { provider: "calcom", settings: { org: "private-org" } },
-    ] as Awaited<ReturnType<typeof listIntegrations>>);
+      publicIntegration("openai", "AI", { model: "private-model" }),
+      publicIntegration("whatsapp", "WHATSAPP", { businessId: "own-business" }),
+      publicIntegration("calcom", "CALENDAR", { org: "private-org" }),
+    ]);
     const response = await listProviders(new Request("https://app.example.com/api/integrations"));
     expect(response.status).toBe(200);
     const data = await response.json();
