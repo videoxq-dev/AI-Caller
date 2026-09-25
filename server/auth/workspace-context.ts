@@ -1,6 +1,6 @@
 import { auth } from "@/server/auth";
 import { assertPlatformUserActive } from "@/server/admin/auth";
-import { getWorkspacePlan } from "@/server/billing/plans";
+import { getEffectiveWorkspaceSeatPlan } from "@/server/billing/plans";
 import { AppError } from "@/server/http/errors";
 import { readActiveWorkspaceId } from "./active-workspace";
 import { ensureDefaultWorkspace, getMembership, getPrimaryMembership } from "./workspace-repository";
@@ -33,7 +33,7 @@ export async function resolveWorkspaceContext(requestHeaders: Headers) {
   }
 
   if (membership.role !== "OWNER") {
-    const plan = await getWorkspacePlan(membership.workspaceId);
+    const { plan } = await getEffectiveWorkspaceSeatPlan(membership.workspaceId);
     if (plan.subUserLimit <= 0) {
       throw new AppError(
         "PLAN_SUBUSER_ACCESS_DISABLED",
