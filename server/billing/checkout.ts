@@ -149,7 +149,7 @@ export async function getBillingOverview(workspaceId: string) {
       paidAt: creditTopups.paidAt,
       createdAt: creditTopups.createdAt,
     }).from(creditTopups)
-      .where(eq(creditTopups.workspaceId, workspaceId))
+      .where(and(eq(creditTopups.workspaceId, workspaceId), eq(creditTopups.fundingDestination, "WORKSPACE")))
       .orderBy(desc(creditTopups.createdAt))
       .limit(50),
     db.select({
