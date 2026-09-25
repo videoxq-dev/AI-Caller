@@ -2,6 +2,7 @@ import { z } from "zod";
 import { resolveWorkspaceContext } from "@/server/auth/workspace-context";
 import { requireWorkspacePermission } from "@/server/auth/permissions";
 import { setWorkspaceAgentStatus } from "@/server/agent/service";
+import { getAgencyCloneReadiness } from "@/server/agency/template-readiness";
 import { toErrorResponse } from "@/server/http/errors";
 import { parseInput } from "@/server/http/validation";
 
@@ -16,6 +17,16 @@ export async function PATCH(request: Request) {
     const { status } = parseInput(statusInputSchema, await request.json());
     const agent = await setWorkspaceAgentStatus(context.workspace.id, status);
     return Response.json({ agent });
+  } catch (error) {
+    return toErrorResponse(error);
+  }
+}
+
+export async function GET(request: Request) {
+  try {
+    const context = await resolveWorkspaceContext(request.headers);
+    const readiness = await getAgencyCloneReadiness(context.workspace.id);
+    return Response.json({ readiness }, { headers: { "cache-control": "no-store" } });
   } catch (error) {
     return toErrorResponse(error);
   }
