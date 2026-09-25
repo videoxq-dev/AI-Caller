@@ -2,6 +2,7 @@ import { eq, sql } from "drizzle-orm";
 import { db } from "@/db";
 import { aiAgents, setupProgress } from "@/db/schema";
 import { AppError } from "@/server/http/errors";
+import { assertTemplateClientActivationReadyInTx } from "./template-activation-readiness";
 import {
   agentCapabilitiesSchema, assertAgentActionAllowed,
   capabilitiesFromBehaviorSettings, type AgentCapability, type AgentCapabilities,
@@ -36,6 +37,7 @@ export async function setWorkspaceAgentStatus(
   workspaceId: string, status: "DRAFT" | "ACTIVE" | "PAUSED",
 ) {
   return db.transaction(async (tx) => {
+    if (status === "ACTIVE") await assertTemplateClientActivationReadyInTx(tx, workspaceId);
     const now = new Date();
     const [agent] = await tx.update(aiAgents)
       .set({ status, updatedAt: now })
