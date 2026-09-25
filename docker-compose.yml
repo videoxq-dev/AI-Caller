@@ -76,6 +76,8 @@ services:
       HOSTNAME: 0.0.0.0
       VOICE_RECORDING_ALLOW_PERSISTENT_FILESYSTEM: "true"
       VOICE_RECORDING_DIR: /app/.data/recordings
+      BRAND_ASSET_ALLOW_PERSISTENT_FILESYSTEM: "true"
+      BRAND_ASSET_DIR: /app/.data/brand-assets
       DATABASE_URL: ${DATABASE_URL:-postgresql://postgres:ai_caller_auto_pass@postgres:5432/ai_caller}
     depends_on:
       migrate:
@@ -90,6 +92,7 @@ services:
       retries: 3
     volumes:
       - recordings:/app/.data/recordings
+      - brand_assets:/app/.data/brand-assets
 
   worker:
     <<: *app
@@ -137,3 +140,4 @@ networks:
 volumes:
   postgres_data:
   recordings:
+  brand_assets:
