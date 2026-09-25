@@ -137,6 +137,7 @@ export async function getAgencyTemplateVersion(
     status: agencyWorkspaceTemplates.status,
     currentVersion: agencyWorkspaceTemplates.currentVersion,
     version: agencyWorkspaceTemplateVersions.version,
+    templateVersionId: agencyWorkspaceTemplateVersions.id,
     snapshot: agencyWorkspaceTemplateVersions.snapshot,
   }).from(agencyWorkspaceTemplates)
     .innerJoin(agencyWorkspaceTemplateVersions, eq(
