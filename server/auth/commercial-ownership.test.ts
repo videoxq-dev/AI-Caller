@@ -51,7 +51,7 @@ describe("F12-B commercial owner and branded client authorization", () => {
     const [additional] = await db.insert(workspaces).values({ name: "Client Business" }).returning();
     client = additional.id;
     await db.insert(workspaceCommercialOwners).values({
-      workspaceId: client, purchaserUserId: purchaser, kind: "ADDITIONAL",
+      workspaceId: client, purchaserUserId: purchaser, kind: "ADDITIONAL", agencyClient: true,
     });
     await db.insert(memberships).values([
       { workspaceId: client, userId: purchaser, role: "OWNER" },
