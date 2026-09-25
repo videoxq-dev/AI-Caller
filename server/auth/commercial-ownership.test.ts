@@ -5,6 +5,7 @@ import { closeDatabase, db } from "@/db";
 import { licenses, memberships, user, workspaceCommercialOwners, workspacePlans, workspaces } from "@/db/schema";
 import {
   getCommercialWorkspaceOwner,
+  requireCommercialProviderPurchaser,
   requireBrandedClientWorkspaceAccess,
   requireEffectiveWhitelabelPurchaser,
 } from "./commercial-ownership";
@@ -84,6 +85,18 @@ describe("F12-B commercial owner and branded client authorization", () => {
       .rejects.toMatchObject({ code: "WHITELABEL_REQUIRED", status: 403 });
     await expect(requireEffectiveWhitelabelPurchaser(staff))
       .rejects.toMatchObject({ code: "WHITELABEL_REQUIRED", status: 403 });
+  });
+
+  it("allows only the commercial purchaser to manage provider keys, including safe cleanup after revocation", async () => {
+    await expect(requireCommercialProviderPurchaser(purchaser, client))
+      .resolves.toMatchObject({ purchaserUserId: purchaser });
+    for (const actor of [delegatedOwner, staff, outsider]) {
+      await expect(requireCommercialProviderPurchaser(actor, client))
+        .rejects.toMatchObject({ code: "COMMERCIAL_PURCHASER_REQUIRED", status: 403 });
+    }
+    await db.update(licenses).set({ status: "REFUNDED" }).where(eq(licenses.productCode, "WHITELABEL"));
+    await expect(requireCommercialProviderPurchaser(purchaser, client))
+      .resolves.toMatchObject({ purchaserUserId: purchaser });
   });
 
   it("permits client OWNER and STAFF on the matching branded client workspace", async () => {
