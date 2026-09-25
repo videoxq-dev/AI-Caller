@@ -14,6 +14,12 @@ import {
 import { SetupProgressPanel, type SetupStatus } from "../setup-progress";
 import "./test.css";
 
+type CloneReadiness = {
+  templatedClient: true;
+  canActivate: boolean;
+  items: Array<{ key: string; ready: boolean; message: string; href: string }>;
+};
+
 type TestKey = "phone" | "sms" | "whatsapp" | "webchat";
 type SetupKey = keyof SetupStatus["steps"];
 
@@ -37,6 +43,31 @@ export default function TestSetupPage() {
   const [isLive, setIsLive] = useState(false);
   const [activating, setActivating] = useState(false);
   const [activationError, setActivationError] = useState<string | null>(null);
+  const [cloneReadiness, setCloneReadiness] = useState<CloneReadiness | null>(null);
+  const [readinessLoading, setReadinessLoading] = useState(true);
+  const [readinessError, setReadinessError] = useState<string | null>(null);
+
+  const refreshCloneReadiness = async () => {
+    setReadinessLoading(true);
+    setReadinessError(null);
+    try {
+      const response = await fetch("/api/agent/status", { cache: "no-store" });
+      const payload = await response.json() as {
+        readiness?: CloneReadiness | null;
+        error?: { message?: string };
+      };
+      if (!response.ok) throw new Error(payload.error?.message ?? "Unable to check activation readiness.");
+      setCloneReadiness(payload.readiness ?? null);
+    } catch (reason) {
+      setReadinessError(reason instanceof Error ? reason.message : "Unable to check activation readiness.");
+    } finally {
+      setReadinessLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    void refreshCloneReadiness();
+  }, []);
 
   useEffect(() => {
     fetch("/api/phone-numbers", { cache: "no-store" })
@@ -58,7 +89,7 @@ export default function TestSetupPage() {
   }, []);
 
   const activate = async () => {
-    if (activating || isLive) return;
+    if (activating || isLive || readinessLoading || readinessError || (cloneReadiness && !cloneReadiness.canActivate)) return;
     setActivating(true);
     setActivationError(null);
     try {
@@ -135,10 +166,39 @@ export default function TestSetupPage() {
             <div className="webChatActions"><Link className="primaryTestButton" href="/ai-agent">Open private AI Agent test</Link><button type="button" className="secondaryTestButton" onClick={() => runTest("webchat")}>How to test</button></div><TipRow>Try asking a few questions and book an appointment.</TipRow>
           </TestCard>
 
+          {(cloneReadiness || readinessError) && (
+            <section className="cloneReadinessCard" aria-label="Client-specific activation checklist">
+              <div className="cloneReadinessHeader">
+                <div>
+                  <h2>Finish this client's setup</h2>
+                  <p>Copied settings are a starting point. Verify this business's own details, channel readiness and funding before activating its agent.</p>
+                </div>
+                <button type="button" className="secondaryTestButton" disabled={readinessLoading}
+                  onClick={() => void refreshCloneReadiness()}>
+                  {readinessLoading ? "Checking…" : "Refresh checklist"}
+                </button>
+              </div>
+              {readinessError && <p role="alert">{readinessError}</p>}
+              {cloneReadiness && (
+                <ul>
+                  {cloneReadiness.items.map((item) => (
+                    <li key={item.key} className={item.ready ? "cloneReady" : "cloneMissing"}>
+                      <span aria-hidden>{item.ready ? "✓" : "○"}</span>
+                      <span>{item.message}</span>
+                      {!item.ready && <Link href={item.href}>Complete setup</Link>}
+                    </li>
+                  ))}
+                </ul>
+              )}
+              {cloneReadiness?.canActivate && (
+                <p role="status">This client's recorded setup is ready for activation. Test connected channels independently; this checklist does not prove carrier delivery.</p>
+              )}
+            </section>
+          )}
           {(activationError || channelError) && <div role="alert" className="readyBanner"><p>{activationError || channelError}</p></div>}
           <div className={`readyBanner ${isLive ? "live" : ""}`}><span className="readyCheck"><CheckIcon size={22} /></span><div><strong>{isLive ? "Agent activated" : "Activate when ready"}</strong><p>{isLive ? "Your AI agent is active; channel availability and SMS compliance are managed separately." : "Complete your own channel checks, then activate the AI agent. This screen does not verify live carrier delivery."}</p></div></div>
 
-          <div className="testFooter"><Link className="backLink" href="/setup/calendar">←&nbsp;&nbsp;Back to Calendar</Link><div className="testActions"><button type="button" className="outlineAction">Save for later</button><button type="button" className="goLiveButton" disabled={activating || isLive} onClick={() => void activate()}>{activating ? "Activating…" : isLive ? "Live" : "Go Live"} <ChevronRightIcon size={18} /></button></div></div>
+          <div className="testFooter"><Link className="backLink" href="/setup/calendar">←&nbsp;&nbsp;Back to Calendar</Link><div className="testActions"><button type="button" className="outlineAction">Save for later</button><button type="button" className="goLiveButton" disabled={activating || isLive || readinessLoading || Boolean(readinessError) || (cloneReadiness !== null && !cloneReadiness.canActivate)} onClick={() => void activate()}>{activating ? "Activating…" : isLive ? "Live" : "Go Live"} <ChevronRightIcon size={18} /></button></div></div>
         </section>
 
         <aside className="testSidebar">
