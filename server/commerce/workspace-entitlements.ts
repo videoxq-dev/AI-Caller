@@ -1,6 +1,7 @@
 import { and, eq } from "drizzle-orm";
 import { db } from "@/db";
-import { licenses, memberships } from "@/db/schema";
+import { licenses, memberships, workspaceCommercialOwners } from "@/db/schema";
+import { getCommercialWorkspaceOwner } from "@/server/auth/commercial-ownership";
 import { AppError } from "@/server/http/errors";
 
 export const CALENDAR_PROVIDERS = new Set(["google", "outlook", "calendly", "calcom"]);
@@ -8,35 +9,74 @@ export const CALENDAR_PROVIDERS = new Set(["google", "outlook", "calendly", "cal
 export type WorkspaceIntegrationEntitlements = {
   purchaserUserId: string | null;
   externalCalendar: boolean;
-  agencyByop: boolean;
   performanceAutomations: boolean;
+  /** Active Core + Agency + Whitelabel anchored to the commercial purchaser's original business. */
+  whitelabelEligible: boolean;
+  /** Deliberately disabled until F12-G defines one exclusive, purchaser-wide provider mode. */
+  nonCalendarByopEnabled: boolean;
 };
+
+function denied(purchaserUserId: string | null = null): WorkspaceIntegrationEntitlements {
+  return {
+    purchaserUserId, externalCalendar: false, performanceAutomations: false,
+    whitelabelEligible: false, nonCalendarByopEnabled: false,
+  };
+}
 
 export async function getWorkspaceIntegrationEntitlements(
   workspaceId: string,
 ): Promise<WorkspaceIntegrationEntitlements> {
-  const owners = await db.select({ userId: memberships.userId }).from(memberships)
-    .where(and(eq(memberships.workspaceId, workspaceId), eq(memberships.role, "OWNER")))
-    .limit(2);
-  if (owners.length !== 1) {
-    return {
-      purchaserUserId: null,
-      externalCalendar: false,
-      agencyByop: false,
-      performanceAutomations: false,
-    };
+  const commercial = await getCommercialWorkspaceOwner(workspaceId);
+  let purchaserUserId: string;
+  let primaryId: string;
+  let kind: "PRIMARY" | "ADDITIONAL";
+
+  if (commercial) {
+    purchaserUserId = commercial.purchaserUserId;
+    kind = commercial.kind;
+    if (kind === "PRIMARY") {
+      primaryId = workspaceId;
+    } else {
+      const [primary] = await db.select({ workspaceId: workspaceCommercialOwners.workspaceId })
+        .from(workspaceCommercialOwners).where(and(
+          eq(workspaceCommercialOwners.purchaserUserId, purchaserUserId),
+          eq(workspaceCommercialOwners.kind, "PRIMARY"),
+        )).limit(2);
+      if (!primary) return denied(purchaserUserId);
+      primaryId = primary.workspaceId;
+    }
+  } else {
+    // Historical workspaces with no commercial-owner record retain the sole
+    // operational OWNER fallback. Multiple OWNERs are never guessed.
+    const owners = await db.select({ userId: memberships.userId }).from(memberships)
+      .where(and(eq(memberships.workspaceId, workspaceId), eq(memberships.role, "OWNER")))
+      .limit(2);
+    if (owners.length !== 1) return denied();
+    purchaserUserId = owners[0].userId;
+    kind = "PRIMARY";
+    primaryId = workspaceId;
   }
 
-  const rows = await db.select({ productCode: licenses.productCode }).from(licenses).where(and(
-    eq(licenses.purchaserUserId, owners[0].userId),
-    eq(licenses.status, "ACTIVE"),
-  ));
-  const products = new Set(rows.map((row) => row.productCode));
+  const rows = await db.select({ code: licenses.productCode, workspaceId: licenses.workspaceId })
+    .from(licenses).where(and(
+      eq(licenses.purchaserUserId, purchaserUserId),
+      eq(licenses.status, "ACTIVE"),
+    ));
+  const ownLicenses = new Set(rows.filter((row) => row.workspaceId === primaryId).map((row) => row.code));
+  const agency = ownLicenses.has("AGENCY_50") || ownLicenses.has("AGENCY_100");
+  const eligibleWhitelabel = Boolean(commercial) && ownLicenses.has("CORE")
+    && agency && ownLicenses.has("WHITELABEL");
+
+  // Agency-managed client workspaces are Core-level. An Unlimited-only buyer's
+  // second owned business remains eligible for Unlimited; Agency's ADDITIONAL
+  // businesses do not inherit purchaser-level Unlimited or Performance.
+  const ownFeatureWorkspace = kind === "PRIMARY" || !agency;
   return {
-    purchaserUserId: owners[0].userId,
-    externalCalendar: products.has("UNLIMITED"),
-    agencyByop: products.has("AGENCY_50") || products.has("AGENCY_100"),
-    performanceAutomations: products.has("PERFORMANCE"),
+    purchaserUserId,
+    externalCalendar: ownFeatureWorkspace && ownLicenses.has("UNLIMITED"),
+    performanceAutomations: ownFeatureWorkspace && ownLicenses.has("PERFORMANCE"),
+    whitelabelEligible: eligibleWhitelabel,
+    nonCalendarByopEnabled: false,
   };
 }
 
@@ -55,11 +95,21 @@ export async function requirePerformanceAutomationEntitlement(workspaceId: strin
   }
 }
 
+async function requireNonCalendarByop(workspaceId: string) {
+  const entitlement = await getWorkspaceIntegrationEntitlements(workspaceId);
+  if (!entitlement.whitelabelEligible) {
+    throw new AppError("BYOP_REQUIRES_WHITELABEL", "Bring-your-own-provider infrastructure requires Agency and Whitelabel.", 403);
+  }
+  if (!entitlement.nonCalendarByopEnabled) {
+    throw new AppError("BYOP_MODE_NOT_CONFIGURED", "Activate a verified Whitelabel provider infrastructure mode before connecting BYOP.", 403);
+  }
+}
+
 export async function requireProviderIntegrationEntitlement(workspaceId: string, provider: string) {
   if (provider === "credits" || provider === "whatsapp") return;
 
-  const entitlement = await getWorkspaceIntegrationEntitlements(workspaceId);
   if (isExternalCalendarProvider(provider)) {
+    const entitlement = await getWorkspaceIntegrationEntitlements(workspaceId);
     if (!entitlement.externalCalendar) {
       throw new AppError(
         "EXTERNAL_CALENDAR_REQUIRES_UNLIMITED",
@@ -69,14 +119,7 @@ export async function requireProviderIntegrationEntitlement(workspaceId: string,
     }
     return;
   }
-
-  if (!entitlement.agencyByop) {
-    throw new AppError(
-      "BYOP_REQUIRES_AGENCY",
-      "Bring-your-own-provider integrations are available on Agency.",
-      403,
-    );
-  }
+  await requireNonCalendarByop(workspaceId);
 }
 
 export async function requireCapabilityBindingEntitlement(
@@ -98,12 +141,5 @@ export async function requireCapabilityBindingEntitlement(
     }
     return;
   }
-  const entitlement = await getWorkspaceIntegrationEntitlements(workspaceId);
-  if (!entitlement.agencyByop) {
-    throw new AppError(
-      "BYOP_REQUIRES_AGENCY",
-      "Bring-your-own-provider integrations are available on Agency.",
-      403,
-    );
-  }
+  await requireNonCalendarByop(workspaceId);
 }
