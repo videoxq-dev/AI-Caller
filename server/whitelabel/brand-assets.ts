@@ -25,12 +25,14 @@ let s3Client: S3Client | null = null;
 function s3() {
   const env = getEnv();
   if (!env.BRAND_ASSET_S3_BUCKET) throw new Error("BRAND_ASSET_S3_BUCKET is required for S3 brand assets.");
+  const accessKeyId = env.BRAND_ASSET_S3_ACCESS_KEY_ID;
+  const secretAccessKey = env.BRAND_ASSET_S3_SECRET_ACCESS_KEY;
+  if (Boolean(accessKeyId) !== Boolean(secretAccessKey)) {
+    throw new Error("Set both BRAND_ASSET_S3_ACCESS_KEY_ID and BRAND_ASSET_S3_SECRET_ACCESS_KEY, or neither when using an ambient AWS credential provider.");
+  }
   if (!s3Client) {
-    const credentials = env.BRAND_ASSET_S3_ACCESS_KEY_ID && env.BRAND_ASSET_S3_SECRET_ACCESS_KEY
-      ? {
-          accessKeyId: env.BRAND_ASSET_S3_ACCESS_KEY_ID,
-          secretAccessKey: env.BRAND_ASSET_S3_SECRET_ACCESS_KEY,
-        }
+    const credentials = accessKeyId && secretAccessKey
+      ? { accessKeyId, secretAccessKey }
       : undefined;
     s3Client = new S3Client({
       region: env.BRAND_ASSET_S3_REGION,
