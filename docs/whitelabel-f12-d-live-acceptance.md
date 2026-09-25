@@ -56,7 +56,7 @@ Set these variables for **this controlled test hostname**, using the actual
 edge IP shown in AI Caller. Read the expected TXT value privately, without
 placing it in shell history:
 
-```sh
+```bash
 export WHITELABEL_TEST_HOST=clients.your-real-domain.com
 export WHITELABEL_PUBLIC_IPV4=YOUR_REAL_EDGE_IPV4
 # Set WHITELABEL_PUBLIC_IPV6 only when this edge actually serves IPv6.
