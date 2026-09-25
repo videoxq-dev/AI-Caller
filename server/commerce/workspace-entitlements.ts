@@ -2,6 +2,7 @@ import { and, eq } from "drizzle-orm";
 import { db } from "@/db";
 import { licenses, memberships, workspaceCommercialOwners } from "@/db/schema";
 import { getCommercialWorkspaceOwner } from "@/server/auth/commercial-ownership";
+import { wasProvisionedForAgency } from "./agency-client-classification";
 import { AppError } from "@/server/http/errors";
 
 export const CALENDAR_PROVIDERS = new Set(["google", "outlook", "calendly", "calcom"]);
@@ -37,13 +38,13 @@ export async function getWorkspaceIntegrationEntitlements(
     if (kind === "PRIMARY") {
       primaryId = workspaceId;
     } else {
-      const [primary] = await db.select({ workspaceId: workspaceCommercialOwners.workspaceId })
+      const primaries = await db.select({ workspaceId: workspaceCommercialOwners.workspaceId })
         .from(workspaceCommercialOwners).where(and(
           eq(workspaceCommercialOwners.purchaserUserId, purchaserUserId),
           eq(workspaceCommercialOwners.kind, "PRIMARY"),
         )).limit(2);
-      if (!primary) return denied(purchaserUserId);
-      primaryId = primary.workspaceId;
+      if (primaries.length !== 1) return denied(purchaserUserId);
+      primaryId = primaries[0].workspaceId;
     }
   } else {
     // Historical workspaces with no commercial-owner record retain the sole
@@ -67,10 +68,11 @@ export async function getWorkspaceIntegrationEntitlements(
   const eligibleWhitelabel = Boolean(commercial) && ownLicenses.has("CORE")
     && agency && ownLicenses.has("WHITELABEL");
 
-  // Agency-managed client workspaces are Core-level. An Unlimited-only buyer's
-  // second owned business remains eligible for Unlimited; Agency's ADDITIONAL
-  // businesses do not inherit purchaser-level Unlimited or Performance.
-  const ownFeatureWorkspace = kind === "PRIMARY" || !agency;
+  // Client classification survives Agency refunds. Unlimited second businesses
+  // created before an Agency purchase retain their separate offer features.
+  const agencyClient = kind === "ADDITIONAL" && commercial !== null
+    && await wasProvisionedForAgency(commercial.purchaserUserId, commercial.createdAt);
+  const ownFeatureWorkspace = !agencyClient;
   return {
     purchaserUserId,
     externalCalendar: ownFeatureWorkspace && ownLicenses.has("UNLIMITED"),
