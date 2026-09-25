@@ -82,7 +82,7 @@ describe("external integration route entitlements", () => {
       membership: { role: "OWNER" },
     } as Awaited<ReturnType<typeof resolveWorkspaceContext>>);
     vi.mocked(getCommercialWorkspaceOwner).mockResolvedValueOnce({
-      purchaserUserId: "purchaser", kind: "ADDITIONAL", createdAt: new Date(),
+      purchaserUserId: "purchaser", kind: "ADDITIONAL", agencyClient: true, createdAt: new Date(),
     });
     vi.mocked(listIntegrations).mockResolvedValueOnce([
       { provider: "openai", settings: { model: "private-model" } },
