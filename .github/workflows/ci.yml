@@ -235,6 +235,9 @@ jobs:
       - name: F12-D custom-domain DNS browser acceptance verification
         run: npm run test:browser:f12d-domain
 
+      - name: F12-D custom-host fail-closed browser acceptance verification
+        run: npm run test:browser:f12d-host
+
       - name: Phase 4 Automation Builder browser acceptance verification
         run: npm run test:browser:phase4
 

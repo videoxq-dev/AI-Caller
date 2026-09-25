@@ -1,9 +1,18 @@
+import { resolveWhitelabelHoldingHost } from "@/server/whitelabel/domain-host-guard";
+
 export const dynamic = "force-dynamic";
 
 export async function GET(request: Request) {
-  const host = request.headers.get("host")?.toLowerCase() ?? "";
+  const rawHost = request.headers.get("host") ?? "";
+  const domain = await resolveWhitelabelHoldingHost(rawHost);
+  if (!domain) {
+    return Response.json(
+      { error: { code: "WHITELABEL_HOST_NOT_FOUND", message: "This client platform is not available." } },
+      { status: 404, headers: { "cache-control": "no-store", "x-robots-tag": "noindex, nofollow" } },
+    );
+  }
   if (request.headers.get("accept")?.includes("application/json")) {
-    return Response.json({ status: "domain-ready", host }, {
+    return Response.json({ status: "domain-ready", host: domain.hostname }, {
       headers: { "cache-control": "no-store", "x-robots-tag": "noindex, nofollow" },
     });
   }
