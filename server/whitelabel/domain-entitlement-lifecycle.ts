@@ -1,7 +1,8 @@
+import { db } from "@/db";
 import { and, eq, ne } from "drizzle-orm";
 import { licenses, memberships, whitelabelDomains, workspaceCommercialOwners } from "@/db/schema";
 
-type Tx = Parameters<Parameters<(typeof import("@/db").db)["transaction"]>[0]>[0];
+type Tx = Parameters<Parameters<typeof db.transaction>[0]>[0];
 
 async function effectiveWhitelabelInTx(tx: Tx, purchaserUserId: string) {
   const primaries = await tx.select({ workspaceId: workspaceCommercialOwners.workspaceId })
