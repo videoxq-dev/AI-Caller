@@ -110,6 +110,22 @@ describe("purchaser-owned commercial licenses", () => {
     });
   });
 
+  it("treats Whitelabel as dormant until the same purchaser has Core and an active Agency purchase", () => {
+    const id = randomUUID();
+    const make = (productCode: string, status: PurchaserLicense["status"] = "ACTIVE"): PurchaserLicense => ({
+      id: randomUUID(), workspaceId: id, productCode, status, purchasedAt: new Date(),
+    });
+    const core = make("CORE");
+    const agency = make("AGENCY_50");
+    const whitelabel = make("WHITELABEL");
+    expect(summarizeFunnelAccountLicenses([core, whitelabel]).effectiveWhitelabel).toBe(false);
+    expect(summarizeFunnelAccountLicenses([agency, whitelabel]).effectiveWhitelabel).toBe(false);
+    expect(summarizeFunnelAccountLicenses([core, agency]).effectiveWhitelabel).toBe(false);
+    expect(summarizeFunnelAccountLicenses([core, agency, whitelabel]).effectiveWhitelabel).toBe(true);
+    expect(summarizeFunnelAccountLicenses([core, { ...agency, status: "REFUNDED" }, whitelabel]).effectiveWhitelabel).toBe(false);
+    expect(summarizeFunnelAccountLicenses([core, agency, { ...whitelabel, status: "CHARGEBACK" }]).effectiveWhitelabel).toBe(false);
+  });
+
   it("isolates buyer licenses even when buyers share a workspace membership", async () => {
     const first = await buyer("First Buyer");
     const second = await buyer("Second Buyer");

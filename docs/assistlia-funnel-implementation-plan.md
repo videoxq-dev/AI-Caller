@@ -12,13 +12,13 @@ There is **one application** with five offers and six purchasable SKUs:
 | OTO 1: Unlimited | UNLIMITED | Up to two total businesses; up to five staff per business; expanded calendars, up to two imported website/file knowledge sources per business, widgets and reporting; an additional 15,000 promotional credits |
 | OTO 2: Performance | PERFORMANCE | Unlocks the existing Automation Builder and custom automations |
 | OTO 3: Agency | AGENCY_50, AGENCY_100 | Agency workspace management and 50 or 100 client businesses in addition to the buyer's original workspace, with a client-capacity expansion path |
-| OTO 4: Whitelabel | WHITELABEL | Custom domain, product name, brand assets and client-facing branded experience |
+| OTO 4: Whitelabel | WHITELABEL | Agency-only upgrade: custom domain, purchaser brand, client-facing branded experience and exclusive hosted/BYOP infrastructure choice |
 
 “Unlimited” is not unlimited hosted AI, voice, messaging or provider consumption. Credits remain metered. There is still **one AI Caller-managed Telnyx number and one configured AI agent per business workspace** under the current runtime contract; none of these SKUs authorizes changing that architecture silently. Automation remains a structured, non-drag-and-drop builder with system-chosen workflow execution, not a user-facing execution-mode selector.
 
 Keep **commercial purchase licenses** separate from the existing PERSONAL/GROWTH workspace billing plan. The latter currently governs seat quotas, whereas the funnel grants access and business capacity to the purchasing account. Do not treat a workspace-level JSON entitlement as an authoritative account-level workspace quota.
 
-A buyer can provide Core as a service to another business, but the Core license still covers one business. Unlimited permits two total business workspaces, counting the original; Agency has separate 50- and 100-client SKUs, each exclusive of the original business (51 or 101 total owned workspaces). Define effective capacity from **active purchases**, not from the latest webhook or an unvalidated UI selection. OTO entitlements add their documented capabilities; purchasing a later OTO does not implicitly grant every earlier OTO unless that is explicitly part of the commercial offer.
+A buyer can provide Core as a service to another business, but the Core license still covers one business. Unlimited permits two total business workspaces, counting the original; Agency has separate 50- and 100-client SKUs, each exclusive of the original business (51 or 101 total owned workspaces). Define effective capacity from **active purchases**, not from the latest webhook or an unvalidated UI selection. OTO entitlements add their documented capabilities; purchasing a later OTO does not implicitly grant every earlier OTO unless that is explicitly part of the commercial offer. **Whitelabel is a deliberate exception to independent eligibility: its features require the same purchaser to hold active Core, Agency 50/100 and Whitelabel receipts.**
 
 ## Frozen completed surfaces
 
@@ -100,7 +100,7 @@ D2 creates an additional Agency-owned client through the existing locked workspa
 
 ### F12 — Whitelabel
 
-Domain ownership verification and TLS/routing; branding isolation for client app, login, widget, reports and permitted emails; safe defaults and custom-domain rollback. Whitelabel is also the package for non-calendar bring-your-own-provider (BYOP) connections such as customer-supplied AI, telephony or messaging provider credentials. Brand or provider customization must not change platform security, secret isolation or license isolation.
+The founder-approved, detailed milestone and troubleshooting contract is [docs/whitelabel-f12-implementation-plan.md](./whitelabel-f12-implementation-plan.md). **Only an active Agency purchaser with active Core and Whitelabel receipts may use Whitelabel.** Purchaser and Agency administrators remain on the canonical AI Caller app; delegated client users use the purchaser's single branded custom domain. The purchaser selects exactly one estate-wide provider-infrastructure mode: AI Caller HOSTED (existing Agency credits and client allocations) or supported BYOP. No hosted/BYOP mixing by capability or client. DNS ownership verification, A-record routing, persistent Traefik TLS/ACME and approved-host authentication are F12 gates. Brand isolation covers client app, login, reports and permitted emails; **widget branding is excluded**. Whitelabel adds no workspace capacity, Performance or Unlimited client entitlements.
 
 ### F13 — Entire purchase funnel and release
 
