@@ -128,7 +128,7 @@ export async function POST(request: Request) {
     const context = await resolveWorkspaceContext(request.headers);
     requireWorkspacePermission(context.membership.role, "integration.manage");
     const input = parseInput(integrationSaveSchema, await request.json());
-    if (input.provider !== "whatsapp" && input.provider !== "credits"
+    if (input.provider !== "whatsapp"
       && !isExternalCalendarProvider(input.provider)) {
       await requireCommercialProviderPurchaser(context.session.user.id, context.workspace.id);
     }
@@ -185,7 +185,7 @@ export async function PATCH(request: Request) {
     const context = await resolveWorkspaceContext(request.headers);
     requireWorkspacePermission(context.membership.role, "integration.manage");
     const input = parseInput(disconnectSchema, await request.json());
-    if (input.provider !== "whatsapp" && input.provider !== "credits"
+    if (input.provider !== "whatsapp"
       && !isExternalCalendarProvider(input.provider)) {
       await requireCommercialProviderPurchaser(context.session.user.id, context.workspace.id);
     }
