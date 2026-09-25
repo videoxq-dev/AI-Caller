@@ -109,7 +109,7 @@ export async function optimizeAndStoreBrandAsset(input: {
     );
   }
 
-  let image = sharp(input.bytes, { animated: false, limitInputPixels: 40_000_000 }).rotate();
+  const image = sharp(input.bytes, { animated: false, limitInputPixels: 40_000_000 }).rotate();
   const metadata = await image.metadata().catch(() => null);
   if (!metadata || !metadata.width || !metadata.height
     || !metadata.format || !["png", "jpeg", "webp"].includes(metadata.format)) {
