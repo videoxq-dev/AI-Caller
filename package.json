@@ -34,7 +34,8 @@
     "test:browser:phase4": "node scripts/phase4-automation-builder-browser-smoke.mjs",
     "test:browser:phase6a": "node scripts/phase6a-whatsapp-templates-browser-smoke.mjs",
     "test:browser:phase6c": "node scripts/phase6c-sms-readiness-browser-smoke.mjs",
-    "test:browser:agency": "node scripts/agency-workspaces-browser-smoke.mjs"
+    "test:browser:agency": "node scripts/agency-workspaces-browser-smoke.mjs",
+    "test:browser:f12c": "node scripts/f12c-whitelabel-brand-browser-smoke.mjs"
   },
   "dependencies": {
     "better-auth": "^1.7.5",
