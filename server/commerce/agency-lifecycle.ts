@@ -2,6 +2,7 @@ import { and, asc, eq, inArray, sql } from "drizzle-orm";
 import { db } from "@/db";
 import { licenses, memberships, user } from "@/db/schema";
 import { AppError } from "@/server/http/errors";
+import { syncWhitelabelDomainEntitlementInTx } from "@/server/whitelabel/domain-entitlement-lifecycle";
 import { resolveFunnelProductId, type FunnelProductCode } from "./products";
 import type { NormalizedPurchaseEvent } from "./types";
 
@@ -141,6 +142,9 @@ export async function reconcileAgencyReceipt(event: NormalizedPurchaseEvent) {
         license = updated;
       }
 
+      if (license.purchaserUserId) {
+        await syncWhitelabelDomainEntitlementInTx(tx, license.purchaserUserId);
+      }
       return {
         ignored: false as const,
         workspaceId: license.workspaceId,
@@ -164,6 +168,9 @@ export async function reconcileAgencyReceipt(event: NormalizedPurchaseEvent) {
 
     // Agency financial state affects future Agency access/capacity only.
     // Existing workspaces and their data are deliberately preserved.
+    if (updated.purchaserUserId) {
+      await syncWhitelabelDomainEntitlementInTx(tx, updated.purchaserUserId);
+    }
     return {
       ignored: false as const,
       workspaceId: updated.workspaceId,
