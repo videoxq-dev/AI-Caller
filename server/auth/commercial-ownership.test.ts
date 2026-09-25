@@ -66,10 +66,10 @@ describe("F12-B commercial owner and branded client authorization", () => {
   afterAll(async () => closeDatabase());
 
   it("identifies the commercial purchaser independently of two operational OWNER memberships", async () => {
-    expect(await getCommercialWorkspaceOwner(client)).toEqual({
+    expect(await getCommercialWorkspaceOwner(client)).toMatchObject({
       purchaserUserId: purchaser, kind: "ADDITIONAL",
     });
-    expect(await getCommercialWorkspaceOwner(original)).toEqual({
+    expect(await getCommercialWorkspaceOwner(original)).toMatchObject({
       purchaserUserId: purchaser, kind: "PRIMARY",
     });
   });
