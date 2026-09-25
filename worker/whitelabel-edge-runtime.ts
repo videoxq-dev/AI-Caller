@@ -2,6 +2,7 @@ import { logger } from "@/server/observability/logger";
 import { getWhitelabelTraefikRouteConfig } from "@/server/whitelabel/domain-route-config";
 import { recoverWhitelabelDomainRoutes } from "@/server/whitelabel/domain-route";
 import { reconcilePendingWhitelabelDomainCertificates } from "@/server/whitelabel/domain-tls";
+import { reconcilePendingWhitelabelDomainCertificates } from "@/server/whitelabel/domain-tls";
 
 export async function startWhitelabelEdgeReconciler() {
   const config = getWhitelabelTraefikRouteConfig();
