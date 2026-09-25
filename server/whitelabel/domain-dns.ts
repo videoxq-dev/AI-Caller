@@ -1,5 +1,5 @@
 import { resolve4, resolve6, resolveTxt } from "node:dns/promises";
-import { and, eq, ne } from "drizzle-orm";
+import { and, eq } from "drizzle-orm";
 import { db } from "@/db";
 import { whitelabelDomains } from "@/db/schema";
 import { AppError } from "@/server/http/errors";
@@ -146,7 +146,7 @@ export async function reconcileWhitelabelDomainDns(
     updatedAt: now,
   }).where(and(
     eq(whitelabelDomains.id, domain.id),
-    ne(whitelabelDomains.status, "DISABLED"),
+    eq(whitelabelDomains.status, domain.status),
   )).returning();
 
   if (!updated) {
