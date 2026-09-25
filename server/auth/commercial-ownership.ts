@@ -10,6 +10,7 @@ export async function getCommercialWorkspaceOwner(workspaceId: string) {
   const [owner] = await db.select({
     purchaserUserId: workspaceCommercialOwners.purchaserUserId,
     kind: workspaceCommercialOwners.kind,
+    createdAt: workspaceCommercialOwners.createdAt,
   }).from(workspaceCommercialOwners)
     .where(eq(workspaceCommercialOwners.workspaceId, workspaceId))
     .limit(1);
