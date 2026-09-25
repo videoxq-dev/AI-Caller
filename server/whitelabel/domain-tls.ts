@@ -1,4 +1,4 @@
-import https from "node:https";
+import { request as httpsRequest } from "node:https";
 import type { TLSSocket } from "node:tls";
 import { and, eq, inArray, isNull, lte, or } from "drizzle-orm";
 import { db } from "@/db";
@@ -33,7 +33,7 @@ export async function probeWhitelabelDomainTls(hostname: string): Promise<Whitel
       resolve(result);
     };
 
-    const request = https.request({
+    const request = httpsRequest({
       hostname: edgeIp,
       port: 443,
       method: "GET",
@@ -114,6 +114,7 @@ export async function reconcileWhitelabelDomainTls(
     );
   }
 
+  const routeId = domain.routeId;
   const probe = await prober(domain.hostname);
   const now = new Date();
 
@@ -125,7 +126,7 @@ export async function reconcileWhitelabelDomainTls(
     }).where(and(
       eq(whitelabelDomains.id, domain.id),
       eq(whitelabelDomains.status, domain.status),
-      eq(whitelabelDomains.routeId, domain.routeId),
+      eq(whitelabelDomains.routeId, routeId),
     )).returning();
 
     if (!updated) {
@@ -150,7 +151,7 @@ export async function reconcileWhitelabelDomainTls(
   }).where(and(
     eq(whitelabelDomains.id, domain.id),
     eq(whitelabelDomains.status, domain.status),
-    eq(whitelabelDomains.routeId, domain.routeId),
+    eq(whitelabelDomains.routeId, routeId),
   )).returning();
 
   if (!updated) {
