@@ -165,3 +165,21 @@ WHITELABEL_TLS_PROBE_TIMEOUT_MS=8000
 ```
 
 F12-D8 still requires a real controlled hostname to prove ACME issuance, renewal-ready persistence and public HTTPS on the deployed server.
+
+
+## D5 independent TLS readiness
+
+A generated Traefik route does not make a domain `CERT_READY`.
+
+The dedicated edge reconciler probes the configured AI Caller public IPv4 address directly on port 443 while using the purchaser hostname as TLS SNI and the HTTP `Host` header. This prevents purchaser-controlled DNS from redirecting the probe to arbitrary network targets.
+
+Readiness requires all of the following:
+
+1. the TLS handshake is trusted for the purchaser hostname;
+2. the certificate has a future expiration date;
+3. HTTPS returns a successful response; and
+4. the response is the expected AI Caller Whitelabel holding-route marker for that hostname.
+
+Only then does `CERT_PENDING` become `CERT_READY`. Certificate expiry is persisted for renewal monitoring.
+
+Transient probe failures do not downgrade an already-ready domain; they are recorded as diagnostic errors and retried. Domains with certificates nearing expiry are periodically re-probed so renewal failures become visible without replacing Traefik's own ACME renewal responsibility.
