@@ -119,7 +119,7 @@ describe("workspace external integration entitlements", () => {
     }
     const clientWorkspaceId = await createOwnedWorkspace(purchaser);
     await db.insert(workspaceCommercialOwners).values({
-      workspaceId: clientWorkspaceId, purchaserUserId: purchaser, kind: "ADDITIONAL",
+      workspaceId: clientWorkspaceId, purchaserUserId: purchaser, kind: "ADDITIONAL", agencyClient: true,
     });
     await db.insert(memberships).values({
       workspaceId: clientWorkspaceId, userId: clientOwner, role: "OWNER",
