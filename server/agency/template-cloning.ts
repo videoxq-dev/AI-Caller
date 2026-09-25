@@ -118,10 +118,6 @@ export async function createWorkspaceFromAgencyTemplate(input: {
 }) {
   const template = await getAgencyTemplateVersion(input.purchaserUserId, input.templateId, input.version);
   await requireAgencyTemplatePurchaser(input.purchaserUserId);
-  if (template.status !== "ACTIVE") {
-    throw new AppError("AGENCY_TEMPLATE_ARCHIVED", "Archived templates cannot provision new clients.", 409);
-  }
-
   const workspaceName = input.name.trim();
   if (workspaceName.length < 2 || workspaceName.length > 120) {
     throw new AppError("WORKSPACE_NAME_INVALID", "Business name must be 2–120 characters.", 400);
