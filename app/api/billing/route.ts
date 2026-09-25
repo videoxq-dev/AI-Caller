@@ -22,6 +22,7 @@ export async function GET(request: Request) {
       balance,
       ...overview,
       packs: canPurchaseCredits ? overview.packs : [],
+      topups: canPurchaseCredits ? overview.topups : [],
       canPurchaseCredits,
     });
   } catch (error) {
