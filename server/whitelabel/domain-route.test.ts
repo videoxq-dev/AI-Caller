@@ -99,6 +99,9 @@ describe("F12-D3 Traefik route reconciliation", () => {
     expect(yaml).toContain("certResolver: letsencrypt");
     expect(yaml).toContain('url: "http://aicaller-web:8080"');
     expect(yaml).toContain("passHostHeader: true");
+    expect(yaml).toContain(`- ${"wl-11111111111141118111111111111111"}-holding`);
+    expect(yaml).toContain("replacePath:");
+    expect(yaml).toContain("path: /api/whitelabel/domain-pending");
   });
 
   it("materializes a verified domain atomically and advances it to CERT_PENDING", async () => {
