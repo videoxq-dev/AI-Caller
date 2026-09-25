@@ -13,7 +13,7 @@ export async function POST(request: Request, { params }: { params: Promise<{ pro
     const { provider: rawProvider } = await params;
     const parsed = providerIdSchema.safeParse(rawProvider);
     if (!parsed.success) throw new AppError("BAD_REQUEST", "Unsupported integration provider.", 400);
-    if (parsed.data !== "whatsapp" && parsed.data !== "credits"
+    if (parsed.data !== "whatsapp"
       && !isExternalCalendarProvider(parsed.data)) {
       await requireCommercialProviderPurchaser(context.session.user.id, context.workspace.id);
     }
