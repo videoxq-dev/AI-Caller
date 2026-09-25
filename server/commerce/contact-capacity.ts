@@ -1,7 +1,6 @@
 import { and, count, eq, sql } from "drizzle-orm";
 import { db } from "@/db";
 import { contacts, licenses, memberships, workspaceCommercialOwners } from "@/db/schema";
-import { wasProvisionedForAgency } from "./agency-client-classification";
 import { AppError } from "@/server/http/errors";
 
 export const CORE_CONTACT_LIMIT = 500;
@@ -12,15 +11,14 @@ async function resolveContactEntitlement(tx: Tx, workspaceId: string) {
   const [commercial] = await tx.select({
     purchaserUserId: workspaceCommercialOwners.purchaserUserId,
     kind: workspaceCommercialOwners.kind,
-    provisioningSource: workspaceCommercialOwners.provisioningSource,
+    agencyClient: workspaceCommercialOwners.agencyClient,
     createdAt: workspaceCommercialOwners.createdAt,
   }).from(workspaceCommercialOwners)
     .where(eq(workspaceCommercialOwners.workspaceId, workspaceId)).limit(1);
   let purchaserUserId: string;
   if (commercial) {
     purchaserUserId = commercial.purchaserUserId;
-    if (commercial.kind === "ADDITIONAL"
-      && await wasProvisionedForAgency(purchaserUserId, commercial.createdAt, commercial.provisioningSource, tx)) {
+    if (commercial.kind === "ADDITIONAL" && commercial.agencyClient) {
       return { limit: CORE_CONTACT_LIMIT as number | null, package: null as "UNLIMITED" | null };
     }
   } else {
