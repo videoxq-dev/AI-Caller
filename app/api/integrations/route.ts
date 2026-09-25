@@ -100,10 +100,14 @@ export async function GET(request: Request) {
       getWorkspaceIntegrationEntitlements(context.workspace.id),
     ]);
     const commercial = await getCommercialWorkspaceOwner(context.workspace.id);
-    const visibleIntegrations = commercial && commercial.purchaserUserId !== context.session.user.id
-      ? integrations.filter((item) => item.provider === "whatsapp"
-        || (entitlements.externalCalendar && isExternalCalendarProvider(item.provider)))
-      : integrations;
+    // Unknown historical commercial ownership is not authority to disclose
+    // purchaser provider configuration to another operational OWNER.
+    const isPurchaser = entitlements.purchaserUserId === context.session.user.id
+      && (!commercial || commercial.purchaserUserId === context.session.user.id);
+    const visibleIntegrations = isPurchaser
+      ? integrations
+      : integrations.filter((item) => item.provider === "whatsapp"
+        || (entitlements.externalCalendar && isExternalCalendarProvider(item.provider)));
     return Response.json({
       integrations: visibleIntegrations,
       entitlements: { externalCalendar: entitlements.externalCalendar, nonCalendarByopEnabled: entitlements.nonCalendarByopEnabled },
