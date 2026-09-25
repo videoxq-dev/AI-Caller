@@ -12,6 +12,7 @@ async function resolveContactEntitlement(tx: Tx, workspaceId: string) {
   const [commercial] = await tx.select({
     purchaserUserId: workspaceCommercialOwners.purchaserUserId,
     kind: workspaceCommercialOwners.kind,
+    provisioningSource: workspaceCommercialOwners.provisioningSource,
     createdAt: workspaceCommercialOwners.createdAt,
   }).from(workspaceCommercialOwners)
     .where(eq(workspaceCommercialOwners.workspaceId, workspaceId)).limit(1);
@@ -19,7 +20,7 @@ async function resolveContactEntitlement(tx: Tx, workspaceId: string) {
   if (commercial) {
     purchaserUserId = commercial.purchaserUserId;
     if (commercial.kind === "ADDITIONAL"
-      && await wasProvisionedForAgency(purchaserUserId, commercial.createdAt, tx)) {
+      && await wasProvisionedForAgency(purchaserUserId, commercial.createdAt, commercial.provisioningSource, tx)) {
       return { limit: CORE_CONTACT_LIMIT as number | null, package: null as "UNLIMITED" | null };
     }
   } else {
