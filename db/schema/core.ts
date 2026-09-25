@@ -52,7 +52,6 @@ export const workspaceCommercialOwners = pgTable(
     purchaserUserId: text("purchaser_user_id").notNull().references(() => user.id, { onDelete: "cascade" }),
     kind: text("kind").$type<"PRIMARY" | "ADDITIONAL">().notNull(),
     agencyClient: boolean("agency_client").default(false).notNull(),
-    agencyClient: boolean("agency_client").default(false).notNull(),
     createdAt: timestamp("created_at", { withTimezone: true, mode: "date" }).defaultNow().notNull(),
     updatedAt: timestamp("updated_at", { withTimezone: true, mode: "date" }).defaultNow().notNull(),
   },
