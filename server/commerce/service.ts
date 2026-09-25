@@ -14,6 +14,7 @@ import { createWorkspaceForUser, ensureDefaultWorkspace, getMembership, getPrima
 import { grantStarterCreditsInTx, reverseStarterCreditsInTx } from "@/server/credits/service";
 import { getEnv } from "@/server/env";
 import { AppError } from "@/server/http/errors";
+import { syncWhitelabelDomainEntitlementInTx } from "@/server/whitelabel/domain-entitlement-lifecycle";
 import { enqueueJob } from "@/server/jobs";
 import { COMMERCE_WELCOME_EMAIL } from "@/server/jobs/queues";
 import { reconcileAgencyReceipt } from "./agency-lifecycle";
@@ -175,7 +176,11 @@ async function activate(event: NormalizedPurchaseEvent) {
     await grantCoreEntitlements(license.workspaceId, tx);
     // Hold the same Core lock until the credit grant is persisted, so a
     // competing refund cannot reverse a grant that has not yet been written.
-    return grantStarterCreditsInTx(tx, license.workspaceId, license.id);
+    const balance = await grantStarterCreditsInTx(tx, license.workspaceId, license.id);
+    if (license.purchaserUserId) {
+      await syncWhitelabelDomainEntitlementInTx(tx, license.purchaserUserId);
+    }
+    return balance;
   });
   if (balance === null) return { ignored: true as const, reason: "REVOKED_PURCHASE" };
 
@@ -246,6 +251,9 @@ async function revoke(event: NormalizedPurchaseEvent) {
         target: [workspaceEntitlements.workspaceId, workspaceEntitlements.key],
         set: { value: coreAccess, updatedAt: new Date() },
       });
+    if (license.purchaserUserId) {
+      await syncWhitelabelDomainEntitlementInTx(tx, license.purchaserUserId);
+    }
     return { ignored: false as const, workspaceId: license.workspaceId, licenseId: license.id, coreAccess };
   });
 }
@@ -339,7 +347,11 @@ export async function activateManualCoreLicense(workspaceId: string) {
   const balance = await db.transaction(async (tx) => {
     await tx.execute(sql`select pg_advisory_xact_lock(hashtext(${`core-license:${workspaceId}`}))`);
     await grantCoreEntitlements(workspaceId, tx);
-    return grantStarterCreditsInTx(tx, workspaceId, license.id);
+    const balance = await grantStarterCreditsInTx(tx, workspaceId, license.id);
+    if (license.purchaserUserId) {
+      await syncWhitelabelDomainEntitlementInTx(tx, license.purchaserUserId);
+    }
+    return balance;
   });
   return { license, balance };
 }
