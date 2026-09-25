@@ -117,6 +117,7 @@ export async function createWorkspaceFromAgencyTemplate(input: {
   idempotencyKey: string;
 }) {
   const template = await getAgencyTemplateVersion(input.purchaserUserId, input.templateId, input.version);
+  await requireAgencyTemplatePurchaser(input.purchaserUserId);
   if (template.status !== "ACTIVE") {
     throw new AppError("AGENCY_TEMPLATE_ARCHIVED", "Archived templates cannot provision new clients.", 409);
   }
