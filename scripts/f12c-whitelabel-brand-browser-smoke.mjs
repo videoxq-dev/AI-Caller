@@ -73,7 +73,7 @@ try {
   await page.getByLabel("Support email").fill("support@stratosassist.com");
 
   const png = Buffer.from(
-    "iVBORw0KGgoAAAANSUhEUgAAAEAAAABACAIAAAAlC+aJAAAAR0lEQVR4nO3PQQ0AIBDAsAP/nuGNAvZoFSzZOjNnyNi1dgfgUQCPAngUwKM AHgXwKIBHATwK4FEAjwJ4FMCjAB4F8CiARwE8CuBRAI8CeBTwA3CQAX9K3yXRAAAAAElFTkSuQmCC".replace(/\s/g, ""),
+    "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAusB9Wl2N3sAAAAASUVORK5CYII=",
     "base64",
   );
   const logoInput = page.locator(".wlAsset").filter({ hasText: "Logo" }).locator('input[type="file"]');
