@@ -169,6 +169,32 @@ describe("F12-D3 Traefik route reconciliation", () => {
     },
   );
 
+  it("resets prior certificate readiness when a removed route is re-provisioned", async () => {
+    const domain = await verifiedDomain();
+    await reconcileWhitelabelDomainRoute(domain.id);
+    const oldReady = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000);
+    await db.update(whitelabelDomains).set({
+      status: "DNS_MISMATCH",
+      certificateStatus: "READY",
+      certificateReadyAt: new Date(),
+      certificateExpiresAt: oldReady,
+    }).where(eq(whitelabelDomains.id, domain.id));
+    await reconcileWhitelabelDomainRoute(domain.id);
+
+    await db.update(whitelabelDomains).set({
+      status: "VERIFIED",
+      dnsVerifiedAt: new Date(),
+    }).where(eq(whitelabelDomains.id, domain.id));
+    const reprovisioned = await reconcileWhitelabelDomainRoute(domain.id);
+
+    expect(reprovisioned).toMatchObject({
+      status: "CERT_PENDING",
+      certificateStatus: "PENDING",
+      certificateReadyAt: null,
+      certificateExpiresAt: null,
+    });
+  });
+
   it("does not materialize a route before DNS verification is complete", async () => {
     const domain = await claimWhitelabelDomain(purchaser, "clients.stratosassist.com");
     await expect(reconcileWhitelabelDomainRoute(domain.id))
