@@ -43,7 +43,7 @@ describe("Agency workspace management API", () => {
     vi.mocked(getOwnedWorkspaceCapacity).mockResolvedValue({
       ownedBusinesses: 2, businessLimit: 51, availableBusinesses: 49,
       agencyClientLimit: 50, agencyClientsUsed: 1, agencyClientsAvailable: 49,
-      activeProducts: ["CORE", "AGENCY_50"],
+      activeProducts: ["CORE", "AGENCY_50"], effectiveWhitelabel: false,
     });
     vi.mocked(listCommercialWorkspacesForUser).mockResolvedValue([owned, client]);
   });
@@ -72,7 +72,7 @@ describe("Agency workspace management API", () => {
     vi.mocked(getOwnedWorkspaceCapacity).mockResolvedValue({
       ownedBusinesses: 2, businessLimit: 2, availableBusinesses: 0,
       agencyClientLimit: null, agencyClientsUsed: null, agencyClientsAvailable: null,
-      activeProducts: ["CORE", "UNLIMITED"],
+      activeProducts: ["CORE", "UNLIMITED"], effectiveWhitelabel: false,
     });
     const response = await GET(request());
     expect(response.status).toBe(403);
