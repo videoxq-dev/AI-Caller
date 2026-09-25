@@ -2,7 +2,7 @@ import { randomUUID } from "node:crypto";
 import { access, mkdtemp, readFile, rm, unlink } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
-import { eq } from "drizzle-orm";
+import { and, eq } from "drizzle-orm";
 import { afterAll, afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { closeDatabase, db } from "@/db";
 import {
@@ -206,7 +206,7 @@ describe("F12-D3 Traefik route reconciliation", () => {
       await reconcileWhitelabelDomainRoute(domain.id);
       const file = routeFilePathForDomain(domain.id, routeDir);
       await db.update(licenses).set({ status: "REFUNDED" })
-        .where(eq(licenses.productCode, productCode));
+        .where(and(eq(licenses.productCode, productCode), eq(licenses.purchaserUserId, purchaser)));
 
       const recovery = await recoverWhitelabelDomainRoutes(20);
       expect(recovery.checked).toBeGreaterThanOrEqual(1);
