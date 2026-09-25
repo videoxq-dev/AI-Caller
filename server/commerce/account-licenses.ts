@@ -15,6 +15,8 @@ export type FunnelAccountSummary = {
   activeProducts: FunnelProductCode[];
   businessLimit: number;
   agencyClientLimit: number | null;
+  /** A purchased Whitelabel receipt is usable only with Core and Agency. */
+  effectiveWhitelabel: boolean;
   licenses: PurchaserLicense[];
 };
 
@@ -34,7 +36,10 @@ export function summarizeFunnelAccountLicenses(rows: PurchaserLicense[]): Funnel
     .map((license) => license.productCode);
   const businessLimit = getPurchasedBusinessLimit(activeLicenseCodes);
   const agencyClientLimit = getAgencyClientLimit(activeLicenseCodes);
-  return { activeProducts, businessLimit, agencyClientLimit, licenses: rows };
+  const effectiveWhitelabel = activeProducts.includes("CORE")
+    && agencyClientLimit !== null
+    && activeProducts.includes("WHITELABEL");
+  return { activeProducts, businessLimit, agencyClientLimit, effectiveWhitelabel, licenses: rows };
 }
 
 export async function getFunnelAccountSummary(purchaserUserId: string): Promise<FunnelAccountSummary> {
