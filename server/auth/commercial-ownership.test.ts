@@ -39,23 +39,25 @@ describe("F12-B commercial owner and branded client authorization", () => {
     staff = await createUser("Client Staff");
     outsider = await createUser("Other Agency");
     const [primary] = await db.insert(workspaces).values({ name: "Purchaser Business" }).returning();
-    const [additional] = await db.insert(workspaces).values({ name: "Client Business" }).returning();
     original = primary.id;
+    await db.insert(workspaceCommercialOwners).values({
+      workspaceId: original, purchaserUserId: purchaser, kind: "PRIMARY",
+    });
+    await db.insert(memberships).values({ workspaceId: original, userId: purchaser, role: "OWNER" });
+    await purchase("CORE");
+    await purchase("AGENCY_50");
+    await purchase("WHITELABEL");
+    const [additional] = await db.insert(workspaces).values({ name: "Client Business" }).returning();
     client = additional.id;
-    await db.insert(workspaceCommercialOwners).values([
-      { workspaceId: original, purchaserUserId: purchaser, kind: "PRIMARY" },
-      { workspaceId: client, purchaserUserId: purchaser, kind: "ADDITIONAL" },
-    ]);
+    await db.insert(workspaceCommercialOwners).values({
+      workspaceId: client, purchaserUserId: purchaser, kind: "ADDITIONAL",
+    });
     await db.insert(memberships).values([
-      { workspaceId: original, userId: purchaser, role: "OWNER" },
       { workspaceId: client, userId: purchaser, role: "OWNER" },
       { workspaceId: client, userId: delegatedOwner, role: "OWNER" },
       { workspaceId: client, userId: staff, role: "STAFF" },
     ]);
     await db.insert(workspacePlans).values({ workspaceId: client, planId: "GROWTH", source: "TEST" });
-    await purchase("CORE");
-    await purchase("AGENCY_50");
-    await purchase("WHITELABEL");
   });
 
   afterEach(async () => {
