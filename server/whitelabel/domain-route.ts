@@ -124,7 +124,7 @@ async function reloadDomain(domainId: string) {
   return row;
 }
 
-export async function reconcileWhitelabelDomainRoute(domainId: string) {
+export async function reconcileWhitelabelDomainRoute(domainId: string): Promise<typeof whitelabelDomains.$inferSelect> {
   const config = getWhitelabelTraefikRouteConfig();
   const domain = await reloadDomain(domainId);
   if (!config.enabled) return domain;
