@@ -172,16 +172,17 @@ export async function reconcileWhitelabelDomainRoute(domainId: string) {
   }
 
   const now = new Date();
-  const nextStatus = domain.status === "VERIFIED" || domain.status === "ROUTE_PROVISIONING"
-    ? "CERT_PENDING" as const
-    : domain.status;
-  const nextCertificateStatus = nextStatus === "CERT_PENDING" && domain.certificateStatus === "NOT_REQUESTED"
+  const enteringCertificatePending = domain.status === "VERIFIED" || domain.status === "ROUTE_PROVISIONING";
+  const nextStatus = enteringCertificatePending ? "CERT_PENDING" as const : domain.status;
+  const nextCertificateStatus = enteringCertificatePending
     ? "PENDING" as const
     : domain.certificateStatus;
 
   const [updated] = await db.update(whitelabelDomains).set({
     status: nextStatus,
     certificateStatus: nextCertificateStatus,
+    certificateReadyAt: enteringCertificatePending ? null : domain.certificateReadyAt,
+    certificateExpiresAt: enteringCertificatePending ? null : domain.certificateExpiresAt,
     routeId,
     routeProvisionedAt: domain.routeProvisionedAt ?? now,
     lastErrorCode: null,
