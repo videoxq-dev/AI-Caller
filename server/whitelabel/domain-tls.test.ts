@@ -160,6 +160,27 @@ describe("F12-D5 public TLS readiness", () => {
     },
   );
 
+  it("moves an actually expired ready certificate back to pending when renewal is not serving yet", async () => {
+    const domain = await certPending();
+    await db.update(whitelabelDomains).set({
+      status: "CERT_READY",
+      certificateStatus: "READY",
+      certificateReadyAt: new Date(Date.now() - 90 * 24 * 60 * 60 * 1000),
+      certificateExpiresAt: new Date(Date.now() - 60_000),
+    }).where(eq(whitelabelDomains.id, domain.id));
+
+    const result = await reconcileWhitelabelDomainTls(domain.id, async () => ({
+      ok: false,
+      code: "TLS_CERT_NOT_READY",
+      message: "Renewed certificate is not being served yet.",
+    }));
+    expect(result).toMatchObject({
+      status: "CERT_PENDING",
+      certificateStatus: "FAILED",
+      lastErrorCode: "TLS_CERT_NOT_READY",
+    });
+  });
+
   it("does not downgrade an already-ready domain on a transient public probe failure", async () => {
     const domain = await certPending();
     await db.update(whitelabelDomains).set({
