@@ -34,6 +34,7 @@ import { listRecoverableAutomationRuns, listUndispatchedAutomationEvents } from 
 import { processDuePhoneNumberRenewals, processPendingPhoneNumberProvisioning, processPendingPhoneNumberReleases } from "@/server/phone-numbers/service";
 import { reconcileWhitelabelDomain } from "@/server/whitelabel/domain-reconcile";
 import { recoverWhitelabelDomainRoutes } from "@/server/whitelabel/domain-route";
+import { processPendingWhitelabelTlsChecks } from "@/server/whitelabel/domain-tls";
 
 export async function startWorker() {
   const authBoss = await ensureQueue(AUTH_PASSWORD_RESET_EMAIL);
@@ -222,6 +223,24 @@ export async function startWorker() {
   const whitelabelRouteRecoveryTimer = setInterval(() => void recoverWhitelabelRoutes(), 30_000);
   whitelabelRouteRecoveryTimer.unref();
 
+
+  let whitelabelTlsRunning = false;
+  const verifyWhitelabelTls = async () => {
+    if (whitelabelTlsRunning) return;
+    whitelabelTlsRunning = true;
+    try {
+      const result = await processPendingWhitelabelTlsChecks(50);
+      if (result.checked > 0) logger.info(result, "Checked Whitelabel HTTPS readiness");
+    } catch (error) {
+      logger.error({ err: error }, "Failed to check Whitelabel HTTPS readiness");
+    } finally {
+      whitelabelTlsRunning = false;
+    }
+  };
+  await verifyWhitelabelTls();
+  const whitelabelTlsTimer = setInterval(() => void verifyWhitelabelTls(), 15_000);
+  whitelabelTlsTimer.unref();
+
   let renewalRunning = false;
   const renewManagedNumbers = async () => {
     if (renewalRunning) return;
@@ -252,6 +271,7 @@ export async function startWorker() {
     clearInterval(provisioningTimer);
     clearInterval(registrationTimer);
     clearInterval(whitelabelRouteRecoveryTimer);
+    clearInterval(whitelabelTlsTimer);
     clearInterval(renewalTimer);
     await stopBoss();
     process.exit(0);
