@@ -3,13 +3,15 @@ import { resolveWorkspaceContext } from "@/server/auth/workspace-context";
 import { getCommercialWorkspaceOwner, requireCommercialProviderPurchaser } from "@/server/auth/commercial-ownership";
 import { bindCapability, listIntegrations, saveIntegration, setIntegrationStatus, testSavedIntegration } from "@/server/domain/integrations/repository";
 import {
+  getWorkspaceIntegrationEntitlements,
   requireCapabilityBindingEntitlement,
   requireProviderIntegrationEntitlement,
 } from "@/server/commerce/workspace-entitlements";
 import { AppError } from "@/server/http/errors";
 import { exchangeOAuthCode, getOAuthAuthorizationUrl } from "@/server/providers/oauth";
 import { GET as listProviders, PATCH as disconnectProvider, POST as saveProvider } from "./route";
-import { PUT as bindProvider } from "./capabilities/route";
+import { GET as listBindings, PUT as bindProvider } from "./capabilities/route";
+import { resolveProviderRoute } from "@/server/providers/resolver";
 import { GET as startOAuth } from "./oauth/[provider]/start/route";
 import { PUT as updateSmsConfig } from "./sms/config/route";
 
@@ -95,6 +97,30 @@ describe("external integration route entitlements", () => {
     expect(data.integrations).toMatchObject([{ provider: "whatsapp" }]);
     expect(JSON.stringify(data)).not.toContain("private-model");
     expect(JSON.stringify(data)).not.toContain("private-org");
+  });
+
+  it("does not expose purchaser AI, SMS or voice provider settings through capability GET", async () => {
+    vi.mocked(resolveWorkspaceContext).mockResolvedValue({
+      session: { user: { id: "client-owner" } },
+      workspace: { id: "agency-client" },
+      membership: { role: "OWNER" },
+    } as Awaited<ReturnType<typeof resolveWorkspaceContext>>);
+    vi.mocked(getCommercialWorkspaceOwner).mockResolvedValueOnce({
+      purchaserUserId: "purchaser", kind: "ADDITIONAL",
+      agencyClient: true, createdAt: new Date(),
+    });
+    vi.mocked(getWorkspaceIntegrationEntitlements).mockResolvedValueOnce({
+      purchaserUserId: "purchaser", externalCalendar: false,
+      performanceAutomations: false, whitelabelEligible: true, nonCalendarByopEnabled: false,
+    });
+    const response = await listBindings(new Request("https://app.example.com/api/integrations/capabilities"));
+    expect(response.status).toBe(200);
+    expect((await response.json()).capabilities).toMatchObject({
+      AI_TEXT: null, SMS: null, VOICE: null,
+    });
+    expect(resolveProviderRoute).toHaveBeenCalledTimes(2);
+    expect(resolveProviderRoute).toHaveBeenCalledWith("agency-client", "WHATSAPP");
+    expect(resolveProviderRoute).toHaveBeenCalledWith("agency-client", "CALENDAR");
   });
 
   it("blocks direct external calendar credentials before persistence or provider testing", async () => {
