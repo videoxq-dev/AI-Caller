@@ -10,6 +10,8 @@ type DomainState = {
   aVerifiedAt: string | null;
   txtVerifiedAt: string | null;
   dnsVerifiedAt: string | null;
+  routeProvisionedAt: string | null;
+  certificateReadyAt: string | null;
   lastCheckedAt: string | null;
   lastErrorCode: string | null;
   lastErrorMessage: string | null;
@@ -96,7 +98,7 @@ export function WhitelabelDomainPanel() {
         await new Promise((resolve) => setTimeout(resolve, 1000));
         const current = await load();
         if (current?.lastCheckedAt && current.lastCheckedAt !== previousCheck) {
-          setNotice(current.status === "VERIFIED"
+          setNotice(["VERIFIED", "CERT_PENDING", "CERT_READY", "ACTIVE"].includes(current.status)
             ? "DNS ownership and routing records are verified."
             : "DNS was checked. Review the record status below.");
           return;
@@ -149,7 +151,7 @@ export function WhitelabelDomainPanel() {
     <section className="wlCard wlDomainCard">
       <div className="wlSectionHeading">
         <h2>Custom domain</h2>
-        <p>Connect one subdomain for your branded client platform. Routing and SSL activate in the next F12-D stages.</p>
+        <p>Connect one subdomain for your branded client platform. After DNS verification, AI Caller provisions the edge route and HTTPS certificate.</p>
       </div>
 
       {error && <div className="wlError" role="alert">{error}</div>}
@@ -175,8 +177,14 @@ export function WhitelabelDomainPanel() {
         <div className="wlDomainState">
           <div className="wlDomainSummary">
             <div><span>Domain</span><strong>{domain.hostname}</strong></div>
-            <span className={domain.status === "VERIFIED" ? "wlDomainGood" : "wlDomainPending"}>
-              {domain.status === "VERIFIED" ? "DNS verified" : domain.status.replaceAll("_", " ").toLowerCase()}
+            <span className={["VERIFIED", "CERT_PENDING", "CERT_READY", "ACTIVE"].includes(domain.status) ? "wlDomainGood" : "wlDomainPending"}>
+              {domain.status === "VERIFIED"
+                ? "DNS verified"
+                : domain.status === "CERT_PENDING"
+                  ? "HTTPS provisioning"
+                  : domain.status === "CERT_READY" || domain.status === "ACTIVE"
+                    ? "HTTPS ready"
+                    : domain.status.replaceAll("_", " ").toLowerCase()}
             </span>
           </div>
 
@@ -195,8 +203,16 @@ export function WhitelabelDomainPanel() {
 
           <div className="wlDomainMeta">
             <span>DNS ownership <b>{domain.dnsVerifiedAt ? "Verified" : "Pending"}</b></span>
-            <span>Routing <b>Not provisioned yet</b></span>
-            <span>SSL certificate <b>{domain.certificateStatus === "READY" ? "Ready" : "Not provisioned yet"}</b></span>
+            <span>Routing <b>{domain.routeProvisionedAt ? "Ready" : "Pending"}</b></span>
+            <span>SSL certificate <b>{
+              domain.certificateStatus === "READY"
+                ? "Ready"
+                : domain.certificateStatus === "PENDING"
+                  ? "Provisioning"
+                  : domain.certificateStatus === "FAILED"
+                    ? "Needs attention"
+                    : "Pending"
+            }</b></span>
             {domain.lastCheckedAt && <span>Last checked <b>{new Date(domain.lastCheckedAt).toLocaleString()}</b></span>}
           </div>
 
