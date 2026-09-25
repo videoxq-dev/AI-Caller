@@ -2,6 +2,7 @@ import { z } from "zod";
 import { getEnv } from "@/server/env";
 import { hostedAIModel } from "@/server/providers/ai";
 import { resolveWorkspaceContext } from "@/server/auth/workspace-context";
+import { getCommercialWorkspaceOwner, requireCommercialProviderPurchaser } from "@/server/auth/commercial-ownership";
 import { requireWorkspacePermission } from "@/server/auth/permissions";
 import {
   bindCapability,
@@ -15,7 +16,7 @@ import { integrationSaveSchema, providerIdSchema } from "@/server/domain/integra
 import { AppError, toErrorResponse } from "@/server/http/errors";
 import { parseInput } from "@/server/http/validation";
 import { decryptIntegrationCredentials, type EncryptedSecretEnvelope } from "@/server/security/secrets";
-import { getWorkspaceIntegrationEntitlements, requireProviderIntegrationEntitlement } from "@/server/commerce/workspace-entitlements";
+import { getWorkspaceIntegrationEntitlements, isExternalCalendarProvider, requireProviderIntegrationEntitlement } from "@/server/commerce/workspace-entitlements";
 
 const disconnectSchema = z.object({
   provider: providerIdSchema,
@@ -98,8 +99,13 @@ export async function GET(request: Request) {
       listIntegrations(context.workspace.id),
       getWorkspaceIntegrationEntitlements(context.workspace.id),
     ]);
+    const commercial = await getCommercialWorkspaceOwner(context.workspace.id);
+    const visibleIntegrations = commercial && commercial.purchaserUserId !== context.session.user.id
+      ? integrations.filter((item) => item.provider === "whatsapp"
+        || (entitlements.externalCalendar && isExternalCalendarProvider(item.provider)))
+      : integrations;
     return Response.json({
-      integrations,
+      integrations: visibleIntegrations,
       entitlements: { externalCalendar: entitlements.externalCalendar, nonCalendarByopEnabled: entitlements.nonCalendarByopEnabled },
       hostedAI: {
         configured: Boolean(env.HOSTED_AI_API_KEY?.trim()),
@@ -118,6 +124,10 @@ export async function POST(request: Request) {
     const context = await resolveWorkspaceContext(request.headers);
     requireWorkspacePermission(context.membership.role, "integration.manage");
     const input = parseInput(integrationSaveSchema, await request.json());
+    if (input.provider !== "whatsapp" && input.provider !== "credits"
+      && !isExternalCalendarProvider(input.provider)) {
+      await requireCommercialProviderPurchaser(context.session.user.id, context.workspace.id);
+    }
     await requireProviderIntegrationEntitlement(context.workspace.id, input.provider);
 
     if (!directCredentialProviders.has(input.provider)) {
@@ -171,6 +181,10 @@ export async function PATCH(request: Request) {
     const context = await resolveWorkspaceContext(request.headers);
     requireWorkspacePermission(context.membership.role, "integration.manage");
     const input = parseInput(disconnectSchema, await request.json());
+    if (input.provider !== "whatsapp" && input.provider !== "credits"
+      && !isExternalCalendarProvider(input.provider)) {
+      await requireCommercialProviderPurchaser(context.session.user.id, context.workspace.id);
+    }
     return Response.json({ integration: await setIntegrationStatus(context.workspace.id, input.provider, "DISCONNECTED") });
   } catch (error) {
     return toErrorResponse(error);
