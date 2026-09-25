@@ -25,8 +25,10 @@ export async function PUT(request: Request) {
     const context = await resolveWorkspaceContext(request.headers);
     requireWorkspacePermission(context.membership.role, "integration.manage");
     const input = parseInput(capabilityBindingInputSchema, await request.json());
-    if (input.mode === "BYOP" && input.capability !== "CALENDAR"
-      && input.capability !== "WHATSAPP") {
+    // Both directions change the purchaser's provider infrastructure. A
+    // delegated client OWNER must not switch the estate to hosted credits.
+    if (input.capability === "AI_TEXT" || input.capability === "SMS"
+      || input.capability === "VOICE") {
       await requireCommercialProviderPurchaser(context.session.user.id, context.workspace.id);
     }
     await requireCapabilityBindingEntitlement(context.workspace.id, input.capability, input.mode, input.provider ?? null);
