@@ -4,6 +4,7 @@ import { db } from "@/db";
 import { creditLedger, creditPacks, creditTopups, usageEvents } from "@/db/schema";
 import { AppError } from "@/server/http/errors";
 import { getStripeClient } from "./stripe-client";
+import { requireWorkspaceCreditPurchaser } from "./workspace-topup-access";
 
 function integrationIdentifier() {
   const bytes = randomBytes(8);
@@ -34,6 +35,10 @@ export async function createCreditTopupCheckout(input: {
   fundingDestination?: "WORKSPACE" | "AGENCY_POOL";
   agencyPurchaserUserId?: string;
 }) {
+  await requireWorkspaceCreditPurchaser(input.userId, input.workspaceId);
+  if (input.fundingDestination === "AGENCY_POOL" && input.agencyPurchaserUserId !== input.userId) {
+    throw new AppError("AGENCY_POOL_PURCHASER_MISMATCH", "Only the Agency purchaser may fund this pool.", 403);
+  }
   const [pack] = await db.select().from(creditPacks).where(and(
     eq(creditPacks.code, input.packCode),
     eq(creditPacks.active, true),
