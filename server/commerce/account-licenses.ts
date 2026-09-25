@@ -1,6 +1,6 @@
-import { desc, eq } from "drizzle-orm";
+import { and, desc, eq } from "drizzle-orm";
 import { db } from "@/db";
-import { licenses } from "@/db/schema";
+import { licenses, memberships, workspaceCommercialOwners } from "@/db/schema";
 import { FUNNEL_PRODUCTS, getAgencyClientLimit, getPurchasedBusinessLimit, type FunnelProductCode } from "./products";
 
 export type PurchaserLicense = {
@@ -26,7 +26,10 @@ export type FunnelAccountSummary = {
  * separately together with atomic limits and legacy workspace reconciliation).
  * Neither a staff membership nor a stale workspace JSON field grants capacity.
  */
-export function summarizeFunnelAccountLicenses(rows: PurchaserLicense[]): FunnelAccountSummary {
+export function summarizeFunnelAccountLicenses(
+  rows: PurchaserLicense[],
+  primaryWorkspaceId?: string | null,
+): FunnelAccountSummary {
   const activeProducts = FUNNEL_PRODUCTS
     .filter((product) => rows.some((license) =>
       license.status === "ACTIVE" && license.productCode === product.code))
@@ -45,8 +48,9 @@ export function summarizeFunnelAccountLicenses(rows: PurchaserLicense[]): Funnel
     products.add(license.productCode);
     activeByWorkspace.set(license.workspaceId, products);
   }
-  const effectiveWhitelabel = Array.from(activeByWorkspace.values()).some((products) =>
-    products.has("CORE") && products.has("WHITELABEL")
+  const effectiveWhitelabel = Array.from(activeByWorkspace.entries()).some(([workspaceId, products]) =>
+    (primaryWorkspaceId === undefined || workspaceId === primaryWorkspaceId)
+      && products.has("CORE") && products.has("WHITELABEL")
       && (products.has("AGENCY_50") || products.has("AGENCY_100")));
   return { activeProducts, businessLimit, agencyClientLimit, effectiveWhitelabel, licenses: rows };
 }
@@ -62,5 +66,25 @@ export async function getFunnelAccountSummary(purchaserUserId: string): Promise<
     .from(licenses)
     .where(eq(licenses.purchaserUserId, purchaserUserId))
     .orderBy(desc(licenses.purchasedAt), desc(licenses.id));
-  return summarizeFunnelAccountLicenses(rows);
+  const summary = summarizeFunnelAccountLicenses(rows);
+  if (!summary.effectiveWhitelabel) return summary;
+
+  // The public purchase summary is not sufficient authorization by itself:
+  // only receipts on the purchaser's ONE original, still-owned business can
+  // become an operational Whitelabel package.
+  const primaries = await db.select({ workspaceId: workspaceCommercialOwners.workspaceId })
+    .from(workspaceCommercialOwners)
+    .innerJoin(memberships, and(
+      eq(memberships.workspaceId, workspaceCommercialOwners.workspaceId),
+      eq(memberships.userId, purchaserUserId),
+      eq(memberships.role, "OWNER"),
+    ))
+    .where(and(
+      eq(workspaceCommercialOwners.purchaserUserId, purchaserUserId),
+      eq(workspaceCommercialOwners.kind, "PRIMARY"),
+    )).limit(2);
+  return summarizeFunnelAccountLicenses(
+    rows,
+    primaries.length === 1 ? primaries[0].workspaceId : null,
+  );
 }
