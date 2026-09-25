@@ -115,8 +115,15 @@ jobs:
             const fs = require("node:fs");
             const config = JSON.parse(fs.readFileSync(0, "utf8"));
             const gateway = config.services.gateway.networks;
+            const web = config.services.web.networks;
+            const worker = config.services.worker;
+            const routeMount = (worker.volumes ?? []).find((volume) =>
+              volume.target === "/app/.data/traefik-domains");
             if (!config.networks.edge?.external || !gateway.default ||
                 !gateway.edge?.aliases?.includes("aicaller-voice-gateway") ||
+                !web.default || !web.edge?.aliases?.includes("aicaller-web") ||
+                !routeMount || routeMount.type !== "bind" ||
+                worker.environment.WHITELABEL_TRAEFIK_DYNAMIC_DIR !== "/app/.data/traefik-domains" ||
                 config.services.postgres.networks.edge) process.exit(1);
           '
           grep -Fq 'POSTGRES_HOST_AUTH_METHOD: scram-sha-256' docker-compose.yml
@@ -130,6 +137,7 @@ jobs:
         run: |
           sh -n scripts/inspect-deployos-postgres.sh
           node --test scripts/inspect-deployos-postgres.test.mjs
+          sh -n scripts/inspect-deployos-traefik.sh
 
       - name: Verify existing PostgreSQL data survives a Compose upgrade
         run: sh scripts/verify-compose-postgres-compat.sh
