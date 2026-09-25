@@ -62,6 +62,8 @@ services:
     restart: "no"
     environment:
       DATABASE_URL: ${DATABASE_URL:-postgresql://postgres:ai_caller_auto_pass@postgres:5432/ai_caller}
+      WHITELABEL_DOMAIN_ROUTE_ENABLED: ${WHITELABEL_DOMAIN_ROUTE_ENABLED:-false}
+      WHITELABEL_TRAEFIK_DYNAMIC_DIR: /app/.data/traefik-domains
     depends_on:
       postgres:
         condition: service_healthy
@@ -93,6 +95,11 @@ services:
     volumes:
       - recordings:/app/.data/recordings
       - brand_assets:/app/.data/brand-assets
+    networks:
+      default: {}
+      edge:
+        aliases:
+          - aicaller-web
 
   worker:
     <<: *app
@@ -105,6 +112,7 @@ services:
     command: ["sh", "-ec", "npm run verify:deployment && npm run worker"]
     volumes:
       - recordings:/app/.data/recordings
+      - ${WHITELABEL_TRAEFIK_DYNAMIC_HOST_DIR:-./.data/traefik-domains}:/app/.data/traefik-domains
 
   gateway:
     <<: *app
