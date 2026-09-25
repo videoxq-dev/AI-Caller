@@ -3,20 +3,23 @@ import { db } from "@/db";
 import { licenses } from "@/db/schema";
 
 type Tx = Parameters<Parameters<typeof db.transaction>[0]>[0];
+export type WorkspaceProvisioningSource = "PRIMARY" | "UNLIMITED" | "AGENCY" | "LEGACY";
 
 /**
- * Agency client status is historical, not determined by today's active Agency
- * receipts. A subsequent Agency refund must not accidentally grant a former
- * Core-only client the purchaser's Unlimited features.
- *
- * ADDITIONAL workspaces created before the purchaser bought Agency remain
- * eligible for their independently purchased Unlimited second-business offer.
+ * New workspace origin is written atomically at provisioning and survives
+ * refunds and upgrades. Legacy additional workspaces predate that marker:
+ * retain the previous date heuristic only for those unreconciled records.
+ * A provider-supplied purchasedAt must never classify a NEW client.
  */
 export async function wasProvisionedForAgency(
   purchaserUserId: string,
   commercialOwnershipCreatedAt: Date,
+  source: WorkspaceProvisioningSource,
   query: Tx | typeof db = db,
 ) {
+  if (source === "AGENCY") return true;
+  if (source === "UNLIMITED" || source === "PRIMARY") return false;
+
   const [agencyAtCreation] = await query.select({ id: licenses.id }).from(licenses)
     .where(and(
       eq(licenses.purchaserUserId, purchaserUserId),
