@@ -64,6 +64,11 @@ async function loadState(purchaserUserId: string) {
   };
 }
 
+export async function ensureBrandForPurchaser(purchaserUserId: string) {
+  await requireEffectiveWhitelabelPurchaser(purchaserUserId);
+  return ensureBrand(db, purchaserUserId);
+}
+
 export async function getBrandState(purchaserUserId: string) {
   await requireEffectiveWhitelabelPurchaser(purchaserUserId);
   return loadState(purchaserUserId);
