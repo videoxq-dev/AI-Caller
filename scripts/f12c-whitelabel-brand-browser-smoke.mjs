@@ -2,6 +2,7 @@ import { mkdir } from "node:fs/promises";
 import path from "node:path";
 import pg from "pg";
 import { chromium } from "playwright";
+import sharp from "sharp";
 
 const { Pool } = pg;
 const baseUrl = process.env.BETTER_AUTH_URL ?? "http://127.0.0.1:3000";
@@ -72,10 +73,9 @@ try {
   await page.getByLabel("Tagline").fill("Never miss another customer");
   await page.getByLabel("Support email").fill("support@stratosassist.com");
 
-  const png = Buffer.from(
-    "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAusB9Wl2N3sAAAAASUVORK5CYII=",
-    "base64",
-  );
+  const png = await sharp({
+    create: { width: 160, height: 60, channels: 4, background: "#335577" },
+  }).png().toBuffer();
   const logoInput = page.locator(".wlAsset").filter({ hasText: "Logo" }).locator('input[type="file"]');
   await logoInput.setInputFiles({ name: "brand.png", mimeType: "image/png", buffer: png });
   await page.getByText(/Logo uploaded/).waitFor();
