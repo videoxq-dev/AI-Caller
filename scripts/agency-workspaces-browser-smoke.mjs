@@ -164,6 +164,14 @@ try {
   await page.getByRole("button", { name: "Close" }).click();
 
   // An Agency client is a read-only credit user, even with operational OWNER.
+  // Seed a commercial-owner-funded checkout so the price-isolation assertion
+  // would catch a regression that accidentally exposes paid/pending top-ups.
+  await pool.query(
+    `INSERT INTO credit_topups
+       (workspace_id, created_by_user_id, pack_code, credits, amount_cents, currency, status)
+     VALUES ($1, $2, 'CREDITS_10000', 10000, 1000, 'usd', 'CHECKOUT_CREATED')`,
+    [clientWorkspace.workspaceId, userId],
+  );
   const clientBillingBefore = await clientContext.request.get(`${baseUrl}/api/billing`);
   assert(clientBillingBefore.ok(), "Delegated client could not view their workspace billing.");
   const clientBillingData = await clientBillingBefore.json();
