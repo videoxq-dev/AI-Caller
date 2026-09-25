@@ -140,6 +140,21 @@ describe("external integration route entitlements", () => {
     expect(saveIntegration).not.toHaveBeenCalled();
   });
 
+  it("blocks a delegated client OWNER from switching AI, SMS or voice onto hosted credits", async () => {
+    for (const capability of ["AI_TEXT", "SMS", "VOICE"] as const) {
+      vi.mocked(requireCommercialProviderPurchaser).mockRejectedValueOnce(
+        new AppError("COMMERCIAL_PURCHASER_REQUIRED", "Only the purchaser can manage provider infrastructure.", 403),
+      );
+      const response = await bindProvider(new Request("https://app.example.com/api/integrations/capabilities", {
+        method: "PUT", headers: { "content-type": "application/json" },
+        body: JSON.stringify({ capability, mode: "HOSTED" }),
+      }));
+      expect(response.status).toBe(403);
+      expect(bindCapability).not.toHaveBeenCalled();
+      expect(requireCapabilityBindingEntitlement).not.toHaveBeenCalled();
+    }
+  });
+
   it("blocks non-calendar BYOP capability binding before changing runtime routing", async () => {
     vi.mocked(requireCapabilityBindingEntitlement).mockRejectedValueOnce(
       new AppError("BYOP_REQUIRES_WHITELABEL", "Bring-your-own-provider infrastructure requires Agency and Whitelabel.", 403),
