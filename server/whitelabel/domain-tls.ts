@@ -17,11 +17,24 @@ function probeFailure(code: string, message: string): WhitelabelTlsProbeResult {
   return { ok: false, code, message };
 }
 
+export function buildWhitelabelTlsProbeTarget(hostname: string) {
+  const infra = getWhitelabelDomainInfrastructure(true);
+  if (!infra.ipv4) {
+    throw new AppError("TLS_EDGE_NOT_CONFIGURED", "The Whitelabel public edge is not configured.", 503);
+  }
+  return {
+    connectHostname: infra.ipv4,
+    servername: hostname,
+    hostHeader: hostname,
+  };
+}
+
 export async function probeWhitelabelDomainTls(hostname: string): Promise<WhitelabelTlsProbeResult> {
   const env = getEnv();
-  const infra = getWhitelabelDomainInfrastructure(true);
-  const edgeIp = infra.ipv4;
-  if (!edgeIp) {
+  let target: ReturnType<typeof buildWhitelabelTlsProbeTarget>;
+  try {
+    target = buildWhitelabelTlsProbeTarget(hostname);
+  } catch {
     return probeFailure("TLS_EDGE_NOT_CONFIGURED", "The Whitelabel public edge is not configured.");
   }
 
@@ -34,14 +47,14 @@ export async function probeWhitelabelDomainTls(hostname: string): Promise<Whitel
     };
 
     const request = httpsRequest({
-      hostname: edgeIp,
+      hostname: target.connectHostname,
       port: 443,
       method: "GET",
       path: "/",
-      servername: hostname,
+      servername: target.servername,
       rejectUnauthorized: true,
       headers: {
-        host: hostname,
+        host: target.hostHeader,
         accept: "application/json",
         "user-agent": "AI-Caller-Whitelabel-TLS-Probe/1.0",
       },
