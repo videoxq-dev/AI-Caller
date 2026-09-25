@@ -92,6 +92,10 @@ export async function getEffectiveWorkspaceSeatPlanInTransaction(tx: Tx, workspa
   };
 }
 
+export async function getEffectiveWorkspaceSeatPlan(workspaceId: string) {
+  return db.transaction((tx) => getEffectiveWorkspaceSeatPlanInTransaction(tx, workspaceId));
+}
+
 export async function getWorkspacePlan(workspaceId: string) {
   return db.transaction((tx) => getWorkspacePlanInTransaction(tx, workspaceId));
 }
