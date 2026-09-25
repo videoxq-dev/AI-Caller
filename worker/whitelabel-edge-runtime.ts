@@ -13,11 +13,15 @@ export async function startWhitelabelEdgeReconciler() {
   }, "Whitelabel edge reconciler started");
 
   let running = false;
+  let routeScanOffset = 0;
   const reconcile = async () => {
     if (running) return;
     running = true;
     try {
-      const routes = await recoverWhitelabelDomainRoutes(100);
+      const routes = await recoverWhitelabelDomainRoutes(100, routeScanOffset);
+      // A bounded scan must still eventually reach every domain, including
+      // when healthy rows do not change their updatedAt each iteration.
+      routeScanOffset = routes.checked < 100 ? 0 : routeScanOffset + routes.checked;
       if (routes.checked > 0 || routes.failed > 0) {
         logger.info(routes, "Reconciled Whitelabel Traefik routes");
       }
