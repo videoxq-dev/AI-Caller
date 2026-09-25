@@ -71,7 +71,7 @@ export async function getWorkspaceIntegrationEntitlements(
   // Client classification survives Agency refunds. Unlimited second businesses
   // created before an Agency purchase retain their separate offer features.
   const agencyClient = kind === "ADDITIONAL" && commercial !== null
-    && await wasProvisionedForAgency(commercial.purchaserUserId, commercial.createdAt);
+    && await wasProvisionedForAgency(commercial.purchaserUserId, commercial.createdAt, commercial.provisioningSource);
   const ownFeatureWorkspace = !agencyClient;
   return {
     purchaserUserId,
