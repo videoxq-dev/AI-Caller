@@ -54,11 +54,32 @@ if ! printf '%s\n' "$aliases" | grep -qx aicaller-web; then
   exit 1
 fi
 
+edge_matches=$(docker ps \
+  --filter label=com.docker.compose.project=ai-caller \
+  --filter label=com.docker.compose.service=edge-reconciler \
+  --format '{{.ID}}')
+set -- $edge_matches
+if [ "$#" -ne 1 ]; then
+  echo 'Expected one running dedicated ai-caller/edge-reconciler container.' >&2
+  exit 1
+fi
+edge_reconciler=$1
+edge_source=$(docker inspect --format '{{range .Mounts}}{{if eq .Destination "/app/.data/traefik-domains"}}{{.Source}}{{end}}{{end}}' "$edge_reconciler")
+if [ -z "$edge_source" ] || [ ! -d "$edge_source" ]; then
+  echo 'Dedicated edge reconciler is missing its writable Traefik dynamic-directory mount.' >&2
+  exit 1
+fi
+if [ "$(readlink -f "$edge_source")" != "$(readlink -f "$dynamic_source")" ]; then
+  echo 'Edge reconciler writes to a different directory than Traefik watches.' >&2
+  exit 1
+fi
+
 printf 'traefik_container=%s\n' "$traefik"
 printf 'traefik_dynamic_host_dir=%s\n' "$dynamic_source"
 printf 'web_container=%s\n' "$web"
 printf 'web_edge_network=yes\n'
 printf 'web_edge_alias=aicaller-web\n'
+printf 'edge_reconciler_dynamic_mount=matches_traefik\n'
 
 if [ -f "$dynamic_source/aicaller.yml" ]; then
   echo 'deployos_generated_web_route=present'
