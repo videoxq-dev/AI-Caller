@@ -1,5 +1,6 @@
 "use client";
 
+import { useState } from "react";
 import type { AgencyTemplateSnapshot } from "@/server/agency/template-schema";
 
 type Agent = AgencyTemplateSnapshot["agent"];
@@ -24,6 +25,25 @@ export function blankAgencyTemplate(): AgencyTemplateSnapshot {
   };
 }
 
+type RecipeKey = AgencyTemplateSnapshot["recipes"][number]["key"];
+const recipeDefaults: Record<RecipeKey, AgencyTemplateSnapshot["recipes"][number]["config"]> = {
+  MISSED_INQUIRY_RECOVERY: {
+    delayMinutes: 15, channels: ["SMS"],
+    message: "Hi {{name}}, we noticed we missed your message. How can we help?",
+  },
+  QUALIFIED_LEAD_ASSIGNMENT: { assignedUserId: null, notifyInApp: true },
+  APPOINTMENT_CONFIRMATION: {
+    channels: ["SMS"], message: "You're booked, {{name}}. Your {{service}} appointment is confirmed.",
+    whatsappTemplateName: null, whatsappTemplateLanguage: "en_US",
+  },
+  APPOINTMENT_REMINDER: {
+    firstMinutesBefore: 1440, secondMinutesBefore: 120, channels: ["SMS"],
+    message: "Reminder, {{name}}: your {{service}} appointment is coming up.",
+    whatsappTemplateName: null, whatsappTemplateLanguage: "en_US",
+  },
+  HUMAN_ESCALATION: { assignedUserId: null, notifyInApp: true },
+};
+
 const weekdays = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
 
 export function AgencyTemplateEditor({
@@ -32,6 +52,11 @@ export function AgencyTemplateEditor({
   value: AgencyTemplateSnapshot;
   onChange: (next: AgencyTemplateSnapshot) => void;
 }) {
+  const [recipeChoice, setRecipeChoice] = useState<RecipeKey>("MISSED_INQUIRY_RECOVERY");
+  const availableRecipes = (Object.keys(recipeDefaults) as RecipeKey[])
+    .filter((key) => !value.recipes.some((recipe) => recipe.key === key));
+  const selectedRecipe = availableRecipes.includes(recipeChoice) ? recipeChoice : availableRecipes[0];
+
   const setBusiness = (next: Partial<Business>) => onChange({
     ...value, business: { ...value.business, ...next },
   });
@@ -341,7 +366,22 @@ export function AgencyTemplateEditor({
               onClick={() => onChange({ ...value, recipes: value.recipes.filter((_, i) => i !== index) })}>Remove recipe</button>
           </div>
         ))}
-        <p>To add a new built-in recipe, configure it in an existing source workspace and extract a new template preview.</p>
+        <div className="agencyTemplateInline">
+          <select aria-label="Core recipe to add" value={selectedRecipe ?? ""} disabled={!selectedRecipe}
+            onChange={(event) => setRecipeChoice(event.target.value as RecipeKey)}>
+            {availableRecipes.map((key) => (
+              <option key={key} value={key}>{key.replaceAll("_", " ")}</option>
+            ))}
+          </select>
+          <button type="button" className="agencySecondaryButton" disabled={!selectedRecipe}
+            onClick={() => {
+              if (selectedRecipe) onChange({
+                ...value, recipes: [...value.recipes, {
+                  key: selectedRecipe, config: { ...recipeDefaults[selectedRecipe] },
+                }],
+              });
+            }}>+ Core recipe</button>
+        </div>
       </fieldset>
     </div>
   );
