@@ -1,6 +1,7 @@
 import { and, count, eq, sql } from "drizzle-orm";
 import { db } from "@/db";
-import { contacts, licenses, memberships } from "@/db/schema";
+import { contacts, licenses, memberships, workspaceCommercialOwners } from "@/db/schema";
+import { wasProvisionedForAgency } from "./agency-client-classification";
 import { AppError } from "@/server/http/errors";
 
 export const CORE_CONTACT_LIMIT = 500;
@@ -8,15 +9,32 @@ export const CORE_CONTACT_LIMIT = 500;
 type Tx = Parameters<Parameters<typeof db.transaction>[0]>[0];
 
 async function resolveContactEntitlement(tx: Tx, workspaceId: string) {
-  const owners = await tx.select({ userId: memberships.userId }).from(memberships)
-    .where(and(eq(memberships.workspaceId, workspaceId), eq(memberships.role, "OWNER")))
-    .limit(2);
-  if (owners.length !== 1) {
-    return { limit: CORE_CONTACT_LIMIT as number | null, package: null as "UNLIMITED" | null };
+  const [commercial] = await tx.select({
+    purchaserUserId: workspaceCommercialOwners.purchaserUserId,
+    kind: workspaceCommercialOwners.kind,
+    createdAt: workspaceCommercialOwners.createdAt,
+  }).from(workspaceCommercialOwners)
+    .where(eq(workspaceCommercialOwners.workspaceId, workspaceId)).limit(1);
+  let purchaserUserId: string;
+  if (commercial) {
+    purchaserUserId = commercial.purchaserUserId;
+    if (commercial.kind === "ADDITIONAL"
+      && await wasProvisionedForAgency(purchaserUserId, commercial.createdAt, tx)) {
+      return { limit: CORE_CONTACT_LIMIT as number | null, package: null as "UNLIMITED" | null };
+    }
+  } else {
+    // Preserve a sole-owner fallback only for unreconciled historical records.
+    const owners = await tx.select({ userId: memberships.userId }).from(memberships)
+      .where(and(eq(memberships.workspaceId, workspaceId), eq(memberships.role, "OWNER")))
+      .limit(2);
+    if (owners.length !== 1) {
+      return { limit: CORE_CONTACT_LIMIT as number | null, package: null as "UNLIMITED" | null };
+    }
+    purchaserUserId = owners[0].userId;
   }
 
   const [unlimited] = await tx.select({ id: licenses.id }).from(licenses).where(and(
-    eq(licenses.purchaserUserId, owners[0].userId),
+    eq(licenses.purchaserUserId, purchaserUserId),
     eq(licenses.productCode, "UNLIMITED"),
     eq(licenses.status, "ACTIVE"),
   )).limit(1);
