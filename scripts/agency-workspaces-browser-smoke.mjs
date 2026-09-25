@@ -250,6 +250,56 @@ try {
   assert(higher.capacity.businessLimit === 151 && higher.capacity.agencyClientsAvailable === 148,
     "Agency 50 + 100 purchases did not stack to 150 client slots.");
 
+  // D2: only the Agency purchaser can clone a reviewed Core template; retry
+  // must not use an additional stacked client slot or copy financial state.
+  const reviewedTemplate = await context.request.post(`${baseUrl}/api/agency/templates`, {
+    data: {
+      name: "Cleaning Receptionist", reviewed: true,
+      snapshot: {
+        schemaVersion: 1,
+        business: { industry: "Cleaning", summary: "Welcome to {{business_name}}", timezone: "UTC", hours: [] },
+        agent: {
+          name: "Mia", tone: "Helpful", primaryGoal: "Answer cleaning inquiries", whenUnsure: "Escalate to a human",
+          openingMessage: "Hello from {{business_name}}", guardrails: [],
+          voice: { profileKey: "ava-us-1", language: "en-US", speakingRate: 1,
+            recordingPolicy: "ANNOUNCE", afterHoursEnabled: true },
+          qualification: { enabled: false, criteria: [] },
+        },
+        services: [{ name: "Office cleaning", description: "Commercial cleaning", priceText: "$99", active: true }],
+        faqs: [], policies: [], recipes: [],
+      },
+    },
+  });
+  if (!reviewedTemplate.ok()) throw new Error(`Template creation failed: ${await reviewedTemplate.text()}`);
+  const templateId = (await reviewedTemplate.json()).template.id;
+  const cloneInput = { name: "Agency Templated Client", templateId, version: 1, idempotencyKey: crypto.randomUUID() };
+  const cloned = await context.request.post(`${baseUrl}/api/agency/workspaces/from-template`, { data: cloneInput });
+  if (cloned.status() !== 201) throw new Error(`Template-based client creation failed: ${await cloned.text()}`);
+  const cloneId = (await cloned.json()).workspace.workspaceId;
+  const retry = await context.request.post(`${baseUrl}/api/agency/workspaces/from-template`, { data: cloneInput });
+  if (!retry.ok()) throw new Error(`Template clone retry failed: ${await retry.text()}`);
+  assert((await retry.json()).workspace.workspaceId === cloneId, "Template creation retry duplicated a client.");
+  const cloneData = await pool.query(`SELECT a.status AS agent_status, a.opening_message,
+    p.business_name, p.phone, p.website_url, w.balance,
+    x.template_version FROM ai_agents a
+    JOIN business_profiles p ON p.workspace_id = a.workspace_id
+    JOIN credit_wallets w ON w.workspace_id = a.workspace_id
+    JOIN agency_workspace_template_applications x ON x.workspace_id = a.workspace_id
+    WHERE a.workspace_id = $1`, [cloneId]);
+  assert(cloneData.rows[0]?.agent_status === "DRAFT"
+    && cloneData.rows[0]?.opening_message === "Hello from Agency Templated Client"
+    && cloneData.rows[0]?.business_name === "Agency Templated Client"
+    && cloneData.rows[0]?.phone === null && cloneData.rows[0]?.website_url === null
+    && cloneData.rows[0]?.balance === 0 && cloneData.rows[0]?.template_version === 1,
+  "Templated client did not receive safe, isolated, draft-only Core setup.");
+  const clientCloneDenied = await clientContext.request.post(`${baseUrl}/api/agency/workspaces/from-template`,
+    { data: { ...cloneInput, idempotencyKey: crypto.randomUUID() } });
+  assert(clientCloneDenied.status() === 404 || clientCloneDenied.status() === 403,
+    "Delegated client could use the Agency template to create a sibling workspace.");
+
+  const afterClone = await (await context.request.get(`${baseUrl}/api/agency/workspaces`)).json();
+  assert(afterClone.capacity.agencyClientsUsed === 3 && afterClone.capacity.agencyClientLimit === 150,
+    "Template creation did not use exactly one stacked Agency client slot.");
   await pool.query(`UPDATE licenses SET status = 'REFUNDED'
     WHERE purchaser_user_id = $1 AND product_code IN ('AGENCY_50', 'AGENCY_100')`, [userId]);
   inventory = await context.request.get(`${baseUrl}/api/agency/workspaces`);
@@ -259,7 +309,7 @@ try {
     "Refunded Agency purchase kept dashboard page access.");
   const preserved = await pool.query(`SELECT count(*)::int AS total FROM memberships
     WHERE user_id = $1 AND role = 'OWNER'`, [userId]);
-  assert(preserved.rows[0].total === 3, "Agency refund deleted existing workspaces.");
+  assert(preserved.rows[0].total === 4, "Agency refund deleted existing or templated client workspaces.");
   const blocked = await context.request.put(`${baseUrl}/api/workspaces`, {
     data: { name: "After Agency Refund" },
   });

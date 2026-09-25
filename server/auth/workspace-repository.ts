@@ -1,7 +1,7 @@
 import { and, asc, eq, isNull, sql } from "drizzle-orm";
 import { getFunnelAccountSummary } from "@/server/commerce/account-licenses";
 import { db } from "@/db";
-import { licenses, memberships, user, workspaceCommercialOwners, workspacePlans, workspaces } from "@/db/schema";
+import { agencyWorkspaceTemplateApplications, licenses, memberships, user, workspaceCommercialOwners, workspacePlans, workspaces } from "@/db/schema";
 import { getPurchasedBusinessLimit } from "@/server/commerce/products";
 import { AppError } from "@/server/http/errors";
 
@@ -225,12 +225,57 @@ export async function getOwnedWorkspaceCapacity(userId: string) {
   };
 }
 
-export async function createWorkspaceForUser(userId: string, name: string): Promise<WorkspaceMembership> {
+type WorkspaceTx = Parameters<Parameters<typeof db.transaction>[0]>[0];
+
+export type TemplateWorkspaceSeed = {
+  templateId: string;
+  templateVersionId: string;
+  version: number;
+  idempotencyKey: string;
+  apply: (tx: WorkspaceTx, workspaceId: string) => Promise<void>;
+};
+
+export async function createWorkspaceForUser(
+  userId: string,
+  name: string,
+  template?: TemplateWorkspaceSeed,
+): Promise<WorkspaceMembership> {
   const workspaceName = name.trim();
   return db.transaction(async (tx) => {
     // Lock first, count and create in the SAME transaction. Independent API
     // requests cannot consume the last account business slot concurrently.
     await tx.execute(sql`select pg_advisory_xact_lock(hashtext(${`funnel-business-capacity:${userId}`}))`);
+    if (template) {
+      const [prior] = await tx.select({
+        workspaceId: workspaces.id, workspaceName: workspaces.name,
+        workspaceStatus: workspaces.status,
+        templateId: agencyWorkspaceTemplateApplications.templateId,
+        templateVersionId: agencyWorkspaceTemplateApplications.templateVersionId,
+        version: agencyWorkspaceTemplateApplications.templateVersion,
+        requestedName: agencyWorkspaceTemplateApplications.requestedName,
+      }).from(agencyWorkspaceTemplateApplications)
+        .innerJoin(workspaces, eq(workspaces.id, agencyWorkspaceTemplateApplications.workspaceId))
+        .where(and(
+          eq(agencyWorkspaceTemplateApplications.purchaserUserId, userId),
+          eq(agencyWorkspaceTemplateApplications.requestKey, template.idempotencyKey),
+        )).limit(1);
+      if (prior) {
+        if (prior.templateId !== template.templateId
+          || prior.templateVersionId !== template.templateVersionId
+          || prior.version !== template.version
+          || prior.requestedName !== workspaceName) {
+          throw new AppError(
+            "AGENCY_TEMPLATE_REQUEST_CONFLICT",
+            "This request key was already used for a different client or template.",
+            409,
+          );
+        }
+        return {
+          workspaceId: prior.workspaceId, workspaceName: prior.workspaceName,
+          workspaceStatus: prior.workspaceStatus, role: "OWNER" as const,
+        };
+      }
+    }
     const [commercialUsage] = await tx.select({ count: sql<number>`count(*)::int` })
       .from(workspaceCommercialOwners)
       .where(eq(workspaceCommercialOwners.purchaserUserId, userId));
@@ -276,6 +321,20 @@ export async function createWorkspaceForUser(userId: string, name: string): Prom
       planId: "PERSONAL",
       source: "DEFAULT",
     });
+    if (template) {
+      // Apply and record provenance inside the SAME capacity-locked transaction.
+      // Failed validation or inserts roll back the workspace and slot usage.
+      await template.apply(tx, workspace.id);
+      await tx.insert(agencyWorkspaceTemplateApplications).values({
+        purchaserUserId: userId,
+        workspaceId: workspace.id,
+        templateId: template.templateId,
+        templateVersionId: template.templateVersionId,
+        templateVersion: template.version,
+        requestedName: workspaceName,
+        requestKey: template.idempotencyKey,
+      });
+    }
     return {
       workspaceId: workspace.id,
       workspaceName: workspace.name,

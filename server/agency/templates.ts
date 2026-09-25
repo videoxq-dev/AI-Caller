@@ -12,7 +12,7 @@ import {
   type AgencyTemplateSnapshot,
 } from "./template-schema";
 
-async function requireAgencyTemplatePurchaser(purchaserUserId: string) {
+export async function requireAgencyTemplatePurchaser(purchaserUserId: string) {
   const [agency] = await db.select({ id: licenses.id }).from(licenses).where(and(
     eq(licenses.purchaserUserId, purchaserUserId),
     eq(licenses.status, "ACTIVE"),
@@ -137,6 +137,7 @@ export async function getAgencyTemplateVersion(
     status: agencyWorkspaceTemplates.status,
     currentVersion: agencyWorkspaceTemplates.currentVersion,
     version: agencyWorkspaceTemplateVersions.version,
+    templateVersionId: agencyWorkspaceTemplateVersions.id,
     snapshot: agencyWorkspaceTemplateVersions.snapshot,
   }).from(agencyWorkspaceTemplates)
     .innerJoin(agencyWorkspaceTemplateVersions, eq(
