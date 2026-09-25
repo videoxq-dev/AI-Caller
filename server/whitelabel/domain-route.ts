@@ -16,6 +16,7 @@ const ROUTE_PRESENT: WhitelabelDomainStatus[] = [
   "ACTIVE",
 ];
 const ROUTE_ABSENT: WhitelabelDomainStatus[] = [
+  "AWAITING_DNS",
   "DNS_MISMATCH",
   "REVOKED",
   "DISABLING",
