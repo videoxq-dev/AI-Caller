@@ -89,7 +89,7 @@ export default function TestSetupPage() {
   }, []);
 
   const activate = async () => {
-    if (activating || isLive || readinessLoading || readinessError || (cloneReadiness && !cloneReadiness.canActivate)) return;
+    if (activating || isLive || readinessLoading || (cloneReadiness && !cloneReadiness.canActivate)) return;
     setActivating(true);
     setActivationError(null);
     try {
@@ -185,7 +185,9 @@ export default function TestSetupPage() {
                     <li key={item.key} className={item.ready ? "cloneReady" : "cloneMissing"}>
                       <span aria-hidden>{item.ready ? "✓" : "○"}</span>
                       <span>{item.message}</span>
-                      {!item.ready && <Link href={item.href}>Complete setup</Link>}
+                      {!item.ready && <Link href={item.key === "credits" ? "/settings/billing" : item.href}>
+                        {item.key === "credits" ? "View balance / contact Agency" : "Complete setup"}
+                      </Link>}
                     </li>
                   ))}
                 </ul>
@@ -198,7 +200,7 @@ export default function TestSetupPage() {
           {(activationError || channelError) && <div role="alert" className="readyBanner"><p>{activationError || channelError}</p></div>}
           <div className={`readyBanner ${isLive ? "live" : ""}`}><span className="readyCheck"><CheckIcon size={22} /></span><div><strong>{isLive ? "Agent activated" : "Activate when ready"}</strong><p>{isLive ? "Your AI agent is active; channel availability and SMS compliance are managed separately." : "Complete your own channel checks, then activate the AI agent. This screen does not verify live carrier delivery."}</p></div></div>
 
-          <div className="testFooter"><Link className="backLink" href="/setup/calendar">←&nbsp;&nbsp;Back to Calendar</Link><div className="testActions"><button type="button" className="outlineAction">Save for later</button><button type="button" className="goLiveButton" disabled={activating || isLive || readinessLoading || Boolean(readinessError) || (cloneReadiness !== null && !cloneReadiness.canActivate)} onClick={() => void activate()}>{activating ? "Activating…" : isLive ? "Live" : "Go Live"} <ChevronRightIcon size={18} /></button></div></div>
+          <div className="testFooter"><Link className="backLink" href="/setup/calendar">←&nbsp;&nbsp;Back to Calendar</Link><div className="testActions"><button type="button" className="outlineAction">Save for later</button><button type="button" className="goLiveButton" disabled={activating || isLive || readinessLoading || (cloneReadiness !== null && !cloneReadiness.canActivate)} onClick={() => void activate()}>{activating ? "Activating…" : isLive ? "Live" : "Go Live"} <ChevronRightIcon size={18} /></button></div></div>
         </section>
 
         <aside className="testSidebar">
