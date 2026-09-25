@@ -23,7 +23,7 @@ function event(type: string, receipt: string, email = buyerEmail, eventId = rand
   };
 }
 
-async function grant(code: string, receipt = randomUUID()) {
+async function grant(code: string, receipt: string = randomUUID()) {
   await db.insert(licenses).values({
     workspaceId: originalId, purchaserUserId: buyerId, source: "JVZOO",
     externalPurchaseId: receipt, productCode: code, status: "ACTIVE", purchasedAt: new Date(),
