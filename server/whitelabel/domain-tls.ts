@@ -235,8 +235,9 @@ export async function reconcileWhitelabelDomainTls(
 }
 
 export async function reconcilePendingWhitelabelDomainCertificates(
-  limit = 100,
+  limit = 40,
   prober: WhitelabelTlsProber = probeWhitelabelDomainTls,
+  concurrency = 8,
 ) {
   const renewalAuditThreshold = new Date(Date.now() + 21 * 24 * 60 * 60 * 1000);
   const rows = await db.select({ id: whitelabelDomains.id })
@@ -257,14 +258,22 @@ export async function reconcilePendingWhitelabelDomainCertificates(
   let ready = 0;
   let pending = 0;
   let failed = 0;
-  for (const row of rows) {
-    try {
-      const result = await reconcileWhitelabelDomainTls(row.id, prober);
-      if (result.status === "CERT_READY" || result.status === "ACTIVE") ready += 1;
-      else pending += 1;
-    } catch {
-      failed += 1;
+  let nextIndex = 0;
+  const workerCount = Math.min(rows.length, Math.max(1, Math.min(concurrency, 16)));
+
+  await Promise.all(Array.from({ length: workerCount }, async () => {
+    while (nextIndex < rows.length) {
+      const row = rows[nextIndex];
+      nextIndex += 1;
+      try {
+        const result = await reconcileWhitelabelDomainTls(row.id, prober);
+        if (result.status === "CERT_READY" || result.status === "ACTIVE") ready += 1;
+        else pending += 1;
+      } catch {
+        failed += 1;
+      }
     }
-  }
+  }));
+
   return { checked: rows.length, ready, pending, failed };
 }
