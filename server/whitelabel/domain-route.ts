@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { mkdir, open, readFile, rename, unlink } from "node:fs/promises";
 import path from "node:path";
-import { and, eq, inArray, isNotNull, or } from "drizzle-orm";
+import { and, asc, eq, inArray, isNotNull, or } from "drizzle-orm";
 import { db } from "@/db";
 import { whitelabelDomains, type WhitelabelDomainStatus } from "@/db/schema";
 import { AppError } from "@/server/http/errors";
@@ -223,6 +223,7 @@ export async function recoverWhitelabelDomainRoutes(limit = 100) {
         isNotNull(whitelabelDomains.routeId),
       ),
     ))
+    .orderBy(asc(whitelabelDomains.updatedAt), asc(whitelabelDomains.id))
     .limit(Math.max(1, Math.min(limit, 500)));
 
   let materialized = 0;
