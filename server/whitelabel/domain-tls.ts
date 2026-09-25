@@ -189,7 +189,11 @@ export async function reconcileWhitelabelDomainTls(
   const now = new Date();
 
   if (!probe.ok) {
+    const expired = Boolean(domain.certificateExpiresAt
+      && domain.certificateExpiresAt.getTime() <= now.getTime());
     const [updated] = await db.update(whitelabelDomains).set({
+      status: expired ? "CERT_PENDING" : domain.status,
+      certificateStatus: expired ? "FAILED" : domain.certificateStatus,
       lastErrorCode: probe.code,
       lastErrorMessage: probe.message,
       updatedAt: now,
