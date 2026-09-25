@@ -75,6 +75,7 @@ const envSchema = z.object({
   WHITELABEL_TRAEFIK_ENTRYPOINT: z.string().regex(/^[A-Za-z0-9_-]+$/).default("websecure"),
   WHITELABEL_TRAEFIK_CERT_RESOLVER: z.string().regex(/^[A-Za-z0-9_-]+$/).default("letsencrypt"),
   WHITELABEL_TRAEFIK_SERVICE_URL: z.string().url().default("http://aicaller-web:8080"),
+  WHITELABEL_TLS_PROBE_TIMEOUT_MS: z.coerce.number().int().min(1000).max(30000).default(8000),
   NODE_ENV: z.enum(["development", "test", "production"]).default("development"),
 });
 
