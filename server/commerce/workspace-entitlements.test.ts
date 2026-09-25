@@ -2,7 +2,7 @@ import { randomUUID } from "node:crypto";
 import { afterAll, afterEach, describe, expect, it } from "vitest";
 import { and, eq } from "drizzle-orm";
 import { closeDatabase, db } from "@/db";
-import { licenses, memberships, user, workspaces } from "@/db/schema";
+import { licenses, memberships, user, workspaceCommercialOwners, workspaces } from "@/db/schema";
 import {
   getWorkspaceIntegrationEntitlements,
   requireCapabilityBindingEntitlement,
@@ -103,6 +103,36 @@ describe("workspace external integration entitlements", () => {
     await expect(requireCapabilityBindingEntitlement(workspaceId, "VOICE", "BYOP", "twilio")).resolves.toBeUndefined();
     await expect(requireProviderIntegrationEntitlement(workspaceId, "outlook"))
       .rejects.toMatchObject({ code: "EXTERNAL_CALENDAR_REQUIRES_UNLIMITED" });
+  });
+
+  it("does not pass Agency purchaser upgrades to a delegated client owner", async () => {
+    const purchaser = await createBuyer("Agency Purchaser");
+    const clientOwner = await createBuyer("Delegated Client Owner");
+    const originalId = await createOwnedWorkspace(purchaser);
+    const clientWorkspaceId = await createOwnedWorkspace(purchaser);
+    await db.insert(workspaceCommercialOwners).values([
+      { workspaceId: originalId, purchaserUserId: purchaser, kind: "PRIMARY" },
+      { workspaceId: clientWorkspaceId, purchaserUserId: purchaser, kind: "ADDITIONAL" },
+    ]);
+    for (const product of ["CORE", "UNLIMITED", "PERFORMANCE", "AGENCY_50"]) {
+      await grant(purchaser, originalId, product);
+    }
+    await db.insert(memberships).values({
+      workspaceId: clientWorkspaceId, userId: clientOwner, role: "OWNER",
+    });
+
+    await expect(getWorkspaceIntegrationEntitlements(clientWorkspaceId)).resolves.toMatchObject({
+      purchaserUserId: null,
+      externalCalendar: false,
+      agencyByop: false,
+      performanceAutomations: false,
+    });
+    await expect(requireProviderIntegrationEntitlement(clientWorkspaceId, "google"))
+      .rejects.toMatchObject({ code: "EXTERNAL_CALENDAR_REQUIRES_UNLIMITED" });
+    await expect(requirePerformanceAutomationEntitlement(clientWorkspaceId))
+      .rejects.toMatchObject({ code: "AUTOMATION_BUILDER_REQUIRES_PERFORMANCE" });
+    await expect(requireProviderIntegrationEntitlement(clientWorkspaceId, "openrouter"))
+      .rejects.toMatchObject({ code: "BYOP_REQUIRES_AGENCY" });
   });
 
   it("keeps WhatsApp embedded signup outside the Agency BYOP gate", async () => {
