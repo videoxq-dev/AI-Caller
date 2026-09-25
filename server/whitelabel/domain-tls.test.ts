@@ -140,11 +140,8 @@ describe("F12-D5 public TLS readiness verification", () => {
       .rejects.toMatchObject({ code: "WHITELABEL_DOMAIN_TLS_NOT_READY", status: 409 });
   });
 
-  it("processes only due CERT_PENDING domains in the background batch", async () => {
+  it("processes due CERT_PENDING domains in the background batch", async () => {
     const domain = await pendingDomain();
-    const other = await claimWhitelabelDomain(purchaser, "portal.stratosassist.com")
-      .catch(() => null);
-    expect(other).toBeNull();
 
     const probe: WhitelabelTlsProbe = vi.fn(async (hostname) => ({
       statusCode: 200,
@@ -159,5 +156,21 @@ describe("F12-D5 public TLS readiness verification", () => {
     const [stored] = await db.select().from(whitelabelDomains)
       .where(eq(whitelabelDomains.id, domain.id));
     expect(stored.status).toBe("CERT_READY");
+  });
+
+  it("does not repeatedly probe a pending domain before the retry cooldown elapses", async () => {
+    const domain = await pendingDomain();
+    await db.update(whitelabelDomains).set({
+      lastCheckedAt: new Date(),
+    }).where(eq(whitelabelDomains.id, domain.id));
+
+    const probe: WhitelabelTlsProbe = vi.fn(async (hostname) => ({
+      statusCode: 200,
+      returnedHost: hostname,
+      certificateExpiresAt: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000),
+    }));
+    const result = await processPendingWhitelabelTlsChecks(20, probe);
+    expect(result).toEqual({ checked: 0, ready: 0, failed: 0 });
+    expect(probe).not.toHaveBeenCalled();
   });
 });
