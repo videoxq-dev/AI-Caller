@@ -9,7 +9,7 @@ import { defaultAgentCapabilities } from "@/server/agent/capabilities";
 import { createWorkspaceForUser } from "@/server/auth/workspace-repository";
 import { AppError } from "@/server/http/errors";
 import { parseAgencyTemplateSnapshot, type AgencyTemplateSnapshot } from "./template-schema";
-import { getAgencyTemplateVersion } from "./templates";
+import { getAgencyTemplateVersion, requireAgencyTemplatePurchaser } from "./templates";
 
 function withClientName(text: string | null | undefined, name: string): string | null {
   return text == null ? null : text.replace(/\{\{business_name\}\}/g, name);
