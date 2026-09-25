@@ -1,11 +1,18 @@
 "use client";
 
-import { useEffect, useState, type FormEvent } from "react";
+import Link from "next/link";
+import { useEffect, useRef, useState, type FormEvent } from "react";
 import { AppNav } from "@/components/core-domain/app-nav";
 import { WorkspaceAccessPanel, type ManagedAgencyWorkspace } from "./workspace-access-panel";
 import { AgencyCreditPanel } from "./agency-credit-panel";
 
 type AgencyWorkspace = ManagedAgencyWorkspace;
+type TemplateChoice = {
+  id: string;
+  name: string;
+  description: string | null;
+  currentVersion: number;
+};
 
 type AgencyCapacity = {
   ownedBusinesses: number;
@@ -44,6 +51,9 @@ export function AgencyWorkspacesDashboard() {
   const [switchingId, setSwitchingId] = useState<string | null>(null);
   const [reloadKey, setReloadKey] = useState(0);
   const [accessWorkspace, setAccessWorkspace] = useState<AgencyWorkspace | null>(null);
+  const [templates, setTemplates] = useState<TemplateChoice[]>([]);
+  const [selectedTemplateId, setSelectedTemplateId] = useState("");
+  const createRequestKey = useRef<string | null>(null);
 
   useEffect(() => {
     const controller = new AbortController();
@@ -65,17 +75,51 @@ export function AgencyWorkspacesDashboard() {
     return () => controller.abort();
   }, [reloadKey]);
 
+  useEffect(() => {
+    const controller = new AbortController();
+    void fetch("/api/agency/templates", { cache: "no-store", signal: controller.signal })
+      .then(async (response) => {
+        const value: unknown = await response.json().catch(() => null);
+        if (!response.ok) throw new Error(errorMessage(value, "Unable to load Agency templates."));
+        if (!controller.signal.aborted && value && typeof value === "object" && "templates" in value) {
+          setTemplates((value as { templates: TemplateChoice[] }).templates);
+        }
+      })
+      .catch((reason) => {
+        if (!controller.signal.aborted) setActionError(reason instanceof Error ? reason.message : "Unable to load templates.");
+      });
+    const fromLibrary = new URLSearchParams(window.location.search).get("templateId");
+    if (fromLibrary) {
+      setSelectedTemplateId(fromLibrary);
+      setCreateOpen(true);
+    }
+    return () => controller.abort();
+  }, []);
+
+  const selectedTemplate = templates.find((template) => template.id === selectedTemplateId);
+
   async function createWorkspace(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     if (creating || !data || data.capacity.agencyClientsAvailable <= 0 || newName.trim().length < 2) return;
     setCreating(true);
     setActionError(null);
     try {
-      const response = await fetch("/api/workspaces", {
-        method: "PUT",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({ name: newName.trim() }),
-      });
+      const template = selectedTemplateId ? selectedTemplate : null;
+      if (selectedTemplateId && !template) {
+        throw new Error("The selected template is no longer available. Choose another template.");
+      }
+      if (template && !createRequestKey.current) createRequestKey.current = crypto.randomUUID();
+      const response = await fetch(
+        template ? "/api/agency/workspaces/from-template" : "/api/workspaces",
+        {
+          method: template ? "POST" : "PUT",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify(template ? {
+            name: newName.trim(), templateId: template.id,
+            version: template.currentVersion, idempotencyKey: createRequestKey.current,
+          } : { name: newName.trim() }),
+        },
+      );
       if (!response.ok) {
         const payload: unknown = await response.json().catch(() => null);
         throw new Error(errorMessage(payload, "Unable to create workspace."));
@@ -123,14 +167,17 @@ export function AgencyWorkspacesDashboard() {
             <h1>Workspaces</h1>
             <span className="dashboardLiveLabel">Manage your Agency client businesses</span>
           </div>
-          <button
-            type="button"
-            className="agencyCreateButton"
-            disabled={loading || !capacity || atCapacity}
-            onClick={() => { setCreateOpen((value) => !value); setActionError(null); }}
-          >
-            + New workspace
-          </button>
+          <div className="agencyWorkspaceActions">
+            <Link href="/workspaces/templates" className="agencySecondaryButton">Templates</Link>
+            <button
+              type="button"
+              className="agencyCreateButton"
+              disabled={loading || !capacity || atCapacity}
+              onClick={() => { setCreateOpen((value) => !value); setActionError(null); }}
+            >
+              + New workspace
+            </button>
+          </div>
         </header>
         <div className="agencyBody">
           {error && (
@@ -174,18 +221,43 @@ export function AgencyWorkspacesDashboard() {
             <form className="agencyCreateCard" onSubmit={(event) => void createWorkspace(event)}>
               <div>
                 <h2>Create a client workspace</h2>
-                <p>Give the business a recognizable name. You can configure it after creation.</p>
+                <p>Start fresh or apply a reviewed template. Every client receives separate business details, a draft agent and an empty credit wallet.</p>
               </div>
+              <label htmlFor="agency-workspace-template">Starting setup</label>
+              <select id="agency-workspace-template" className="agencyTemplateCreateSelect"
+                value={selectedTemplateId} disabled={creating || atCapacity}
+                onChange={(event) => {
+                  setSelectedTemplateId(event.target.value);
+                  createRequestKey.current = null;
+                }}>
+                <option value="">Start fresh</option>
+                {templates.map((template) => (
+                  <option key={template.id} value={template.id}>
+                    {template.name} (v{template.currentVersion})
+                  </option>
+                ))}
+              </select>
+              {selectedTemplate && (
+                <div className="agencyTemplateCreateHint">
+                  <strong>{selectedTemplate.name} · version {selectedTemplate.currentVersion}</strong>
+                  <span>{selectedTemplate.description || "Reusable Core-level business setup"}</span>
+                  <p>Agent starts in Draft. Phone, calendar, SMS, client users and credits must be configured separately.</p>
+                  <Link href="/workspaces/templates">Review or edit this template</Link>
+                </div>
+              )}
               <label htmlFor="agency-workspace-name">Business name</label>
               <div className="agencyCreateFields">
                 <input id="agency-workspace-name" autoFocus minLength={2} maxLength={120}
                   placeholder="e.g. Northside Dental"
                   value={newName} disabled={creating || atCapacity}
-                  onChange={(event) => setNewName(event.target.value)} />
+                  onChange={(event) => {
+                    setNewName(event.target.value);
+                    createRequestKey.current = null;
+                  }} />
                 <button type="button" className="agencySecondaryButton" disabled={creating}
                   onClick={() => setCreateOpen(false)}>Cancel</button>
                 <button type="submit" className="agencyCreateButton" disabled={creating || atCapacity || newName.trim().length < 2}>
-                  {creating ? "Creating…" : "Create workspace"}
+                  {creating ? "Creating…" : selectedTemplate ? "Create from template" : "Create workspace"}
                 </button>
               </div>
             </form>
