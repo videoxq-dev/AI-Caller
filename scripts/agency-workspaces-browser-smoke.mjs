@@ -349,6 +349,35 @@ try {
     && uiClone.rows[0].phone === null && uiClone.rows[0].website_url === null
     && uiClone.rows[0].balance === 0 && uiClone.rows[0].template_version === 1,
   "Agency template UI did not produce an isolated, zero-funded draft client.");
+
+  // D4: the same status API used by Go Live must reject the copied agent
+  // until this NEW client completes its own onboarding and receives credits.
+  const clonedReadiness = await context.request.get(`${baseUrl}/api/agent/status`);
+  if (!clonedReadiness.ok()) throw new Error(`Cloned readiness failed: ${await clonedReadiness.text()}`);
+  const checklist = (await clonedReadiness.json()).readiness;
+  assert(checklist?.templatedClient && checklist.canActivate === false
+    && checklist.items.some(item => item.key === "credits" && !item.ready)
+    && checklist.items.some(item => item.key === "business" && !item.ready),
+    "Cloned client was marked ready without client-specific setup or funding.");
+  const prematureActivation = await context.request.patch(`${baseUrl}/api/agent/status`, {
+    data: { status: "ACTIVE" },
+  });
+  assert(prematureActivation.status() === 409,
+    "A directly invoked status API activated an unconfigured cloned client.");
+  const prematureCode = (await prematureActivation.json()).error?.code;
+  assert(prematureCode === "AGENCY_CLONE_NOT_READY", "Direct activation did not fail with the readiness gate.");
+  await page.goto(`${baseUrl}/setup/test`, { waitUntil: "networkidle" });
+  await page.getByRole("heading", { name: "Finish this client's setup" }).waitFor();
+  assert(await page.getByRole("button", { name: /Go Live/ }).isDisabled(),
+    "The cloned-client setup UI allowed activation before readiness.");
+  await noOverflow("Cloned client readiness desktop");
+  await page.screenshot({ path: path.join(outputDir, "agency-client-readiness-desktop.png"), fullPage: true });
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.reload({ waitUntil: "networkidle" });
+  await page.getByRole("heading", { name: "Finish this client's setup" }).waitFor();
+  await noOverflow("Cloned client readiness mobile");
+  await page.screenshot({ path: path.join(outputDir, "agency-client-readiness-mobile.png"), fullPage: true });
+  await page.setViewportSize({ width: 1440, height: 960 });
   await page.goto(`${baseUrl}/workspaces/templates`, { waitUntil: "networkidle" });
   const editingRow = page.locator(".agencyTemplateListRow").filter({ hasText: "Agency Cleaning Reusable" });
   await editingRow.getByRole("button", { name: "Review / edit" }).click();
