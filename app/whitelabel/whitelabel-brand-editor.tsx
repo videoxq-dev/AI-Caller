@@ -4,6 +4,7 @@ import { useEffect, useMemo, useState } from "react";
 import type { CSSProperties, ChangeEvent } from "react";
 import { AppNav } from "@/components/core-domain/app-nav";
 import type { BrandDraft } from "@/server/whitelabel/brand-schema";
+import { WhitelabelDomainPanel } from "./whitelabel-domain-panel";
 
 type VersionItem = {
   version: number;
@@ -270,6 +271,7 @@ export function WhitelabelBrandEditor() {
               </div>
             </div>
           )}
+          <WhitelabelDomainPanel />
         </div>
       </section>
     </main>
