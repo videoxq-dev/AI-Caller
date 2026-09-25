@@ -8,6 +8,7 @@ import {
 import { resetEnvForTests } from "@/server/env";
 import { claimWhitelabelDomain } from "./domain-service";
 import {
+  buildWhitelabelTlsProbeTarget,
   reconcileWhitelabelDomainTls,
   reconcilePendingWhitelabelDomainCertificates,
   type WhitelabelTlsProber,
@@ -77,6 +78,14 @@ describe("F12-D5 public TLS readiness", () => {
   });
 
   afterAll(async () => closeDatabase());
+
+  it("pins TLS network traffic to the configured AI Caller edge while preserving customer SNI/Host", () => {
+    expect(buildWhitelabelTlsProbeTarget("clients.stratosassist.com")).toEqual({
+      connectHostname: "203.0.113.25",
+      servername: "clients.stratosassist.com",
+      hostHeader: "clients.stratosassist.com",
+    });
+  });
 
   it("promotes CERT_PENDING only after a trusted HTTPS probe succeeds", async () => {
     const domain = await certPending();
