@@ -15,7 +15,7 @@ import { PUT as updateSmsConfig } from "./sms/config/route";
 vi.mock("@/server/auth/workspace-context", () => ({ resolveWorkspaceContext: vi.fn() }));
 vi.mock("@/server/auth/permissions", () => ({ requireWorkspacePermission: vi.fn() }));
 vi.mock("@/server/commerce/workspace-entitlements", () => ({
-  getWorkspaceIntegrationEntitlements: vi.fn().mockResolvedValue({ externalCalendar: false, agencyByop: false }),
+  getWorkspaceIntegrationEntitlements: vi.fn().mockResolvedValue({ externalCalendar: false, nonCalendarByopEnabled: false }),
   requireCapabilityBindingEntitlement: vi.fn(),
   requireProviderIntegrationEntitlement: vi.fn(),
 }));
@@ -76,7 +76,7 @@ describe("external integration route entitlements", () => {
 
   it("blocks direct BYOP SMS configuration before reading saved provider state", async () => {
     vi.mocked(requireProviderIntegrationEntitlement).mockRejectedValueOnce(
-      new AppError("BYOP_REQUIRES_AGENCY", "Bring-your-own-provider integrations are available on Agency.", 403),
+      new AppError("BYOP_REQUIRES_WHITELABEL", "Bring-your-own-provider infrastructure requires Agency and Whitelabel.", 403),
     );
     const response = await updateSmsConfig(new Request("https://app.example.com/api/integrations/sms/config", {
       method: "PUT",
@@ -89,7 +89,7 @@ describe("external integration route entitlements", () => {
 
   it("blocks non-calendar BYOP capability binding before changing runtime routing", async () => {
     vi.mocked(requireCapabilityBindingEntitlement).mockRejectedValueOnce(
-      new AppError("BYOP_REQUIRES_AGENCY", "Bring-your-own-provider integrations are available on Agency.", 403),
+      new AppError("BYOP_REQUIRES_WHITELABEL", "Bring-your-own-provider infrastructure requires Agency and Whitelabel.", 403),
     );
     const response = await bindProvider(new Request("https://app.example.com/api/integrations/capabilities", {
       method: "PUT",
