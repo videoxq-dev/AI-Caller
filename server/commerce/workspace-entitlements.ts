@@ -1,6 +1,6 @@
 import { and, eq } from "drizzle-orm";
 import { db } from "@/db";
-import { licenses, memberships } from "@/db/schema";
+import { agencyWorkspaceTemplateApplications, licenses, memberships } from "@/db/schema";
 import { AppError } from "@/server/http/errors";
 
 export const CALENDAR_PROVIDERS = new Set(["google", "outlook", "calendly", "calcom"]);
@@ -15,6 +15,20 @@ export type WorkspaceIntegrationEntitlements = {
 export async function getWorkspaceIntegrationEntitlements(
   workspaceId: string,
 ): Promise<WorkspaceIntegrationEntitlements> {
+  // A cloned Agency client remains Core-only even before a separate client
+  // OWNER accepts their invitation. The Agency purchaser's upgrades belong
+  // to their original business and must not become client entitlements.
+  const [client] = await db.select({ workspaceId: agencyWorkspaceTemplateApplications.workspaceId })
+    .from(agencyWorkspaceTemplateApplications)
+    .where(eq(agencyWorkspaceTemplateApplications.workspaceId, workspaceId)).limit(1);
+  if (client) {
+    return {
+      purchaserUserId: null,
+      externalCalendar: false,
+      agencyByop: false,
+      performanceAutomations: false,
+    };
+  }
   const owners = await db.select({ userId: memberships.userId }).from(memberships)
     .where(and(eq(memberships.workspaceId, workspaceId), eq(memberships.role, "OWNER")))
     .limit(2);
