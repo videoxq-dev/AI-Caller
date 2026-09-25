@@ -15,7 +15,11 @@ export async function GET(
     const { assetId } = await params;
     const id = parseInput(z.string().uuid(), assetId);
     const asset = await getBrandAssetForPurchaser(context.session.user.id, id);
-    return new Response(asset.bytes, {
+    const body = asset.bytes.buffer.slice(
+      asset.bytes.byteOffset,
+      asset.bytes.byteOffset + asset.bytes.byteLength,
+    ) as ArrayBuffer;
+    return new Response(body, {
       headers: {
         "content-type": asset.contentType,
         "cache-control": "private,max-age=3600",
