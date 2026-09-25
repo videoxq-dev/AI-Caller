@@ -60,7 +60,7 @@ export function renderTraefikDomainRoute(input: {
     "http:",
     "  routers:",
     `    ${input.routeId}:`,
-    `      rule: "Host(\\`${hostname}\\`)"`,
+    '      rule: "Host(`' + hostname + '`)"',
     "      entryPoints:",
     `        - ${input.entryPoint}`,
     `      service: ${input.routeId}`,
