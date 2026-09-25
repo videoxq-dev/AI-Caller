@@ -219,12 +219,12 @@ export function WhitelabelDomainPanel() {
           </div>
 
           <div className="wlDomainActions">
-            <button className="wlPrimary" type="button" disabled={busy !== null || !domain.dns.ipv4} onClick={() => void verify()}>
+            <button className="wlPrimary" type="button" disabled={busy !== null || !domain.dns.ipv4 || domain.status === "REVOKED"} onClick={() => void verify()}>
               {busy === "verify" ? "Checking…" : domain.lastCheckedAt ? "Verify again" : "Verify DNS"}
             </button>
-            {["AWAITING_DNS", "DNS_MISMATCH"].includes(domain.status) && (
+            {["AWAITING_DNS", "DNS_MISMATCH", "REVOKED"].includes(domain.status) && (
               <button className="wlSecondary" type="button" disabled={busy !== null} onClick={() => void rotate()}>
-                {busy === "rotate" ? "Rotating…" : "Rotate TXT proof"}
+                {busy === "rotate" ? "Updating…" : domain.status === "REVOKED" ? "Reconnect domain" : "Rotate TXT proof"}
               </button>
             )}
             <button className="wlSecondary wlDangerText" type="button" disabled={busy !== null} onClick={() => void disconnect()}>
