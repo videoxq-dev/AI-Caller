@@ -171,6 +171,7 @@ async function pendingInvitations(tx: Tx, workspaceId: string, now: Date) {
     .where(and(
       eq(workspaceInvitations.workspaceId, workspaceId),
       eq(workspaceInvitations.status, "PENDING"),
+      ne(workspaceInvitations.role, "OWNER"),
       gt(workspaceInvitations.expiresAt, now),
     ));
   return row?.count ?? 0;

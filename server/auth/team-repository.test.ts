@@ -1,3 +1,4 @@
+import { eq } from "drizzle-orm";
 import { afterAll, beforeEach, describe, expect, it } from "vitest";
 import { db, closeDatabase } from "@/db";
 import {
@@ -5,8 +6,10 @@ import {
   contacts,
   conversations,
   leads,
+  licenses,
   memberships,
   user,
+  workspaceCommercialOwners,
   workspaceInvitations,
   workspacePlans,
   workspaces,
@@ -18,6 +21,7 @@ import {
   removeWorkspaceMember,
   revokeWorkspaceInvitation,
 } from "./team-repository";
+import { getWorkspaceSeatUsage } from "@/server/billing/plans";
 
 const ownerId = "team-owner";
 const staffId = "team-staff";
@@ -125,6 +129,155 @@ describe("workspace team invitations", () => {
       .rejects.toMatchObject({ code: "FORBIDDEN_ROLE_ASSIGNMENT", status: 403 });
     await expect(revokeWorkspaceInvitation(workspaceId, adminInvite.invitation.id, "OWNER"))
       .resolves.toMatchObject({ id: adminInvite.invitation.id });
+  });
+
+  it("lets an active Agency commercial owner invite one client owner without consuming a sub-user seat", async () => {
+    await db.update(workspacePlans).set({ planId: "PERSONAL", updatedAt: new Date() });
+    await db.insert(workspaceCommercialOwners).values({
+      workspaceId,
+      purchaserUserId: ownerId,
+      kind: "ADDITIONAL",
+    });
+    await db.insert(licenses).values({
+      workspaceId,
+      purchaserUserId: ownerId,
+      source: "MANUAL",
+      externalPurchaseId: "agency-client-owner-seat-exempt",
+      productCode: "AGENCY_50",
+      status: "ACTIVE",
+      purchasedAt: new Date(),
+    });
+
+    const created = await createWorkspaceInvitation({
+      workspaceId,
+      invitedByUserId: ownerId,
+      email: "staff@example.com",
+      role: "OWNER",
+    });
+    expect(created.invitation.role).toBe("OWNER");
+    expect(await getWorkspaceSeatUsage(workspaceId)).toMatchObject({
+      plan: { id: "PERSONAL", subUserLimit: 0 },
+      activeSubUsers: 0,
+      pendingInvitations: 0,
+      usedSeats: 0,
+      availableSeats: 0,
+    });
+
+    await expect(acceptWorkspaceInvitation({
+      userId: staffId,
+      userEmail: "staff@example.com",
+      token: created.token,
+    })).resolves.toEqual({ workspaceId, role: "OWNER" });
+
+    const team = await listWorkspaceTeam(workspaceId);
+    expect(team.members.filter((member) => member.role === "OWNER")).toHaveLength(2);
+    expect(await db.select().from(workspaceCommercialOwners))
+      .toMatchObject([{ workspaceId, purchaserUserId: ownerId, kind: "ADDITIONAL" }]);
+    expect(await getWorkspaceSeatUsage(workspaceId)).toMatchObject({
+      activeSubUsers: 0,
+      usedSeats: 0,
+    });
+  });
+
+  it("prevents a second delegated client owner and rejects non-commercial owner invitations", async () => {
+    await db.insert(workspaceCommercialOwners).values({
+      workspaceId,
+      purchaserUserId: ownerId,
+      kind: "ADDITIONAL",
+    });
+    await db.insert(licenses).values({
+      workspaceId,
+      purchaserUserId: ownerId,
+      source: "MANUAL",
+      externalPurchaseId: "agency-single-client-owner",
+      productCode: "AGENCY_50",
+      status: "ACTIVE",
+      purchasedAt: new Date(),
+    });
+
+    const first = await createWorkspaceInvitation({
+      workspaceId,
+      invitedByUserId: ownerId,
+      email: "first-client-owner@example.com",
+      role: "OWNER",
+    });
+    await expect(createWorkspaceInvitation({
+      workspaceId,
+      invitedByUserId: ownerId,
+      email: "second-client-owner@example.com",
+      role: "OWNER",
+    })).rejects.toMatchObject({ code: "CLIENT_OWNER_INVITATION_EXISTS", status: 409 });
+
+    await expect(createWorkspaceInvitation({
+      workspaceId,
+      invitedByUserId: staffId,
+      email: "not-commercial-owner@example.com",
+      role: "OWNER",
+    })).rejects.toMatchObject({ code: "AGENCY_COMMERCIAL_OWNER_REQUIRED", status: 403 });
+
+    await revokeWorkspaceInvitation(workspaceId, first.invitation.id, "OWNER");
+  });
+
+  it("does not let an ordinary Admin revoke a pending client-owner invitation", async () => {
+    await db.insert(workspaceCommercialOwners).values({
+      workspaceId,
+      purchaserUserId: ownerId,
+      kind: "ADDITIONAL",
+    });
+    await db.insert(licenses).values({
+      workspaceId,
+      purchaserUserId: ownerId,
+      source: "MANUAL",
+      externalPurchaseId: "agency-protected-client-owner-invite",
+      productCode: "AGENCY_50",
+      status: "ACTIVE",
+      purchasedAt: new Date(),
+    });
+    const created = await createWorkspaceInvitation({
+      workspaceId,
+      invitedByUserId: ownerId,
+      email: "protected-client-owner@example.com",
+      role: "OWNER",
+    });
+
+    await expect(revokeWorkspaceInvitation(workspaceId, created.invitation.id, "ADMIN"))
+      .rejects.toMatchObject({ code: "FORBIDDEN_ROLE_ASSIGNMENT", status: 403 });
+    await expect(revokeWorkspaceInvitation(workspaceId, created.invitation.id, "OWNER"))
+      .resolves.toMatchObject({ id: created.invitation.id });
+  });
+
+  it("rechecks active Agency entitlement before a client owner accepts", async () => {
+    await db.insert(workspaceCommercialOwners).values({
+      workspaceId,
+      purchaserUserId: ownerId,
+      kind: "ADDITIONAL",
+    });
+    const [agency] = await db.insert(licenses).values({
+      workspaceId,
+      purchaserUserId: ownerId,
+      source: "MANUAL",
+      externalPurchaseId: "agency-owner-acceptance-recheck",
+      productCode: "AGENCY_50",
+      status: "ACTIVE",
+      purchasedAt: new Date(),
+    }).returning();
+
+    const created = await createWorkspaceInvitation({
+      workspaceId,
+      invitedByUserId: ownerId,
+      email: "staff@example.com",
+      role: "OWNER",
+    });
+    await db.update(licenses).set({ status: "REFUNDED" }).where(eq(licenses.id, agency.id));
+
+    await expect(acceptWorkspaceInvitation({
+      userId: staffId,
+      userEmail: "staff@example.com",
+      token: created.token,
+    })).rejects.toMatchObject({ code: "AGENCY_REQUIRED", status: 403 });
+
+    expect((await listWorkspaceTeam(workspaceId)).members.some((member) => member.userId === staffId))
+      .toBe(false);
   });
 
   it("blocks sub-user invitations on Personal", async () => {

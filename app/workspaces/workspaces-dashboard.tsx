@@ -2,13 +2,9 @@
 
 import { useEffect, useState, type FormEvent } from "react";
 import { AppNav } from "@/components/core-domain/app-nav";
+import { WorkspaceAccessPanel, type ManagedAgencyWorkspace } from "./workspace-access-panel";
 
-type AgencyWorkspace = {
-  workspaceId: string;
-  workspaceName: string;
-  workspaceStatus: "ACTIVE" | "SUSPENDED";
-  kind: "PRIMARY" | "ADDITIONAL";
-};
+type AgencyWorkspace = ManagedAgencyWorkspace;
 
 type AgencyCapacity = {
   ownedBusinesses: number;
@@ -46,6 +42,7 @@ export function AgencyWorkspacesDashboard() {
   const [creating, setCreating] = useState(false);
   const [switchingId, setSwitchingId] = useState<string | null>(null);
   const [reloadKey, setReloadKey] = useState(0);
+  const [accessWorkspace, setAccessWorkspace] = useState<AgencyWorkspace | null>(null);
 
   useEffect(() => {
     const controller = new AbortController();
@@ -221,15 +218,29 @@ export function AgencyWorkspacesDashboard() {
                       {active && <span className="agencyCurrentTag">Current workspace</span>}
                     </div>
                   </div>
-                  <button type="button" className="agencyOpenButton"
-                    disabled={suspended || active || switchingId !== null}
-                    onClick={() => void openWorkspace(workspace.workspaceId)}>
-                    {active ? "Current" : switchingId === workspace.workspaceId ? "Opening…" : "Open workspace"}
-                  </button>
+                  <div className="agencyWorkspaceActions">
+                    <button type="button" className="agencySecondaryButton"
+                      disabled={suspended}
+                      onClick={() => { setAccessWorkspace(workspace); setActionError(null); }}>
+                      Manage access
+                    </button>
+                    <button type="button" className="agencyOpenButton"
+                      disabled={suspended || active || switchingId !== null}
+                      onClick={() => void openWorkspace(workspace.workspaceId)}>
+                      {active ? "Current" : switchingId === workspace.workspaceId ? "Opening…" : "Open workspace"}
+                    </button>
+                  </div>
                 </article>
               );
             })}
           </section>
+
+          {accessWorkspace && (
+            <WorkspaceAccessPanel
+              workspace={accessWorkspace}
+              onClose={() => setAccessWorkspace(null)}
+            />
+          )}
         </div>
       </section>
     </main>
