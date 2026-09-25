@@ -1,6 +1,7 @@
 import { logger } from "@/server/observability/logger";
 import { getWhitelabelTraefikRouteConfig } from "@/server/whitelabel/domain-route-config";
 import { recoverWhitelabelDomainRoutes } from "@/server/whitelabel/domain-route";
+import { reconcilePendingWhitelabelDomainCertificates } from "@/server/whitelabel/domain-tls";
 
 export async function startWhitelabelEdgeReconciler() {
   const config = getWhitelabelTraefikRouteConfig();
@@ -16,9 +17,15 @@ export async function startWhitelabelEdgeReconciler() {
     if (running) return;
     running = true;
     try {
-      const result = await recoverWhitelabelDomainRoutes(100);
-      if (result.checked > 0 || result.failed > 0) {
-        logger.info(result, "Reconciled Whitelabel Traefik routes");
+      const routes = await recoverWhitelabelDomainRoutes(100);
+      if (routes.checked > 0 || routes.failed > 0) {
+        logger.info(routes, "Reconciled Whitelabel Traefik routes");
+      }
+      if (config.enabled) {
+        const certificates = await reconcilePendingWhitelabelDomainCertificates(40);
+        if (certificates.checked > 0 || certificates.failed > 0) {
+          logger.info(certificates, "Reconciled Whitelabel TLS readiness");
+        }
       }
     } catch (error) {
       logger.error({ err: error }, "Whitelabel edge reconciliation failed");
