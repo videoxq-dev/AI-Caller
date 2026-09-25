@@ -56,6 +56,20 @@ export async function requireEffectiveWhitelabelPurchaser(purchaserUserId: strin
 }
 
 /**
+ * Restrict provider-key lifecycle to the commercial purchaser. The caller
+ * separately checks product entitlement before CONNECT/BIND, but a purchaser
+ * may still remove their saved keys after a refund or provider-mode downgrade.
+ */
+export async function requireCommercialProviderPurchaser(userId: string, workspaceId: string) {
+  const commercial = await getCommercialWorkspaceOwner(workspaceId);
+  if (!commercial || commercial.purchaserUserId !== userId) {
+    throw new AppError("COMMERCIAL_PURCHASER_REQUIRED",
+      "Only the commercial purchaser can manage this provider infrastructure.", 403);
+  }
+  return commercial;
+}
+
+/**
  * Called only after F12-E resolves and verifies the requesting branded host
  * to its commercial purchaser. Never use an untrusted user-supplied purchaser
  * ID as the hostname identity. Purchasers continue using the canonical app.
