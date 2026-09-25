@@ -162,6 +162,54 @@ try {
     "Delegating client OWNER access changed the workspace commercial owner.");
 
   await page.getByRole("button", { name: "Close" }).click();
+
+  // An Agency client is a read-only credit user, even with operational OWNER.
+  const clientBillingBefore = await clientContext.request.get(`${baseUrl}/api/billing`);
+  assert(clientBillingBefore.ok(), "Delegated client could not view their workspace billing.");
+  const clientBillingData = await clientBillingBefore.json();
+  assert(clientBillingData.canPurchaseCredits === false && clientBillingData.packs.length === 0,
+    "Agency client was offered direct platform credit purchases.");
+  assert(clientBillingData.balance === 0, "New Agency client unexpectedly received credits.");
+  const deniedTopup = await clientContext.request.post(`${baseUrl}/api/billing/checkout`, {
+    data: { packCode: "CREDITS_10000" },
+  });
+  assert(deniedTopup.status() === 403, "Client-owner account could purchase credits directly.");
+  assert((await clientContext.request.get(`${baseUrl}/api/agency/credits`)).status() === 403,
+    "Client account gained access to the Agency credit pool.");
+  const deniedAllocation = await clientContext.request.post(`${baseUrl}/api/agency/credits/allocations`, {
+    data: { workspaceId: clientWorkspace.workspaceId, amount: 1, idempotencyKey: crypto.randomUUID() },
+  });
+  assert(deniedAllocation.status() === 403, "Client account allocated Agency-owned credits.");
+
+  // Provider-paid pool purchases are covered by the Stripe integration tests.
+  // Seed an isolated Agency pool here to verify the real browser allocation UI.
+  await pool.query(`INSERT INTO agency_credit_pools (purchaser_user_id, balance)
+    VALUES ($1, 10000) ON CONFLICT (purchaser_user_id) DO UPDATE SET balance = 10000`, [userId]);
+  await page.getByRole("button", { name: "Refresh balance" }).click();
+  const poolCard = page.getByRole("region", { name: "Agency credit pool" });
+  await poolCard.getByText("10,000", { exact: true }).waitFor();
+  await page.getByLabel("Client workspace").selectOption(clientWorkspace.workspaceId);
+  await page.getByLabel("Credits", { exact: true }).fill("2000");
+  const allocationPromise = page.waitForResponse((response) => response.url().endsWith(
+    "/api/agency/credits/allocations") && response.request().method() === "POST");
+  await page.getByRole("button", { name: "Allocate credits" }).click();
+  const allocationResponse = await allocationPromise;
+  if (allocationResponse.status() !== 201) throw new Error(`Agency allocation failed: ${await allocationResponse.text()}`);
+  await poolCard.getByText("8,000", { exact: true }).first().waitFor();
+  const clientBillingAfter = await clientContext.request.get(`${baseUrl}/api/billing`);
+  assert(clientBillingAfter.ok(), "Client billing was not readable after Agency allocation.");
+  const clientAfter = await clientBillingAfter.json();
+  assert(clientAfter.balance === 2000 && clientAfter.canPurchaseCredits === false,
+    "Agency allocation did not fund the client wallet without enabling direct checkout.");
+  assert(clientAfter.ledger.some((entry) => entry.referenceType === "AGENCY_ALLOCATION" ||
+    (entry.reason === "Credits allocated by Agency" && entry.amount === 2000)),
+    "Client billing activity omitted the Agency credit allocation.");
+  const agencyOriginalCredits = await context.request.get(`${baseUrl}/api/credits`);
+  assert(agencyOriginalCredits.ok(), "Original Agency wallet was not readable.");
+  // The original workspace is not the source of Agency allocations.
+  const originalWallet = await pool.query(`SELECT balance FROM credit_wallets WHERE workspace_id = $1`, [originalId]);
+  assert((originalWallet.rows[0]?.balance ?? 0) === 0, "Agency allocation consumed original workspace credits.");
+
   await noOverflow("Agency desktop");
   await page.screenshot({ path: path.join(outputDir, "agency-desktop.png"), fullPage: true });
 
