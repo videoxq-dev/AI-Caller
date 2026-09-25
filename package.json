@@ -36,7 +36,8 @@
     "test:browser:phase6c": "node scripts/phase6c-sms-readiness-browser-smoke.mjs",
     "test:browser:agency": "node scripts/agency-workspaces-browser-smoke.mjs",
     "test:browser:f12c": "node scripts/f12c-whitelabel-brand-browser-smoke.mjs",
-    "test:browser:f12d-domain": "node scripts/f12d-domain-dns-browser-smoke.mjs"
+    "test:browser:f12d-domain": "node scripts/f12d-domain-dns-browser-smoke.mjs",
+    "whitelabel-edge-reconciler": "tsx worker/whitelabel-edge.ts"
   },
   "dependencies": {
     "better-auth": "^1.7.5",

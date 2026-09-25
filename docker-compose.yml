@@ -111,6 +111,21 @@ services:
     volumes:
       - recordings:/app/.data/recordings
 
+  edge-reconciler:
+    <<: *app
+    restart: unless-stopped
+    environment:
+      NODE_ENV: production
+      DATABASE_URL: ${DATABASE_URL:-postgresql://postgres:ai_caller_auto_pass@postgres:5432/ai_caller}
+      WHITELABEL_DOMAIN_ROUTE_ENABLED: ${WHITELABEL_DOMAIN_ROUTE_ENABLED:-false}
+      WHITELABEL_TRAEFIK_DYNAMIC_DIR: /app/.data/traefik-domains
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+    command: ["sh", "-ec", "npm run verify:deployment && npm run whitelabel-edge-reconciler"]
+    volumes:
+      - ${WHITELABEL_TRAEFIK_DYNAMIC_HOST_DIR:-./.data/traefik-domains}:/app/.data/traefik-domains
+
   gateway:
     <<: *app
     restart: unless-stopped
