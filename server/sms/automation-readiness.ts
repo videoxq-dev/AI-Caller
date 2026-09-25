@@ -3,6 +3,8 @@ import { db } from "@/db";
 import { capabilityBindings, hostedPhoneNumbers, integrations, smsRegistrations } from "@/db/schema";
 import type { ApprovedSmsPolicy, SmsPurpose } from "./policy";
 
+type Tx = Parameters<Parameters<typeof db.transaction>[0]>[0];
+
 export type SmsAutomationReadiness = {
   status: "NOT_CONFIGURED" | "PROVIDER_DISCONNECTED" | "CARRIER_UNVERIFIED"
     | "REGISTRATION_REQUIRED" | "IN_REVIEW" | "REJECTED" | "PHONE_SUSPENDED" | "READY";
@@ -13,9 +15,12 @@ export type SmsAutomationReadiness = {
 
 // This read-only status does not resolve runtime credentials or contact consent.
 // Send-time validation in SMS outbound remains authoritative for every action.
-export async function smsAutomationReadiness(workspaceId: string): Promise<SmsAutomationReadiness> {
+export async function smsAutomationReadiness(
+  workspaceId: string,
+  tx: Tx | typeof db = db,
+): Promise<SmsAutomationReadiness> {
   const base = { categories: [] as SmsPurpose[], setupUrl: "/settings?tab=phone#sms-registration" };
-  const [binding] = await db.select({
+  const [binding] = await tx.select({
     mode: capabilityBindings.mode,
     integrationId: capabilityBindings.integrationId,
   }).from(capabilityBindings).where(and(
@@ -28,7 +33,7 @@ export async function smsAutomationReadiness(workspaceId: string): Promise<SmsAu
   }
 
   if (binding.mode === "BYOP") {
-    const [integration] = binding.integrationId ? await db.select({
+    const [integration] = binding.integrationId ? await tx.select({
       status: integrations.status,
     }).from(integrations).where(and(
       eq(integrations.workspaceId, workspaceId),
@@ -44,7 +49,7 @@ export async function smsAutomationReadiness(workspaceId: string): Promise<SmsAu
       setupUrl: "/integrations" };
   }
 
-  const [number] = await db.select({
+  const [number] = await tx.select({
     id: hostedPhoneNumbers.id,
     status: hostedPhoneNumbers.status,
     messagingReadiness: hostedPhoneNumbers.messagingReadiness,
@@ -64,7 +69,7 @@ export async function smsAutomationReadiness(workspaceId: string): Promise<SmsAu
       setupUrl: "/settings?tab=phone" };
   }
 
-  const [registration] = await db.select({
+  const [registration] = await tx.select({
     status: smsRegistrations.status,
     approvedPolicy: smsRegistrations.approvedPolicy,
   }).from(smsRegistrations).where(and(
