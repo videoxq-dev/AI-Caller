@@ -32,7 +32,8 @@ import { dispatchAutomationEvent } from "@/server/automations/dispatcher";
 import { executeAutomationRun } from "@/server/automations/executor";
 import { listRecoverableAutomationRuns, listUndispatchedAutomationEvents } from "@/server/automations/repository";
 import { processDuePhoneNumberRenewals, processPendingPhoneNumberProvisioning, processPendingPhoneNumberReleases } from "@/server/phone-numbers/service";
-import { reconcileWhitelabelDomainDns } from "@/server/whitelabel/domain-dns";
+import { reconcileWhitelabelDomain } from "@/server/whitelabel/domain-reconcile";
+import { recoverWhitelabelDomainRoutes } from "@/server/whitelabel/domain-route";
 
 export async function startWorker() {
   const authBoss = await ensureQueue(AUTH_PASSWORD_RESET_EMAIL);
@@ -112,12 +113,12 @@ export async function startWorker() {
   await whitelabelDomainBoss.work(WHITELABEL_DOMAIN_RECONCILE, async (jobs) => {
     for (const job of jobs) {
       const payload = whitelabelDomainReconcileJobSchema.parse(job.data);
-      const result = await reconcileWhitelabelDomainDns(payload.domainId);
+      const result = await reconcileWhitelabelDomain(payload.domainId);
       logger.info({
         domainId: payload.domainId,
         status: result.status,
         errorCode: result.lastErrorCode,
-      }, "Reconciled Whitelabel custom-domain DNS");
+      }, "Reconciled Whitelabel custom domain");
     }
   });
 
@@ -203,6 +204,24 @@ export async function startWorker() {
   const registrationTimer = setInterval(() => void reconcileMessagingRegistration(), 60_000);
   registrationTimer.unref();
 
+
+  let whitelabelRouteRecoveryRunning = false;
+  const recoverWhitelabelRoutes = async () => {
+    if (whitelabelRouteRecoveryRunning) return;
+    whitelabelRouteRecoveryRunning = true;
+    try {
+      const result = await recoverWhitelabelDomainRoutes(100);
+      if (result.checked > 0) logger.info(result, "Recovered Whitelabel Traefik routes");
+    } catch (error) {
+      logger.error({ err: error }, "Failed to recover Whitelabel Traefik routes");
+    } finally {
+      whitelabelRouteRecoveryRunning = false;
+    }
+  };
+  await recoverWhitelabelRoutes();
+  const whitelabelRouteRecoveryTimer = setInterval(() => void recoverWhitelabelRoutes(), 30_000);
+  whitelabelRouteRecoveryTimer.unref();
+
   let renewalRunning = false;
   const renewManagedNumbers = async () => {
     if (renewalRunning) return;
@@ -232,6 +251,7 @@ export async function startWorker() {
     clearInterval(bookingRecoveryTimer);
     clearInterval(provisioningTimer);
     clearInterval(registrationTimer);
+    clearInterval(whitelabelRouteRecoveryTimer);
     clearInterval(renewalTimer);
     await stopBoss();
     process.exit(0);
