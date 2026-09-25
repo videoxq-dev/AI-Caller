@@ -173,3 +173,31 @@ and route writes remain globally gated by:
 ```dotenv
 WHITELABEL_DOMAIN_ROUTE_ENABLED=true
 ```
+
+
+## F12-D5 independent TLS readiness
+
+A generated Traefik route does not make a domain `CERT_READY`.
+
+The dedicated edge reconciler probes the configured AI Caller public IPv4 address directly on port 443 while using the purchaser hostname as TLS SNI and the HTTP `Host` header. This prevents purchaser-controlled DNS from redirecting the probe to arbitrary network targets.
+
+Readiness requires all of the following:
+
+1. the TLS handshake is trusted for the purchaser hostname;
+2. the certificate has a future expiration date;
+3. HTTPS returns a 2xx/3xx response; and
+4. the response is the expected AI Caller Whitelabel holding-route marker for that hostname.
+
+Only then does `CERT_PENDING` become `CERT_READY`. Certificate expiry is persisted for renewal monitoring.
+
+Pending probe failures stay `CERT_PENDING` with an actionable error. Transient probe failures do not downgrade an already-ready domain; they are recorded diagnostically and retried. Ready/active domains with certificates within 21 days of recorded expiry are re-probed so renewed certificate metadata is refreshed.
+
+The probe timeout is bounded by:
+
+```dotenv
+WHITELABEL_TLS_PROBE_TIMEOUT_MS=8000
+```
+
+Traefik remains the ACME issuer and renewal authority. F12-D5 does not read or mutate `acme.json`.
+
+F12-D8 still requires a real controlled hostname on the deployed server to prove real ACME issuance, public HTTPS, and persistence across redeploy.
