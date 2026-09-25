@@ -70,6 +70,11 @@ const envSchema = z.object({
   WHITELABEL_PUBLIC_IPV6: z.preprocess((v) => v === "" ? undefined : v, z.string().min(1).optional()),
   WHITELABEL_CANONICAL_HOST: z.preprocess((v) => v === "" ? undefined : v, z.string().min(1).optional()),
   WHITELABEL_RESERVED_HOSTS: z.string().default(""),
+  WHITELABEL_DOMAIN_ROUTE_ENABLED: z.enum(["true", "false"]).default("false").transform((value) => value === "true"),
+  WHITELABEL_TRAEFIK_DYNAMIC_DIR: z.string().min(1).default(".data/traefik-domains"),
+  WHITELABEL_TRAEFIK_ENTRYPOINT: z.string().regex(/^[A-Za-z0-9_-]+$/).default("websecure"),
+  WHITELABEL_TRAEFIK_CERT_RESOLVER: z.string().regex(/^[A-Za-z0-9_-]+$/).default("letsencrypt"),
+  WHITELABEL_TRAEFIK_SERVICE_URL: z.string().url().default("http://aicaller-web:8080"),
   NODE_ENV: z.enum(["development", "test", "production"]).default("development"),
 });
 
