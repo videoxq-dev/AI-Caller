@@ -141,6 +141,26 @@ describe("F12-D2 custom-domain DNS verification", () => {
     expect(ok.status).toBe("VERIFIED");
   });
 
+  it.each(["ROUTE_PROVISIONING", "CERT_PENDING", "CERT_READY", "ACTIVE"] as const)(
+    "refreshes healthy DNS without moving an advanced %s lifecycle backward",
+    async (status) => {
+      const domain = await claimWhitelabelDomain(purchaser, "clients.stratosassist.com");
+      await db.update(whitelabelDomains).set({
+        status,
+        dnsVerifiedAt: new Date(Date.now() - 60_000),
+      }).where(eq(whitelabelDomains.id, domain.id));
+
+      const refreshed = await reconcileWhitelabelDomainDns(domain.id, resolver({
+        a: ["203.0.113.25"],
+        txt: [[domain.dns.verificationRecordValue]],
+      }));
+
+      expect(refreshed.status).toBe(status);
+      expect(refreshed.dnsVerifiedAt).toBeInstanceOf(Date);
+      expect(refreshed.lastErrorCode).toBeNull();
+    },
+  );
+
   it("marks a previously verified domain DNS_MISMATCH if routing later drifts", async () => {
     const domain = await claimWhitelabelDomain(purchaser, "clients.stratosassist.com");
     await reconcileWhitelabelDomainDns(domain.id, resolver({
