@@ -94,7 +94,7 @@ function checkHttpsAtEdge(pathname) {
 
 async function verifyLiveRecord() {
   if (!process.env.DATABASE_URL) return null;
-  const pool = new Pool({ connectionString: process.env.DATABASE_URL, max: 1 });
+  const pool = new Pool({ connectionString: process.env.DATABASE_URL, max: 1, connectionTimeoutMillis: 8000, statement_timeout: 5000 });
   try {
     const result = await pool.query(
       `SELECT status, certificate_status, certificate_expires_at,
