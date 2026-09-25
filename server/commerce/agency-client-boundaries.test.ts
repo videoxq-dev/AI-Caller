@@ -84,7 +84,7 @@ describe("F12-B Agency clients do not inherit the purchaser's premium business f
     workspacesToDelete.push(client.workspaceId);
     const [origin] = await db.select().from(workspaceCommercialOwners)
       .where(eq(workspaceCommercialOwners.workspaceId, client.workspaceId));
-    expect(origin.provisioningSource).toBe("AGENCY");
+    expect(origin.agencyClient).toBe(true);
     expect(await getContactCapacity(client.workspaceId)).toMatchObject({ limit: 500 });
     expect(await getWorkspaceSeatUsage(client.workspaceId)).toMatchObject({ commercialSeatPackage: null });
     expect(await getWorkspaceIntegrationEntitlements(client.workspaceId)).toMatchObject({
