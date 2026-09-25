@@ -1,4 +1,5 @@
 import { resolveWorkspaceContext } from "@/server/auth/workspace-context";
+import { requireCommercialProviderPurchaser } from "@/server/auth/commercial-ownership";
 import { requireWorkspacePermission } from "@/server/auth/permissions";
 import { bindCapability } from "@/server/domain/integrations/repository";
 import { capabilityBindingInputSchema } from "@/server/domain/integrations/schemas";
@@ -24,6 +25,10 @@ export async function PUT(request: Request) {
     const context = await resolveWorkspaceContext(request.headers);
     requireWorkspacePermission(context.membership.role, "integration.manage");
     const input = parseInput(capabilityBindingInputSchema, await request.json());
+    if (input.mode === "BYOP" && input.capability !== "CALENDAR"
+      && input.capability !== "WHATSAPP") {
+      await requireCommercialProviderPurchaser(context.session.user.id, context.workspace.id);
+    }
     await requireCapabilityBindingEntitlement(context.workspace.id, input.capability, input.mode, input.provider ?? null);
     await bindCapability(context.workspace.id, input.capability, input.mode, input.provider ?? null);
     return Response.json({ route: await resolveProviderRoute(context.workspace.id, input.capability) });
