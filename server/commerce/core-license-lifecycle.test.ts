@@ -261,11 +261,18 @@ describe("Core purchase lifecycle", () => {
     await guard.query("select pg_advisory_xact_lock(hashtext($1))", ["core-license:" + workspaceId]);
 
     const waitingCount = async () => {
-      // Inspect PostgreSQL's lock table directly rather than relying on the
-      // sampled pg_stat_activity query text / wait_event label.
+      // Count only sessions contending on THIS guard's advisory lock, not
+      // unrelated advisory waits elsewhere in the test database.
       const result = await guard.query(
-        "select count(*)::int AS waiting from pg_locks " +
-        "where locktype = 'advisory' and granted = false",
+        "select count(*)::int AS waiting from pg_locks blocked " +
+        "join pg_locks held on held.pid = pg_backend_pid() " +
+        "and held.locktype = 'advisory' and held.granted = true " +
+        "and blocked.database is not distinct from held.database " +
+        "and blocked.classid is not distinct from held.classid " +
+        "and blocked.objid is not distinct from held.objid " +
+        "and blocked.objsubid is not distinct from held.objsubid " +
+        "where blocked.locktype = 'advisory' and blocked.granted = false " +
+        "and blocked.pid <> pg_backend_pid()",
       );
       return result.rows[0].waiting as number;
     };
