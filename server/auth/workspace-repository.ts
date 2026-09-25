@@ -315,8 +315,8 @@ export async function createWorkspaceForUser(
       workspaceId: workspace.id,
       purchaserUserId: userId,
       kind: ownedBusinesses === 0 ? "PRIMARY" : "ADDITIONAL",
-      agencyClient: ownedBusinesses > 0 && activePurchases.some(({ code }) =>
-        code === "AGENCY_50" || code === "AGENCY_100"),
+      provisioningSource: ownedBusinesses === 0 ? "PRIMARY" : activePurchases.some(({ code }) =>
+        code === "AGENCY_50" || code === "AGENCY_100") ? "AGENCY" : "UNLIMITED",
     });
     await tx.insert(workspacePlans).values({
       workspaceId: workspace.id,
