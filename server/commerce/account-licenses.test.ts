@@ -126,6 +126,20 @@ describe("purchaser-owned commercial licenses", () => {
     expect(summarizeFunnelAccountLicenses([core, agency, { ...whitelabel, status: "CHARGEBACK" }]).effectiveWhitelabel).toBe(false);
   });
 
+  it("does not combine Core, Agency and Whitelabel receipts anchored to unrelated businesses", () => {
+    const originalId = randomUUID();
+    const anotherId = randomUUID();
+    const make = (workspaceId: string, productCode: string): PurchaserLicense => ({
+      id: randomUUID(), workspaceId, productCode, status: "ACTIVE", purchasedAt: new Date(),
+    });
+    expect(summarizeFunnelAccountLicenses([
+      make(originalId, "CORE"), make(originalId, "AGENCY_50"), make(anotherId, "WHITELABEL"),
+    ]).effectiveWhitelabel).toBe(false);
+    expect(summarizeFunnelAccountLicenses([
+      make(originalId, "CORE"), make(originalId, "AGENCY_50"), make(originalId, "WHITELABEL"),
+    ]).effectiveWhitelabel).toBe(true);
+  });
+
   it("isolates buyer licenses even when buyers share a workspace membership", async () => {
     const first = await buyer("First Buyer");
     const second = await buyer("Second Buyer");
