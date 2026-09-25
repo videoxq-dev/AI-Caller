@@ -18,12 +18,12 @@ async function buyer() {
   return id;
 }
 
-async function business(purchaser: string, kind: "PRIMARY" | "ADDITIONAL") {
+async function business(purchaser: string, kind: "PRIMARY" | "ADDITIONAL", isAgency = false) {
   const [row] = await db.insert(workspaces).values({ name: kind }).returning();
   workspacesToDelete.push(row.id);
   await db.insert(memberships).values({ workspaceId: row.id, userId: purchaser, role: "OWNER" });
   await db.insert(workspaceCommercialOwners).values({
-    workspaceId: row.id, purchaserUserId: purchaser, kind,
+    workspaceId: row.id, purchaserUserId: purchaser, kind, agencyClient: kind === "ADDITIONAL" && isAgency,
   });
   await db.insert(workspacePlans).values({ workspaceId: row.id, planId: "PERSONAL", source: "TEST" });
   return row.id;
@@ -52,7 +52,7 @@ describe("F12-B Agency clients do not inherit the purchaser's premium business f
     await grant(purchaser, primary, "UNLIMITED");
     await grant(purchaser, primary, "PERFORMANCE");
     await grant(purchaser, primary, "WHITELABEL");
-    const client = await business(purchaser, "ADDITIONAL");
+    const client = await business(purchaser, "ADDITIONAL", true);
     const delegatedOwner = await buyer();
     await db.insert(memberships).values({ workspaceId: client, userId: delegatedOwner, role: "OWNER" });
 
@@ -99,7 +99,7 @@ describe("F12-B Agency clients do not inherit the purchaser's premium business f
     await grant(purchaser, primary, "CORE");
     await grant(purchaser, primary, "UNLIMITED");
     await grant(purchaser, primary, "WHITELABEL");
-    const client = await business(purchaser, "ADDITIONAL");
+    const client = await business(purchaser, "ADDITIONAL", true);
     await db.update(licenses).set({ status: "REFUNDED" }).where(eq(licenses.id, agency.id));
     expect(await getContactCapacity(client)).toMatchObject({ limit: 500 });
     expect(await getWorkspaceSeatUsage(client)).toMatchObject({
