@@ -214,6 +214,9 @@ export function WhitelabelDomainPanel() {
                     ? "Needs attention"
                     : "Pending"
             }</b></span>
+            {domain.certificateExpiresAt && (
+              <span>Certificate expires <b>{new Date(domain.certificateExpiresAt).toLocaleDateString()}</b></span>
+            )}
             {domain.certificateExpiresAt && <span>Certificate expires <b>{new Date(domain.certificateExpiresAt).toLocaleDateString()}</b></span>}
             {domain.lastCheckedAt && <span>Last DNS check <b>{new Date(domain.lastCheckedAt).toLocaleString()}</b></span>}
           </div>
