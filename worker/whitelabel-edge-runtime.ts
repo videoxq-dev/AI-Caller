@@ -22,7 +22,7 @@ export async function startWhitelabelEdgeReconciler() {
       // A bounded scan must still eventually reach every domain, including
       // when healthy rows do not change their updatedAt each iteration.
       routeScanOffset = routes.checked < 100 ? 0 : routeScanOffset + routes.checked;
-      if (routes.checked > 0 || routes.failed > 0) {
+      if (routes.removed > 0 || routes.failed > 0) {
         logger.info(routes, "Reconciled Whitelabel Traefik routes");
       }
       if (config.enabled) {
