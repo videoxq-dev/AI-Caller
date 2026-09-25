@@ -9,7 +9,7 @@ import {
   workspaces,
 } from "@/db/schema";
 import {
-  buildAgencyTemplatePreview, createAgencyTemplate, publishAgencyTemplateVersion,
+  archiveAgencyTemplate, buildAgencyTemplatePreview, createAgencyTemplate, publishAgencyTemplateVersion,
 } from "@/server/agency/templates";
 import { saveAgentSetup, saveBusinessSetup } from "@/server/domain/onboarding/repository";
 import { createWorkspaceFromAgencyTemplate } from "./template-cloning";
@@ -148,6 +148,11 @@ describe("create Agency client from immutable template", () => {
     expect(owned).toHaveLength(2);
     await expect(createWorkspaceFromAgencyTemplate({ ...input, name: "Different Request" }))
       .rejects.toMatchObject({ code: "AGENCY_TEMPLATE_REQUEST_CONFLICT", status: 409 });
+    await archiveAgencyTemplate(buyer, templateId);
+    expect((await createWorkspaceFromAgencyTemplate(input)).workspaceId).toBe(first.workspaceId);
+    await expect(createWorkspaceFromAgencyTemplate({
+      ...input, idempotencyKey: randomUUID(),
+    })).rejects.toMatchObject({ code: "AGENCY_TEMPLATE_NOT_FOUND", status: 404 });
   });
 
   it("uses exact immutable versions; later edits cannot change older clients", async () => {
