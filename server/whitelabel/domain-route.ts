@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { mkdir, open, rename, unlink } from "node:fs/promises";
+import { mkdir, open, readFile, rename, unlink } from "node:fs/promises";
 import path from "node:path";
 import { and, eq, inArray, isNotNull, or } from "drizzle-orm";
 import { db } from "@/db";
@@ -77,6 +77,12 @@ export function renderTraefikDomainRoute(input: {
 }
 
 async function writeAtomic(target: string, content: string) {
+  try {
+    if (await readFile(target, "utf8") === content) return false;
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+  }
+
   await mkdir(path.dirname(target), { recursive: true });
   const temporary = `${target}.${process.pid}.${randomUUID()}.tmp`;
   let handle: Awaited<ReturnType<typeof open>> | null = null;
@@ -87,6 +93,7 @@ async function writeAtomic(target: string, content: string) {
     await handle.close();
     handle = null;
     await rename(temporary, target);
+    return true;
   } finally {
     if (handle) await handle.close().catch(() => undefined);
     await unlink(temporary).catch((error: NodeJS.ErrnoException) => {
