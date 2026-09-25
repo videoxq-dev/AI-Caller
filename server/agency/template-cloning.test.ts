@@ -1,17 +1,21 @@
-import { randomUUID } from "node:crypto";
+import { randomInt, randomUUID } from "node:crypto";
 import { eq, inArray } from "drizzle-orm";
 import { afterAll, afterEach, beforeEach, describe, expect, it } from "vitest";
 import { closeDatabase, db } from "@/db";
 import {
   agencyWorkspaceTemplateApplications, aiAgents, automationSettings,
-  businessProfiles, creditWallets, faqs, licenses, memberships, policies,
+  businessHours, businessProfiles, calendarSetupSettings, communicationSetupSettings, creditWallets, faqs,
+  hostedPhoneNumbers, licenses, memberships, policies,
   services, setupProgress, user, workspaceCommercialOwners, workspacePlans,
   workspaces,
 } from "@/db/schema";
 import {
   archiveAgencyTemplate, buildAgencyTemplatePreview, createAgencyTemplate, publishAgencyTemplateVersion,
 } from "@/server/agency/templates";
-import { saveAgentSetup, saveBusinessSetup } from "@/server/domain/onboarding/repository";
+import { markSetupStep, saveAgentSetup, saveBusinessSetup } from "@/server/domain/onboarding/repository";
+import { defaultAgentCapabilities } from "@/server/agent/capabilities";
+import { setWorkspaceAgentCapabilities, setWorkspaceAgentStatus } from "@/server/agent/service";
+import { getAgencyCloneReadiness } from "./template-readiness";
 import { createWorkspaceFromAgencyTemplate } from "./template-cloning";
 
 let buyer = "";
@@ -130,6 +134,116 @@ describe("create Agency client from immutable template", () => {
       .toMatchObject([{ userId: buyer, role: "OWNER" }]);
     expect((await db.select().from(aiAgents).where(eq(aiAgents.workspaceId, original)))[0]?.status)
       .toBe("ACTIVE");
+  });
+
+  it("rejects direct activation until the client's own business, AI, channel and credits are ready", async () => {
+    const cloned = await createWorkspaceFromAgencyTemplate({
+      purchaserUserId: buyer, name: "Readiness Clinic", templateId,
+      version: 1, idempotencyKey: randomUUID(),
+    });
+    const id = cloned.workspaceId;
+    await expect(setWorkspaceAgentStatus(id, "ACTIVE"))
+      .rejects.toMatchObject({ code: "AGENCY_CLONE_NOT_READY", status: 409 });
+    const first = await getAgencyCloneReadiness(id);
+    expect(first).toMatchObject({ templatedClient: true, canActivate: false });
+    expect(first?.items.filter((item) => !item.ready).map((item) => item.key))
+      .toEqual(expect.arrayContaining(["business", "agent", "communication", "credits"]));
+    expect((await db.select().from(aiAgents).where(eq(aiAgents.workspaceId, id)))[0]?.status).toBe("DRAFT");
+    expect(await db.select().from(setupProgress).where(eq(setupProgress.workspaceId, id)))
+      .toHaveLength(0);
+
+    await saveBusinessSetup(id, {
+      businessName: "Readiness Clinic", industry: "Healthcare", timezone: "America/Denver",
+      summary: "Clinic-specific approved content", completeStep: true,
+    });
+    await saveAgentSetup(id, {
+      name: "Mia", tone: "Warm", primaryGoal: "Answer questions",
+      whenUnsure: "Escalate to human", guardrails: [], voice,
+      qualification: { enabled: false, criteria: [] }, completeStep: true,
+    });
+    await db.insert(communicationSetupSettings).values({
+      workspaceId: id,
+      settings: {
+        voice: { mode: "HOSTED", provider: null },
+        sms: { mode: "HOSTED", provider: null },
+        whatsapp: { mode: "BYOP", provider: "whatsapp" },
+        webchat: { enabled: true },
+      },
+    });
+    await markSetupStep(id, "communication");
+    await db.update(creditWallets).set({ balance: 3000 })
+      .where(eq(creditWallets.workspaceId, id));
+    await expect(setWorkspaceAgentStatus(id, "ACTIVE"))
+      .rejects.toMatchObject({ code: "AGENCY_CLONE_NOT_READY" });
+    expect((await getAgencyCloneReadiness(id))?.items.find((item) => item.key === "phone"))
+      .toMatchObject({ ready: false });
+
+    await db.insert(hostedPhoneNumbers).values({
+      workspaceId: id, phoneNumber: `+1${randomInt(2_000_000_000, 9_999_999_999)}`,
+      countryCode: "US", status: "ACTIVE", messagingReadiness: "NOT_REGISTERED",
+      providerMonthlyCostMicros: 0, monthlyCredits: 10, purchaseCredits: 10,
+    });
+    expect(await getAgencyCloneReadiness(id)).toMatchObject({ canActivate: true });
+    await expect(setWorkspaceAgentStatus(id, "ACTIVE"))
+      .resolves.toMatchObject({ status: "ACTIVE" });
+    expect(await db.select().from(setupProgress).where(eq(setupProgress.workspaceId, id)))
+      .toMatchObject([{ liveCompletedAt: expect.any(Date) }]);
+    expect((await db.select().from(aiAgents).where(eq(aiAgents.workspaceId, original)))[0]?.status)
+      .toBe("ACTIVE");
+  });
+
+  it("requires destination calendar only for enabled booking actions, and approved SMS only if SMS is enabled", async () => {
+    const cloned = await createWorkspaceFromAgencyTemplate({
+      purchaserUserId: buyer, name: "Capability Clinic", templateId,
+      version: 1, idempotencyKey: randomUUID(),
+    });
+    const id = cloned.workspaceId;
+    await saveBusinessSetup(id, {
+      businessName: "Capability Clinic", timezone: "America/Denver", completeStep: true,
+      hours: [{ dayOfWeek: 1, enabled: true, openTime: "09:00", closeTime: "17:00" }],
+    });
+    await saveAgentSetup(id, {
+      name: "Mia", tone: "Warm", primaryGoal: "Book visits",
+      whenUnsure: "Escalate to human", guardrails: [], voice,
+      qualification: { enabled: false, criteria: [] }, completeStep: true,
+    });
+    await db.insert(communicationSetupSettings).values({
+      workspaceId: id, settings: {
+        voice: { mode: "HOSTED", provider: null }, sms: { mode: "HOSTED", provider: null },
+        whatsapp: { mode: "BYOP", provider: "whatsapp" }, webchat: { enabled: true },
+      },
+    });
+    await markSetupStep(id, "communication");
+    await db.insert(hostedPhoneNumbers).values({
+      workspaceId: id, phoneNumber: `+1${randomInt(2_000_000_000, 9_999_999_999)}`,
+      countryCode: "US", status: "ACTIVE", messagingReadiness: "NOT_REGISTERED",
+      providerMonthlyCostMicros: 0, monthlyCredits: 10, purchaseCredits: 10,
+    });
+    await db.update(creditWallets).set({ balance: 1000 }).where(eq(creditWallets.workspaceId, id));
+    await setWorkspaceAgentCapabilities(id, {
+      ...defaultAgentCapabilities, BOOK_APPOINTMENT: true, CHECK_AVAILABILITY: true,
+      SEND_SMS: false, RESCHEDULE_APPOINTMENT: false, CANCEL_APPOINTMENT: false,
+    });
+    const before = await getAgencyCloneReadiness(id);
+    expect(before?.items.find((item) => item.key === "calendar")).toMatchObject({ ready: false });
+    await expect(setWorkspaceAgentStatus(id, "ACTIVE"))
+      .rejects.toMatchObject({ code: "AGENCY_CLONE_NOT_READY" });
+
+    await db.insert(calendarSetupSettings).values({ workspaceId: id, settings: {
+      provider: "google", timezone: "America/Denver",
+      availableDays: ["Mon"], startTime: "09:00", endTime: "17:00",
+    } });
+    await markSetupStep(id, "calendar");
+    expect((await getAgencyCloneReadiness(id))?.items.find((item) => item.key === "calendar"))
+      .toMatchObject({ ready: true });
+    await setWorkspaceAgentCapabilities(id, {
+      ...defaultAgentCapabilities, BOOK_APPOINTMENT: true, CHECK_AVAILABILITY: true,
+      RESCHEDULE_APPOINTMENT: false, CANCEL_APPOINTMENT: false, SEND_SMS: true,
+    });
+    expect((await getAgencyCloneReadiness(id))?.items.find((item) => item.key === "sms"))
+      .toMatchObject({ ready: false });
+    await expect(setWorkspaceAgentStatus(id, "ACTIVE"))
+      .rejects.toMatchObject({ code: "AGENCY_CLONE_NOT_READY" });
   });
 
   it("creates just one client when the same request is retried concurrently", async () => {
