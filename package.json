@@ -50,7 +50,8 @@
     "zod": "^4.6.5",
     "@aws-sdk/client-s3": "^3.1134.0",
     "ws": "^8.18.3",
-    "stripe": "^22.4.0"
+    "stripe": "^22.4.0",
+    "sharp": "^0.35.4"
   },
   "devDependencies": {
     "@types/node": "^22.0.0",
