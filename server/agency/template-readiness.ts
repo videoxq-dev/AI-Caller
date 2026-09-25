@@ -104,7 +104,7 @@ export async function getAgencyCloneReadiness(
   ];
 
   if (smsEnabled) {
-    const readiness = await smsAutomationReadiness(workspaceId);
+    const readiness = await smsAutomationReadiness(workspaceId, tx);
     items.push({
       key: "sms",
       ready: readiness.status === "READY",

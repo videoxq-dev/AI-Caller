@@ -81,6 +81,22 @@ describe("Phase 6C automation SMS readiness", () => {
     });
   });
 
+  it("reads uncommitted SMS registration readiness on the caller's activation transaction", async () => {
+    const id = await hosted();
+    await db.transaction(async (tx) => {
+      await tx.update(hostedPhoneNumbers).set({ messagingReadiness: "READY" })
+        .where(eq(hostedPhoneNumbers.id, id));
+      await tx.insert(smsRegistrations).values({
+        workspaceId, phoneNumberId: id, numberType: "local", status: "READY",
+        approvedPolicy: { categories: ["TRANSACTIONAL"], allowEmbeddedLinks: false,
+          description: "Confirmed appointments" },
+      });
+      expect(await smsAutomationReadiness(workspaceId, tx)).toMatchObject({
+        status: "READY", categories: ["TRANSACTIONAL"],
+      });
+    });
+  });
+
   it("treats a suspended managed phone as unavailable even if its carrier campaign is approved", async () => {
     const id = await hosted("READY");
     await db.insert(smsRegistrations).values({

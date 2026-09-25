@@ -261,15 +261,26 @@ describe("Core purchase lifecycle", () => {
     await guard.query("select pg_advisory_xact_lock(hashtext($1))", ["core-license:" + workspaceId]);
 
     const waitingCount = async () => {
+      // Count only sessions contending on THIS guard's advisory lock, not
+      // unrelated advisory waits elsewhere in the test database.
       const result = await guard.query(
-        "select count(*)::int AS waiting from pg_stat_activity " +
-        "where wait_event = 'advisory' and pid <> pg_backend_pid() " +
-        "and query like '%pg_advisory_xact_lock%'",
+        "select count(*)::int AS waiting from pg_locks blocked " +
+        "join pg_locks held on held.pid = pg_backend_pid() " +
+        "and held.locktype = 'advisory' and held.granted = true " +
+        "and blocked.database is not distinct from held.database " +
+        "and blocked.classid is not distinct from held.classid " +
+        "and blocked.objid is not distinct from held.objid " +
+        "and blocked.objsubid is not distinct from held.objsubid " +
+        "where blocked.locktype = 'advisory' and blocked.granted = false " +
+        "and blocked.pid <> pg_backend_pid()",
       );
       return result.rows[0].waiting as number;
     };
     const waitFor = async (minimum: number) => {
-      for (let i = 0; i < 100; i++) {
+      // CI sometimes needs more than three seconds to schedule a competing
+      // purchase webhook. Keep the lock-based assertion instead of accepting
+      // a sequential refund/BILL test that would miss the regression.
+      for (let i = 0; i < 400; i++) {
         if (await waitingCount() >= minimum) return true;
         await new Promise((resolve) => setTimeout(resolve, 30));
       }
@@ -319,5 +330,5 @@ describe("Core purchase lifecycle", () => {
     expect(access.value).toBe(false);
     expect(results[1].status === "fulfilled" && results[1].value)
       .toMatchObject({ result: { ignored: true, reason: "REVOKED_PURCHASE" } });
-  });
+  }, 30_000);
 });
