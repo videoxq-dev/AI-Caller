@@ -60,6 +60,7 @@ export async function getEffectiveWorkspaceSeatPlanInTransaction(tx: Tx, workspa
   const [commercialOwner] = await tx.select({
     userId: workspaceCommercialOwners.purchaserUserId,
     kind: workspaceCommercialOwners.kind,
+    provisioningSource: workspaceCommercialOwners.provisioningSource,
     createdAt: workspaceCommercialOwners.createdAt,
   })
     .from(workspaceCommercialOwners)
@@ -69,7 +70,7 @@ export async function getEffectiveWorkspaceSeatPlanInTransaction(tx: Tx, workspa
   // cancellation/refund. The prior purchase date classifies the client,
   // rather than whichever operational OWNER happens to be invited today.
   if (commercialOwner?.kind === "ADDITIONAL"
-    && await wasProvisionedForAgency(commercialOwner.userId, commercialOwner.createdAt, tx)) {
+    && await wasProvisionedForAgency(commercialOwner.userId, commercialOwner.createdAt, commercialOwner.provisioningSource, tx)) {
     return { plan, commercialSeatPackage: null as "UNLIMITED" | null };
   }
   let purchaserUserId = commercialOwner?.userId ?? null;
