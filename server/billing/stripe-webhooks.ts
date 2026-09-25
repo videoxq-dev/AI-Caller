@@ -8,6 +8,7 @@ import {
   stripeWebhookEvents,
 } from "@/db/schema";
 import { AppError } from "@/server/http/errors";
+import { creditAgencyPoolTopupInTx, adjustAgencyPoolForPaymentInTx } from "@/server/agency/credit-pool";
 
 type Tx = Parameters<Parameters<typeof db.transaction>[0]>[0];
 
@@ -39,10 +40,20 @@ async function fulfillCheckout(tx: Tx, eventId: string, session: Stripe.Checkout
   if (session.metadata?.workspaceId && session.metadata.workspaceId !== topup.workspaceId) {
     throw new AppError("STRIPE_TOPUP_WORKSPACE_MISMATCH", "Stripe Checkout workspace metadata does not match the top-up.", 409);
   }
+  if (session.metadata?.fundingDestination && session.metadata.fundingDestination !== topup.fundingDestination) {
+    throw new AppError("STRIPE_TOPUP_DESTINATION_MISMATCH", "Stripe Checkout funding destination does not match the purchase.", 409);
+  }
+  if (session.metadata?.agencyPurchaserUserId && session.metadata.agencyPurchaserUserId !== topup.agencyPurchaserUserId) {
+    throw new AppError("STRIPE_TOPUP_OWNER_MISMATCH", "Stripe Checkout purchaser does not match the purchase.", 409);
+  }
   if (session.amount_total !== topup.amountCents || session.currency?.toLowerCase() !== topup.currency.toLowerCase()) {
     throw new AppError("STRIPE_TOPUP_AMOUNT_MISMATCH", "Stripe Checkout amount does not match the selected credit pack.", 409);
   }
 
+  if (topup.fundingDestination === "AGENCY_POOL") {
+    if (!topup.agencyPurchaserUserId) throw new AppError("AGENCY_POOL_PURCHASER_MISSING", "Agency pool buyer was not recorded.", 409);
+    await creditAgencyPoolTopupInTx(tx, topup.agencyPurchaserUserId, topup.id, topup.credits);
+  } else {
   const [existingPurchase] = await tx.select({ id: creditLedger.id }).from(creditLedger).where(and(
     eq(creditLedger.workspaceId, topup.workspaceId),
     eq(creditLedger.type, "PURCHASE"),
@@ -67,6 +78,8 @@ async function fulfillCheckout(tx: Tx, eventId: string, session: Stripe.Checkout
       referenceType: "STRIPE_TOPUP",
       referenceId: topup.id,
     });
+  }
+
   }
 
   await tx.update(creditTopups).set({
@@ -140,22 +153,27 @@ async function reconcileLoss(
   const delta = targetReversedCredits - current.reversedCredits;
 
   if (delta !== 0) {
-    await ensureWallet(tx, current.workspaceId);
-    const [wallet] = await tx.update(creditWallets).set({
-      balance: sql`${creditWallets.balance} - ${delta}`,
-      updatedAt: new Date(),
-    }).where(eq(creditWallets.workspaceId, current.workspaceId)).returning({ balance: creditWallets.balance });
-    if (!wallet) throw new AppError("CREDIT_WALLET_NOT_FOUND", "Credit wallet could not be updated.", 409);
+    if (current.fundingDestination === "AGENCY_POOL") {
+      if (!current.agencyPurchaserUserId) throw new AppError("AGENCY_POOL_PURCHASER_MISSING", "Agency pool buyer was not recorded.", 409);
+      await adjustAgencyPoolForPaymentInTx(tx, current.agencyPurchaserUserId, eventId, -delta);
+    } else {
+      await ensureWallet(tx, current.workspaceId);
+      const [wallet] = await tx.update(creditWallets).set({
+        balance: sql`${creditWallets.balance} - ${delta}`,
+        updatedAt: new Date(),
+      }).where(eq(creditWallets.workspaceId, current.workspaceId)).returning({ balance: creditWallets.balance });
+      if (!wallet) throw new AppError("CREDIT_WALLET_NOT_FOUND", "Credit wallet could not be updated.", 409);
 
-    await tx.insert(creditLedger).values({
-      workspaceId: current.workspaceId,
-      type: "ADJUSTMENT",
-      amount: -delta,
-      balanceAfter: wallet.balance,
-      reason: delta > 0 ? "Stripe top-up refund or dispute reversal" : "Stripe dispute reversal restored credits",
-      referenceType: "STRIPE_EVENT",
-      referenceId: eventId,
-    });
+      await tx.insert(creditLedger).values({
+        workspaceId: current.workspaceId,
+        type: "ADJUSTMENT",
+        amount: -delta,
+        balanceAfter: wallet.balance,
+        reason: delta > 0 ? "Stripe top-up refund or dispute reversal" : "Stripe dispute reversal restored credits",
+        referenceType: "STRIPE_EVENT",
+        referenceId: eventId,
+      });
+    }
   }
 
   await tx.update(creditTopups).set({
