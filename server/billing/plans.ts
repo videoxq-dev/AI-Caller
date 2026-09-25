@@ -2,6 +2,7 @@ import { and, eq, gt, ne, sql } from "drizzle-orm";
 import { db } from "@/db";
 import { licenses, memberships, plans, workspaceCommercialOwners, workspaceInvitations, workspacePlans } from "@/db/schema";
 import { AppError } from "@/server/http/errors";
+import { wasProvisionedForAgency } from "@/server/commerce/agency-client-classification";
 
 export type PlanCode = "PERSONAL" | "GROWTH";
 type Tx = Parameters<Parameters<typeof db.transaction>[0]>[0];
@@ -56,10 +57,21 @@ export async function getEffectiveWorkspaceSeatPlanInTransaction(tx: Tx, workspa
   // Commercial entitlements follow the explicit purchaser, independent of
   // operational OWNER/ADMIN/STAFF roles. Fall back only for unreconciled
   // historical workspaces that still have exactly one OWNER membership.
-  const [commercialOwner] = await tx.select({ userId: workspaceCommercialOwners.purchaserUserId })
+  const [commercialOwner] = await tx.select({
+    userId: workspaceCommercialOwners.purchaserUserId,
+    kind: workspaceCommercialOwners.kind,
+    createdAt: workspaceCommercialOwners.createdAt,
+  })
     .from(workspaceCommercialOwners)
     .where(eq(workspaceCommercialOwners.workspaceId, workspaceId))
     .limit(1);
+  // An Agency client keeps Core-only commercial seats even after an Agency
+  // cancellation/refund. The prior purchase date classifies the client,
+  // rather than whichever operational OWNER happens to be invited today.
+  if (commercialOwner?.kind === "ADDITIONAL"
+    && await wasProvisionedForAgency(commercialOwner.userId, commercialOwner.createdAt, tx)) {
+    return { plan, commercialSeatPackage: null as "UNLIMITED" | null };
+  }
   let purchaserUserId = commercialOwner?.userId ?? null;
   if (!purchaserUserId) {
     const owners = await tx.select({ userId: memberships.userId }).from(memberships)
