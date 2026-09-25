@@ -137,3 +137,39 @@ Disconnect/revocation is fail-closed: route removal is queued immediately and al
 Traefik is responsible for ACME issuance and renewal. The router references the configured certificate resolver, but **F12-D3 does not mark a certificate READY**. F12-D5 performs an independent public TLS/SNI probe before setting `CERT_READY`.
 
 Keep ACME storage persistent in the Traefik deployment. Use a staging ACME resolver for infrastructure rehearsal if available before production issuance.
+
+
+## D4 dedicated edge reconciler
+
+Route materialization runs in the Compose `edge-reconciler` service, not the general AI Caller worker.
+
+The service:
+
+- has PostgreSQL access on the private default network;
+- has no HTTP port;
+- is not attached to the public `edge` network;
+- receives the Traefik dynamic-directory bind mount;
+- writes only deterministic `wl-<domain-id>.yml` files from normalized database hostnames;
+- periodically recreates missing desired files and removes routes that should no longer exist.
+
+The public `web` service is attached to `edge` as `aicaller-web`, but it does not receive the Traefik filesystem mount. The general `worker` also does not receive that mount.
+
+Until client-domain authentication and the branded client application are implemented, every generated Whitelabel router uses a Traefik `replacePath` middleware that sends requests to:
+
+```text
+/api/whitelabel/domain-pending
+```
+
+This endpoint returns a neutral, non-indexed holding response. As a result, enabling route/TLS provisioning during F12-D cannot expose the canonical AI Caller sign-in or purchaser dashboard on a customer hostname.
+
+The reconciler command is:
+
+```sh
+npm run whitelabel-edge-reconciler
+```
+
+and route writes remain globally gated by:
+
+```dotenv
+WHITELABEL_DOMAIN_ROUTE_ENABLED=true
+```
