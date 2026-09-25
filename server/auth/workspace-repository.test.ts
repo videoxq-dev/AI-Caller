@@ -96,6 +96,25 @@ describe("workspace provisioning", () => {
     expect(await listMembershipsForUser(TEST_USER_ID)).toHaveLength(2);
   });
 
+  it("rolls back creation and capacity when applying a template fails", async () => {
+    const original = await createWorkspaceForUser(TEST_USER_ID, "Original");
+    await db.insert(licenses).values({
+      workspaceId: original.workspaceId, purchaserUserId: TEST_USER_ID,
+      source: "MANUAL", externalPurchaseId: randomUUID(), productCode: "AGENCY_50",
+      status: "ACTIVE", purchasedAt: new Date(),
+    });
+    await expect(createWorkspaceForUser(TEST_USER_ID, "Broken Client", {
+      templateId: randomUUID(), templateVersionId: randomUUID(),
+      version: 1, idempotencyKey: randomUUID(),
+      apply: async () => { throw new Error("Template seed failed"); },
+    })).rejects.toThrow("Template seed failed");
+    expect(await listCommercialWorkspacesForUser(TEST_USER_ID))
+      .toMatchObject([{ workspaceId: original.workspaceId, kind: "PRIMARY" }]);
+    expect(await getOwnedWorkspaceCapacity(TEST_USER_ID)).toMatchObject({
+      ownedBusinesses: 1, agencyClientsUsed: 0, agencyClientsAvailable: 50,
+    });
+  });
+
   it("reserves Agency 50 slots for clients in addition to the original business", async () => {
     const original = await createWorkspaceForUser(TEST_USER_ID, "Original Business");
     await db.insert(licenses).values({ workspaceId: original.workspaceId, purchaserUserId: TEST_USER_ID, source: "MANUAL", externalPurchaseId: randomUUID(), productCode: "AGENCY_50", status: "ACTIVE", purchasedAt: new Date() });
