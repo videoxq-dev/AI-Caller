@@ -208,6 +208,14 @@ Client business data remains isolated by workspace in the shared database. No pe
 
 **Exit:** Commercial and operational ownership unambiguously separate; each sensitive entry point requires the same effective authorization.
 
+**F12-B implementation note — purchaser authorization foundation (PR #88)**
+
+- `workspaceCommercialOwners` is authoritative for purchaser identity. The operational `OWNER` role does not confer Agency license, Whitelabel administration, Agency credit purchase/allocation or purchaser provider credentials. A sole-owner fallback remains only for unreconciled historical workspaces without a commercial record.
+- Agency-client classification uses the commercial ownership creation timestamp and the purchaser's historical Agency receipt purchase time. An additional workspace created *after* Agency was purchased remains Core-only even when the Agency receipt is later refunded. The purchaser's separate Unlimited second business created *before* Agency purchase remains eligible for its Unlimited seats and contact cap. If historical data was manually imported without reliable purchase/provisioning chronology, reconcile those records explicitly; do not guess a client classification from today's membership counts.
+- Whitelabel purchaser administration requires Core, Agency and Whitelabel active receipts anchored to the same commercial primary business; purchaser management is independent of the currently selected workspace. The brand-scoped client-access guard requires an approved brand purchaser ID supplied by a **future verified host resolver**, an Agency-provisioned additional workspace, a delegated client membership and live Whitelabel prerequisites. Purchaser/Agency staff remain on the canonical AI Caller application.
+- Non-calendar BYOP remains disabled until F12-G implements an **exclusive estate-wide HOSTED/BYOP mode**. Legacy Agency BYOP capability bindings fail closed and must not silently consume hosted credits. Core WhatsApp Embedded Signup and separately purchased Unlimited calendars keep their preexisting product boundaries.
+- F12-B does not implement a host registry or activate public brand-host request routing. Wire the verified hostname to this guard and test unknown/deactivated domains, forged Host headers, cookies and callback origins in F12-D/E/F. Never pass a raw user-provided purchaser ID as the approved host identity.
+
 ### F12-C — Purchaser-side brand management (canonical domain only)
 
 **Goal:** Agency purchaser configures a branded product in AI Caller without changing their own canonical AI Caller control center.
