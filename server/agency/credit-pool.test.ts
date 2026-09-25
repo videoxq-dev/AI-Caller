@@ -5,7 +5,7 @@ import { afterAll, afterEach, beforeEach, describe, expect, it } from "vitest";
 import { closeDatabase, db } from "@/db";
 import {
   agencyCreditAllocations, agencyCreditPoolLedger, agencyCreditPools,
-  creditLedger, creditPacks, creditTopups, creditWallets, licenses,
+  creditLedger, creditTopups, creditWallets, licenses,
   user, workspaceCommercialOwners, workspaces,
 } from "@/db/schema";
 import { getCreditBalance } from "@/server/credits/service";
@@ -36,7 +36,7 @@ async function purchaseAgencyCredits(amount = 10_000) {
     fundingDestination: "AGENCY_POOL",
     agencyPurchaserUserId: ownerId,
     createdByUserId: ownerId,
-    packCode: "AGENCY_POOL_TEST",
+    packCode: "CREDITS_10000",
     credits: amount,
     amountCents: 1000,
     currency: "usd",
@@ -85,12 +85,6 @@ describe("purchaser-owned Agency credit pool", () => {
       workspaceId: originalId, purchaserUserId: ownerId, source: "MANUAL",
       externalPurchaseId: randomUUID(), productCode: "AGENCY_50",
       status: "ACTIVE", purchasedAt: new Date(),
-    });
-    await db.insert(creditPacks).values({
-      code: "AGENCY_POOL_TEST", name: "Agency credit test pack",
-      credits: 10_000, amountCents: 1000, currency: "usd",
-    }).onConflictDoUpdate({
-      target: creditPacks.code, set: { credits: 10_000, amountCents: 1000, active: true },
     });
   });
 
