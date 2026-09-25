@@ -66,6 +66,10 @@ const envSchema = z.object({
   BRAND_ASSET_S3_ENDPOINT: z.preprocess((v) => v === "" ? undefined : v, z.string().url().optional()),
   BRAND_ASSET_S3_ACCESS_KEY_ID: z.preprocess((v) => v === "" ? undefined : v, z.string().min(1).optional()),
   BRAND_ASSET_S3_SECRET_ACCESS_KEY: z.preprocess((v) => v === "" ? undefined : v, z.string().min(1).optional()),
+  WHITELABEL_PUBLIC_IPV4: z.preprocess((v) => v === "" ? undefined : v, z.string().min(1).optional()),
+  WHITELABEL_PUBLIC_IPV6: z.preprocess((v) => v === "" ? undefined : v, z.string().min(1).optional()),
+  WHITELABEL_CANONICAL_HOST: z.preprocess((v) => v === "" ? undefined : v, z.string().min(1).optional()),
+  WHITELABEL_RESERVED_HOSTS: z.string().default(""),
   NODE_ENV: z.enum(["development", "test", "production"]).default("development"),
 });
 
