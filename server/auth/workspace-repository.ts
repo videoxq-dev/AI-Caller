@@ -222,6 +222,7 @@ export async function getOwnedWorkspaceCapacity(userId: string) {
     agencyClientsUsed: agencyClientLimit === null ? null : agencyClientsUsed,
     agencyClientsAvailable: agencyClientLimit === null ? null : Math.max(0, agencyClientLimit - agencyClientsUsed),
     activeProducts: summary.activeProducts,
+    effectiveWhitelabel: summary.effectiveWhitelabel,
   };
 }
 

@@ -28,7 +28,7 @@ describe("authenticated funnel purchase summary", () => {
     });
     vi.mocked(getOwnedWorkspaceCapacity).mockResolvedValue({
       ownedBusinesses: 1, businessLimit: 1, availableBusinesses: 0, activeProducts: ["CORE"],
-      agencyClientLimit: null, agencyClientsUsed: null, agencyClientsAvailable: null,
+      agencyClientLimit: null, agencyClientsUsed: null, agencyClientsAvailable: null, effectiveWhitelabel: false,
     });
   });
 
