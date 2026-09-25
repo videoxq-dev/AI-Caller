@@ -2,6 +2,7 @@ import { and, asc, eq, sql } from "drizzle-orm";
 import { db } from "@/db";
 import { licenses, memberships, user, workspaceCommercialOwners } from "@/db/schema";
 import { AppError } from "@/server/http/errors";
+import { syncWhitelabelDomainEntitlementInTx } from "@/server/whitelabel/domain-entitlement-lifecycle";
 import { resolveFunnelProductId } from "./products";
 import type { NormalizedPurchaseEvent } from "./types";
 
@@ -12,7 +13,8 @@ const REVOKE_EVENTS = new Set(["RFND", "CGBK", "INSF", "CANCEL-REBILL"]);
  * Stage an independently owned Whitelabel receipt without enabling public
  * checkout/IPN provisioning. Whitelabel becomes usable only when the same
  * purchaser also has active Core and Agency; this function does not add
- * workspaces, credits, provider routing or brand/domain authorization.
+ * workspaces, credits or provider routing. Existing custom-domain lifecycle
+ * state is synchronized atomically with the commercial prerequisite state.
  */
 export async function reconcileWhitelabelReceipt(event: NormalizedPurchaseEvent) {
   if (event.source !== "JVZOO" || resolveFunnelProductId(event.productId) !== "WHITELABEL") {
@@ -120,6 +122,9 @@ export async function reconcileWhitelabelReceipt(event: NormalizedPurchaseEvent)
       }).where(eq(licenses.id, license.id)).returning();
     }
 
+    if (license.purchaserUserId) {
+      await syncWhitelabelDomainEntitlementInTx(tx, license.purchaserUserId);
+    }
     return {
       ignored: false as const, workspaceId: license.workspaceId,
       licenseId: license.id, productCode: "WHITELABEL" as const,
