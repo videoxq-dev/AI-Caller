@@ -58,6 +58,14 @@ const envSchema = z.object({
   VOICE_RECORDING_S3_ENDPOINT: z.string().url().optional(),
   VOICE_RECORDING_S3_ACCESS_KEY_ID: z.string().min(1).optional(),
   VOICE_RECORDING_S3_SECRET_ACCESS_KEY: z.string().min(1).optional(),
+  BRAND_ASSET_STORAGE_BACKEND: z.enum(["filesystem", "s3"]).default("filesystem"),
+  BRAND_ASSET_ALLOW_PERSISTENT_FILESYSTEM: z.enum(["true", "false"]).default("false").transform((value) => value === "true"),
+  BRAND_ASSET_DIR: z.string().min(1).default(".data/brand-assets"),
+  BRAND_ASSET_S3_BUCKET: z.preprocess((v) => v === "" ? undefined : v, z.string().min(1).optional()),
+  BRAND_ASSET_S3_REGION: z.string().min(1).default("us-east-1"),
+  BRAND_ASSET_S3_ENDPOINT: z.preprocess((v) => v === "" ? undefined : v, z.string().url().optional()),
+  BRAND_ASSET_S3_ACCESS_KEY_ID: z.preprocess((v) => v === "" ? undefined : v, z.string().min(1).optional()),
+  BRAND_ASSET_S3_SECRET_ACCESS_KEY: z.preprocess((v) => v === "" ? undefined : v, z.string().min(1).optional()),
   NODE_ENV: z.enum(["development", "test", "production"]).default("development"),
 });
 

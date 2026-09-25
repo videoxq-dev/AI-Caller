@@ -49,6 +49,8 @@ services:
       HOSTNAME: 0.0.0.0
       VOICE_RECORDING_ALLOW_PERSISTENT_FILESYSTEM: "true"
       VOICE_RECORDING_DIR: /app/.data/recordings
+      BRAND_ASSET_ALLOW_PERSISTENT_FILESYSTEM: "true"
+      BRAND_ASSET_DIR: /app/.data/brand-assets
     depends_on:
       migrate:
         condition: service_completed_successfully
@@ -65,6 +67,7 @@ services:
       - "${AI_CALLER_BIND_ADDRESS:-127.0.0.1}:${AI_CALLER_HTTP_PORT:-8080}:8080"
     volumes:
       - recordings:/app/.data/recordings
+      - brand_assets:/app/.data/brand-assets
 
   worker:
     image: ai-caller-app:local
@@ -110,3 +113,4 @@ services:
 volumes:
   postgres_data:
   recordings:
+  brand_assets:
