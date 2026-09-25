@@ -155,7 +155,7 @@ describe("F12-D3 Traefik route reconciliation", () => {
     expect(stored.routeId).toBe(first.routeId);
   });
 
-  it.each(["DNS_MISMATCH", "REVOKED", "DISABLING", "DISABLED"] as const)(
+  it.each(["DRAFT", "AWAITING_DNS", "DNS_MISMATCH", "REVOKED", "DISABLING", "DISABLED"] as const)(
     "removes the route for %s rather than leaving a stale public router",
     async (status) => {
       const domain = await verifiedDomain();
