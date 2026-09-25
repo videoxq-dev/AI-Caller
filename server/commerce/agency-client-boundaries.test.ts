@@ -6,6 +6,7 @@ import { licenses, memberships, user, workspaceCommercialOwners, workspacePlans,
 import { getContactCapacity } from "./contact-capacity";
 import { getWorkspaceIntegrationEntitlements } from "./workspace-entitlements";
 import { getWorkspaceSeatUsage } from "@/server/billing/plans";
+import { createWorkspaceForUser } from "@/server/auth/workspace-repository";
 
 const users: string[] = [];
 const workspacesToDelete: string[] = [];
@@ -66,6 +67,28 @@ describe("F12-B Agency clients do not inherit the purchaser's premium business f
     expect(await getWorkspaceIntegrationEntitlements(client)).toMatchObject({
       purchaserUserId: purchaser, externalCalendar: false, performanceAutomations: false,
       whitelabelEligible: true, nonCalendarByopEnabled: false,
+    });
+  });
+
+  it("records Agency client origin at provisioning instead of guessing from a future-dated receipt", async () => {
+    const purchaser = await buyer();
+    const primary = await business(purchaser, "PRIMARY");
+    await grant(purchaser, primary, "CORE");
+    await grant(purchaser, primary, "UNLIMITED");
+    const agency = await grant(purchaser, primary, "AGENCY_50");
+    // A provider's purchasedAt is not the moment our app provisioned the
+    // client; timestamp comparisons cannot be used as the permanent policy.
+    await db.update(licenses).set({ purchasedAt: new Date(Date.now() + 86_400_000) })
+      .where(eq(licenses.id, agency.id));
+    const client = await createWorkspaceForUser(purchaser, "Future receipt client");
+    workspacesToDelete.push(client.workspaceId);
+    const [origin] = await db.select().from(workspaceCommercialOwners)
+      .where(eq(workspaceCommercialOwners.workspaceId, client.workspaceId));
+    expect(origin.provisioningSource).toBe("AGENCY");
+    expect(await getContactCapacity(client.workspaceId)).toMatchObject({ limit: 500 });
+    expect(await getWorkspaceSeatUsage(client.workspaceId)).toMatchObject({ commercialSeatPackage: null });
+    expect(await getWorkspaceIntegrationEntitlements(client.workspaceId)).toMatchObject({
+      externalCalendar: false, performanceAutomations: false,
     });
   });
 
