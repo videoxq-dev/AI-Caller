@@ -1,6 +1,6 @@
 import { request as httpsRequest } from "node:https";
 import type { TLSSocket } from "node:tls";
-import { and, eq, inArray, isNull, lte, or } from "drizzle-orm";
+import { and, asc, eq, inArray, isNull, lte, or } from "drizzle-orm";
 import { db } from "@/db";
 import { whitelabelDomains } from "@/db/schema";
 import { getEnv } from "@/server/env";
@@ -227,6 +227,7 @@ export async function reconcilePendingWhitelabelDomainCertificates(
         ),
       ),
     ))
+    .orderBy(asc(whitelabelDomains.updatedAt), asc(whitelabelDomains.id))
     .limit(Math.max(1, Math.min(limit, 500)));
 
   let ready = 0;
