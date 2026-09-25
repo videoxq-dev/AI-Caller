@@ -2,6 +2,7 @@ import { eq, sql } from "drizzle-orm";
 import { db } from "@/db";
 import { aiAgents, setupProgress } from "@/db/schema";
 import { AppError } from "@/server/http/errors";
+import { getAgencyCloneReadiness } from "@/server/agency/template-readiness";
 import {
   agentCapabilitiesSchema, assertAgentActionAllowed,
   capabilitiesFromBehaviorSettings, type AgentCapability, type AgentCapabilities,
@@ -42,6 +43,15 @@ export async function setWorkspaceAgentStatus(
       .where(eq(aiAgents.workspaceId, workspaceId)).returning();
     if (!agent) throw new AppError("AGENT_NOT_CONFIGURED", "Configure your AI Agent first.", 409);
     if (status === "ACTIVE") {
+      const readiness = await getAgencyCloneReadiness(workspaceId, tx);
+      if (readiness && !readiness.canActivate) {
+        throw new AppError(
+          "AGENCY_CLONE_NOT_READY",
+          "Complete this client's own setup before activating the copied agent.",
+          409,
+          { missing: readiness.items.filter((item) => !item.ready).map((item) => item.key) },
+        );
+      }
       // The Go Live button must never report an error after actually activating
       // the agent just because the progress write failed in a separate query.
       await tx.insert(setupProgress)
