@@ -135,8 +135,11 @@ export async function reconcileWhitelabelDomainDns(
   const wasVerified = Boolean(domain.dnsVerifiedAt)
     || !["DRAFT", "AWAITING_DNS"].includes(domain.status);
 
+  const healthyStatus = ["ROUTE_PROVISIONING", "CERT_PENDING", "CERT_READY", "ACTIVE"].includes(domain.status)
+    ? domain.status
+    : "VERIFIED";
   const [updated] = await db.update(whitelabelDomains).set({
-    status: verified ? "VERIFIED" : wasVerified ? "DNS_MISMATCH" : "AWAITING_DNS",
+    status: verified ? healthyStatus : wasVerified ? "DNS_MISMATCH" : "AWAITING_DNS",
     aVerifiedAt: aOk ? now : null,
     txtVerifiedAt: txtOk ? now : null,
     dnsVerifiedAt: verified ? now : null,
