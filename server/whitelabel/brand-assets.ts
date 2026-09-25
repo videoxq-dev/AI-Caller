@@ -1,7 +1,7 @@
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { GetObjectCommand, PutObjectCommand, S3Client } from "@aws-sdk/client-s3";
-import sharp from "sharp";
+import sharp, { type OutputInfo } from "sharp";
 import { getEnv } from "@/server/env";
 import { AppError } from "@/server/http/errors";
 import type { BrandAssetKind } from "./brand-schema";
@@ -118,7 +118,7 @@ export async function optimizeAndStoreBrandAsset(input: {
 
   let extension: "webp" | "png";
   let contentType: "image/webp" | "image/png";
-  let result: { data: Buffer; info: sharp.OutputInfo };
+  let result: { data: Buffer; info: OutputInfo };
 
   if (input.kind === "LOGO") {
     extension = "webp";
