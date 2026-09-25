@@ -116,6 +116,8 @@ export const creditTopups = pgTable(
   {
     id: uuid("id").defaultRandom().primaryKey(),
     workspaceId: uuid("workspace_id").notNull().references(() => workspaces.id, { onDelete: "cascade" }),
+    fundingDestination: text("funding_destination").$type<"WORKSPACE" | "AGENCY_POOL">().default("WORKSPACE").notNull(),
+    agencyPurchaserUserId: text("agency_purchaser_user_id").references(() => user.id),
     createdByUserId: text("created_by_user_id").references(() => user.id, { onDelete: "set null" }),
     packCode: text("pack_code").notNull().references(() => creditPacks.code),
     credits: integer("credits").notNull(),

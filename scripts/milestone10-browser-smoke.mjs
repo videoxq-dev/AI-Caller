@@ -132,7 +132,8 @@ try {
   const billing = (await api(adminContext, "GET", "/api/billing", undefined, "load billing API")).data;
   assert(billing.plan?.id === "PERSONAL", "Billing API did not return Personal plan.");
   assert(billing.balance === 5000, "Billing API did not return the seeded credit balance.");
-  assert(billing.packs?.length === 4, "Billing API did not return four active credit packs.");
+  assert(billing.packs?.length === 4,
+    `Billing API expected four active credit packs, received: ${JSON.stringify(billing.packs?.map((pack) => pack.code) ?? null)}`);
 
   await page.goto(`${baseUrl}/settings/billing`, { waitUntil: "networkidle" });
   await page.getByRole("heading", { name: "Billing & Usage", exact: true }).waitFor({ timeout: 10_000 });

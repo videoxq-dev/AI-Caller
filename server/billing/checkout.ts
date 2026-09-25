@@ -4,6 +4,7 @@ import { db } from "@/db";
 import { creditLedger, creditPacks, creditTopups, usageEvents } from "@/db/schema";
 import { AppError } from "@/server/http/errors";
 import { getStripeClient } from "./stripe-client";
+import { requireWorkspaceCreditPurchaser } from "./workspace-topup-access";
 
 function integrationIdentifier() {
   const bytes = randomBytes(8);
@@ -31,7 +32,13 @@ export async function createCreditTopupCheckout(input: {
   customerEmail: string;
   packCode: string;
   appBaseUrl: string;
+  fundingDestination?: "WORKSPACE" | "AGENCY_POOL";
+  agencyPurchaserUserId?: string;
 }) {
+  await requireWorkspaceCreditPurchaser(input.userId, input.workspaceId);
+  if (input.fundingDestination === "AGENCY_POOL" && input.agencyPurchaserUserId !== input.userId) {
+    throw new AppError("AGENCY_POOL_PURCHASER_MISMATCH", "Only the Agency purchaser may fund this pool.", 403);
+  }
   const [pack] = await db.select().from(creditPacks).where(and(
     eq(creditPacks.code, input.packCode),
     eq(creditPacks.active, true),
@@ -40,6 +47,8 @@ export async function createCreditTopupCheckout(input: {
 
   const [topup] = await db.insert(creditTopups).values({
     workspaceId: input.workspaceId,
+    fundingDestination: input.fundingDestination ?? "WORKSPACE",
+    agencyPurchaserUserId: input.fundingDestination === "AGENCY_POOL" ? input.agencyPurchaserUserId : null,
     createdByUserId: input.userId,
     packCode: pack.code,
     credits: pack.credits,
@@ -68,18 +77,22 @@ export async function createCreditTopupCheckout(input: {
       }],
       metadata: {
         workspaceId: input.workspaceId,
+        fundingDestination: topup.fundingDestination,
+        agencyPurchaserUserId: topup.agencyPurchaserUserId ?? "",
         topupId: topup.id,
         packCode: topup.packCode,
       },
       payment_intent_data: {
         metadata: {
           workspaceId: input.workspaceId,
+          fundingDestination: topup.fundingDestination,
+          agencyPurchaserUserId: topup.agencyPurchaserUserId ?? "",
           topupId: topup.id,
           packCode: topup.packCode,
         },
       },
-      success_url: `${input.appBaseUrl.replace(/\/$/, "")}/settings/billing?checkout=success&session_id={CHECKOUT_SESSION_ID}`,
-      cancel_url: `${input.appBaseUrl.replace(/\/$/, "")}/settings/billing?checkout=cancelled`,
+      success_url: `${input.appBaseUrl.replace(/\/$/, "")}${topup.fundingDestination === "AGENCY_POOL" ? "/workspaces" : "/settings/billing"}?checkout=success&session_id={CHECKOUT_SESSION_ID}`,
+      cancel_url: `${input.appBaseUrl.replace(/\/$/, "")}${topup.fundingDestination === "AGENCY_POOL" ? "/workspaces" : "/settings/billing"}?checkout=cancelled`,
     }, {
       idempotencyKey: `credit-topup:${topup.id}`,
     });
@@ -136,7 +149,7 @@ export async function getBillingOverview(workspaceId: string) {
       paidAt: creditTopups.paidAt,
       createdAt: creditTopups.createdAt,
     }).from(creditTopups)
-      .where(eq(creditTopups.workspaceId, workspaceId))
+      .where(and(eq(creditTopups.workspaceId, workspaceId), eq(creditTopups.fundingDestination, "WORKSPACE")))
       .orderBy(desc(creditTopups.createdAt))
       .limit(50),
     db.select({

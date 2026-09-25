@@ -53,6 +53,7 @@ type BillingData = {
   workspace: { id: string; name: string };
   plan: Plan;
   balance: number;
+  canPurchaseCredits: boolean;
   packs: CreditPack[];
   ledger: LedgerItem[];
   topups: Topup[];
@@ -267,6 +268,14 @@ export default function BillingPage() {
             )}
           </section>
 
+          {data && !data.canPurchaseCredits ? (
+            <section className="billingSection" aria-label="Agency-managed client credit funding">
+              <div className="billingSectionHeading"><div>
+                <h2>Credits supplied by your Agency</h2>
+                <p>Your Agency manages credit purchases and allocations for this workspace. Contact your Agency when you need more credits.</p>
+              </div></div>
+            </section>
+          ) : (
           <section className="billingSection">
             <div className="billingSectionHeading">
               <div><h2>Top up credits</h2><p>One-time payment through Stripe-hosted Checkout. Credits are granted only after a verified payment webhook.</p></div>
@@ -286,6 +295,8 @@ export default function BillingPage() {
             </div>
           </section>
 
+          )}
+
           <section className="billingUsageGrid">
             <article className="billingCard billingUsageCard">
               <div className="billingSectionHeading"><div><h2>Hosted usage</h2><p>Credits charged by capability.</p></div></div>
@@ -300,7 +311,7 @@ export default function BillingPage() {
               <ul>
                 <li>All current MVP product features</li>
                 <li>{data?.plan.subUserLimit ? `Owner + ${data.plan.subUserLimit} sub-users` : "Single owner; team invitations disabled"}</li>
-                <li>Hosted APIs use the shared credit wallet</li>
+                <li>Hosted APIs use this workspace\u2019s own credit wallet</li>
                 <li>BYOP provider usage does not consume hosted transport credits</li>
               </ul>
             </article>
