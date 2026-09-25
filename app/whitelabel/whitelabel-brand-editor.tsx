@@ -49,6 +49,10 @@ function assetUrl(id: string | null) {
   return id ? `/api/whitelabel/brand/assets/${id}` : null;
 }
 
+function pickerColor(value: string, fallback: string) {
+  return /^#[0-9A-Fa-f]{6}$/.test(value) ? value : fallback;
+}
+
 export function WhitelabelBrandEditor() {
   const [state, setState] = useState<BrandState | null>(null);
   const [draft, setDraft] = useState<BrandDraft>(EMPTY);
@@ -215,8 +219,8 @@ export function WhitelabelBrandEditor() {
                 </div>
 
                 <div className="wlColorGrid">
-                  <label><span>Primary color</span><div className="wlColorInput"><input type="color" value={draft.primaryColor} onChange={(event) => set("primaryColor", event.target.value.toUpperCase())} /><input value={draft.primaryColor} onChange={(event) => set("primaryColor", event.target.value)} maxLength={7} /></div></label>
-                  <label><span>Accent color</span><div className="wlColorInput"><input type="color" value={draft.accentColor} onChange={(event) => set("accentColor", event.target.value.toUpperCase())} /><input value={draft.accentColor} onChange={(event) => set("accentColor", event.target.value)} maxLength={7} /></div></label>
+                  <label><span>Primary color</span><div className="wlColorInput"><input aria-label="Primary color picker" type="color" value={pickerColor(draft.primaryColor, "#2563EB")} onChange={(event) => set("primaryColor", event.target.value.toUpperCase())} /><input aria-label="Primary color hex" value={draft.primaryColor} onChange={(event) => set("primaryColor", event.target.value.toUpperCase())} maxLength={7} /></div></label>
+                  <label><span>Accent color</span><div className="wlColorInput"><input aria-label="Accent color picker" type="color" value={pickerColor(draft.accentColor, "#0F172A")} onChange={(event) => set("accentColor", event.target.value.toUpperCase())} /><input aria-label="Accent color hex" value={draft.accentColor} onChange={(event) => set("accentColor", event.target.value.toUpperCase())} maxLength={7} /></div></label>
                 </div>
 
                 <div className="wlSectionHeading wlSupportHeading"><h2>Client support</h2><p>Publish requires at least one support contact.</p></div>
