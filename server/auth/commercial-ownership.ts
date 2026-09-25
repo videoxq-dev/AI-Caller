@@ -2,7 +2,6 @@ import { and, eq } from "drizzle-orm";
 import { db } from "@/db";
 import { licenses, memberships, workspaceCommercialOwners } from "@/db/schema";
 import { getEffectiveWorkspaceSeatPlan } from "@/server/billing/plans";
-import { wasProvisionedForAgency } from "@/server/commerce/agency-client-classification";
 import { AppError } from "@/server/http/errors";
 import { getMembership } from "./workspace-repository";
 
@@ -11,7 +10,7 @@ export async function getCommercialWorkspaceOwner(workspaceId: string) {
   const [owner] = await db.select({
     purchaserUserId: workspaceCommercialOwners.purchaserUserId,
     kind: workspaceCommercialOwners.kind,
-    provisioningSource: workspaceCommercialOwners.provisioningSource,
+    agencyClient: workspaceCommercialOwners.agencyClient,
     createdAt: workspaceCommercialOwners.createdAt,
   }).from(workspaceCommercialOwners)
     .where(eq(workspaceCommercialOwners.workspaceId, workspaceId))
@@ -83,7 +82,7 @@ export async function requireBrandedClientWorkspaceAccess(
   const commercial = await getCommercialWorkspaceOwner(workspaceId);
   if (!commercial || commercial.kind !== "ADDITIONAL"
     || commercial.purchaserUserId !== approvedBrandPurchaserUserId
-    || !(await wasProvisionedForAgency(commercial.purchaserUserId, commercial.createdAt, commercial.provisioningSource))) {
+    || !commercial.agencyClient) {
     throw new AppError("BRANDED_WORKSPACE_NOT_FOUND", "This business is not available on this branded platform.", 404);
   }
   if (userId === approvedBrandPurchaserUserId) {
