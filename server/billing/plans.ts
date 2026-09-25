@@ -2,7 +2,6 @@ import { and, eq, gt, ne, sql } from "drizzle-orm";
 import { db } from "@/db";
 import { licenses, memberships, plans, workspaceCommercialOwners, workspaceInvitations, workspacePlans } from "@/db/schema";
 import { AppError } from "@/server/http/errors";
-import { wasProvisionedForAgency } from "@/server/commerce/agency-client-classification";
 
 export type PlanCode = "PERSONAL" | "GROWTH";
 type Tx = Parameters<Parameters<typeof db.transaction>[0]>[0];
@@ -60,17 +59,15 @@ export async function getEffectiveWorkspaceSeatPlanInTransaction(tx: Tx, workspa
   const [commercialOwner] = await tx.select({
     userId: workspaceCommercialOwners.purchaserUserId,
     kind: workspaceCommercialOwners.kind,
-    provisioningSource: workspaceCommercialOwners.provisioningSource,
+    agencyClient: workspaceCommercialOwners.agencyClient,
     createdAt: workspaceCommercialOwners.createdAt,
   })
     .from(workspaceCommercialOwners)
     .where(eq(workspaceCommercialOwners.workspaceId, workspaceId))
     .limit(1);
-  // An Agency client keeps Core-only commercial seats even after an Agency
-  // cancellation/refund. The prior purchase date classifies the client,
-  // rather than whichever operational OWNER happens to be invited today.
-  if (commercialOwner?.kind === "ADDITIONAL"
-    && await wasProvisionedForAgency(commercialOwner.userId, commercialOwner.createdAt, commercialOwner.provisioningSource, tx)) {
+  // The recorded Agency client origin survives cancellation/refund and never
+  // depends on purchaser receipt timestamps or current operational OWNERs.
+  if (commercialOwner?.kind === "ADDITIONAL" && commercialOwner.agencyClient) {
     return { plan, commercialSeatPackage: null as "UNLIMITED" | null };
   }
   let purchaserUserId = commercialOwner?.userId ?? null;
