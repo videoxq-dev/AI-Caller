@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { resolveWorkspaceContext } from "@/server/auth/workspace-context";
-import { requireCommercialProviderPurchaser } from "@/server/auth/commercial-ownership";
-import { bindCapability, saveIntegration, testSavedIntegration } from "@/server/domain/integrations/repository";
+import { getCommercialWorkspaceOwner, requireCommercialProviderPurchaser } from "@/server/auth/commercial-ownership";
+import { bindCapability, listIntegrations, saveIntegration, setIntegrationStatus, testSavedIntegration } from "@/server/domain/integrations/repository";
 import {
   requireCapabilityBindingEntitlement,
   requireProviderIntegrationEntitlement,
@@ -72,6 +72,29 @@ describe("external integration route entitlements", () => {
       body: JSON.stringify({ provider: "telnyx", status: "DISCONNECTED" }),
     }));
     expect(response.status).toBe(403);
+    expect(setIntegrationStatus).not.toHaveBeenCalled();
+  });
+
+  it("hides purchaser provider records from delegated client integration listings", async () => {
+    vi.mocked(resolveWorkspaceContext).mockResolvedValue({
+      session: { user: { id: "delegated-client" } },
+      workspace: { id: "workspace-core" },
+      membership: { role: "OWNER" },
+    } as Awaited<ReturnType<typeof resolveWorkspaceContext>>);
+    vi.mocked(getCommercialWorkspaceOwner).mockResolvedValueOnce({
+      purchaserUserId: "purchaser", kind: "ADDITIONAL", createdAt: new Date(),
+    });
+    vi.mocked(listIntegrations).mockResolvedValueOnce([
+      { provider: "openai", settings: { model: "private-model" } },
+      { provider: "whatsapp", settings: { businessId: "own-business" } },
+      { provider: "calcom", settings: { org: "private-org" } },
+    ] as Awaited<ReturnType<typeof listIntegrations>>);
+    const response = await listProviders(new Request("https://app.example.com/api/integrations"));
+    expect(response.status).toBe(200);
+    const data = await response.json();
+    expect(data.integrations).toMatchObject([{ provider: "whatsapp" }]);
+    expect(JSON.stringify(data)).not.toContain("private-model");
+    expect(JSON.stringify(data)).not.toContain("private-org");
   });
 
   it("blocks direct external calendar credentials before persistence or provider testing", async () => {
