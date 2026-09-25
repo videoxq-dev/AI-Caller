@@ -17,6 +17,35 @@ function probeFailure(code: string, message: string): WhitelabelTlsProbeResult {
   return { ok: false, code, message };
 }
 
+
+export function classifyWhitelabelTlsProbeError(error: unknown): WhitelabelTlsProbeResult {
+  const code = error && typeof error === "object" && "code" in error
+    ? String((error as { code?: unknown }).code)
+    : "";
+  const certificateCodes = new Set([
+    "ERR_TLS_CERT_ALTNAME_INVALID",
+    "CERT_HAS_EXPIRED",
+    "CERT_NOT_YET_VALID",
+    "DEPTH_ZERO_SELF_SIGNED_CERT",
+    "SELF_SIGNED_CERT_IN_CHAIN",
+    "UNABLE_TO_VERIFY_LEAF_SIGNATURE",
+    "UNABLE_TO_GET_ISSUER_CERT",
+    "UNABLE_TO_GET_ISSUER_CERT_LOCALLY",
+  ]);
+  if (certificateCodes.has(code)) {
+    return probeFailure(
+      "TLS_CERT_NOT_READY",
+      "The edge certificate is not trusted for this custom hostname yet.",
+    );
+  }
+  return probeFailure(
+    "TLS_PROBE_FAILED",
+    error instanceof Error && error.message
+      ? `HTTPS is not ready yet: ${error.message}`
+      : "HTTPS is not ready yet.",
+  );
+}
+
 export function buildWhitelabelTlsProbeTarget(hostname: string) {
   const infra = getWhitelabelDomainInfrastructure(true);
   if (!infra.ipv4) {
@@ -130,12 +159,7 @@ export async function probeWhitelabelDomainTls(hostname: string): Promise<Whitel
       request.destroy(new Error("TLS probe timed out."));
     });
     request.on("error", (error) => {
-      finish(probeFailure(
-        "TLS_PROBE_FAILED",
-        error instanceof Error && error.message
-          ? `HTTPS is not ready yet: ${error.message}`
-          : "HTTPS is not ready yet.",
-      ));
+      finish(classifyWhitelabelTlsProbeError(error));
     });
     request.end();
   });
