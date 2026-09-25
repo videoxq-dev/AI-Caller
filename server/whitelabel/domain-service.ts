@@ -116,7 +116,7 @@ export async function rotateWhitelabelDomainVerification(purchaserUserId: string
     await tx.execute(sql`select pg_advisory_xact_lock(hashtext(${`whitelabel-domain-brand:${brand.id}`}))`);
     const existing = await findActiveForBrand(tx, brand.id);
     if (!existing) throw new AppError("WHITELABEL_DOMAIN_NOT_FOUND", "No custom domain is connected.", 404);
-    if (!["AWAITING_DNS", "DNS_MISMATCH"].includes(existing.status)) {
+    if (!["AWAITING_DNS", "DNS_MISMATCH", "REVOKED"].includes(existing.status)) {
       throw new AppError(
         "WHITELABEL_DOMAIN_VERIFICATION_LOCKED",
         "DNS verification cannot be rotated after this domain has been verified.",
@@ -129,6 +129,9 @@ export async function rotateWhitelabelDomainVerification(purchaserUserId: string
       aVerifiedAt: null,
       txtVerifiedAt: null,
       dnsVerifiedAt: null,
+      certificateStatus: "NOT_REQUESTED",
+      certificateReadyAt: null,
+      certificateExpiresAt: null,
       lastCheckedAt: null,
       lastErrorCode: null,
       lastErrorMessage: null,
