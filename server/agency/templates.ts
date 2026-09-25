@@ -12,7 +12,7 @@ import {
   type AgencyTemplateSnapshot,
 } from "./template-schema";
 
-async function requireAgencyTemplatePurchaser(purchaserUserId: string) {
+export async function requireAgencyTemplatePurchaser(purchaserUserId: string) {
   const [agency] = await db.select({ id: licenses.id }).from(licenses).where(and(
     eq(licenses.purchaserUserId, purchaserUserId),
     eq(licenses.status, "ACTIVE"),
