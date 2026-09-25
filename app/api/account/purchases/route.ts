@@ -20,6 +20,7 @@ export async function GET(request: Request) {
     ]);
     return Response.json({
       activeProducts: summary.activeProducts,
+      effectiveWhitelabel: summary.effectiveWhitelabel,
       licenses: summary.licenses,
       businessLimit: capacity.businessLimit,
       ownedBusinesses: capacity.ownedBusinesses,

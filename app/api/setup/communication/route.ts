@@ -1,4 +1,5 @@
 import { resolveWorkspaceContext } from "@/server/auth/workspace-context";
+import { requireCommercialProviderPurchaser } from "@/server/auth/commercial-ownership";
 import { requireWorkspacePermission } from "@/server/auth/permissions";
 import { getCommunicationSetup, saveCommunicationSetup } from "@/server/domain/integrations/repository";
 import { communicationSetupSchema } from "@/server/domain/integrations/schemas";
@@ -19,6 +20,9 @@ export async function PUT(request: Request) {
   try {
     const context = await resolveWorkspaceContext(request.headers);
     requireWorkspacePermission(context.membership.role, "integration.manage");
+    // Communication setup writes AI Caller/BYOP voice and SMS bindings; it is
+    // purchaser infrastructure administration, not a delegated client setting.
+    await requireCommercialProviderPurchaser(context.session.user.id, context.workspace.id);
     const input = parseInput(communicationSetupSchema, await request.json());
     await Promise.all([
       requireCapabilityBindingEntitlement(context.workspace.id, "VOICE", input.voice.mode, input.voice.provider ?? null),

@@ -62,13 +62,13 @@ describe("workspace external integration entitlements", () => {
     await expect(getWorkspaceIntegrationEntitlements(workspaceId)).resolves.toMatchObject({
       purchaserUserId: owner,
       externalCalendar: false,
-      agencyByop: false,
+      nonCalendarByopEnabled: false,
       performanceAutomations: false,
     });
     await expect(requireProviderIntegrationEntitlement(workspaceId, "google"))
       .rejects.toMatchObject({ code: "EXTERNAL_CALENDAR_REQUIRES_UNLIMITED", status: 403 });
     await expect(requireProviderIntegrationEntitlement(workspaceId, "openai"))
-      .rejects.toMatchObject({ code: "BYOP_REQUIRES_AGENCY", status: 403 });
+      .rejects.toMatchObject({ code: "BYOP_REQUIRES_WHITELABEL", status: 403 });
   });
 
   it("unlocks calendar providers with Unlimited but does not unlock other BYOP", async () => {
@@ -79,16 +79,16 @@ describe("workspace external integration entitlements", () => {
 
     await expect(getWorkspaceIntegrationEntitlements(workspaceId)).resolves.toMatchObject({
       externalCalendar: true,
-      agencyByop: false,
+      nonCalendarByopEnabled: false,
       performanceAutomations: false,
     });
     await expect(requireProviderIntegrationEntitlement(workspaceId, "google")).resolves.toBeUndefined();
     await expect(requireProviderIntegrationEntitlement(workspaceId, "calcom")).resolves.toBeUndefined();
     await expect(requireProviderIntegrationEntitlement(workspaceId, "twilio"))
-      .rejects.toMatchObject({ code: "BYOP_REQUIRES_AGENCY" });
+      .rejects.toMatchObject({ code: "BYOP_REQUIRES_WHITELABEL" });
   });
 
-  it("unlocks non-calendar BYOP with Agency without implicitly granting Unlimited calendars", async () => {
+  it("keeps Agency hosted and does not unlock non-calendar BYOP or Unlimited calendars", async () => {
     const owner = await createBuyer("Agency Buyer");
     const workspaceId = await createOwnedWorkspace(owner);
     await grant(owner, workspaceId, "CORE");
@@ -96,11 +96,13 @@ describe("workspace external integration entitlements", () => {
 
     await expect(getWorkspaceIntegrationEntitlements(workspaceId)).resolves.toMatchObject({
       externalCalendar: false,
-      agencyByop: true,
+      nonCalendarByopEnabled: false,
       performanceAutomations: false,
     });
-    await expect(requireProviderIntegrationEntitlement(workspaceId, "openrouter")).resolves.toBeUndefined();
-    await expect(requireCapabilityBindingEntitlement(workspaceId, "VOICE", "BYOP", "twilio")).resolves.toBeUndefined();
+    await expect(requireProviderIntegrationEntitlement(workspaceId, "openrouter"))
+      .rejects.toMatchObject({ code: "BYOP_REQUIRES_WHITELABEL" });
+    await expect(requireCapabilityBindingEntitlement(workspaceId, "VOICE", "BYOP", "twilio"))
+      .rejects.toMatchObject({ code: "BYOP_REQUIRES_WHITELABEL" });
     await expect(requireProviderIntegrationEntitlement(workspaceId, "outlook"))
       .rejects.toMatchObject({ code: "EXTERNAL_CALENDAR_REQUIRES_UNLIMITED" });
   });
@@ -109,30 +111,84 @@ describe("workspace external integration entitlements", () => {
     const purchaser = await createBuyer("Agency Purchaser");
     const clientOwner = await createBuyer("Delegated Client Owner");
     const originalId = await createOwnedWorkspace(purchaser);
-    const clientWorkspaceId = await createOwnedWorkspace(purchaser);
-    await db.insert(workspaceCommercialOwners).values([
-      { workspaceId: originalId, purchaserUserId: purchaser, kind: "PRIMARY" },
-      { workspaceId: clientWorkspaceId, purchaserUserId: purchaser, kind: "ADDITIONAL" },
-    ]);
-    for (const product of ["CORE", "UNLIMITED", "PERFORMANCE", "AGENCY_50"]) {
+    await db.insert(workspaceCommercialOwners).values({
+      workspaceId: originalId, purchaserUserId: purchaser, kind: "PRIMARY",
+    });
+    for (const product of ["CORE", "UNLIMITED", "PERFORMANCE", "AGENCY_50", "WHITELABEL"]) {
       await grant(purchaser, originalId, product);
     }
+    const clientWorkspaceId = await createOwnedWorkspace(purchaser);
+    await db.insert(workspaceCommercialOwners).values({
+      workspaceId: clientWorkspaceId, purchaserUserId: purchaser, kind: "ADDITIONAL", agencyClient: true,
+    });
     await db.insert(memberships).values({
       workspaceId: clientWorkspaceId, userId: clientOwner, role: "OWNER",
     });
 
     await expect(getWorkspaceIntegrationEntitlements(clientWorkspaceId)).resolves.toMatchObject({
-      purchaserUserId: null,
+      purchaserUserId: purchaser,
       externalCalendar: false,
-      agencyByop: false,
+      nonCalendarByopEnabled: false,
       performanceAutomations: false,
+      whitelabelEligible: true,
     });
     await expect(requireProviderIntegrationEntitlement(clientWorkspaceId, "google"))
       .rejects.toMatchObject({ code: "EXTERNAL_CALENDAR_REQUIRES_UNLIMITED" });
     await expect(requirePerformanceAutomationEntitlement(clientWorkspaceId))
       .rejects.toMatchObject({ code: "AUTOMATION_BUILDER_REQUIRES_PERFORMANCE" });
     await expect(requireProviderIntegrationEntitlement(clientWorkspaceId, "openrouter"))
-      .rejects.toMatchObject({ code: "BYOP_REQUIRES_AGENCY" });
+      .rejects.toMatchObject({ code: "BYOP_MODE_NOT_CONFIGURED" });
+  });
+
+  it("recognizes Whitelabel eligibility on its purchaser's primary business but keeps BYOP dormant until the exclusive mode is implemented", async () => {
+    const purchaser = await createBuyer("Whitelabel Purchaser");
+    const original = await createOwnedWorkspace(purchaser);
+    await db.insert(workspaceCommercialOwners).values({ workspaceId: original, purchaserUserId: purchaser, kind: "PRIMARY" });
+    for (const product of ["CORE", "AGENCY_50", "WHITELABEL"]) await grant(purchaser, original, product);
+    await expect(getWorkspaceIntegrationEntitlements(original)).resolves.toMatchObject({
+      purchaserUserId: purchaser, whitelabelEligible: true, nonCalendarByopEnabled: false,
+    });
+    await expect(requireProviderIntegrationEntitlement(original, "openai"))
+      .rejects.toMatchObject({ code: "BYOP_MODE_NOT_CONFIGURED", status: 403 });
+  });
+
+  it("uses a commercial purchaser on a multi-owner primary business without guessing the delegated owner's licenses", async () => {
+    const buyer = await createBuyer("Purchaser");
+    const delegated = await createBuyer("Delegated");
+    const original = await createOwnedWorkspace(buyer);
+    await db.insert(workspaceCommercialOwners).values({ workspaceId: original, purchaserUserId: buyer, kind: "PRIMARY" });
+    await db.insert(memberships).values({ workspaceId: original, userId: delegated, role: "OWNER" });
+    await grant(buyer, original, "UNLIMITED");
+    await grant(buyer, original, "PERFORMANCE");
+    await expect(getWorkspaceIntegrationEntitlements(original)).resolves.toMatchObject({
+      purchaserUserId: buyer, externalCalendar: true, performanceAutomations: true,
+    });
+    await grant(delegated, original, "WHITELABEL");
+    expect((await getWorkspaceIntegrationEntitlements(original)).whitelabelEligible).toBe(false);
+  });
+
+  it("does not authorize Whitelabel or purchaser premium features after the original OWNER membership is lost", async () => {
+    const purchaser = await createBuyer("Former Purchaser");
+    const delegated = await createBuyer("Client Owner");
+    const original = await createOwnedWorkspace(purchaser);
+    await db.insert(workspaceCommercialOwners).values({
+      workspaceId: original, purchaserUserId: purchaser, kind: "PRIMARY",
+    });
+    for (const product of ["CORE", "UNLIMITED", "PERFORMANCE", "AGENCY_50", "WHITELABEL"]) {
+      await grant(purchaser, original, product);
+    }
+    const client = await createOwnedWorkspace(purchaser);
+    await db.insert(workspaceCommercialOwners).values({
+      workspaceId: client, purchaserUserId: purchaser, kind: "ADDITIONAL", agencyClient: true,
+    });
+    await db.insert(memberships).values({ workspaceId: client, userId: delegated, role: "OWNER" });
+    await db.delete(memberships).where(and(
+      eq(memberships.workspaceId, original), eq(memberships.userId, purchaser),
+    ));
+    await expect(getWorkspaceIntegrationEntitlements(client)).resolves.toMatchObject({
+      purchaserUserId: purchaser, externalCalendar: false,
+      performanceAutomations: false, whitelabelEligible: false, nonCalendarByopEnabled: false,
+    });
   });
 
   it("keeps WhatsApp embedded signup outside the Agency BYOP gate", async () => {
@@ -198,8 +254,9 @@ describe("workspace external integration entitlements", () => {
     await expect(getWorkspaceIntegrationEntitlements(workspaceId)).resolves.toEqual({
       purchaserUserId: null,
       externalCalendar: false,
-      agencyByop: false,
+      nonCalendarByopEnabled: false,
       performanceAutomations: false,
+      whitelabelEligible: false,
     });
   });
 });

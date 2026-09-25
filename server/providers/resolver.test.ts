@@ -50,7 +50,7 @@ describe("provider capability routing", () => {
     expect(route).toMatchObject({ capability: "AI_TEXT", mode: "HOSTED", provider: "credits", integrationId: null });
   });
 
-  it("resolves an Agency BYOP provider and never exposes plaintext secrets", async () => {
+  it("fails closed for stale Agency BYOP instead of silently charging hosted credits, and never exposes secrets", async () => {
     await grant("AGENCY_50");
     await saveVerifiedIntegration(workspaceId, {
       provider: "openai",
@@ -61,8 +61,8 @@ describe("provider capability routing", () => {
     });
     await bindCapability(workspaceId, "AI_TEXT", "BYOP", "openai");
 
-    const route = await resolveProviderRoute(workspaceId, "AI_TEXT");
-    expect(route).toMatchObject({ capability: "AI_TEXT", mode: "BYOP", provider: "openai" });
+    await expect(resolveProviderRoute(workspaceId, "AI_TEXT"))
+      .rejects.toMatchObject({ code: "BYOP_INFRASTRUCTURE_INACTIVE", status: 403 });
 
     const publicIntegration = await getIntegration(workspaceId, "openai");
     expect(publicIntegration).not.toHaveProperty("encryptedCredentials");

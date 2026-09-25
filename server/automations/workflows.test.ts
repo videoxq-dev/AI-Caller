@@ -288,6 +288,13 @@ describe("versioned deterministic workflows", () => {
       userId: "workflow-owner",
       role: "OWNER",
     });
+    // Give the target workspace its own Performance license to verify the
+    // cross-workspace ownership guard, not merely the plan gate.
+    await db.insert(licenses).values({
+      workspaceId: other.id, purchaserUserId: "workflow-owner",
+      source: "MANUAL", externalPurchaseId: "workflow-performance-other",
+      productCode: "PERFORMANCE", status: "ACTIVE", purchasedAt: new Date(),
+    });
     expect(await listPublishedWorkflowVersions(other.id)).toHaveLength(0);
     expect(await getWorkflowVersion(other.id, version.id)).toBeNull();
     await expect(updateWorkflowDraft(other.id, draft.id, "Hijacked", original)).rejects.toMatchObject({

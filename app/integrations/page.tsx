@@ -30,8 +30,8 @@ type Provider = {
   brand: string;
 };
 
-type IntegrationEntitlements = { externalCalendar: boolean; agencyByop: boolean };
-type ProviderAccess = { allowed: boolean; requiredPlan: "Unlimited" | "Agency" | null };
+type IntegrationEntitlements = { externalCalendar: boolean; nonCalendarByopEnabled: boolean };
+type ProviderAccess = { allowed: boolean; requiredPlan: "Unlimited" | "Whitelabel" | null };
 type MetaConfig = { enabled: boolean; appId: string | null; configId: string | null; graphApiVersion: string };
 type MetaSession = { wabaId: string; phoneNumberId: string; businessId?: string | null };
 
@@ -75,7 +75,7 @@ export default function IntegrationsPage() {
   const [selectedId, setSelectedId] = useState<ProviderId | null>(null);
   const [connected, setConnected] = useState<Record<ProviderId, boolean>>(emptyConnected);
   const [records, setRecords] = useState<Partial<Record<ProviderId, IntegrationRecord>>>({});
-  const [entitlements, setEntitlements] = useState<IntegrationEntitlements>({ externalCalendar: false, agencyByop: false });
+  const [entitlements, setEntitlements] = useState<IntegrationEntitlements>({ externalCalendar: false, nonCalendarByopEnabled: false });
   const [pageNotice, setPageNotice] = useState<{ tone: "success" | "error"; text: string } | null>(null);
 
   useEffect(() => {
@@ -103,7 +103,7 @@ export default function IntegrationsPage() {
         setRecords(nextRecords);
         setEntitlements({
           externalCalendar: payload?.entitlements?.externalCalendar === true,
-          agencyByop: payload?.entitlements?.agencyByop === true,
+          nonCalendarByopEnabled: payload?.entitlements?.nonCalendarByopEnabled === true,
         });
       })
       .catch(() => setPageNotice({ tone: "error", text: "Unable to load saved integrations." }));
@@ -137,7 +137,7 @@ export default function IntegrationsPage() {
     if (provider.category === "scheduling") {
       return { allowed: entitlements.externalCalendar, requiredPlan: "Unlimited" };
     }
-    return { allowed: entitlements.agencyByop, requiredPlan: "Agency" };
+    return { allowed: entitlements.nonCalendarByopEnabled, requiredPlan: "Whitelabel" };
   }
 
   return (
@@ -258,7 +258,7 @@ function IntegrationDrawer({ provider, connected, record, access, onClose, onRec
     <aside className="integrationDrawer" aria-label={`${provider.name} integration settings`}>
       <button type="button" className="drawerClose" onClick={onClose} aria-label="Close integration panel">×</button>
       <div className="drawerProviderHeader"><span className={`providerMark large ${provider.id}`}>{provider.brand}</span><div><h2>{provider.name}</h2><span className={`connectionBadge ${connected ? "connected" : ""}`}>{provider.id === "credits" ? (connected ? "● Server configured" : "Not configured") : connected ? "● Connected" : record?.status === "ERROR" ? "Connection error" : "Not connected"}</span><p>{provider.description}</p></div></div>
-      {!access.allowed ? <section className="providerConnectCard"><h3>Available on {access.requiredPlan}</h3><p>{access.requiredPlan === "Unlimited" ? "External calendar connections are unlocked with Unlimited. Core continues to use AI Caller’s built-in appointment calendar." : "Bring-your-own AI, voice and messaging providers are reserved for Agency."}</p>{connected && <p>Your saved connection is retained, but it is not used while this entitlement is inactive. You can disconnect it below.</p>}</section> : provider.id === "credits" ? <CreditsPanel onUseHosted={useHostedAI} busy={saving} /> : provider.id === "whatsapp" ? <MetaEmbeddedSignupPanel record={record} onRecordChange={onRecordChange} setNotice={setNotice} /> : oauthCalendar ? <OAuthCalendarPanel provider={provider.id as "google" | "outlook"} record={record} /> : provider.category === "communication" ? <CommunicationPanel provider={provider.id} values={values} update={update} showSecret={showSecret} setShowSecret={setShowSecret} hasSavedSecret={hasSavedSecret} /> : provider.category === "ai" ? <AiPanel provider={provider.id} values={values} update={update} showSecret={showSecret} setShowSecret={setShowSecret} hasSavedSecret={hasSavedSecret} /> : <SchedulingPanel provider={provider.id} values={values} update={update} showSecret={showSecret} setShowSecret={setShowSecret} hasSavedSecret={hasSavedSecret} />}
+      {!access.allowed ? <section className="providerConnectCard"><h3>Available on {access.requiredPlan}</h3><p>{access.requiredPlan === "Unlimited" ? "External calendar connections are unlocked with Unlimited. Core continues to use AI Caller’s built-in appointment calendar." : "Bring-your-own AI, voice and messaging infrastructure requires Agency + Whitelabel and an activated provider mode."}</p>{connected && <p>Your saved connection is retained, but it is not used while this entitlement is inactive. You can disconnect it below.</p>}</section> : provider.id === "credits" ? <CreditsPanel onUseHosted={useHostedAI} busy={saving} /> : provider.id === "whatsapp" ? <MetaEmbeddedSignupPanel record={record} onRecordChange={onRecordChange} setNotice={setNotice} /> : oauthCalendar ? <OAuthCalendarPanel provider={provider.id as "google" | "outlook"} record={record} /> : provider.category === "communication" ? <CommunicationPanel provider={provider.id} values={values} update={update} showSecret={showSecret} setShowSecret={setShowSecret} hasSavedSecret={hasSavedSecret} /> : provider.category === "ai" ? <AiPanel provider={provider.id} values={values} update={update} showSecret={showSecret} setShowSecret={setShowSecret} hasSavedSecret={hasSavedSecret} /> : <SchedulingPanel provider={provider.id} values={values} update={update} showSecret={showSecret} setShowSecret={setShowSecret} hasSavedSecret={hasSavedSecret} />}
       {provider.id === "whatsapp" && connected && <Link className="whatsappTemplatesLink" href="/integrations/whatsapp/templates">Manage message templates →</Link>}
       {record?.lastTestedAt && <div className="providerLastTest">Last tested {new Date(record.lastTestedAt).toLocaleString()}</div>}
       {record?.lastError && <div className="providerErrorText">{record.lastError}</div>}

@@ -38,6 +38,7 @@ describe("authenticated funnel purchase summary", () => {
     expect(response.headers.get("cache-control")).toBe("no-store");
     expect(await response.json()).toMatchObject({
       activeProducts: ["CORE"],
+      effectiveWhitelabel: false,
       businessLimit: 1, ownedBusinesses: 1, availableBusinesses: 0,
       licenses: [
         { id: "core-license", productCode: "CORE", status: "ACTIVE" },

@@ -1,5 +1,6 @@
 import { and, eq } from "drizzle-orm";
 import { db } from "@/db";
+import { AppError } from "@/server/http/errors";
 import { capabilityBindings, integrations } from "@/db/schema";
 import { assertProviderSupportsCapability } from "./catalog";
 import type { Capability, ProviderRoute } from "./contracts";
@@ -21,15 +22,12 @@ export async function resolveProviderRoute(workspaceId: string, capability: Capa
 
   const entitlement = await getWorkspaceIntegrationEntitlements(workspaceId);
   if (capability === "CALENDAR" && !entitlement.externalCalendar) return null;
-  if (capability !== "WHATSAPP" && capability !== "CALENDAR" && !entitlement.agencyByop) {
-    return {
-      workspaceId,
-      capability,
-      mode: "HOSTED",
-      provider: capability === "AI_TEXT" ? "credits" : "hosted",
-      integrationId: null,
-      settings: {},
-    };
+  if (capability !== "WHATSAPP" && capability !== "CALENDAR"
+    && !entitlement.nonCalendarByopEnabled) {
+    // Never move a previously selected customer-funded provider onto hosted
+    // credits silently. F12-G will provision the estate-wide exclusive mode.
+    throw new AppError("BYOP_INFRASTRUCTURE_INACTIVE",
+      "This workspace's bring-your-own-provider infrastructure is inactive.", 403);
   }
 
   if (!binding.integrationId) {

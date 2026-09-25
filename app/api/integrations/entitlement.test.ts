@@ -1,21 +1,30 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { resolveWorkspaceContext } from "@/server/auth/workspace-context";
-import { bindCapability, saveIntegration, testSavedIntegration } from "@/server/domain/integrations/repository";
+import { getCommercialWorkspaceOwner, requireCommercialProviderPurchaser } from "@/server/auth/commercial-ownership";
+import { bindCapability, listIntegrations, saveCommunicationSetup, saveIntegration, setIntegrationStatus, testSavedIntegration } from "@/server/domain/integrations/repository";
 import {
+  getWorkspaceIntegrationEntitlements,
   requireCapabilityBindingEntitlement,
   requireProviderIntegrationEntitlement,
 } from "@/server/commerce/workspace-entitlements";
 import { AppError } from "@/server/http/errors";
 import { exchangeOAuthCode, getOAuthAuthorizationUrl } from "@/server/providers/oauth";
-import { POST as saveProvider } from "./route";
-import { PUT as bindProvider } from "./capabilities/route";
+import { GET as listProviders, PATCH as disconnectProvider, POST as saveProvider } from "./route";
+import { GET as listBindings, PUT as bindProvider } from "./capabilities/route";
+import { resolveProviderRoute } from "@/server/providers/resolver";
 import { GET as startOAuth } from "./oauth/[provider]/start/route";
 import { PUT as updateSmsConfig } from "./sms/config/route";
+import { PUT as saveCommunication } from "../setup/communication/route";
 
 vi.mock("@/server/auth/workspace-context", () => ({ resolveWorkspaceContext: vi.fn() }));
+vi.mock("@/server/auth/commercial-ownership", () => ({
+  getCommercialWorkspaceOwner: vi.fn().mockResolvedValue(null),
+  requireCommercialProviderPurchaser: vi.fn().mockResolvedValue(undefined),
+}));
 vi.mock("@/server/auth/permissions", () => ({ requireWorkspacePermission: vi.fn() }));
 vi.mock("@/server/commerce/workspace-entitlements", () => ({
-  getWorkspaceIntegrationEntitlements: vi.fn().mockResolvedValue({ externalCalendar: false, agencyByop: false }),
+  getWorkspaceIntegrationEntitlements: vi.fn().mockResolvedValue({ externalCalendar: false, nonCalendarByopEnabled: false }),
+  isExternalCalendarProvider: vi.fn((provider: string) => ["google", "outlook", "calendly", "calcom"].includes(provider)),
   requireCapabilityBindingEntitlement: vi.fn(),
   requireProviderIntegrationEntitlement: vi.fn(),
 }));
@@ -24,6 +33,7 @@ vi.mock("@/server/domain/integrations/repository", () => ({
   getPrivateIntegration: vi.fn().mockResolvedValue(null),
   listIntegrations: vi.fn().mockResolvedValue([]),
   saveIntegration: vi.fn(),
+  saveCommunicationSetup: vi.fn(),
   setIntegrationStatus: vi.fn(),
   testSavedIntegration: vi.fn(),
 }));
@@ -39,9 +49,120 @@ describe("external integration route entitlements", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     vi.mocked(resolveWorkspaceContext).mockResolvedValue({
+      session: { user: { id: "purchaser" } },
       workspace: { id: "workspace-core" },
       membership: { role: "OWNER" },
     } as Awaited<ReturnType<typeof resolveWorkspaceContext>>);
+  });
+
+  it("blocks delegated client OWNER from saving provider credentials before any provider call", async () => {
+    vi.mocked(requireCommercialProviderPurchaser).mockRejectedValueOnce(
+      new AppError("COMMERCIAL_PURCHASER_REQUIRED", "Only the purchaser can manage provider infrastructure.", 403),
+    );
+    const response = await saveProvider(new Request("https://app.example.com/api/integrations", {
+      method: "POST", headers: { "content-type": "application/json" },
+      body: JSON.stringify({ provider: "openai", category: "AI", mode: "BYOP", credentials: { apiKey: "secret" }, settings: {} }),
+    }));
+    expect(response.status).toBe(403);
+    expect(saveIntegration).not.toHaveBeenCalled();
+    expect(testSavedIntegration).not.toHaveBeenCalled();
+  });
+
+  it("blocks delegated client OWNER from disconnecting purchaser BYOP credentials after a refund", async () => {
+    vi.mocked(requireCommercialProviderPurchaser).mockRejectedValueOnce(
+      new AppError("COMMERCIAL_PURCHASER_REQUIRED", "Only the purchaser can manage provider infrastructure.", 403),
+    );
+    const response = await disconnectProvider(new Request("https://app.example.com/api/integrations", {
+      method: "PATCH", headers: { "content-type": "application/json" },
+      body: JSON.stringify({ provider: "telnyx", status: "DISCONNECTED" }),
+    }));
+    expect(response.status).toBe(403);
+    expect(setIntegrationStatus).not.toHaveBeenCalled();
+  });
+
+  it("blocks delegated client OWNER from disabling the hosted credits integration", async () => {
+    vi.mocked(requireCommercialProviderPurchaser).mockRejectedValueOnce(
+      new AppError("COMMERCIAL_PURCHASER_REQUIRED", "Only the purchaser can manage provider infrastructure.", 403),
+    );
+    const response = await disconnectProvider(new Request("https://app.example.com/api/integrations", {
+      method: "PATCH", headers: { "content-type": "application/json" },
+      body: JSON.stringify({ provider: "credits", status: "DISCONNECTED" }),
+    }));
+    expect(response.status).toBe(403);
+    expect(setIntegrationStatus).not.toHaveBeenCalled();
+  });
+
+  it("hides purchaser provider records from delegated client integration listings", async () => {
+    vi.mocked(resolveWorkspaceContext).mockResolvedValue({
+      session: { user: { id: "delegated-client" } },
+      workspace: { id: "workspace-core" },
+      membership: { role: "OWNER" },
+    } as Awaited<ReturnType<typeof resolveWorkspaceContext>>);
+    vi.mocked(getCommercialWorkspaceOwner).mockResolvedValueOnce({
+      purchaserUserId: "purchaser", kind: "ADDITIONAL", agencyClient: true, createdAt: new Date(),
+    });
+    const publicIntegration = (
+      provider: "openai" | "whatsapp" | "calcom",
+      category: "AI" | "WHATSAPP" | "CALENDAR",
+      settings: Record<string, unknown>,
+    ) => ({
+      id: provider, provider, category, mode: "BYOP" as const,
+      status: "CONNECTED" as const, settings, maskedCredentials: {},
+      lastTestedAt: null, lastError: null, updatedAt: new Date(),
+    });
+    vi.mocked(listIntegrations).mockResolvedValueOnce([
+      publicIntegration("openai", "AI", { model: "private-model" }),
+      publicIntegration("whatsapp", "WHATSAPP", { businessId: "own-business" }),
+      publicIntegration("calcom", "CALENDAR", { org: "private-org" }),
+    ]);
+    const response = await listProviders(new Request("https://app.example.com/api/integrations"));
+    expect(response.status).toBe(200);
+    const data = await response.json();
+    expect(data.integrations).toMatchObject([{ provider: "whatsapp" }]);
+    expect(JSON.stringify(data)).not.toContain("private-model");
+    expect(JSON.stringify(data)).not.toContain("private-org");
+  });
+
+  it("does not expose purchaser AI, SMS or voice provider settings through capability GET", async () => {
+    vi.mocked(resolveWorkspaceContext).mockResolvedValue({
+      session: { user: { id: "client-owner" } },
+      workspace: { id: "agency-client" },
+      membership: { role: "OWNER" },
+    } as Awaited<ReturnType<typeof resolveWorkspaceContext>>);
+    vi.mocked(getCommercialWorkspaceOwner).mockResolvedValueOnce({
+      purchaserUserId: "purchaser", kind: "ADDITIONAL",
+      agencyClient: true, createdAt: new Date(),
+    });
+    vi.mocked(getWorkspaceIntegrationEntitlements).mockResolvedValueOnce({
+      purchaserUserId: "purchaser", externalCalendar: false,
+      performanceAutomations: false, whitelabelEligible: true, nonCalendarByopEnabled: false,
+    });
+    const response = await listBindings(new Request("https://app.example.com/api/integrations/capabilities"));
+    expect(response.status).toBe(200);
+    expect((await response.json()).capabilities).toMatchObject({
+      AI_TEXT: null, SMS: null, VOICE: null,
+    });
+    expect(resolveProviderRoute).toHaveBeenCalledTimes(2);
+    expect(resolveProviderRoute).toHaveBeenCalledWith("agency-client", "WHATSAPP");
+    expect(resolveProviderRoute).toHaveBeenCalledWith("agency-client", "CALENDAR");
+  });
+
+  it("rejects delegated client communication setup before saving voice/SMS bindings", async () => {
+    vi.mocked(requireCommercialProviderPurchaser).mockRejectedValueOnce(
+      new AppError("COMMERCIAL_PURCHASER_REQUIRED", "Only the purchaser can manage provider infrastructure.", 403),
+    );
+    const response = await saveCommunication(new Request("https://app.example.com/api/setup/communication", {
+      method: "PUT", headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        voice: { mode: "HOSTED", numberMode: "new" },
+        sms: { mode: "HOSTED", numberMode: "same" },
+        whatsapp: { mode: "BYOP", provider: "whatsapp", accountMode: "existing" },
+        webchat: { enabled: true },
+      }),
+    }));
+    expect(response.status).toBe(403);
+    expect(saveCommunicationSetup).not.toHaveBeenCalled();
+    expect(bindCapability).not.toHaveBeenCalled();
   });
 
   it("blocks direct external calendar credentials before persistence or provider testing", async () => {
@@ -76,7 +197,7 @@ describe("external integration route entitlements", () => {
 
   it("blocks direct BYOP SMS configuration before reading saved provider state", async () => {
     vi.mocked(requireProviderIntegrationEntitlement).mockRejectedValueOnce(
-      new AppError("BYOP_REQUIRES_AGENCY", "Bring-your-own-provider integrations are available on Agency.", 403),
+      new AppError("BYOP_REQUIRES_WHITELABEL", "Bring-your-own-provider infrastructure requires Agency and Whitelabel.", 403),
     );
     const response = await updateSmsConfig(new Request("https://app.example.com/api/integrations/sms/config", {
       method: "PUT",
@@ -87,9 +208,24 @@ describe("external integration route entitlements", () => {
     expect(saveIntegration).not.toHaveBeenCalled();
   });
 
+  it("blocks a delegated client OWNER from switching AI, SMS or voice onto hosted credits", async () => {
+    for (const capability of ["AI_TEXT", "SMS", "VOICE"] as const) {
+      vi.mocked(requireCommercialProviderPurchaser).mockRejectedValueOnce(
+        new AppError("COMMERCIAL_PURCHASER_REQUIRED", "Only the purchaser can manage provider infrastructure.", 403),
+      );
+      const response = await bindProvider(new Request("https://app.example.com/api/integrations/capabilities", {
+        method: "PUT", headers: { "content-type": "application/json" },
+        body: JSON.stringify({ capability, mode: "HOSTED" }),
+      }));
+      expect(response.status).toBe(403);
+      expect(bindCapability).not.toHaveBeenCalled();
+      expect(requireCapabilityBindingEntitlement).not.toHaveBeenCalled();
+    }
+  });
+
   it("blocks non-calendar BYOP capability binding before changing runtime routing", async () => {
     vi.mocked(requireCapabilityBindingEntitlement).mockRejectedValueOnce(
-      new AppError("BYOP_REQUIRES_AGENCY", "Bring-your-own-provider integrations are available on Agency.", 403),
+      new AppError("BYOP_REQUIRES_WHITELABEL", "Bring-your-own-provider infrastructure requires Agency and Whitelabel.", 403),
     );
     const response = await bindProvider(new Request("https://app.example.com/api/integrations/capabilities", {
       method: "PUT",

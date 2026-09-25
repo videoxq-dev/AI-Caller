@@ -2,7 +2,7 @@ import { randomUUID } from "node:crypto";
 import { afterAll, afterEach, describe, expect, it, vi } from "vitest";
 import { eq } from "drizzle-orm";
 import { closeDatabase, db } from "@/db";
-import { commerceEvents, licenses, memberships, user, workspaces } from "@/db/schema";
+import { commerceEvents, licenses, memberships, user, workspaceCommercialOwners, workspaces } from "@/db/schema";
 import { activateManualCoreLicense, processCommerceEvent } from "./service";
 import { resetEnvForTests } from "@/server/env";
 import { getFunnelAccountSummary, summarizeFunnelAccountLicenses, type PurchaserLicense } from "./account-licenses";
@@ -126,6 +126,20 @@ describe("purchaser-owned commercial licenses", () => {
     expect(summarizeFunnelAccountLicenses([core, agency, { ...whitelabel, status: "CHARGEBACK" }]).effectiveWhitelabel).toBe(false);
   });
 
+  it("does not combine Core, Agency and Whitelabel receipts anchored to unrelated businesses", () => {
+    const originalId = randomUUID();
+    const anotherId = randomUUID();
+    const make = (workspaceId: string, productCode: string): PurchaserLicense => ({
+      id: randomUUID(), workspaceId, productCode, status: "ACTIVE", purchasedAt: new Date(),
+    });
+    expect(summarizeFunnelAccountLicenses([
+      make(originalId, "CORE"), make(originalId, "AGENCY_50"), make(anotherId, "WHITELABEL"),
+    ]).effectiveWhitelabel).toBe(false);
+    expect(summarizeFunnelAccountLicenses([
+      make(originalId, "CORE"), make(originalId, "AGENCY_50"), make(originalId, "WHITELABEL"),
+    ]).effectiveWhitelabel).toBe(true);
+  });
+
   it("isolates buyer licenses even when buyers share a workspace membership", async () => {
     const first = await buyer("First Buyer");
     const second = await buyer("Second Buyer");
@@ -144,6 +158,22 @@ describe("purchaser-owned commercial licenses", () => {
       activeProducts: [],
       businessLimit: 0,
     });
+  });
+
+  it("never reports Whitelabel operationally ready when receipts are anchored to an additional business", async () => {
+    const id = await buyer("Wrong Anchor");
+    const original = await ownedWorkspace(id);
+    const additional = await ownedWorkspace(id);
+    await db.insert(workspaceCommercialOwners).values([
+      { workspaceId: original, purchaserUserId: id, kind: "PRIMARY" },
+      { workspaceId: additional, purchaserUserId: id, kind: "ADDITIONAL", agencyClient: true },
+    ]);
+    for (const code of ["CORE", "AGENCY_50", "WHITELABEL"]) {
+      await license(id, additional, code, "ACTIVE");
+    }
+    const summary = await getFunnelAccountSummary(id);
+    expect(summary.activeProducts).toContain("WHITELABEL");
+    expect(summary.effectiveWhitelabel).toBe(false);
   });
 
   it("ties a real Core purchase to the buyer, never an older staff workspace", async () => {

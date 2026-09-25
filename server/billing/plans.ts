@@ -56,10 +56,20 @@ export async function getEffectiveWorkspaceSeatPlanInTransaction(tx: Tx, workspa
   // Commercial entitlements follow the explicit purchaser, independent of
   // operational OWNER/ADMIN/STAFF roles. Fall back only for unreconciled
   // historical workspaces that still have exactly one OWNER membership.
-  const [commercialOwner] = await tx.select({ userId: workspaceCommercialOwners.purchaserUserId })
+  const [commercialOwner] = await tx.select({
+    userId: workspaceCommercialOwners.purchaserUserId,
+    kind: workspaceCommercialOwners.kind,
+    agencyClient: workspaceCommercialOwners.agencyClient,
+    createdAt: workspaceCommercialOwners.createdAt,
+  })
     .from(workspaceCommercialOwners)
     .where(eq(workspaceCommercialOwners.workspaceId, workspaceId))
     .limit(1);
+  // The recorded Agency client origin survives cancellation/refund and never
+  // depends on purchaser receipt timestamps or current operational OWNERs.
+  if (commercialOwner?.kind === "ADDITIONAL" && commercialOwner.agencyClient) {
+    return { plan, commercialSeatPackage: null as "UNLIMITED" | null };
+  }
   let purchaserUserId = commercialOwner?.userId ?? null;
   if (!purchaserUserId) {
     const owners = await tx.select({ userId: memberships.userId }).from(memberships)
@@ -78,6 +88,10 @@ export async function getEffectiveWorkspaceSeatPlanInTransaction(tx: Tx, workspa
     plan: { ...plan, subUserLimit: Math.max(plan.subUserLimit, 5) },
     commercialSeatPackage: "UNLIMITED" as const,
   };
+}
+
+export async function getEffectiveWorkspaceSeatPlan(workspaceId: string) {
+  return db.transaction((tx) => getEffectiveWorkspaceSeatPlanInTransaction(tx, workspaceId));
 }
 
 export async function getWorkspacePlan(workspaceId: string) {
