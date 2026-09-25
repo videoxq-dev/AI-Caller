@@ -52,6 +52,7 @@ export function AgencyWorkspacesDashboard() {
   const [reloadKey, setReloadKey] = useState(0);
   const [accessWorkspace, setAccessWorkspace] = useState<AgencyWorkspace | null>(null);
   const [templates, setTemplates] = useState<TemplateChoice[]>([]);
+  const [templatesLoading, setTemplatesLoading] = useState(true);
   const [selectedTemplateId, setSelectedTemplateId] = useState("");
   const createRequestKey = useRef<string | null>(null);
 
@@ -87,7 +88,8 @@ export function AgencyWorkspacesDashboard() {
       })
       .catch((reason) => {
         if (!controller.signal.aborted) setActionError(reason instanceof Error ? reason.message : "Unable to load templates.");
-      });
+      })
+      .finally(() => { if (!controller.signal.aborted) setTemplatesLoading(false); });
     const fromLibrary = new URLSearchParams(window.location.search).get("templateId");
     if (fromLibrary) {
       setSelectedTemplateId(fromLibrary);
@@ -237,6 +239,9 @@ export function AgencyWorkspacesDashboard() {
                   </option>
                 ))}
               </select>
+              {selectedTemplateId && templatesLoading && (
+                <p className="agencyUsageHint" role="status">Loading selected template…</p>
+              )}
               {selectedTemplate && (
                 <div className="agencyTemplateCreateHint">
                   <strong>{selectedTemplate.name} · version {selectedTemplate.currentVersion}</strong>
@@ -256,8 +261,9 @@ export function AgencyWorkspacesDashboard() {
                   }} />
                 <button type="button" className="agencySecondaryButton" disabled={creating}
                   onClick={() => setCreateOpen(false)}>Cancel</button>
-                <button type="submit" className="agencyCreateButton" disabled={creating || atCapacity || newName.trim().length < 2}>
-                  {creating ? "Creating…" : selectedTemplate ? "Create from template" : "Create workspace"}
+                <button type="submit" className="agencyCreateButton" disabled={creating || atCapacity || newName.trim().length < 2
+                    || (selectedTemplateId !== "" && (!selectedTemplate || templatesLoading))}>
+                  {creating ? "Creating…" : selectedTemplateId ? "Create from template" : "Create workspace"}
                 </button>
               </div>
             </form>
