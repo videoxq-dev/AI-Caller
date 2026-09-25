@@ -16,7 +16,7 @@ Confirm on the actual DeployOS VPS:
 1. `main` has been deployed with migrations through
    `0044_whitelabel_domains.sql`.
 2. `sh scripts/inspect-deployos-traefik.sh` succeeds and reports the actual
-   mounted Traefik `/dynamic` directory and `aicaller-web` on `edge`.
+   mounted Traefik `/dynamic` directory, `aicaller-web` on `edge`, and\n   the dedicated edge reconciler mounted to that **same** host directory.
 3. Public port **80** is reachable for the configured Traefik ACME HTTP-01
    challenge, and port **443** is reachable for HTTPS.
 4. Traefik's `letsencrypt` resolver exists and its ACME storage is persistent
