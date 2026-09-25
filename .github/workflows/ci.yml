@@ -104,7 +104,7 @@ jobs:
             docker compose -f docker-compose.yml config --quiet
           services=$(env -u POSTGRES_USER -u POSTGRES_PASSWORD -u POSTGRES_DB \
             docker compose -f docker-compose.yml config --services)
-          for expected in postgres migrate web worker gateway; do
+          for expected in postgres migrate web worker edge-reconciler gateway; do
             printf '%s\n' "$services" | grep -qx "$expected"
           done
           docker compose -f docker-compose.yml config --volumes | grep -qx postgres_data
@@ -116,10 +116,20 @@ jobs:
             const config = JSON.parse(fs.readFileSync(0, "utf8"));
             const gateway = config.services.gateway.networks;
             const web = config.services.web.networks;
+            const worker = config.services.worker;
+            const edgeReconciler = config.services["edge-reconciler"];
+            const routeTarget = "/app/.data/traefik-domains";
+            const edgeMount = (edgeReconciler.volumes ?? []).find((volume) => volume.target === routeTarget);
+            const webHasRouteMount = (config.services.web.volumes ?? []).some((volume) => volume.target === routeTarget);
+            const workerHasRouteMount = (worker.volumes ?? []).some((volume) => volume.target === routeTarget);
             if (!config.networks.edge?.external || !gateway.default ||
                 !gateway.edge?.aliases?.includes("aicaller-voice-gateway") ||
                 !web.default || !web.edge?.aliases?.includes("aicaller-web") ||
                 config.services.worker.networks?.edge ||
+                config.services["edge-reconciler"].networks?.edge ||
+                !edgeMount || edgeMount.type !== "bind" ||
+                edgeReconciler.environment.WHITELABEL_TRAEFIK_DYNAMIC_DIR !== routeTarget ||
+                webHasRouteMount || workerHasRouteMount ||
                 config.services.postgres.networks.edge) process.exit(1);
           '
           grep -Fq 'POSTGRES_HOST_AUTH_METHOD: scram-sha-256' docker-compose.yml
