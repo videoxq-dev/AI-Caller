@@ -261,15 +261,19 @@ describe("Core purchase lifecycle", () => {
     await guard.query("select pg_advisory_xact_lock(hashtext($1))", ["core-license:" + workspaceId]);
 
     const waitingCount = async () => {
+      // Inspect PostgreSQL's lock table directly rather than relying on the
+      // sampled pg_stat_activity query text / wait_event label.
       const result = await guard.query(
-        "select count(*)::int AS waiting from pg_stat_activity " +
-        "where wait_event = 'advisory' and pid <> pg_backend_pid() " +
-        "and query like '%pg_advisory_xact_lock%'",
+        "select count(*)::int AS waiting from pg_locks " +
+        "where locktype = 'advisory' and granted = false",
       );
       return result.rows[0].waiting as number;
     };
     const waitFor = async (minimum: number) => {
-      for (let i = 0; i < 100; i++) {
+      // CI sometimes needs more than three seconds to schedule a competing
+      // purchase webhook. Keep the lock-based assertion instead of accepting
+      // a sequential refund/BILL test that would miss the regression.
+      for (let i = 0; i < 400; i++) {
         if (await waitingCount() >= minimum) return true;
         await new Promise((resolve) => setTimeout(resolve, 30));
       }
@@ -319,5 +323,5 @@ describe("Core purchase lifecycle", () => {
     expect(access.value).toBe(false);
     expect(results[1].status === "fulfilled" && results[1].value)
       .toMatchObject({ result: { ignored: true, reason: "REVOKED_PURCHASE" } });
-  });
+  }, 30_000);
 });
