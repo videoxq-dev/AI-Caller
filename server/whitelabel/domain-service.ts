@@ -27,10 +27,17 @@ function decryptVerificationToken(value: Record<string, unknown>) {
   return result.token;
 }
 
-function infrastructure() {
+function infrastructure(requirePublicIp = false) {
   const env = getEnv();
   const ipv4 = env.WHITELABEL_PUBLIC_IPV4?.trim();
-  if (!ipv4 || isIP(ipv4) !== 4) {
+  if (ipv4 && isIP(ipv4) !== 4) {
+    throw new AppError(
+      "WHITELABEL_DOMAIN_INFRASTRUCTURE_NOT_CONFIGURED",
+      "The configured custom-domain IPv4 address is invalid.",
+      503,
+    );
+  }
+  if (requirePublicIp && !ipv4) {
     throw new AppError(
       "WHITELABEL_DOMAIN_INFRASTRUCTURE_NOT_CONFIGURED",
       "Custom domains are not configured on this AI Caller server yet.",
@@ -81,7 +88,7 @@ function toState(row: typeof whitelabelDomains.$inferSelect) {
     updatedAt: row.updatedAt,
     disabledAt: row.disabledAt,
     dns: {
-      ipv4: infra.ipv4,
+      ipv4: infra.ipv4 ?? null,
       ipv6: infra.ipv6,
       verificationRecordName: `_ai-caller-verify.${row.hostname}`,
       verificationRecordValue: `aicaller-verification=${token}`,
@@ -108,7 +115,7 @@ export async function getWhitelabelDomainState(purchaserUserId: string) {
 
 export async function claimWhitelabelDomain(purchaserUserId: string, rawHostname: string) {
   const brand = await ensureBrandForPurchaser(purchaserUserId);
-  const infra = infrastructure();
+  const infra = infrastructure(true);
   const hostname = normalizeWhitelabelHostname(rawHostname, infra.reservedHosts);
 
   const row = await db.transaction(async (tx) => {
