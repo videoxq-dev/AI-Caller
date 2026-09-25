@@ -1,7 +1,7 @@
 import { and, eq } from "drizzle-orm";
 import { db } from "@/db";
 import { licenses, memberships, workspaceCommercialOwners } from "@/db/schema";
-import { getWorkspacePlan } from "@/server/billing/plans";
+import { getEffectiveWorkspaceSeatPlan } from "@/server/billing/plans";
 import { wasProvisionedForAgency } from "@/server/commerce/agency-client-classification";
 import { AppError } from "@/server/http/errors";
 import { getMembership } from "./workspace-repository";
@@ -97,7 +97,7 @@ export async function requireBrandedClientWorkspaceAccess(
     throw new AppError("WORKSPACE_SUSPENDED", "This workspace is suspended.", 403);
   }
   if (membership.role !== "OWNER") {
-    const plan = await getWorkspacePlan(workspaceId);
+    const { plan } = await getEffectiveWorkspaceSeatPlan(workspaceId);
     if (plan.subUserLimit <= 0) {
       throw new AppError("PLAN_SUBUSER_ACCESS_DISABLED", "This workspace does not include staff access.", 403);
     }
