@@ -115,6 +115,16 @@ describe("F12-B commercial owner and branded client authorization", () => {
       .rejects.toMatchObject({ code: "BRANDED_WORKSPACE_NOT_FOUND", status: 404 });
   });
 
+  it("keeps Agency staff on canonical AI Caller even when assigned to a client workspace", async () => {
+    const agencyStaff = await createUser("Agency Staff");
+    await db.insert(memberships).values([
+      { workspaceId: original, userId: agencyStaff, role: "STAFF" },
+      { workspaceId: client, userId: agencyStaff, role: "STAFF" },
+    ]);
+    await expect(requireBrandedClientWorkspaceAccess(agencyStaff, client, purchaser))
+      .rejects.toMatchObject({ code: "BRANDED_CLIENT_ACCESS_DENIED", status: 403 });
+  });
+
   it("rejects branded access as soon as an Agency or Whitelabel prerequisite is revoked", async () => {
     await db.update(licenses).set({ status: "REFUNDED" }).where(eq(licenses.productCode, "AGENCY_50"));
     await expect(requireBrandedClientWorkspaceAccess(delegatedOwner, client, purchaser))
