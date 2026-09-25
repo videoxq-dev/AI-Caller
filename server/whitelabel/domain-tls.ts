@@ -63,34 +63,67 @@ export async function probeWhitelabelDomainTls(hostname: string): Promise<Whitel
       const socket = response.socket as TLSSocket;
       const certificate = socket.getPeerCertificate();
       const statusCode = response.statusCode ?? 0;
-      response.resume();
+      const chunks: Buffer[] = [];
+      let size = 0;
 
-      if (!socket.authorized) {
-        finish(probeFailure(
-          "TLS_CERT_NOT_READY",
-          "The edge certificate is not trusted for this custom hostname yet.",
-        ));
-        return;
-      }
+      response.on("data", (chunk: Buffer | string) => {
+        const buffer = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
+        size += buffer.byteLength;
+        if (size <= 4096) chunks.push(buffer);
+      });
+      response.on("end", () => {
+        if (!socket.authorized) {
+          finish(probeFailure(
+            "TLS_CERT_NOT_READY",
+            "The edge certificate is not trusted for this custom hostname yet.",
+          ));
+          return;
+        }
 
-      const expiresAt = certificate.valid_to ? new Date(certificate.valid_to) : null;
-      if (!expiresAt || Number.isNaN(expiresAt.getTime()) || expiresAt.getTime() <= Date.now()) {
-        finish(probeFailure(
-          "TLS_CERT_INVALID",
-          "The custom-domain certificate is missing a valid future expiration date.",
-        ));
-        return;
-      }
+        const expiresAt = certificate.valid_to ? new Date(certificate.valid_to) : null;
+        if (!expiresAt || Number.isNaN(expiresAt.getTime()) || expiresAt.getTime() <= Date.now()) {
+          finish(probeFailure(
+            "TLS_CERT_INVALID",
+            "The custom-domain certificate is missing a valid future expiration date.",
+          ));
+          return;
+        }
 
-      if (statusCode < 200 || statusCode >= 400) {
-        finish(probeFailure(
-          "TLS_HTTP_NOT_READY",
-          `HTTPS reached the edge but returned status ${statusCode}.`,
-        ));
-        return;
-      }
+        if (statusCode < 200 || statusCode >= 400) {
+          finish(probeFailure(
+            "TLS_HTTP_NOT_READY",
+            `HTTPS reached the edge but returned status ${statusCode}.`,
+          ));
+          return;
+        }
 
-      finish({ ok: true, statusCode, expiresAt });
+        if (size > 4096) {
+          finish(probeFailure(
+            "TLS_ROUTE_NOT_READY",
+            "HTTPS is active but the expected Whitelabel edge response was not returned.",
+          ));
+          return;
+        }
+
+        let body: unknown;
+        try {
+          body = JSON.parse(Buffer.concat(chunks).toString("utf8"));
+        } catch {
+          body = null;
+        }
+        if (!body || typeof body !== "object"
+          || !("status" in body) || (body as { status?: unknown }).status !== "domain-ready"
+          || !("host" in body)
+          || String((body as { host?: unknown }).host).split(":")[0].toLowerCase() !== hostname.toLowerCase()) {
+          finish(probeFailure(
+            "TLS_ROUTE_NOT_READY",
+            "HTTPS is active but the custom hostname has not reached the Whitelabel holding route yet.",
+          ));
+          return;
+        }
+
+        finish({ ok: true, statusCode, expiresAt });
+      });
     });
 
     request.on("timeout", () => {
