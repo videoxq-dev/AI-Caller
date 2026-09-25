@@ -36,9 +36,18 @@ export function summarizeFunnelAccountLicenses(rows: PurchaserLicense[]): Funnel
     .map((license) => license.productCode);
   const businessLimit = getPurchasedBusinessLimit(activeLicenseCodes);
   const agencyClientLimit = getAgencyClientLimit(activeLicenseCodes);
-  const effectiveWhitelabel = activeProducts.includes("CORE")
-    && agencyClientLimit !== null
-    && activeProducts.includes("WHITELABEL");
+  // Core + Agency + Whitelabel must be anchored to one business, not
+  // combined from unrelated receipts on different workspaces.
+  const activeByWorkspace = new Map<string, Set<string>>();
+  for (const license of rows) {
+    if (license.status !== "ACTIVE") continue;
+    const products = activeByWorkspace.get(license.workspaceId) ?? new Set<string>();
+    products.add(license.productCode);
+    activeByWorkspace.set(license.workspaceId, products);
+  }
+  const effectiveWhitelabel = Array.from(activeByWorkspace.values()).some((products) =>
+    products.has("CORE") && products.has("WHITELABEL")
+      && (products.has("AGENCY_50") || products.has("AGENCY_100")));
   return { activeProducts, businessLimit, agencyClientLimit, effectiveWhitelabel, licenses: rows };
 }
 
