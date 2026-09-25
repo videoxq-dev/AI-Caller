@@ -88,3 +88,70 @@
 .agencyCreditActivity strong{color:#136a43}.agencyCreditActivity small{color:#718198}
 @media(max-width:850px){.agencyCreditFields{grid-template-columns:1fr 1fr}.agencyCreditFields label{grid-column:1/-1}.agencyCreditFields select,.agencyCreditFields input{grid-column:1/-1}.agencyCreditFields button{grid-column:1/-1}.agencyCreditHeader{flex-wrap:wrap}.agencyCreditBalance{justify-items:start}}
 @media(max-width:620px){.agencyCreditCard{padding:15px}.agencyCreditActivity{grid-template-columns:minmax(0,1fr) auto}.agencyCreditActivity small{grid-column:1/-1}}
+
+/* Agency template library and structured review */
+.agencyTemplateHeader{display:flex;justify-content:space-between;align-items:flex-start;gap:20px}
+.agencyTemplateHeader h1{margin:6px 0;font-size:28px;letter-spacing:-.6px}
+.agencyTemplateHeader p:not(.agencyEyebrow){max-width:720px;color:#60718a;font-size:13px;line-height:1.6}
+.agencyTemplateHeader a{display:inline-flex;align-items:center;text-decoration:none}
+.agencyTemplateSource{display:grid;grid-template-columns:minmax(0,1fr) minmax(180px,280px) auto;align-items:end;gap:13px}
+.agencyTemplateSource>div{grid-column:1/-1}.agencyTemplateSource h2{margin:0;font-size:18px}
+.agencyTemplateSource p{margin:6px 0 0;font-size:12px;line-height:1.6;color:#60718a}
+.agencyTemplateSource label{font-size:12px;color:#52647d;font-weight:750}
+.agencyTemplateSource select{min-height:42px;padding:0 12px;border:1px solid #cdd9e9;border-radius:8px;background:#fff;color:#20314b;font-size:12px}
+.agencyTemplateListRow{display:flex;align-items:center;justify-content:space-between;gap:16px;padding:18px 0;border-top:1px solid #e6edf6}
+.agencyTemplateListRow>div:first-child{min-width:0;display:grid;gap:6px}
+.agencyTemplateListRow strong{font-size:14px;color:#20314b}
+.agencyTemplateListRow span,.agencyTemplateListRow small{color:#65768c;font-size:12px}
+.agencyTemplateListActions{display:flex;flex-wrap:wrap;align-items:center;justify-content:flex-end;gap:8px}
+.agencyTemplateListActions a{display:inline-flex;align-items:center;text-decoration:none}
+.agencyTemplateForm{display:grid;gap:18px;padding:24px;border:1px solid #dde5ef;border-radius:14px;background:#fff;box-shadow:0 10px 30px rgba(42,63,91,.045)}
+.agencyTemplateFormHeader{display:flex;justify-content:space-between;gap:14px;align-items:flex-start}
+.agencyTemplateFormHeader h2{margin:6px 0;font-size:21px}
+.agencyTemplateFormHeader p:not(.agencyEyebrow){margin:5px 0;color:#60718a;font-size:12px;line-height:1.5}
+.agencyTemplateForm>fieldset{border:0;padding:0;margin:0;min-width:0}
+.agencyTemplateEditor{display:grid;gap:18px}
+.agencyTemplateSection{display:grid;gap:12px;min-width:0;margin:0;padding:18px;border:1px solid #dde5ef;border-radius:11px}
+.agencyTemplateSection legend{padding:0 8px;color:#20314b;font-size:15px;font-weight:800}
+.agencyTemplateSection>p,.agencyTemplateSection details>p{margin:0;color:#60718a;font-size:12px;line-height:1.6}
+.agencyTemplateFields{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px}
+.agencyTemplateFields>label,.agencyTemplateEntry>label,.agencyTemplateHistory{display:grid;gap:6px;color:#31465f;font-size:12px;font-weight:700}
+.agencyTemplateWide{grid-column:1/-1}
+.agencyTemplateFields input,.agencyTemplateFields select,.agencyTemplateFields textarea,
+.agencyTemplateEntry input,.agencyTemplateEntry textarea,
+.agencyTemplateHistory select,.agencyTemplateInline input,
+.agencyTemplateCreateSelect{width:100%;min-height:40px;max-width:100%;padding:9px 12px;border:1px solid #cdd9e9;border-radius:8px;background:#fff;color:#20314b;font:inherit;font-size:13px}
+.agencyTemplateFields textarea,.agencyTemplateEntry textarea{resize:vertical}
+.agencyTemplateSection details{min-width:0;border-top:1px solid #edf2f7;padding-top:12px}
+.agencyTemplateSection summary{cursor:pointer;color:#1769ee;font-size:12px;font-weight:800}
+.agencyTemplateHours{display:grid;grid-template-columns:minmax(100px,1fr) minmax(85px,120px) minmax(85px,120px);align-items:center;gap:10px;padding:8px 0;border-bottom:1px solid #eff2f7}
+.agencyTemplateHours>label{display:flex;align-items:center;gap:8px;font-size:12px}
+.agencyTemplateHours input[type=time]{max-width:100%;padding:7px 5px;border:1px solid #cdd9e9;border-radius:8px}
+.agencyTemplateCheckbox{display:flex!important;align-items:center;gap:9px;color:#31465f;font-size:12px;font-weight:700}
+.agencyTemplateCheckbox input{flex:none;width:16px;height:16px;min-height:0}
+.agencyTemplateEntry{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px;padding:16px 0;border-top:1px solid #edf2f7}
+.agencyTemplateEntry label:has(textarea){grid-column:1/-1}
+.agencyTemplateEntry>.agencySecondaryButton{justify-self:start}
+.agencyTemplateEntry>strong{grid-column:1/-1;color:#20314b;font-size:13px}
+.agencyTemplateInline{display:flex;gap:8px;padding:8px 0}
+.agencyTemplateInline input{flex:1}
+.agencyTemplateSection>.agencySecondaryButton,.agencyTemplateSection details>.agencySecondaryButton{justify-self:start;margin-top:6px}
+.agencyTemplateReview{display:grid;gap:11px;padding:18px;border:1px solid #bad2f8;border-radius:11px;background:#f7faff}
+.agencyTemplateReview h3{margin:0;font-size:16px}
+.agencyTemplateReview p{margin:0;color:#52647d;font-size:12px;line-height:1.6}
+.agencyTemplateReviewNote{padding:10px 12px;border-radius:8px;background:#fff4e5;color:#75500f!important;font-size:12px;line-height:1.5}
+.agencyTemplateHistory{max-width:260px}
+.agencyTemplateCreateHint{display:grid;gap:6px;padding:12px;border:1px solid #cddcf3;border-radius:9px;background:#f5f9ff}
+.agencyTemplateCreateHint strong{font-size:12px}.agencyTemplateCreateHint span,.agencyTemplateCreateHint p{font-size:12px!important;color:#52647d!important}
+.agencyTemplateCreateHint p{margin:0}.agencyTemplateCreateHint a{font-size:12px;color:#1769ee}
+@media(max-width:760px){
+  .agencyTemplateHeader,.agencyTemplateFormHeader{flex-wrap:wrap}
+  .agencyTemplateSource{grid-template-columns:1fr}
+  .agencyTemplateSource>div{grid-column:auto}
+  .agencyTemplateListRow{display:grid}
+  .agencyTemplateListActions{justify-content:flex-start}
+  .agencyTemplateFields,.agencyTemplateEntry{grid-template-columns:1fr}
+  .agencyTemplateWide,.agencyTemplateEntry label:has(textarea){grid-column:auto}
+  .agencyTemplateForm{padding:14px}.agencyTemplateSection{padding:12px}
+  .agencyTemplateHours{grid-template-columns:minmax(95px,1fr) minmax(74px,100px) minmax(74px,100px)}
+}
