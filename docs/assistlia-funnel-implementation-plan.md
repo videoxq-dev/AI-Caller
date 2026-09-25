@@ -92,6 +92,12 @@ Commercial ownership is separate from operational workspace administration. The 
 
 F10: agency commercial ownership, agency owner/client hierarchy, capacity SKUs, delegated agency-team and client access, client provisioning, client-specific credit funding and the central workspace dashboard. Agency workspaces remain on Assistlia-hosted providers; BYOP is not part of Agency. F11: Agency-purchased credit-pool allocation to client wallets (client self-checkout disabled), cloning with safe secret exclusion, templates, unified agency reports and additional-capacity purchase behavior.
 
+### Agency D — reusable client setup and safe cloning
+
+D1 captures only an explicitly allowlisted **Core** configuration: reusable business category/summary/hours, one AI Agent's copy and behavior preferences, manual services/FAQs/policies, and validated built-in recipe configuration. The Agency previews existing workspace content and must explicitly review before publishing an immutable purchaser-owned template version. Source identities embedded in free text require human review; high-confidence credential strings are rejected. Published snapshots never include workspace/customer IDs, members, credits, phone assignments, integration bindings, imported knowledge, workflow definitions, consent, conversation or billing data. Source staff assignment and WhatsApp template approvals are removed from recipe configurations.
+
+D2 will create an additional Agency-owned client through the existing locked workspace-capacity transaction and apply an exact immutable template version in that same transaction. A new workspace starts with its own empty credit wallet and a DRAFT AI Agent; cloned recipe settings stay disabled until destination-specific readiness is completed. Template revisions never change previously created businesses. D3 adds Agency template library/review/editor and template-based client creation UI. D4 provides integrated browser/regression acceptance, preserves Phase 6C SMS and booking runtime, and does not change the deferred Whitelabel BYOP entitlement.
+
 ### F12 — Whitelabel
 
 Domain ownership verification and TLS/routing; branding isolation for client app, login, widget, reports and permitted emails; safe defaults and custom-domain rollback. Whitelabel is also the package for non-calendar bring-your-own-provider (BYOP) connections such as customer-supplied AI, telephony or messaging provider credentials. Brand or provider customization must not change platform security, secret isolation or license isolation.
