@@ -2,6 +2,7 @@ import { and, eq } from "drizzle-orm";
 import { db } from "@/db";
 import { licenses, memberships, workspaceCommercialOwners } from "@/db/schema";
 import { getWorkspacePlan } from "@/server/billing/plans";
+import { wasProvisionedForAgency } from "@/server/commerce/agency-client-classification";
 import { AppError } from "@/server/http/errors";
 import { getMembership } from "./workspace-repository";
 
@@ -23,7 +24,7 @@ export async function getCommercialWorkspaceOwner(workspaceId: string) {
  * All three active receipts must belong to this purchaser's original business.
  */
 export async function requireEffectiveWhitelabelPurchaser(purchaserUserId: string) {
-  const [primary] = await db.select({ workspaceId: workspaceCommercialOwners.workspaceId })
+  const primaries = await db.select({ workspaceId: workspaceCommercialOwners.workspaceId })
     .from(workspaceCommercialOwners)
     .innerJoin(memberships, and(
       eq(memberships.workspaceId, workspaceCommercialOwners.workspaceId),
@@ -35,9 +36,10 @@ export async function requireEffectiveWhitelabelPurchaser(purchaserUserId: strin
       eq(workspaceCommercialOwners.kind, "PRIMARY"),
     ))
     .limit(2);
-  if (!primary) {
+  if (primaries.length !== 1) {
     throw new AppError("WHITELABEL_REQUIRED", "An active Agency and Whitelabel purchase is required.", 403);
   }
+  const [primary] = primaries;
   const rows = await db.select({ code: licenses.productCode }).from(licenses)
     .where(and(
       eq(licenses.workspaceId, primary.workspaceId),
@@ -65,7 +67,8 @@ export async function requireBrandedClientWorkspaceAccess(
 ) {
   const commercial = await getCommercialWorkspaceOwner(workspaceId);
   if (!commercial || commercial.kind !== "ADDITIONAL"
-    || commercial.purchaserUserId !== approvedBrandPurchaserUserId) {
+    || commercial.purchaserUserId !== approvedBrandPurchaserUserId
+    || !(await wasProvisionedForAgency(commercial.purchaserUserId, commercial.createdAt))) {
     throw new AppError("BRANDED_WORKSPACE_NOT_FOUND", "This business is not available on this branded platform.", 404);
   }
   if (userId === approvedBrandPurchaserUserId) {
