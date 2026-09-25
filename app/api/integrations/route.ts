@@ -100,7 +100,7 @@ export async function GET(request: Request) {
     ]);
     return Response.json({
       integrations,
-      entitlements: { externalCalendar: entitlements.externalCalendar, agencyByop: entitlements.agencyByop },
+      entitlements: { externalCalendar: entitlements.externalCalendar, nonCalendarByopEnabled: entitlements.nonCalendarByopEnabled },
       hostedAI: {
         configured: Boolean(env.HOSTED_AI_API_KEY?.trim()),
         provider: env.HOSTED_AI_PROVIDER,
