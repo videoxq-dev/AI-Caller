@@ -31,6 +31,8 @@ export async function createCreditTopupCheckout(input: {
   customerEmail: string;
   packCode: string;
   appBaseUrl: string;
+  fundingDestination?: "WORKSPACE" | "AGENCY_POOL";
+  agencyPurchaserUserId?: string;
 }) {
   const [pack] = await db.select().from(creditPacks).where(and(
     eq(creditPacks.code, input.packCode),
@@ -40,6 +42,8 @@ export async function createCreditTopupCheckout(input: {
 
   const [topup] = await db.insert(creditTopups).values({
     workspaceId: input.workspaceId,
+    fundingDestination: input.fundingDestination ?? "WORKSPACE",
+    agencyPurchaserUserId: input.fundingDestination === "AGENCY_POOL" ? input.agencyPurchaserUserId : null,
     createdByUserId: input.userId,
     packCode: pack.code,
     credits: pack.credits,
@@ -68,18 +72,22 @@ export async function createCreditTopupCheckout(input: {
       }],
       metadata: {
         workspaceId: input.workspaceId,
+        fundingDestination: topup.fundingDestination,
+        agencyPurchaserUserId: topup.agencyPurchaserUserId ?? "",
         topupId: topup.id,
         packCode: topup.packCode,
       },
       payment_intent_data: {
         metadata: {
           workspaceId: input.workspaceId,
+          fundingDestination: topup.fundingDestination,
+          agencyPurchaserUserId: topup.agencyPurchaserUserId ?? "",
           topupId: topup.id,
           packCode: topup.packCode,
         },
       },
-      success_url: `${input.appBaseUrl.replace(/\/$/, "")}/settings/billing?checkout=success&session_id={CHECKOUT_SESSION_ID}`,
-      cancel_url: `${input.appBaseUrl.replace(/\/$/, "")}/settings/billing?checkout=cancelled`,
+      success_url: `${input.appBaseUrl.replace(/\/$/, "")}${topup.fundingDestination === "AGENCY_POOL" ? "/workspaces" : "/settings/billing"}?checkout=success&session_id={CHECKOUT_SESSION_ID}`,
+      cancel_url: `${input.appBaseUrl.replace(/\/$/, "")}${topup.fundingDestination === "AGENCY_POOL" ? "/workspaces" : "/settings/billing"}?checkout=cancelled`,
     }, {
       idempotencyKey: `credit-topup:${topup.id}`,
     });
