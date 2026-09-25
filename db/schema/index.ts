@@ -18,3 +18,4 @@ export * from "./booking";
 export * from "./appointment-management";
 export * from "./agency-credits";
 export * from "./agency-templates";
+export * from "./agency-template-applications";
