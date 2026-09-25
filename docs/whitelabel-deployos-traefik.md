@@ -137,3 +137,31 @@ Disconnect/revocation is fail-closed: route removal is queued immediately and al
 Traefik is responsible for ACME issuance and renewal. The router references the configured certificate resolver, but **F12-D3 does not mark a certificate READY**. F12-D5 performs an independent public TLS/SNI probe before setting `CERT_READY`.
 
 Keep ACME storage persistent in the Traefik deployment. Use a staging ACME resolver for infrastructure rehearsal if available before production issuance.
+
+
+## F12-D5 certificate readiness contract
+
+Traefik remains the ACME issuer and renewal authority. AI Caller does not parse `acme.json` and does not infer success merely because a router file exists.
+
+The dedicated edge reconciler independently verifies public readiness:
+
+1. connect to the configured `WHITELABEL_PUBLIC_IPV4` on port 443;
+2. send the purchaser hostname as TLS SNI;
+3. require normal CA/hostname certificate validation;
+4. send the same hostname as the HTTP `Host` header;
+5. require an HTTP 2xx/3xx response from the custom-host route;
+6. record the peer certificate expiration date.
+
+Only then does `CERT_PENDING` become `CERT_READY`.
+
+The probe is deliberately pinned to the configured AI Caller edge IP rather than resolving the purchaser-controlled hostname for the outbound connection. This proves our edge is serving the certificate and avoids using custom DNS as an arbitrary outbound-network destination.
+
+A failed probe while the certificate is still pending leaves it in `CERT_PENDING` with an actionable error. A transient failed audit does not automatically downgrade a previously ready/active hostname. Certificates within 21 days of their recorded expiration are re-probed so renewed certificate metadata is refreshed.
+
+The TLS probe timeout is bounded with:
+
+```dotenv
+WHITELABEL_TLS_PROBE_TIMEOUT_MS=8000
+```
+
+F12-D8 still requires a real controlled hostname to prove ACME issuance, renewal-ready persistence and public HTTPS on the deployed server.
