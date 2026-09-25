@@ -31,6 +31,23 @@ describe("F12-D6 incoming host classification", () => {
     expect(isCanonicalAiCallerHost("[::1]:3000")).toBe(true);
   });
 
+  it("does not trust loopback Host headers as canonical on a public production app", () => {
+    vi.stubEnv("NODE_ENV", "production");
+    vi.stubEnv("BETTER_AUTH_URL", "https://app.aicaller.com");
+    resetEnvForTests();
+    expect(isCanonicalAiCallerHost("localhost:8080")).toBe(false);
+    expect(isCanonicalAiCallerHost("127.0.0.1:8080")).toBe(false);
+    expect(isCanonicalAiCallerHost("[::1]:8080")).toBe(false);
+  });
+
+  it("accepts loopback when it is explicitly configured as the production app origin", () => {
+    vi.stubEnv("NODE_ENV", "production");
+    vi.stubEnv("BETTER_AUTH_URL", "http://127.0.0.1:3000");
+    resetEnvForTests();
+    expect(isCanonicalAiCallerHost("127.0.0.1:3000")).toBe(true);
+    expect(isCanonicalAiCallerHost("localhost:8080")).toBe(false);
+  });
+
   it("does not treat purchaser-controlled custom domains as canonical", () => {
     vi.stubEnv("BETTER_AUTH_URL", "https://app.aicaller.com");
     resetEnvForTests();
