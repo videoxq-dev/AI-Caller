@@ -23,6 +23,7 @@ export const probeWhitelabelTls: WhitelabelTlsProbe = async (hostname) => new Pr
     servername: hostname,
     rejectUnauthorized: true,
     timeout: 5_000,
+    agent: false,
     headers: {
       accept: "application/json",
       "user-agent": "AI-Caller-Whitelabel-TLS-Probe/1",
