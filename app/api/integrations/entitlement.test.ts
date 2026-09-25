@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { resolveWorkspaceContext } from "@/server/auth/workspace-context";
 import { getCommercialWorkspaceOwner, requireCommercialProviderPurchaser } from "@/server/auth/commercial-ownership";
-import { bindCapability, listIntegrations, saveIntegration, setIntegrationStatus, testSavedIntegration } from "@/server/domain/integrations/repository";
+import { bindCapability, listIntegrations, saveCommunicationSetup, saveIntegration, setIntegrationStatus, testSavedIntegration } from "@/server/domain/integrations/repository";
 import {
   getWorkspaceIntegrationEntitlements,
   requireCapabilityBindingEntitlement,
@@ -14,6 +14,7 @@ import { GET as listBindings, PUT as bindProvider } from "./capabilities/route";
 import { resolveProviderRoute } from "@/server/providers/resolver";
 import { GET as startOAuth } from "./oauth/[provider]/start/route";
 import { PUT as updateSmsConfig } from "./sms/config/route";
+import { PUT as saveCommunication } from "../setup/communication/route";
 
 vi.mock("@/server/auth/workspace-context", () => ({ resolveWorkspaceContext: vi.fn() }));
 vi.mock("@/server/auth/commercial-ownership", () => ({
@@ -32,6 +33,7 @@ vi.mock("@/server/domain/integrations/repository", () => ({
   getPrivateIntegration: vi.fn().mockResolvedValue(null),
   listIntegrations: vi.fn().mockResolvedValue([]),
   saveIntegration: vi.fn(),
+  saveCommunicationSetup: vi.fn(),
   setIntegrationStatus: vi.fn(),
   testSavedIntegration: vi.fn(),
 }));
@@ -122,6 +124,24 @@ describe("external integration route entitlements", () => {
     expect(resolveProviderRoute).toHaveBeenCalledTimes(2);
     expect(resolveProviderRoute).toHaveBeenCalledWith("agency-client", "WHATSAPP");
     expect(resolveProviderRoute).toHaveBeenCalledWith("agency-client", "CALENDAR");
+  });
+
+  it("rejects delegated client communication setup before saving voice/SMS bindings", async () => {
+    vi.mocked(requireCommercialProviderPurchaser).mockRejectedValueOnce(
+      new AppError("COMMERCIAL_PURCHASER_REQUIRED", "Only the purchaser can manage provider infrastructure.", 403),
+    );
+    const response = await saveCommunication(new Request("https://app.example.com/api/setup/communication", {
+      method: "PUT", headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        voice: { mode: "HOSTED", numberMode: "new" },
+        sms: { mode: "HOSTED", numberMode: "same" },
+        whatsapp: { mode: "BYOP", provider: "whatsapp", accountMode: "existing" },
+        webchat: { enabled: true },
+      }),
+    }));
+    expect(response.status).toBe(403);
+    expect(saveCommunicationSetup).not.toHaveBeenCalled();
+    expect(bindCapability).not.toHaveBeenCalled();
   });
 
   it("blocks direct external calendar credentials before persistence or provider testing", async () => {
