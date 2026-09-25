@@ -315,11 +315,20 @@ try {
   await page.getByText("Template created.").waitFor();
   const savedTemplateRow = page.locator(".agencyTemplateListRow").filter({ hasText: "Agency Cleaning Reusable" });
   await savedTemplateRow.getByText("Version 1", { exact: false }).waitFor();
-  const sourceTemplateId = new URL(await savedTemplateRow.getByRole("link", { name: "Use template" }).getAttribute("href"), baseUrl)
+  const sourceTemplateId = new URL((await savedTemplateRow.getByRole("link", { name: "Use template" }).getAttribute("href")) ?? "", baseUrl)
     .searchParams.get("templateId");
   assert(sourceTemplateId, "Published Agency template was not offered for client provisioning.");
+  await noOverflow("Agency template library mobile");
+  await page.screenshot({ path: path.join(outputDir, "agency-templates-mobile.png"), fullPage: true });
+  await page.setViewportSize({ width: 1440, height: 960 });
+  await page.reload({ waitUntil: "networkidle" });
+  await page.getByRole("heading", { name: "Reusable client setups" }).waitFor();
+  await noOverflow("Agency template library desktop");
+  await page.screenshot({ path: path.join(outputDir, "agency-templates-desktop.png"), fullPage: true });
   await savedTemplateRow.getByRole("link", { name: "Use template" }).click();
   await page.getByRole("heading", { name: "Create a client workspace" }).waitFor();
+  await page.waitForFunction((id) => document.getElementById("agency-workspace-template")?.value === id,
+    sourceTemplateId);
   assert(await page.getByLabel("Starting setup").inputValue() === sourceTemplateId,
     "Use template did not select the correct Agency template.");
   await page.getByLabel("Business name").fill("UI Templated Client");
