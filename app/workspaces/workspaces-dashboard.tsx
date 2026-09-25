@@ -3,6 +3,7 @@
 import { useEffect, useState, type FormEvent } from "react";
 import { AppNav } from "@/components/core-domain/app-nav";
 import { WorkspaceAccessPanel, type ManagedAgencyWorkspace } from "./workspace-access-panel";
+import { AgencyCreditPanel } from "./agency-credit-panel";
 
 type AgencyWorkspace = ManagedAgencyWorkspace;
 
@@ -166,6 +167,8 @@ export function AgencyWorkspacesDashboard() {
               <p>Original business plus your client workspaces.</p>
             </article>
           </section>
+
+          {data && <AgencyCreditPanel workspaces={data.workspaces} />}
 
           {createOpen && (
             <form className="agencyCreateCard" onSubmit={(event) => void createWorkspace(event)}>
