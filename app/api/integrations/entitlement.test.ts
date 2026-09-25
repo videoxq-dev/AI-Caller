@@ -80,6 +80,18 @@ describe("external integration route entitlements", () => {
     expect(setIntegrationStatus).not.toHaveBeenCalled();
   });
 
+  it("blocks delegated client OWNER from disabling the hosted credits integration", async () => {
+    vi.mocked(requireCommercialProviderPurchaser).mockRejectedValueOnce(
+      new AppError("COMMERCIAL_PURCHASER_REQUIRED", "Only the purchaser can manage provider infrastructure.", 403),
+    );
+    const response = await disconnectProvider(new Request("https://app.example.com/api/integrations", {
+      method: "PATCH", headers: { "content-type": "application/json" },
+      body: JSON.stringify({ provider: "credits", status: "DISCONNECTED" }),
+    }));
+    expect(response.status).toBe(403);
+    expect(setIntegrationStatus).not.toHaveBeenCalled();
+  });
+
   it("hides purchaser provider records from delegated client integration listings", async () => {
     vi.mocked(resolveWorkspaceContext).mockResolvedValue({
       session: { user: { id: "delegated-client" } },
