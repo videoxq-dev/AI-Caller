@@ -188,7 +188,7 @@ try {
   await page.getByRole("button", { name: "Refresh balance" }).click();
   const poolCard = page.getByRole("region", { name: "Agency credit pool" });
   await poolCard.getByText("10,000", { exact: true }).waitFor();
-  await page.getByLabel("Client workspace").selectOption(clientWorkspace.workspaceId);
+  await page.getByLabel("Client workspace", { exact: true }).selectOption(clientWorkspace.workspaceId);
   await page.getByLabel("Credits", { exact: true }).fill("2000");
   const allocationPromise = page.waitForResponse((response) => response.url().endsWith(
     "/api/agency/credits/allocations") && response.request().method() === "POST");
