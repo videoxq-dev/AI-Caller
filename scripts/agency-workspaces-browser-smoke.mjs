@@ -300,6 +300,57 @@ try {
   const afterClone = await (await context.request.get(`${baseUrl}/api/agency/workspaces`)).json();
   assert(afterClone.capacity.agencyClientsUsed === 3 && afterClone.capacity.agencyClientLimit === 150,
     "Template creation did not use exactly one stacked Agency client slot.");
+  // D3: Agency extracts, edits, explicitly reviews and publishes the source
+  // setup through the actual UI, then creates another independent client.
+  await page.goto(`${baseUrl}/workspaces/templates`, { waitUntil: "networkidle" });
+  await page.getByRole("heading", { name: "Reusable client setups" }).waitFor();
+  await page.getByLabel("Source business").selectOption(cloneId);
+  await page.getByRole("button", { name: "Review reusable setup" }).click();
+  await page.getByRole("heading", { name: "Prepare template" }).waitFor();
+  await page.getByLabel("Template name").fill("Agency Cleaning Reusable");
+  await page.getByLabel("Business summary").fill("Reusable commercial cleaning assistance");
+  await page.getByLabel("Opening greeting").fill("Hello from {{business_name}}!");
+  await page.getByRole("checkbox", { name: /reviewed this template/i }).check();
+  await page.getByRole("button", { name: "Publish template" }).click();
+  await page.getByText("Template created.").waitFor();
+  const savedTemplateRow = page.locator(".agencyTemplateListRow").filter({ hasText: "Agency Cleaning Reusable" });
+  await savedTemplateRow.getByText("Version 1", { exact: false }).waitFor();
+  const sourceTemplateId = new URL(await savedTemplateRow.getByRole("link", { name: "Use template" }).getAttribute("href"), baseUrl)
+    .searchParams.get("templateId");
+  assert(sourceTemplateId, "Published Agency template was not offered for client provisioning.");
+  await savedTemplateRow.getByRole("link", { name: "Use template" }).click();
+  await page.getByRole("heading", { name: "Create a client workspace" }).waitFor();
+  assert(await page.getByLabel("Starting setup").inputValue() === sourceTemplateId,
+    "Use template did not select the correct Agency template.");
+  await page.getByLabel("Business name").fill("UI Templated Client");
+  await page.getByRole("button", { name: "Create from template" }).click();
+  await page.waitForURL((url) => url.pathname === "/setup/business");
+  const uiClone = await pool.query(`SELECT a.status AS agent_status, a.opening_message,
+    p.business_name, p.summary, p.phone, p.website_url, w.balance,
+    x.template_version, x.template_id
+    FROM ai_agents a
+    JOIN business_profiles p ON p.workspace_id = a.workspace_id
+    JOIN credit_wallets w ON w.workspace_id = a.workspace_id
+    JOIN agency_workspace_template_applications x ON x.workspace_id = a.workspace_id
+    WHERE x.purchaser_user_id = $1 AND x.template_id = $2`, [userId, sourceTemplateId]);
+  assert(uiClone.rowCount === 1 && uiClone.rows[0].agent_status === "DRAFT"
+    && uiClone.rows[0].business_name === "UI Templated Client"
+    && uiClone.rows[0].opening_message === "Hello from UI Templated Client!"
+    && uiClone.rows[0].summary === "Reusable commercial cleaning assistance"
+    && uiClone.rows[0].phone === null && uiClone.rows[0].website_url === null
+    && uiClone.rows[0].balance === 0 && uiClone.rows[0].template_version === 1,
+  "Agency template UI did not produce an isolated, zero-funded draft client.");
+  await page.goto(`${baseUrl}/workspaces/templates`, { waitUntil: "networkidle" });
+  const editingRow = page.locator(".agencyTemplateListRow").filter({ hasText: "Agency Cleaning Reusable" });
+  await editingRow.getByRole("button", { name: "Review / edit" }).click();
+  await page.getByLabel("Agent name").fill("Mia Two");
+  await page.getByRole("checkbox", { name: /reviewed this template/i }).check();
+  await page.getByRole("button", { name: "Publish new version" }).click();
+  await page.getByText("New template version published.").waitFor();
+  const priorClone = await pool.query(`SELECT name FROM ai_agents WHERE workspace_id =
+    (SELECT workspace_id FROM agency_workspace_template_applications
+     WHERE purchaser_user_id = $1 AND template_id = $2)`, [userId, sourceTemplateId]);
+  assert(priorClone.rows[0]?.name === "Mia", "Editing Agency template modified an existing client agent.");
   await pool.query(`UPDATE licenses SET status = 'REFUNDED'
     WHERE purchaser_user_id = $1 AND product_code IN ('AGENCY_50', 'AGENCY_100')`, [userId]);
   inventory = await context.request.get(`${baseUrl}/api/agency/workspaces`);
@@ -309,7 +360,7 @@ try {
     "Refunded Agency purchase kept dashboard page access.");
   const preserved = await pool.query(`SELECT count(*)::int AS total FROM memberships
     WHERE user_id = $1 AND role = 'OWNER'`, [userId]);
-  assert(preserved.rows[0].total === 4, "Agency refund deleted existing or templated client workspaces.");
+  assert(preserved.rows[0].total === 5, "Agency refund deleted an existing or templated client workspace.");
   const blocked = await context.request.put(`${baseUrl}/api/workspaces`, {
     data: { name: "After Agency Refund" },
   });
