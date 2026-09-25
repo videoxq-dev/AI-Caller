@@ -167,6 +167,30 @@ describe("workspace external integration entitlements", () => {
     expect((await getWorkspaceIntegrationEntitlements(original)).whitelabelEligible).toBe(false);
   });
 
+  it("does not authorize Whitelabel or purchaser premium features after the original OWNER membership is lost", async () => {
+    const purchaser = await createBuyer("Former Purchaser");
+    const delegated = await createBuyer("Client Owner");
+    const original = await createOwnedWorkspace(purchaser);
+    await db.insert(workspaceCommercialOwners).values({
+      workspaceId: original, purchaserUserId: purchaser, kind: "PRIMARY",
+    });
+    for (const product of ["CORE", "UNLIMITED", "PERFORMANCE", "AGENCY_50", "WHITELABEL"]) {
+      await grant(purchaser, original, product);
+    }
+    const client = await createOwnedWorkspace(purchaser);
+    await db.insert(workspaceCommercialOwners).values({
+      workspaceId: client, purchaserUserId: purchaser, kind: "ADDITIONAL", agencyClient: true,
+    });
+    await db.insert(memberships).values({ workspaceId: client, userId: delegated, role: "OWNER" });
+    await db.delete(memberships).where(and(
+      eq(memberships.workspaceId, original), eq(memberships.userId, purchaser),
+    ));
+    await expect(getWorkspaceIntegrationEntitlements(client)).resolves.toMatchObject({
+      purchaserUserId: purchaser, externalCalendar: false,
+      performanceAutomations: false, whitelabelEligible: false, nonCalendarByopEnabled: false,
+    });
+  });
+
   it("keeps WhatsApp embedded signup outside the Agency BYOP gate", async () => {
     const owner = await createBuyer("WhatsApp Core Buyer");
     const workspaceId = await createOwnedWorkspace(owner);
