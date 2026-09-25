@@ -42,6 +42,9 @@ jobs:
       VOICE_GATEWAY_PORT: "3002"
       VOICE_RECORDING_STORAGE_BACKEND: filesystem
       VOICE_RECORDING_DIR: /tmp/ai-caller-recordings
+      BRAND_ASSET_STORAGE_BACKEND: filesystem
+      BRAND_ASSET_ALLOW_PERSISTENT_FILESYSTEM: "true"
+      BRAND_ASSET_DIR: /tmp/ai-caller-brand-assets
 
     services:
       postgres:
@@ -103,6 +106,7 @@ jobs:
             printf '%s\n' "$services" | grep -qx "$expected"
           done
           docker compose -f docker-compose.yml config --volumes | grep -qx postgres_data
+          docker compose -f docker-compose.yml config --volumes | grep -qx brand_assets
           # Gateway must survive redeploy on Traefik's edge network while
           # preserving its private default network for PostgreSQL.
           docker compose -f docker-compose.yml config --format json | node -e '
@@ -209,6 +213,9 @@ jobs:
       - name: Agency workspace management browser acceptance verification
         run: npm run test:browser:agency
 
+      - name: F12-C Whitelabel brand browser acceptance verification
+        run: npm run test:browser:f12c
+
       - name: Phase 4 Automation Builder browser acceptance verification
         run: npm run test:browser:phase4
 
@@ -228,6 +235,15 @@ jobs:
 
       - name: Booking remediation browser acceptance verification
         run: npm run test:browser:booking
+
+      - name: Upload F12-C Whitelabel brand screenshots
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: f12c-whitelabel-brand-verification
+          path: artifacts/f12c-whitelabel-brand
+          if-no-files-found: warn
+          retention-days: 14
 
       - name: Upload Agency workspace management screenshots
         if: always()
