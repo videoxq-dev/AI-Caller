@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { eq } from "drizzle-orm";
+import { and, eq } from "drizzle-orm";
 import { afterAll, afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { closeDatabase, db } from "@/db";
 import {
@@ -108,14 +108,14 @@ describe("F12-D6 Whitelabel holding-host guard", () => {
   it("fails closed immediately when Whitelabel entitlement is refunded even before route cleanup", async () => {
     await routed("CERT_READY");
     await db.update(licenses).set({ status: "REFUNDED" })
-      .where(eq(licenses.productCode, "WHITELABEL"));
+      .where(and(eq(licenses.productCode, "WHITELABEL"), eq(licenses.purchaserUserId, purchaser)));
     await expect(resolveWhitelabelHoldingHost("clients.stratosassist.com")).resolves.toBeNull();
   });
 
   it("fails closed when the Agency prerequisite is lost", async () => {
     await routed("CERT_READY");
     await db.update(licenses).set({ status: "CANCELLED" })
-      .where(eq(licenses.productCode, "AGENCY_50"));
+      .where(and(eq(licenses.productCode, "AGENCY_50"), eq(licenses.purchaserUserId, purchaser)));
     await expect(resolveWhitelabelHoldingHost("clients.stratosassist.com")).resolves.toBeNull();
   });
 
