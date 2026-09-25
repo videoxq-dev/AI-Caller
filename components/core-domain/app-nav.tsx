@@ -18,6 +18,7 @@ type BusinessCapacity = {
   businessLimit: number;
   availableBusinesses: number;
   activeProducts: string[];
+  effectiveWhitelabel: boolean;
 };
 
 type NotificationItem = {
@@ -73,7 +74,15 @@ export function AppNav({ active, className = "appSidebar" }: { active: string; c
   const atCapacity = capacity !== null && capacity.availableBusinesses <= 0;
   const hasAgency = capacity?.activeProducts.some((code) => code === "AGENCY_50" || code === "AGENCY_100") ?? false;
   const navigationItems = hasAgency
-    ? [items[0], { label: "Workspaces", href: "/workspaces", icon: <DatabaseIcon size={20} /> }, ...items.slice(1)]
+    ? [
+        items[0],
+        { label: "Workspaces", href: "/workspaces", icon: <DatabaseIcon size={20} /> },
+        ...items.slice(1, -1),
+        ...(capacity?.effectiveWhitelabel
+          ? [{ label: "Whitelabel", href: "/whitelabel", icon: <span aria-hidden>◇</span> }]
+          : []),
+        items[items.length - 1],
+      ]
     : items;
 
   async function switchWorkspace(workspaceId: string) {
