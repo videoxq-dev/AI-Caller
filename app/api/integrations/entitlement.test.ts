@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { resolveWorkspaceContext } from "@/server/auth/workspace-context";
+import { requireCommercialProviderPurchaser } from "@/server/auth/commercial-ownership";
 import { bindCapability, saveIntegration, testSavedIntegration } from "@/server/domain/integrations/repository";
 import {
   requireCapabilityBindingEntitlement,
@@ -7,12 +8,16 @@ import {
 } from "@/server/commerce/workspace-entitlements";
 import { AppError } from "@/server/http/errors";
 import { exchangeOAuthCode, getOAuthAuthorizationUrl } from "@/server/providers/oauth";
-import { POST as saveProvider } from "./route";
+import { GET as listProviders, PATCH as disconnectProvider, POST as saveProvider } from "./route";
 import { PUT as bindProvider } from "./capabilities/route";
 import { GET as startOAuth } from "./oauth/[provider]/start/route";
 import { PUT as updateSmsConfig } from "./sms/config/route";
 
 vi.mock("@/server/auth/workspace-context", () => ({ resolveWorkspaceContext: vi.fn() }));
+vi.mock("@/server/auth/commercial-ownership", () => ({
+  getCommercialWorkspaceOwner: vi.fn().mockResolvedValue(null),
+  requireCommercialProviderPurchaser: vi.fn().mockResolvedValue(undefined),
+}));
 vi.mock("@/server/auth/permissions", () => ({ requireWorkspacePermission: vi.fn() }));
 vi.mock("@/server/commerce/workspace-entitlements", () => ({
   getWorkspaceIntegrationEntitlements: vi.fn().mockResolvedValue({ externalCalendar: false, nonCalendarByopEnabled: false }),
@@ -39,9 +44,34 @@ describe("external integration route entitlements", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     vi.mocked(resolveWorkspaceContext).mockResolvedValue({
+      session: { user: { id: "purchaser" } },
       workspace: { id: "workspace-core" },
       membership: { role: "OWNER" },
     } as Awaited<ReturnType<typeof resolveWorkspaceContext>>);
+  });
+
+  it("blocks delegated client OWNER from saving provider credentials before any provider call", async () => {
+    vi.mocked(requireCommercialProviderPurchaser).mockRejectedValueOnce(
+      new AppError("COMMERCIAL_PURCHASER_REQUIRED", "Only the purchaser can manage provider infrastructure.", 403),
+    );
+    const response = await saveProvider(new Request("https://app.example.com/api/integrations", {
+      method: "POST", headers: { "content-type": "application/json" },
+      body: JSON.stringify({ provider: "openai", category: "AI", mode: "BYOP", credentials: { apiKey: "secret" }, settings: {} }),
+    }));
+    expect(response.status).toBe(403);
+    expect(saveIntegration).not.toHaveBeenCalled();
+    expect(testSavedIntegration).not.toHaveBeenCalled();
+  });
+
+  it("blocks delegated client OWNER from disconnecting purchaser BYOP credentials after a refund", async () => {
+    vi.mocked(requireCommercialProviderPurchaser).mockRejectedValueOnce(
+      new AppError("COMMERCIAL_PURCHASER_REQUIRED", "Only the purchaser can manage provider infrastructure.", 403),
+    );
+    const response = await disconnectProvider(new Request("https://app.example.com/api/integrations", {
+      method: "PATCH", headers: { "content-type": "application/json" },
+      body: JSON.stringify({ provider: "telnyx", status: "DISCONNECTED" }),
+    }));
+    expect(response.status).toBe(403);
   });
 
   it("blocks direct external calendar credentials before persistence or provider testing", async () => {
