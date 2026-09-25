@@ -109,6 +109,7 @@ export async function saveBrandDraft(
   const draft = brandDraftSchema.parse(input);
   await db.transaction(async (tx) => {
     const brand = await ensureBrand(tx, purchaserUserId);
+    await tx.execute(sql`select pg_advisory_xact_lock(hashtext(${`whitelabel-brand:${brand.id}`}))`);
     await assertAssetsBelongToBrand(tx, brand.id, draft);
     const [updated] = await tx.update(whitelabelBrands).set({
       draft,
