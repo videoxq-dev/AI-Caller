@@ -222,15 +222,20 @@ Client business data remains isolated by workspace in the shared database. No pe
 
 **Implementation**
 
-- Create `Whitelabel` section in canonical app with brand name, tagline, approved logo/icon/favicon uploads, palette, support email/link, preview, save draft and publish; reuse the existing UI design language and shared components.
-- Schema-validate lengths/colors/URLs/media formats and limits; scan or decode permitted asset formats, re-encode raster uploads as appropriate, disallow executable SVG/HTML unless a secure sanitizer pipeline is explicitly justified, serve assets with correct content type/cache.
-- No brand-specific secrets in client JSON; allow only public published brand fields in the client-facing resolver.
-- Version and audit publication; revert safely to prior published brand; invalid logo/icon cannot break navigation/auth. Default branding is stable for incomplete accounts.
-- Scope admin mutation by commercial purchaser. An Agency Admin may get narrowly delegated read/preview if approved, but buying, domain ownership and BYOP keys should not be implicitly delegated.
+- Create a purchaser-only `Whitelabel` section in the canonical app with brand name, tagline, logo/icon/favicon, palette, support email/link, live client preview, draft save, publish, history and restore. Canonical AI Caller navigation/login/support remain AI Caller-branded.
+- Persist one brand per effective Agency + Whitelabel purchaser. Brand authority comes from F12-B commercial ownership, never the selected workspace or a delegated client `OWNER`.
+- Keep draft revision separate from immutable published versions. Optimistic revision checks reject stale-tab overwrites; publishing snapshots the draft; restoring an old version creates a new publication instead of rewriting history.
+- Brand media is normal public-facing content, not a high-security document-ingestion workflow. Accept PNG/JPEG/WebP, enforce reasonable upload sizes, read actual image dimensions/format, resize for compatible display, and store optimized output. SVG is deferred to avoid inconsistent rendering/processing, not because brand assets require a heavyweight security pipeline.
+- Use one storage abstraction with **persistent filesystem for the production-like development server** and **S3-compatible object storage for production**. Keep brand media separate from private voice recordings. Filesystem data lives on a dedicated persistent volume; production S3 configuration is server-side.
+- Normalize only the variants we need: logo max roughly 1600×600 preserving aspect ratio; app icon 512×512; favicon 128×128. Avoid storing oversized source images and avoid generating a large responsive derivative set.
+- Store asset metadata and immutable object keys in PostgreSQL; brand drafts/publications reference asset IDs. Historical assets remain while referenced by published versions. Garbage collection of unreferenced historical media can be a later maintenance task and is not a launch gate.
+- Expose only public-safe published brand fields to future client-domain resolvers. F12-C asset reads used by the canonical preview stay authenticated; F12-F will add the published-client asset contract.
+- Preserve brand data and assets on Whitelabel refund/cancellation while denying further purchaser brand administration until entitlement is restored.
+- Scope all brand mutation to the commercial purchaser for the MVP. Agency staff/client owners are not implicit brand administrators.
 
-**Tests first:** Distinct purchasers, access control, invalid uploads/theme, draft vs published, concurrent edits/version conflict, fallback on deleted asset, mobile/desktop visual snapshots.
+**Tests first:** Distinct purchasers, purchaser-only access, draft vs published, concurrent revision conflict, publish readiness, immutable version restore, refund preservation, invalid/oversized image, logo sizing, icon/favicon normalization, filesystem persistence, S3 adapter configuration, mobile/desktop editor/preview, and canonical AI Caller visual regression.
 
-**Exit:** A purchaser can save, preview and publish one brand on canonical AI Caller; canonical purchaser dashboard remains AI Caller-branded; no widget change.
+**Exit:** A purchaser can save, preview, publish and restore one brand from canonical AI Caller; dev media persists on the configured filesystem volume; production has an S3-compatible backend ready for credentials; canonical purchaser dashboard remains AI Caller-branded; no widget change and no custom-domain routing yet.
 
 ### F12-D — Verified custom domain, server-side Traefik routing and automatic TLS
 
