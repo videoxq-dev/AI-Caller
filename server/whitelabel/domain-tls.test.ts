@@ -9,6 +9,7 @@ import { resetEnvForTests } from "@/server/env";
 import { claimWhitelabelDomain } from "./domain-service";
 import {
   buildWhitelabelTlsProbeTarget,
+  classifyWhitelabelTlsProbeError,
   reconcileWhitelabelDomainTls,
   reconcilePendingWhitelabelDomainCertificates,
   type WhitelabelTlsProber,
@@ -85,6 +86,16 @@ describe("F12-D5 public TLS readiness", () => {
       servername: "clients.stratosassist.com",
       hostHeader: "clients.stratosassist.com",
     });
+  });
+
+
+  it("distinguishes certificate validation failures from transient network failures", () => {
+    expect(classifyWhitelabelTlsProbeError(
+      Object.assign(new Error("hostname mismatch"), { code: "ERR_TLS_CERT_ALTNAME_INVALID" }),
+    )).toMatchObject({ ok: false, code: "TLS_CERT_NOT_READY" });
+    expect(classifyWhitelabelTlsProbeError(
+      Object.assign(new Error("connection refused"), { code: "ECONNREFUSED" }),
+    )).toMatchObject({ ok: false, code: "TLS_PROBE_FAILED" });
   });
 
   it("promotes CERT_PENDING only after a trusted HTTPS probe succeeds", async () => {
