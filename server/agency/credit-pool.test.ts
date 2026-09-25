@@ -10,6 +10,7 @@ import {
 } from "@/db/schema";
 import { getCreditBalance } from "@/server/credits/service";
 import { processStripeWebhookEvent } from "@/server/billing/stripe-webhooks";
+import { getBillingOverview } from "@/server/billing/checkout";
 import { allocateAgencyCredits, getAgencyCreditOverview } from "./credit-pool";
 
 let ownerId = "";
@@ -114,6 +115,7 @@ describe("purchaser-owned Agency credit pool", () => {
     expect((await getAgencyCreditOverview(ownerId)).balance).toBe(10_000);
     expect(await getCreditBalance(clientId)).toBe(0);
     expect(await getCreditBalance(originalId)).toBe(0);
+    expect((await getBillingOverview(originalId)).topups).toHaveLength(0);
     expect(await db.select().from(creditLedger).where(eq(creditLedger.workspaceId, originalId))).toHaveLength(0);
 
     await processStripeWebhookEvent(stripeEvent(`evt_${randomUUID()}`, "checkout.session.async_payment_succeeded", session));
