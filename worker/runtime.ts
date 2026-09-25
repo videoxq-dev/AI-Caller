@@ -17,6 +17,8 @@ import {
   whatsappInboundResponseJobSchema,
   automationDispatchEventJobSchema,
   automationExecuteRunJobSchema,
+  whitelabelDomainReconcileJobSchema,
+  WHITELABEL_DOMAIN_RECONCILE,
   welcomeEmailJobSchema,
   adminUserWelcomeEmailJobSchema,
 } from "@/server/jobs/queues";
@@ -30,6 +32,7 @@ import { dispatchAutomationEvent } from "@/server/automations/dispatcher";
 import { executeAutomationRun } from "@/server/automations/executor";
 import { listRecoverableAutomationRuns, listUndispatchedAutomationEvents } from "@/server/automations/repository";
 import { processDuePhoneNumberRenewals, processPendingPhoneNumberProvisioning, processPendingPhoneNumberReleases } from "@/server/phone-numbers/service";
+import { reconcileWhitelabelDomainDns } from "@/server/whitelabel/domain-dns";
 
 export async function startWorker() {
   const authBoss = await ensureQueue(AUTH_PASSWORD_RESET_EMAIL);
@@ -41,6 +44,7 @@ export async function startWorker() {
   const voiceBoss = await ensureQueue(VOICE_RESPOND_TURN);
   const automationDispatchBoss = await ensureQueue(AUTOMATION_DISPATCH_EVENT);
   const automationExecuteBoss = await ensureQueue(AUTOMATION_EXECUTE_RUN);
+  const whitelabelDomainBoss = await ensureQueue(WHITELABEL_DOMAIN_RECONCILE);
 
   await authBoss.work(AUTH_PASSWORD_RESET_EMAIL, async (jobs) => {
     for (const job of jobs) {
@@ -102,6 +106,18 @@ export async function startWorker() {
     for (const job of jobs) {
       const payload = automationExecuteRunJobSchema.parse(job.data);
       await executeAutomationRun(payload.workspaceId, payload.runId);
+    }
+  });
+
+  await whitelabelDomainBoss.work(WHITELABEL_DOMAIN_RECONCILE, async (jobs) => {
+    for (const job of jobs) {
+      const payload = whitelabelDomainReconcileJobSchema.parse(job.data);
+      const result = await reconcileWhitelabelDomainDns(payload.domainId);
+      logger.info({
+        domainId: payload.domainId,
+        status: result.status,
+        errorCode: result.lastErrorCode,
+      }, "Reconciled Whitelabel custom-domain DNS");
     }
   });
 
@@ -208,7 +224,7 @@ export async function startWorker() {
   const renewalTimer = setInterval(() => void renewManagedNumbers(), 60 * 60 * 1000);
   renewalTimer.unref();
 
-  logger.info({ queues: [AUTH_PASSWORD_RESET_EMAIL, COMMERCE_WELCOME_EMAIL, ADMIN_USER_WELCOME_EMAIL, TEAM_INVITATION_EMAIL, SMS_INBOUND_RESPONSE, WHATSAPP_INBOUND_RESPONSE, VOICE_RESPOND_TURN, AUTOMATION_DISPATCH_EVENT, AUTOMATION_EXECUTE_RUN] }, "AI Caller worker started");
+  logger.info({ queues: [AUTH_PASSWORD_RESET_EMAIL, COMMERCE_WELCOME_EMAIL, ADMIN_USER_WELCOME_EMAIL, TEAM_INVITATION_EMAIL, SMS_INBOUND_RESPONSE, WHATSAPP_INBOUND_RESPONSE, VOICE_RESPOND_TURN, AUTOMATION_DISPATCH_EVENT, AUTOMATION_EXECUTE_RUN, WHITELABEL_DOMAIN_RECONCILE] }, "AI Caller worker started");
 
   const shutdown = async (signal: string) => {
     logger.info({ signal }, "Stopping AI Caller worker");

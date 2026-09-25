@@ -9,6 +9,7 @@ export const WHATSAPP_INBOUND_RESPONSE = "whatsapp.inbound-response";
 export const VOICE_RESPOND_TURN = "voice.respond-turn";
 export const AUTOMATION_DISPATCH_EVENT = "automation.dispatch-event";
 export const AUTOMATION_EXECUTE_RUN = "automation.execute-run";
+export const WHITELABEL_DOMAIN_RECONCILE = "whitelabel.domain-reconcile";
 
 export const passwordResetEmailJobSchema = z.object({
   to: z.string().email(),
@@ -50,6 +51,10 @@ export const automationDispatchEventJobSchema = z.object({
 export const automationExecuteRunJobSchema = z.object({
   workspaceId: z.string().uuid(),
   runId: z.string().uuid(),
+});
+
+export const whitelabelDomainReconcileJobSchema = z.object({
+  domainId: z.string().uuid(),
 });
 
 export const voiceRespondTurnJobSchema = z.object({
