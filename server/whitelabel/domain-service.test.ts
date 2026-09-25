@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { eq } from "drizzle-orm";
+import { and, eq } from "drizzle-orm";
 import { afterAll, afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { closeDatabase, db } from "@/db";
 import {
@@ -149,7 +149,7 @@ describe("F12-D purchaser custom-domain registry", () => {
   it("denies domain administration after Whitelabel entitlement is revoked without deleting the claim", async () => {
     await claimWhitelabelDomain(purchaser, "clients.stratosassist.com");
     await db.update(licenses).set({ status: "REFUNDED" })
-      .where(eq(licenses.productCode, "WHITELABEL"));
+      .where(and(eq(licenses.productCode, "WHITELABEL"), eq(licenses.purchaserUserId, purchaser)));
     await expect(getWhitelabelDomainState(purchaser))
       .rejects.toMatchObject({ code: "WHITELABEL_REQUIRED", status: 403 });
     expect(await db.select().from(whitelabelDomains)
