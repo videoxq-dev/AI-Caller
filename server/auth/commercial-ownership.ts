@@ -92,7 +92,12 @@ export async function requireBrandedClientWorkspaceAccess(
   if (!membership) {
     throw new AppError("BRANDED_WORKSPACE_NOT_FOUND", "This business is not available on this branded platform.", 404);
   }
-  await requireEffectiveWhitelabelPurchaser(approvedBrandPurchaserUserId);
+  const { originalWorkspaceId } = await requireEffectiveWhitelabelPurchaser(approvedBrandPurchaserUserId);
+  // Staff of the Agency itself continue using the canonical control center,
+  // even when additionally assigned to an Agency client's workspace.
+  if (await getMembership(userId, originalWorkspaceId)) {
+    throw new AppError("BRANDED_CLIENT_ACCESS_DENIED", "Use AI Caller to manage Agency client businesses.", 403);
+  }
   if (membership.workspaceStatus !== "ACTIVE") {
     throw new AppError("WORKSPACE_SUSPENDED", "This workspace is suspended.", 403);
   }
