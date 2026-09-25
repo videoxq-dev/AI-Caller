@@ -26,7 +26,7 @@ PostgreSQL remains the desired-state source of truth.
 whitelabel_domains
       |
       v
-AI Caller worker
+AI Caller edge reconciler
       |
       | atomic *.yml files
       v
@@ -43,7 +43,7 @@ traefik-edge
 aicaller-web:8080
 ```
 
-The worker never receives the Docker socket.
+The dedicated edge reconciler never receives the Docker socket. The general web and worker processes do not receive the Traefik dynamic-directory mount.
 
 Every domain gets one deterministic route file. If DeployOS removes custom files during redeployment, the worker recovery loop recreates the desired files from PostgreSQL without changing the purchaser's domain record.
 
@@ -74,7 +74,7 @@ It must confirm:
 
 The script does not create routes, connect networks or request certificates.
 
-### 3. Configure the worker bind mount
+### 3. Configure the edge-reconciler bind mount
 
 For the observed DeployOS installation:
 
@@ -94,7 +94,7 @@ Only after the preflight succeeds:
 WHITELABEL_DOMAIN_ROUTE_ENABLED=true
 ```
 
-Then redeploy the worker.
+Then redeploy the dedicated edge reconciler.
 
 A domain in `VERIFIED` state will receive a dynamic router file and advance to `CERT_PENDING`.
 
@@ -124,7 +124,7 @@ The hostname comes only from the normalized database domain record. Purchasers c
 
 ## Recovery behavior
 
-The worker periodically reconciles route files:
+The dedicated edge reconciler periodically reconciles route files:
 
 - `VERIFIED`, `CERT_PENDING`, `CERT_READY`, `ACTIVE`: route should exist.
 - `DNS_MISMATCH`, `REVOKED`, `DISABLING`, `DISABLED`: route should not exist.
