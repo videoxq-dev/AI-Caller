@@ -16,3 +16,4 @@ export * from "./telephony";
 export * from "./messaging-compliance";
 export * from "./booking";
 export * from "./appointment-management";
+export * from "./agency-credits";
