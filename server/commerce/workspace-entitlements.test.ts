@@ -111,14 +111,16 @@ describe("workspace external integration entitlements", () => {
     const purchaser = await createBuyer("Agency Purchaser");
     const clientOwner = await createBuyer("Delegated Client Owner");
     const originalId = await createOwnedWorkspace(purchaser);
-    const clientWorkspaceId = await createOwnedWorkspace(purchaser);
-    await db.insert(workspaceCommercialOwners).values([
-      { workspaceId: originalId, purchaserUserId: purchaser, kind: "PRIMARY" },
-      { workspaceId: clientWorkspaceId, purchaserUserId: purchaser, kind: "ADDITIONAL" },
-    ]);
+    await db.insert(workspaceCommercialOwners).values({
+      workspaceId: originalId, purchaserUserId: purchaser, kind: "PRIMARY",
+    });
     for (const product of ["CORE", "UNLIMITED", "PERFORMANCE", "AGENCY_50", "WHITELABEL"]) {
       await grant(purchaser, originalId, product);
     }
+    const clientWorkspaceId = await createOwnedWorkspace(purchaser);
+    await db.insert(workspaceCommercialOwners).values({
+      workspaceId: clientWorkspaceId, purchaserUserId: purchaser, kind: "ADDITIONAL",
+    });
     await db.insert(memberships).values({
       workspaceId: clientWorkspaceId, userId: clientOwner, role: "OWNER",
     });
