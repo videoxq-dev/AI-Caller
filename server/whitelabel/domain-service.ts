@@ -1,75 +1,21 @@
-import { randomBytes } from "node:crypto";
-import { isIP } from "node:net";
 import { and, desc, eq, ne, sql } from "drizzle-orm";
 import { db } from "@/db";
 import { whitelabelDomains } from "@/db/schema";
-import { getEnv } from "@/server/env";
 import { AppError } from "@/server/http/errors";
-import {
-  createSecretBox,
-  type EncryptedSecretEnvelope,
-} from "@/server/security/secrets";
 import { ensureBrandForPurchaser } from "./brand-service";
 import { normalizeWhitelabelHostname } from "./domain-hostname";
+import { getWhitelabelDomainInfrastructure } from "./domain-config";
+import {
+  decryptWhitelabelDomainVerificationToken,
+  encryptWhitelabelDomainVerificationToken,
+  newWhitelabelDomainVerificationToken,
+} from "./domain-token";
 
 type Tx = Parameters<Parameters<typeof db.transaction>[0]>[0];
 
-function tokenBox() {
-  return createSecretBox(getEnv().INTEGRATION_ENCRYPTION_KEY);
-}
-
-function encryptVerificationToken(token: string) {
-  return tokenBox().encrypt({ token }) as unknown as Record<string, unknown>;
-}
-
-function decryptVerificationToken(value: Record<string, unknown>) {
-  const result = tokenBox().decrypt<{ token: string }>(value as EncryptedSecretEnvelope);
-  return result.token;
-}
-
-function infrastructure(requirePublicIp = false) {
-  const env = getEnv();
-  const ipv4 = env.WHITELABEL_PUBLIC_IPV4?.trim();
-  if (ipv4 && isIP(ipv4) !== 4) {
-    throw new AppError(
-      "WHITELABEL_DOMAIN_INFRASTRUCTURE_NOT_CONFIGURED",
-      "The configured custom-domain IPv4 address is invalid.",
-      503,
-    );
-  }
-  if (requirePublicIp && !ipv4) {
-    throw new AppError(
-      "WHITELABEL_DOMAIN_INFRASTRUCTURE_NOT_CONFIGURED",
-      "Custom domains are not configured on this AI Caller server yet.",
-      503,
-    );
-  }
-  const ipv6 = env.WHITELABEL_PUBLIC_IPV6?.trim() || null;
-  if (ipv6 && isIP(ipv6) !== 6) {
-    throw new AppError(
-      "WHITELABEL_DOMAIN_INFRASTRUCTURE_NOT_CONFIGURED",
-      "The configured custom-domain IPv6 address is invalid.",
-      503,
-    );
-  }
-  const authHost = (() => {
-    try { return new URL(env.BETTER_AUTH_URL).hostname; } catch { return ""; }
-  })();
-  const reservedHosts = [
-    env.WHITELABEL_CANONICAL_HOST ?? "",
-    authHost,
-    ...env.WHITELABEL_RESERVED_HOSTS.split(","),
-  ].filter(Boolean);
-  return { ipv4, ipv6, reservedHosts };
-}
-
-function newVerificationToken() {
-  return randomBytes(24).toString("base64url");
-}
-
 function toState(row: typeof whitelabelDomains.$inferSelect) {
-  const infra = infrastructure();
-  const token = decryptVerificationToken(row.verificationTokenEncrypted);
+  const infra = getWhitelabelDomainInfrastructure();
+  const token = decryptWhitelabelDomainVerificationToken(row.verificationTokenEncrypted);
   return {
     id: row.id,
     hostname: row.hostname,
@@ -115,7 +61,7 @@ export async function getWhitelabelDomainState(purchaserUserId: string) {
 
 export async function claimWhitelabelDomain(purchaserUserId: string, rawHostname: string) {
   const brand = await ensureBrandForPurchaser(purchaserUserId);
-  const infra = infrastructure(true);
+  const infra = getWhitelabelDomainInfrastructure(true);
   const hostname = normalizeWhitelabelHostname(rawHostname, infra.reservedHosts);
 
   const row = await db.transaction(async (tx) => {
@@ -149,13 +95,13 @@ export async function claimWhitelabelDomain(purchaserUserId: string, rawHostname
       );
     }
 
-    const token = newVerificationToken();
+    const token = newWhitelabelDomainVerificationToken();
     const [created] = await tx.insert(whitelabelDomains).values({
       brandId: brand.id,
       purchaserUserId,
       hostname,
       status: "AWAITING_DNS",
-      verificationTokenEncrypted: encryptVerificationToken(token),
+      verificationTokenEncrypted: encryptWhitelabelDomainVerificationToken(token),
       certificateStatus: "NOT_REQUESTED",
     }).returning();
     return created;
@@ -178,7 +124,7 @@ export async function rotateWhitelabelDomainVerification(purchaserUserId: string
       );
     }
     const [row] = await tx.update(whitelabelDomains).set({
-      verificationTokenEncrypted: encryptVerificationToken(newVerificationToken()),
+      verificationTokenEncrypted: encryptWhitelabelDomainVerificationToken(newWhitelabelDomainVerificationToken()),
       status: "AWAITING_DNS",
       aVerifiedAt: null,
       txtVerifiedAt: null,
