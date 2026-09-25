@@ -12,6 +12,7 @@ type DomainState = {
   dnsVerifiedAt: string | null;
   routeProvisionedAt: string | null;
   certificateReadyAt: string | null;
+  certificateExpiresAt: string | null;
   lastCheckedAt: string | null;
   lastErrorCode: string | null;
   lastErrorMessage: string | null;
@@ -213,7 +214,8 @@ export function WhitelabelDomainPanel() {
                     ? "Needs attention"
                     : "Pending"
             }</b></span>
-            {domain.lastCheckedAt && <span>Last checked <b>{new Date(domain.lastCheckedAt).toLocaleString()}</b></span>}
+            {domain.certificateExpiresAt && <span>Certificate expires <b>{new Date(domain.certificateExpiresAt).toLocaleDateString()}</b></span>}
+            {domain.lastCheckedAt && <span>Last DNS check <b>{new Date(domain.lastCheckedAt).toLocaleString()}</b></span>}
           </div>
 
           <div className="wlDomainActions">
