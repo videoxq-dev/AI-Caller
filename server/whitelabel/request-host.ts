@@ -34,6 +34,11 @@ function configuredCanonicalHosts() {
 export function isCanonicalAiCallerHost(rawHost: string | null) {
   const hostname = normalizeIncomingHost(rawHost);
   if (!hostname) return false;
-  if (hostname === "localhost" || hostname === "127.0.0.1" || hostname === "::1") return true;
-  return configuredCanonicalHosts().has(hostname);
+  const configured = configuredCanonicalHosts();
+  if (configured.has(hostname)) return true;
+  // A public production app must never trust an arbitrary loopback Host header
+  // as a canonical alias. Dev loopback still works, as does an explicitly
+  // configured loopback BETTER_AUTH_URL used by local production-mode smoke.
+  return getEnv().NODE_ENV !== "production"
+    && (hostname === "localhost" || hostname === "127.0.0.1" || hostname === "::1");
 }
