@@ -2,7 +2,7 @@ import { randomUUID } from "node:crypto";
 import { eq } from "drizzle-orm";
 import { afterAll, afterEach, beforeEach, describe, expect, it } from "vitest";
 import { closeDatabase, db } from "@/db";
-import { licenses, memberships, user, workspaceCommercialOwners, workspaces } from "@/db/schema";
+import { licenses, memberships, user, workspaceCommercialOwners, workspacePlans, workspaces } from "@/db/schema";
 import {
   getCommercialWorkspaceOwner,
   requireBrandedClientWorkspaceAccess,
@@ -52,6 +52,7 @@ describe("F12-B commercial owner and branded client authorization", () => {
       { workspaceId: client, userId: delegatedOwner, role: "OWNER" },
       { workspaceId: client, userId: staff, role: "STAFF" },
     ]);
+    await db.insert(workspacePlans).values({ workspaceId: client, planId: "GROWTH", source: "TEST" });
     await purchase("CORE");
     await purchase("AGENCY_50");
     await purchase("WHITELABEL");
