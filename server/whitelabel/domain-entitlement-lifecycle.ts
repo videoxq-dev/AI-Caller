@@ -1,5 +1,5 @@
 import { db } from "@/db";
-import { and, eq, ne } from "drizzle-orm";
+import { and, eq, ne, sql } from "drizzle-orm";
 import { licenses, memberships, whitelabelDomains, workspaceCommercialOwners } from "@/db/schema";
 
 type Tx = Parameters<Parameters<typeof db.transaction>[0]>[0];
@@ -39,6 +39,7 @@ async function effectiveWhitelabelInTx(tx: Tx, purchaserUserId: string) {
  * the domain cannot observe an older billing state.
  */
 export async function syncWhitelabelDomainEntitlementInTx(tx: Tx, purchaserUserId: string) {
+  await tx.execute(sql`select pg_advisory_xact_lock(hashtext(${`whitelabel-domain-entitlement:${purchaserUserId}`}))`);
   const effective = await effectiveWhitelabelInTx(tx, purchaserUserId);
   const [domain] = await tx.select().from(whitelabelDomains)
     .where(and(
