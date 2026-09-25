@@ -11,6 +11,7 @@ export async function getCommercialWorkspaceOwner(workspaceId: string) {
   const [owner] = await db.select({
     purchaserUserId: workspaceCommercialOwners.purchaserUserId,
     kind: workspaceCommercialOwners.kind,
+    provisioningSource: workspaceCommercialOwners.provisioningSource,
     createdAt: workspaceCommercialOwners.createdAt,
   }).from(workspaceCommercialOwners)
     .where(eq(workspaceCommercialOwners.workspaceId, workspaceId))
@@ -82,7 +83,7 @@ export async function requireBrandedClientWorkspaceAccess(
   const commercial = await getCommercialWorkspaceOwner(workspaceId);
   if (!commercial || commercial.kind !== "ADDITIONAL"
     || commercial.purchaserUserId !== approvedBrandPurchaserUserId
-    || !(await wasProvisionedForAgency(commercial.purchaserUserId, commercial.createdAt))) {
+    || !(await wasProvisionedForAgency(commercial.purchaserUserId, commercial.createdAt, commercial.provisioningSource))) {
     throw new AppError("BRANDED_WORKSPACE_NOT_FOUND", "This business is not available on this branded platform.", 404);
   }
   if (userId === approvedBrandPurchaserUserId) {
