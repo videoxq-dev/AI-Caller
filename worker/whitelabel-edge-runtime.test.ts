@@ -1,5 +1,8 @@
 import { describe, expect, it } from "vitest";
-import { nextWhitelabelRouteScanOffset } from "./whitelabel-edge-runtime";
+import {
+  createWhitelabelReconcileTimer,
+  nextWhitelabelRouteScanOffset,
+} from "./whitelabel-edge-runtime";
 
 describe("Whitelabel edge recovery pagination", () => {
   it("advances by a full unchanged page", () => {
@@ -14,5 +17,14 @@ describe("Whitelabel edge recovery pagination", () => {
 
   it("resets after the final short page", () => {
     expect(nextWhitelabelRouteScanOffset(300, { checked: 37, removed: 5 })).toBe(0);
+  });
+
+  it("keeps the dedicated reconciler process alive between scans", () => {
+    const timer = createWhitelabelReconcileTimer(() => undefined, 60_000);
+    try {
+      expect(timer.hasRef()).toBe(true);
+    } finally {
+      clearInterval(timer);
+    }
   });
 });
