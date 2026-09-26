@@ -3,6 +3,17 @@ import { getWhitelabelTraefikRouteConfig } from "@/server/whitelabel/domain-rout
 import { recoverWhitelabelDomainRoutes } from "@/server/whitelabel/domain-route";
 import { reconcilePendingWhitelabelDomainCertificates } from "@/server/whitelabel/domain-tls";
 
+export function nextWhitelabelRouteScanOffset(
+  currentOffset: number,
+  result: { checked: number; removed: number },
+  pageSize = 100,
+) {
+  if (result.checked < pageSize) return 0;
+  // Removed rows leave the recovery query immediately. Subtract them so
+  // domains that shifted forward are not skipped on the next bounded page.
+  return Math.max(0, currentOffset + result.checked - result.removed);
+}
+
 export async function startWhitelabelEdgeReconciler() {
   const config = getWhitelabelTraefikRouteConfig();
   logger.info({
@@ -21,7 +32,7 @@ export async function startWhitelabelEdgeReconciler() {
       const routes = await recoverWhitelabelDomainRoutes(100, routeScanOffset);
       // A bounded scan must still eventually reach every domain, including
       // when healthy rows do not change their updatedAt each iteration.
-      routeScanOffset = routes.checked < 100 ? 0 : routeScanOffset + routes.checked;
+      routeScanOffset = nextWhitelabelRouteScanOffset(routeScanOffset, routes, 100);
       if (routes.removed > 0 || routes.failed > 0) {
         logger.info(routes, "Reconciled Whitelabel Traefik routes");
       }
