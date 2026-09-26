@@ -58,8 +58,9 @@ try {
   await page.reload();
   await expectPath("/dashboard", "Refreshing an authenticated route restarted onboarding.");
 
-  const signout = await context.request.post(`${baseUrl}/api/auth/sign-out`, { data: {} });
-  assert(signout.ok(), `Sign out failed: ${await signout.text()}`);
+  await page.goto(`${baseUrl}/settings`);
+  await page.getByRole("button", { name: "Sign out" }).click();
+  await expectPath("/sign-in", "The account sign-out action did not end the session.");
   await page.goto(`${baseUrl}/sign-in?returnTo=%2Fwelcome`);
   await page.getByLabel("Email address").fill(email);
   await page.locator("#password").fill(password);
