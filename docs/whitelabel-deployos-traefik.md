@@ -132,6 +132,18 @@ The dedicated edge reconciler periodically reconciles route files:
 
 Disconnect/revocation is fail-closed: route removal is queued immediately and also repaired by periodic recovery.
 
+F12-D7 additionally checks the **commercial purchaser's active Core, Agency and
+Whitelabel entitlements** before maintaining each routed domain. If any required
+license becomes inactive, the edge reconciler first marks the domain REVOKED in
+PostgreSQL, then removes its generated Traefik router. The D6 host guard rejects
+the domain immediately even before route cleanup. A reinstated purchaser must
+select **Reconnect domain** and publish the new TXT proof; a prior certificate
+or an old proof never silently reactivates the public router.
+
+The route scan advances through bounded pages and skips redundant database
+writes when generated content and domain state are unchanged. A failed DNS
+lookup cannot overwrite a concurrently revoked domain.
+
 ## TLS boundary
 
 Traefik is responsible for ACME issuance and renewal. The router references the configured certificate resolver, but **F12-D3 does not mark a certificate READY**. F12-D5 performs an independent public TLS/SNI probe before setting `CERT_READY`.

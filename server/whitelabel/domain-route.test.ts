@@ -2,7 +2,7 @@ import { randomUUID } from "node:crypto";
 import { access, mkdtemp, readFile, rm, unlink } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
-import { eq } from "drizzle-orm";
+import { and, eq } from "drizzle-orm";
 import { afterAll, afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { closeDatabase, db } from "@/db";
 import {
@@ -197,6 +197,49 @@ describe("F12-D3 Traefik route reconciliation", () => {
       certificateReadyAt: null,
       certificateExpiresAt: null,
     });
+  });
+
+  it.each(["WHITELABEL", "AGENCY_50", "CORE"] as const)(
+    "revokes and removes a routed domain when %s is no longer active",
+    async (productCode) => {
+      const domain = await verifiedDomain();
+      await reconcileWhitelabelDomainRoute(domain.id);
+      const file = routeFilePathForDomain(domain.id, routeDir);
+      await db.update(licenses).set({ status: "REFUNDED" })
+        .where(and(eq(licenses.productCode, productCode), eq(licenses.purchaserUserId, purchaser)));
+
+      const recovery = await recoverWhitelabelDomainRoutes(20);
+      expect(recovery.checked).toBeGreaterThanOrEqual(1);
+      await expect(access(file)).rejects.toThrow();
+      const [stored] = await db.select().from(whitelabelDomains)
+        .where(eq(whitelabelDomains.id, domain.id));
+      expect(stored.status).toBe("REVOKED");
+      expect(stored.routeId).toBeNull();
+      expect(stored.routeProvisionedAt).toBeNull();
+      expect(stored.certificateStatus).toBe("NOT_REQUESTED");
+    },
+  );
+
+  it("removes a stale route for a claim reset to AWAITING_DNS", async () => {
+    const domain = await verifiedDomain();
+    await reconcileWhitelabelDomainRoute(domain.id);
+    const file = routeFilePathForDomain(domain.id, routeDir);
+    await db.update(whitelabelDomains).set({
+      status: "AWAITING_DNS", dnsVerifiedAt: null,
+    }).where(eq(whitelabelDomains.id, domain.id));
+    await recoverWhitelabelDomainRoutes(20);
+    await expect(access(file)).rejects.toThrow();
+    const [stored] = await db.select().from(whitelabelDomains)
+      .where(eq(whitelabelDomains.id, domain.id));
+    expect(stored.routeId).toBeNull();
+  });
+
+  it("does not write to the database for an unchanged healthy route", async () => {
+    const domain = await verifiedDomain();
+    const first = await reconcileWhitelabelDomainRoute(domain.id);
+    const second = await reconcileWhitelabelDomainRoute(domain.id);
+    expect(second.updatedAt.getTime()).toBe(first.updatedAt.getTime());
+    expect(second.routeProvisionedAt?.getTime()).toBe(first.routeProvisionedAt?.getTime());
   });
 
   it("does not materialize a route before DNS verification is complete", async () => {

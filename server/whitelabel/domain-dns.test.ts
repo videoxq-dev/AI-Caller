@@ -214,6 +214,34 @@ describe("F12-D2 custom-domain DNS verification", () => {
     expect(stored.status).toBe("REVOKED");
   });
 
+  it("does not overwrite a revoked domain after a DNS resolver failure", async () => {
+    const domain = await claimWhitelabelDomain(purchaser, "clients.stratosassist.com");
+    let release!: () => void;
+    let entered!: () => void;
+    const gate = new Promise<void>((resolve) => { release = resolve; });
+    const started = new Promise<void>((resolve) => { entered = resolve; });
+    const delayed: WhitelabelDnsResolver = {
+      resolve4: async () => {
+        entered();
+        await gate;
+        throw new Error("DNS service unavailable");
+      },
+      resolve6: async () => [],
+      resolveTxt: async () => [],
+    };
+    const verification = reconcileWhitelabelDomainDns(domain.id, delayed);
+    await started;
+    await db.update(whitelabelDomains).set({ status: "REVOKED" })
+      .where(eq(whitelabelDomains.id, domain.id));
+    release();
+    await expect(verification)
+      .rejects.toMatchObject({ code: "WHITELABEL_DOMAIN_NOT_VERIFIABLE", status: 409 });
+    const [stored] = await db.select().from(whitelabelDomains)
+      .where(eq(whitelabelDomains.id, domain.id));
+    expect(stored.status).toBe("REVOKED");
+    expect(stored.lastErrorCode).toBeNull();
+  });
+
   it("does not verify disabled domain records", async () => {
     const domain = await claimWhitelabelDomain(purchaser, "clients.stratosassist.com");
     await db.update(whitelabelDomains).set({ status: "DISABLED", disabledAt: new Date() })

@@ -113,7 +113,17 @@ export async function reconcileWhitelabelDomainDns(
       lastErrorCode: "DNS_LOOKUP_FAILED",
       lastErrorMessage: "DNS lookup could not be completed. Try again shortly.",
       updatedAt: now,
-    }).where(eq(whitelabelDomains.id, domain.id)).returning();
+    }).where(and(
+      eq(whitelabelDomains.id, domain.id),
+      eq(whitelabelDomains.status, domain.status),
+    )).returning();
+    if (!updated) {
+      throw new AppError(
+        "WHITELABEL_DOMAIN_NOT_VERIFIABLE",
+        "This custom domain changed while DNS was being checked.",
+        409,
+      );
+    }
     return updated;
   }
 

@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { eq } from "drizzle-orm";
+import { and, eq } from "drizzle-orm";
 import { afterAll, afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { closeDatabase, db } from "@/db";
 import {
@@ -120,10 +120,36 @@ describe("F12-D purchaser custom-domain registry", () => {
     expect(next.id).not.toBe(first.id);
   });
 
+  it("requires renewed DNS proof after Whitelabel reinstatement", async () => {
+    const first = await claimWhitelabelDomain(purchaser, "clients.stratosassist.com");
+    await db.update(whitelabelDomains).set({
+      status: "REVOKED",
+      dnsVerifiedAt: new Date(),
+      routeId: "wl-" + first.id.replaceAll("-", ""),
+      routeProvisionedAt: new Date(),
+      certificateStatus: "READY",
+      certificateReadyAt: new Date(),
+      certificateExpiresAt: new Date(Date.now() + 30 * 86400_000),
+    }).where(eq(whitelabelDomains.id, first.id));
+
+    const restarted = await rotateWhitelabelDomainVerification(purchaser);
+    expect(restarted).toMatchObject({
+      id: first.id, hostname: first.hostname, status: "AWAITING_DNS",
+      certificateStatus: "NOT_REQUESTED",
+      dnsVerifiedAt: null, certificateReadyAt: null, certificateExpiresAt: null,
+    });
+    expect(restarted.dns.verificationRecordValue).not.toBe(first.dns.verificationRecordValue);
+    // Retain route identity until the edge worker physically removes its
+    // prior file, including if proof rotation races route reconciliation.
+    const [stored] = await db.select().from(whitelabelDomains)
+      .where(eq(whitelabelDomains.id, first.id));
+    expect(stored.routeId).toBeTruthy();
+  });
+
   it("denies domain administration after Whitelabel entitlement is revoked without deleting the claim", async () => {
     await claimWhitelabelDomain(purchaser, "clients.stratosassist.com");
     await db.update(licenses).set({ status: "REFUNDED" })
-      .where(eq(licenses.productCode, "WHITELABEL"));
+      .where(and(eq(licenses.productCode, "WHITELABEL"), eq(licenses.purchaserUserId, purchaser)));
     await expect(getWhitelabelDomainState(purchaser))
       .rejects.toMatchObject({ code: "WHITELABEL_REQUIRED", status: 403 });
     expect(await db.select().from(whitelabelDomains)

@@ -5,6 +5,7 @@ import { and, asc, eq, inArray, isNotNull, or } from "drizzle-orm";
 import { db } from "@/db";
 import { whitelabelDomains, type WhitelabelDomainStatus } from "@/db/schema";
 import { AppError } from "@/server/http/errors";
+import { requireEffectiveWhitelabelPurchaser } from "@/server/auth/commercial-ownership";
 import { normalizeWhitelabelHostname } from "./domain-hostname";
 import { getWhitelabelTraefikRouteConfig } from "./domain-route-config";
 
@@ -16,6 +17,8 @@ const ROUTE_PRESENT: WhitelabelDomainStatus[] = [
   "ACTIVE",
 ];
 const ROUTE_ABSENT: WhitelabelDomainStatus[] = [
+  "DRAFT",
+  "AWAITING_DNS",
   "DNS_MISMATCH",
   "REVOKED",
   "DISABLING",
@@ -121,7 +124,7 @@ async function reloadDomain(domainId: string) {
   return row;
 }
 
-export async function reconcileWhitelabelDomainRoute(domainId: string) {
+export async function reconcileWhitelabelDomainRoute(domainId: string): Promise<typeof whitelabelDomains.$inferSelect> {
   const config = getWhitelabelTraefikRouteConfig();
   const domain = await reloadDomain(domainId);
   if (!config.enabled) return domain;
@@ -129,8 +132,53 @@ export async function reconcileWhitelabelDomainRoute(domainId: string) {
   const routeId = routeIdForDomain(domain.id);
   const target = routeFilePathForDomain(domain.id, config.dynamicDir);
 
+  if (ROUTE_PRESENT.includes(domain.status)) {
+    // D6 rejects refunded/unentitled hosts immediately; the isolated edge
+    // process must ALSO stop renewing their public route. Reconcile from the
+    // current commercial purchaser, never a delegated workspace OWNER.
+    try {
+      await requireEffectiveWhitelabelPurchaser(domain.purchaserUserId);
+    } catch (error) {
+      if (!(error instanceof AppError) || error.code !== "WHITELABEL_REQUIRED") throw error;
+      const [revoked] = await db.update(whitelabelDomains).set({
+        status: "REVOKED",
+        dnsVerifiedAt: null,
+        certificateStatus: "NOT_REQUESTED",
+        certificateReadyAt: null,
+        certificateExpiresAt: null,
+        lastErrorCode: "WHITELABEL_LICENSE_INACTIVE",
+        lastErrorMessage: "Reactivate Core, Agency and Whitelabel to reconnect this custom domain.",
+        updatedAt: new Date(),
+      }).where(and(
+        eq(whitelabelDomains.id, domain.id),
+        eq(whitelabelDomains.status, domain.status),
+      )).returning();
+      if (!revoked) throw new AppError(
+        "WHITELABEL_DOMAIN_ROUTE_STATE_CHANGED",
+        "The custom-domain lifecycle changed during entitlement reconciliation.",
+        409,
+      );
+      // Persist fail-closed state BEFORE touching Traefik. A crashed edge
+      // worker can safely retry removal using the retained routeId.
+      return reconcileWhitelabelDomainRoute(domain.id);
+    }
+  }
+
   if (ROUTE_ABSENT.includes(domain.status)) {
+    // Always remove an unexpected/stale file first. A fresh pre-verification
+    // claim is still not route-ready and should preserve the D3 API contract;
+    // only lifecycle records that actually carried route metadata need a
+    // successful cleanup result.
     await removeRouteFile(target);
+    const preVerification = domain.status === "DRAFT" || domain.status === "AWAITING_DNS";
+    if (preVerification && !domain.routeId && !domain.routeProvisionedAt) {
+      throw new AppError(
+        "WHITELABEL_DOMAIN_ROUTE_NOT_READY",
+        "DNS ownership and routing must be verified before the custom-domain route can be provisioned.",
+        409,
+      );
+    }
+
     const [updated] = await db.update(whitelabelDomains).set({
       routeId: null,
       routeProvisionedAt: null,
@@ -163,8 +211,9 @@ export async function reconcileWhitelabelDomainRoute(domainId: string) {
     serviceUrl: config.serviceUrl,
   });
 
+  let routeWritten: boolean;
   try {
-    await writeAtomic(target, yaml);
+    routeWritten = await writeAtomic(target, yaml);
   } catch (error) {
     await db.update(whitelabelDomains).set({
       lastErrorCode: "TRAEFIK_ROUTE_WRITE_FAILED",
@@ -183,6 +232,11 @@ export async function reconcileWhitelabelDomainRoute(domainId: string) {
   const nextCertificateStatus = enteringCertificatePending
     ? "PENDING" as const
     : domain.certificateStatus;
+
+  // Repeated healthy reconciliation should not update DB timestamps or
+  // trigger downstream work once the route is already desired/persisted.
+  if (!routeWritten && !enteringCertificatePending
+    && domain.routeId === routeId && domain.routeProvisionedAt) return domain;
 
   const [updated] = await db.update(whitelabelDomains).set({
     status: nextStatus,
@@ -210,7 +264,7 @@ export async function reconcileWhitelabelDomainRoute(domainId: string) {
   return updated;
 }
 
-export async function recoverWhitelabelDomainRoutes(limit = 100) {
+export async function recoverWhitelabelDomainRoutes(limit = 100, offset = 0) {
   const config = getWhitelabelTraefikRouteConfig();
   if (!config.enabled) return { checked: 0, materialized: 0, removed: 0, failed: 0 };
 
@@ -223,16 +277,19 @@ export async function recoverWhitelabelDomainRoutes(limit = 100) {
         isNotNull(whitelabelDomains.routeId),
       ),
     ))
-    .orderBy(asc(whitelabelDomains.updatedAt), asc(whitelabelDomains.id))
-    .limit(Math.max(1, Math.min(limit, 500)));
+    // Page on immutable keys. Reconciliation may update updatedAt, so using it
+    // here can move processed rows mid-scan and skip domains.
+    .orderBy(asc(whitelabelDomains.createdAt), asc(whitelabelDomains.id))
+    .limit(Math.max(1, Math.min(limit, 500)))
+    .offset(Math.max(0, offset));
 
   let materialized = 0;
   let removed = 0;
   let failed = 0;
   for (const row of rows) {
     try {
-      await reconcileWhitelabelDomainRoute(row.id);
-      if (ROUTE_PRESENT.includes(row.status)) materialized += 1;
+      const reconciled = await reconcileWhitelabelDomainRoute(row.id);
+      if (ROUTE_PRESENT.includes(reconciled.status)) materialized += 1;
       else removed += 1;
     } catch {
       failed += 1;
