@@ -14,6 +14,15 @@ export function nextWhitelabelRouteScanOffset(
   return Math.max(0, currentOffset + result.checked - result.removed);
 }
 
+export function createWhitelabelReconcileTimer(
+  reconcile: () => void | Promise<void>,
+  intervalMs = 5_000,
+) {
+  // Keep this timer referenced. This dedicated worker has no HTTP server or
+  // other long-lived handle, so unref() would let Node exit after one pass.
+  return setInterval(() => void reconcile(), intervalMs);
+}
+
 export async function startWhitelabelEdgeReconciler() {
   const config = getWhitelabelTraefikRouteConfig();
   logger.info({
@@ -50,8 +59,7 @@ export async function startWhitelabelEdgeReconciler() {
   };
 
   await reconcile();
-  const timer = setInterval(() => void reconcile(), 5_000);
-  timer.unref();
+  const timer = createWhitelabelReconcileTimer(reconcile);
 
   const shutdown = (signal: string) => {
     logger.info({ signal }, "Stopping Whitelabel edge reconciler");
