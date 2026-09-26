@@ -174,7 +174,14 @@ if (auth.fingerprint256 !== root.fingerprint256) {
   throw new Error("Unexpected TLS certificate change between holding and auth checks.");
 }
 const storedExpiry = await verifyLiveRecord();
-console.log(storedExpiry
-  ? `PASS: live DB domain is CERT_READY; recorded expiry: ${new Date(storedExpiry).toISOString()}.`
-  : "NOTE: DATABASE_URL unavailable; verify CERT_READY and matching certificate expiry in live Whitelabel settings.");
+if (storedExpiry) {
+  const recordedExpiry = new Date(storedExpiry);
+  if (!Number.isFinite(recordedExpiry.getTime())
+    || Math.abs(recordedExpiry.getTime() - root.expiresAt.getTime()) > 1000) {
+    throw new Error("Live database certificate expiry does not match the certificate served by the edge.");
+  }
+  console.log(`PASS: live DB domain is CERT_READY; recorded expiry matches served certificate: ${recordedExpiry.toISOString()}.`);
+} else {
+  console.log("NOTE: DATABASE_URL unavailable; verify CERT_READY and matching certificate expiry in live Whitelabel settings.");
+}
 console.log("Network acceptance passed. Repeat after a Traefik and DeployOS redeploy to validate persistence.");
