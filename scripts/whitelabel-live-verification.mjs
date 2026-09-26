@@ -34,3 +34,12 @@ export function checkWhitelabelHttpReachability({ statusCode }) {
     throw new Error("HTTP_EDGE_NOT_READY: public port 80 did not return a valid HTTP response.");
   }
 }
+
+export function checkWhitelabelStoredCertificateExpiry({ servedExpiry, storedExpiry, toleranceMs = 1000 }) {
+  const served = servedExpiry instanceof Date ? servedExpiry : new Date(servedExpiry);
+  const stored = storedExpiry instanceof Date ? storedExpiry : new Date(storedExpiry);
+  if (!Number.isFinite(served.getTime()) || !Number.isFinite(stored.getTime())
+    || Math.abs(stored.getTime() - served.getTime()) > toleranceMs) {
+    throw new Error("Live database certificate expiry does not match the certificate served by the edge.");
+  }
+}
