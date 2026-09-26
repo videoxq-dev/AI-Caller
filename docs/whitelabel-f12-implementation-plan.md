@@ -260,6 +260,8 @@ Client business data remains isolated by workspace in the shared database. No pe
 
 **Exit:** One real test customer subdomain goes from DNS through ownership proof to CERT_READY with valid public HTTPS and provisional routing, persisting across redeploy **without DeployOS desktop running**; full client-domain ACTIVE is explicitly gated on F12-E and F12-F. Durable route and cert artifacts documented with sanitized evidence.
 
+**Live acceptance instrument:** `scripts/verify-whitelabel-domain-live.mjs` and the step-by-step `docs/whitelabel-f12-d-live-acceptance.md` are the required deployed-server/DNS/TLS/redeploy evidence contract. Green repository CI alone does not prove public certificate issuance.
+
 ### F12-E — Better Auth multi-domain and branded invitation/authentication
 
 **Goal:** Existing shared user database/auth system serves canonical purchaser domain and approved client domains with host-specific session cookies and correct links.
