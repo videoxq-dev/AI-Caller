@@ -3,6 +3,7 @@ import test from "node:test";
 import {
   checkWhitelabelPublicDns,
   checkWhitelabelHoldingResponse,
+  checkWhitelabelHttpReachability,
 } from "./whitelabel-live-verification.mjs";
 
 const valid = {
@@ -41,5 +42,14 @@ test("accepts the domain-specific holding response only", () => {
       body: { status: "domain-ready", host: "app.example.com" },
       ...changed,
     }));
+  }
+});
+
+test("accepts any valid HTTP response from public port 80 and rejects missing transport response", () => {
+  for (const statusCode of [200, 301, 308, 404]) {
+    assert.doesNotThrow(() => checkWhitelabelHttpReachability({ statusCode }));
+  }
+  for (const statusCode of [0, 99, 600, undefined]) {
+    assert.throws(() => checkWhitelabelHttpReachability({ statusCode }));
   }
 });
