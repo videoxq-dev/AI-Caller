@@ -74,6 +74,24 @@ It must confirm:
 
 The script does not create routes, connect networks or request certificates.
 
+It also checks write access from inside the running edge reconciler. On a host
+where Docker creates the shared directory as `root:root` with mode `755`, the
+`node` process (UID/GID 1000) cannot write a route. Confirm the mount source
+is `/opt/deployos/traefik/dynamic/generated` on this installation, then grant
+only its group write access on the host:
+
+```sh
+chgrp 1000 /opt/deployos/traefik/dynamic/generated
+chmod 1775 /opt/deployos/traefik/dynamic/generated
+sh scripts/inspect-deployos-traefik.sh
+```
+
+This keeps root as owner, preserves the existing route files, and uses the
+sticky bit to prevent the reconciler from deleting root-owned files. Apply
+permissions only to the shared directory itself, not recursively to existing
+routes. Repeat the preflight after any DeployOS operation that recreates that
+directory.
+
 ### 3. Configure the edge-reconciler bind mount
 
 For the observed DeployOS installation:
