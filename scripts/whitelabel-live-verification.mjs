@@ -28,3 +28,9 @@ export function checkWhitelabelHoldingResponse({ statusCode, body, hostname }) {
     throw new Error("TLS_ROUTE_NOT_READY: HTTPS did not reach this domain's holding response.");
   }
 }
+
+export function checkWhitelabelHttpReachability({ statusCode }) {
+  if (!Number.isInteger(statusCode) || statusCode < 100 || statusCode >= 600) {
+    throw new Error("HTTP_EDGE_NOT_READY: public port 80 did not return a valid HTTP response.");
+  }
+}
