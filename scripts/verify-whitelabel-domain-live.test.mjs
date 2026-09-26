@@ -4,6 +4,7 @@ import {
   checkWhitelabelPublicDns,
   checkWhitelabelHoldingResponse,
   checkWhitelabelHttpReachability,
+  checkWhitelabelStoredCertificateExpiry,
 } from "./whitelabel-live-verification.mjs";
 
 const valid = {
@@ -52,4 +53,20 @@ test("accepts any valid HTTP response from public port 80 and rejects missing tr
   for (const statusCode of [0, 99, 600, undefined]) {
     assert.throws(() => checkWhitelabelHttpReachability({ statusCode }));
   }
+});
+
+test("requires the live DB certificate expiry to match the served certificate", () => {
+  const servedExpiry = new Date("2026-12-01T00:00:00.000Z");
+  assert.doesNotThrow(() => checkWhitelabelStoredCertificateExpiry({
+    servedExpiry,
+    storedExpiry: new Date("2026-12-01T00:00:00.500Z"),
+  }));
+  assert.throws(() => checkWhitelabelStoredCertificateExpiry({
+    servedExpiry,
+    storedExpiry: new Date("2026-12-01T00:00:02.000Z"),
+  }));
+  assert.throws(() => checkWhitelabelStoredCertificateExpiry({
+    servedExpiry,
+    storedExpiry: "not-a-date",
+  }));
 });
