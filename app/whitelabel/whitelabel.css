@@ -5,7 +5,9 @@
 /* Keep form controls inside their grid track at laptop and mobile widths. */
 .wlGrid,.wlGrid>*,.wlSide,.wlSide>*,.wlCard,.wlEditor>*,.wlAssetGrid>*,.wlColorGrid>*,.wlColorInput input:not([type=color]){min-width:0}
 .wlGrid{grid-template-columns:minmax(0,.9fr) minmax(0,1.1fr)}
-.wlAssetGrid{grid-template-columns:minmax(0,1.4fr) repeat(2,minmax(0,.8fr))}
+.wlAssetGrid{grid-template-columns:repeat(auto-fit,minmax(min(100%,190px),1fr))}
+.wlAsset{min-width:0}
+.wlAsset input[type=file]{width:100%;min-width:0;box-sizing:border-box}
 .wlColorGrid{grid-template-columns:repeat(2,minmax(0,1fr))}
 .wlColorInput{grid-template-columns:44px minmax(0,1fr)}
 @media(max-width:1300px){.wlGrid{grid-template-columns:minmax(0,1fr)}.wlSide{grid-template-columns:minmax(0,1fr)}}
