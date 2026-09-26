@@ -27,19 +27,29 @@ fi
 
 web=${AI_CALLER_WEB_CONTAINER:-}
 if [ -z "$web" ]; then
-  matches=$(docker ps     --filter label=com.docker.compose.project=ai-caller     --filter label=com.docker.compose.service=web     --format '{{.ID}}')
-  set -- $matches
-  if [ "$#" -ne 1 ]; then
-    echo 'Expected one running AI Caller web container. Set AI_CALLER_WEB_CONTAINER explicitly if needed.' >&2
+  web=
+  for candidate in $(docker ps \
+    --filter label=com.docker.compose.service=web \
+    --format '{{.ID}}'); do
+    candidate_aliases=$(docker inspect --format '{{with index .NetworkSettings.Networks "edge"}}{{range .Aliases}}{{println .}}{{end}}{{end}}' "$candidate")
+    if printf '%s\n' "$candidate_aliases" | grep -qx aicaller-web; then
+      if [ -n "$web" ]; then
+        echo 'Expected one running AI Caller web container with edge alias aicaller-web. Set AI_CALLER_WEB_CONTAINER explicitly if needed.' >&2
+        exit 1
+      fi
+      web=$candidate
+    fi
+  done
+  if [ -z "$web" ]; then
+    echo 'Expected one running AI Caller web container with edge alias aicaller-web. Set AI_CALLER_WEB_CONTAINER explicitly if needed.' >&2
     exit 1
   fi
-  web=$1
 fi
 
 project=$(docker inspect --format '{{index .Config.Labels "com.docker.compose.project"}}' "$web")
 service=$(docker inspect --format '{{index .Config.Labels "com.docker.compose.service"}}' "$web")
-if [ "$project" != ai-caller ] || [ "$service" != web ]; then
-  echo 'Refusing to inspect a web container outside the ai-caller/web Compose service.' >&2
+if [ -z "$project" ] || [ "$service" != web ]; then
+  echo 'Refusing to inspect a container outside a Compose web service.' >&2
   exit 1
 fi
 
@@ -55,12 +65,12 @@ if ! printf '%s\n' "$aliases" | grep -qx aicaller-web; then
 fi
 
 edge_matches=$(docker ps \
-  --filter label=com.docker.compose.project=ai-caller \
+  --filter label=com.docker.compose.project="$project" \
   --filter label=com.docker.compose.service=edge-reconciler \
   --format '{{.ID}}')
 set -- $edge_matches
 if [ "$#" -ne 1 ]; then
-  echo 'Expected one running dedicated ai-caller/edge-reconciler container.' >&2
+  echo "Expected one running dedicated $project/edge-reconciler container." >&2
   exit 1
 fi
 edge_reconciler=$1
