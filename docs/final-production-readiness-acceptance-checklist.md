@@ -168,11 +168,14 @@ For each package, record:
 
 | Package | Expected entitlements | UI verified | API/server enforcement verified | Upgrade/downgrade verified | Billing verified | Result |
 |---|---|---:|---:|---:|---:|---|
-| Package 1 | TODO from authoritative package config | [ ] | [ ] | [ ] | [ ] | Pending |
-| Package 2 | TODO from authoritative package config | [ ] | [ ] | [ ] | [ ] | Pending |
-| Package 3 | TODO from authoritative package config | [ ] | [ ] | [ ] | [ ] | Pending |
+| Core (`CORE`) | 1 business, 15,000 starter credits, native appointments and Core channels | [ ] | [ ] | [ ] | [ ] | Pending |
+| Unlimited (`UNLIMITED`) | Up to 2 total businesses, 5 staff per business, external calendars, 2 website/file knowledge imports per business, additional 15,000 credits | [ ] | [ ] | [ ] | [ ] | Pending |
+| Performance (`PERFORMANCE`) | Custom Automation Builder and custom workflow execution | [ ] | [ ] | [ ] | [ ] | Pending |
+| Agency 50 (`AGENCY_50`) | 50 client businesses plus original business; Agency management | [ ] | [ ] | [ ] | [ ] | Pending |
+| Agency 100 (`AGENCY_100`) | 100 client businesses plus original business; Agency management | [ ] | [ ] | [ ] | [ ] | Pending |
+| Whitelabel (`WHITELABEL`) | Published client branding and custom domain, requiring active Core and Agency ownership for eligibility | [ ] | [ ] | [ ] | [ ] | Pending |
 
-Replace the placeholder package rows with the actual package names and authoritative entitlement matrix from the release code/config before sign-off.
+These are additive purchase SKUs from `server/commerce/products.ts`, `server/commerce/workspace-entitlements.ts`, and `docs/assistlia-funnel-implementation-plan.md`; the legacy Personal/Growth seat plans remain separate. Confirm which product IDs are actually configured and sellable in the release environment before exercising every row. The rows are targets, not acceptance evidence.
 
 ---
 

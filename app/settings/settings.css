@@ -36,3 +36,8 @@
 .voiceTechFoot button:disabled{opacity:.5;cursor:default}
 .voiceTechError{color:#b42318;font-size:12px}
 @media(max-width:720px){.voiceTechCards{grid-template-columns:1fr}}
+
+.settingsSignOut{display:grid;gap:8px;margin-top:16px;padding-top:16px;border-top:1px solid #e3eaf3}
+.settingsSignOut button{justify-self:start;min-height:38px;padding:0 14px;border:1px solid #cbd8e8;border-radius:8px;color:#30445e;background:#fff;font-size:12px;font-weight:700;cursor:pointer}
+.settingsSignOut button:disabled{opacity:.6;cursor:default}
+.settingsSignOut p{margin:0;color:#b42318;font-size:11px}

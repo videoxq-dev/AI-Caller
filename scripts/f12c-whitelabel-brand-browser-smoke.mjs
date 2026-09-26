@@ -32,6 +32,23 @@ async function noOverflow(label) {
   assert(size.scrollWidth - size.width <= 2, `${label} has horizontal overflow: ${JSON.stringify(size)}`);
 }
 
+async function noCardOverlap(label) {
+  const layout = await page.evaluate(() => {
+    const editor = document.querySelector(".wlEditor").getBoundingClientRect();
+    const side = document.querySelector(".wlSide").getBoundingClientRect();
+    const escaped = [...document.querySelectorAll(".wlEditor input, .wlEditor button, .wlEditor .wlAsset, .wlEditor .wlColorInput")]
+      .filter((element) => {
+        const box = element.getBoundingClientRect();
+        return box.left < editor.left - 2 || box.right > editor.right + 2;
+      }).map((element) => element.outerHTML.slice(0, 100));
+    const overlap = editor.left < side.right - 2 && editor.right > side.left + 2
+      && editor.top < side.bottom - 2 && editor.bottom > side.top + 2;
+    return { overlap, escaped };
+  });
+  assert(!layout.overlap && layout.escaped.length === 0,
+    `${label} has editor/preview overlap or escaped controls: ${JSON.stringify(layout)}`);
+}
+
 const stamp = Date.now();
 const email = `f12c-brand-${stamp}@example.com`;
 const password = "F12cBrandPass123!";
@@ -102,13 +119,15 @@ try {
     "Restoring a published brand did not restore its draft snapshot.");
   await page.getByText("Published v3").waitFor();
 
-  await noOverflow("F12-C desktop");
-  await page.screenshot({ path: path.join(outputDir, "whitelabel-brand-desktop.png"), fullPage: true });
-  await page.setViewportSize({ width: 390, height: 844 });
-  await page.reload({ waitUntil: "networkidle" });
-  await page.getByRole("heading", { name: "Whitelabel", exact: true }).waitFor();
-  await noOverflow("F12-C mobile");
-  await page.screenshot({ path: path.join(outputDir, "whitelabel-brand-mobile.png"), fullPage: true });
+  for (const width of [1440, 1280, 1100, 900, 760, 620, 390]) {
+    await page.setViewportSize({ width, height: 960 });
+    await page.reload({ waitUntil: "networkidle" });
+    await page.getByRole("heading", { name: "Whitelabel", exact: true }).waitFor();
+    await page.getByLabel("Support URL").waitFor();
+    await noOverflow(`F12-C ${width}px`);
+    await noCardOverlap(`F12-C ${width}px`);
+    await page.screenshot({ path: path.join(outputDir, `whitelabel-brand-${width}.png`), fullPage: true });
+  }
 
   const clientWorkspace = await context.request.put(`${baseUrl}/api/workspaces`, {
     data: { name: "Branded Client" },

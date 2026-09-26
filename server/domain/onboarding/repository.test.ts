@@ -1,6 +1,7 @@
 import { afterAll, beforeEach, describe, expect, it } from "vitest";
 import { closeDatabase, db } from "@/db";
-import { workspaces } from "@/db/schema";
+import { aiAgents, workspaces } from "@/db/schema";
+import { eq } from "drizzle-orm";
 import { setWorkspaceAgentCapabilities } from "@/server/agent/service";
 import { defaultAgentCapabilities } from "@/server/agent/capabilities";
 import { getAgentSetup, getBusinessSetup, getSetupStatus, saveAgentSetup, saveBusinessSetup } from "./repository";
@@ -102,6 +103,15 @@ describe("onboarding persistence", () => {
     expect((saved.agent?.behaviorSettings.capabilities as Record<string, boolean>).BOOK_APPOINTMENT)
       .toBe(false);
     expect(saved.agent?.behaviorSettings.guardrails).toEqual(["Never invent pricing"]);
+  });
+
+  it("recognizes previously activated and later paused agents without a live progress marker", async () => {
+    await db.insert(aiAgents).values({ workspaceId, name: "Legacy agent", status: "DRAFT" });
+    expect((await getSetupStatus(workspaceId)).steps.live).toBe(false);
+    await db.update(aiAgents).set({ status: "ACTIVE" }).where(eq(aiAgents.workspaceId, workspaceId));
+    expect((await getSetupStatus(workspaceId)).steps.live).toBe(true);
+    await db.update(aiAgents).set({ status: "PAUSED" }).where(eq(aiAgents.workspaceId, workspaceId));
+    expect((await getSetupStatus(workspaceId)).steps.live).toBe(true);
   });
 
 });

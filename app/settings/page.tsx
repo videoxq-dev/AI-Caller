@@ -8,6 +8,7 @@ import {
   UsersIcon,
 } from "@/components/icons";
 import { AppNav } from "@/components/core-domain/app-nav";
+import { authClient } from "@/lib/auth-client";
 import { PhoneNumberManager } from "@/components/phone-number-manager";
 import { VoiceTechnologySettings } from "@/components/voice-technology-settings";
 import { SmsRegistrationSettings } from "@/components/sms-registration-settings";
@@ -264,8 +265,29 @@ function GeneralTab({ businessName, setBusinessName, timezone, setTimezone, lang
         <label><span>Language</span><select value={language} onChange={(event) => setLanguage(event.target.value)}><option>English</option><option>Spanish</option><option>French</option></select></label>
       </div>
     </article>
-    <aside className="settingsCard compactCard"><h2>Account</h2><SettingToggle title="Weekly performance email" text="Receive a weekly summary of conversations and bookings." on /><SettingToggle title="Product updates" text="Receive important product announcements." on={false} /></aside>
+    <aside className="settingsCard compactCard"><h2>Account</h2><SettingToggle title="Weekly performance email" text="Receive a weekly summary of conversations and bookings." on /><SettingToggle title="Product updates" text="Receive important product announcements." on={false} /><SignOutButton /></aside>
   </section>;
+}
+
+function SignOutButton() {
+  const [pending, setPending] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  async function signOut() {
+    if (pending) return;
+    setPending(true);
+    setError(null);
+    try {
+      const result = await authClient.signOut();
+      if (result.error) throw new Error(result.error.message ?? "Unable to sign out.");
+      window.location.assign("/sign-in");
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : "Unable to sign out.");
+      setPending(false);
+    }
+  }
+
+  return <div className="settingsSignOut"><button type="button" disabled={pending} onClick={() => void signOut()}>{pending ? "Signing out…" : "Sign out"}</button>{error && <p role="alert">{error}</p>}</div>;
 }
 
 function ChannelCard({ title, provider, icon, detail }: { title: string; provider: string; icon: ReactNode; detail: string }) {

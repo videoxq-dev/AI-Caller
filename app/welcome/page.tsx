@@ -1,6 +1,7 @@
 import type { ReactNode } from "react";
 import Link from "next/link";
 import { headers } from "next/headers";
+import { redirect } from "next/navigation";
 import "./welcome.css";
 import {
   CalendarIcon,
@@ -52,10 +53,11 @@ function SetupRowContent({ step }: { step: SetupStep }) {
 
 export default async function WelcomePage() {
   const context = await resolveWorkspaceContext(await headers());
-  const [setup, hostedCredits] = await Promise.all([
-    getSetupStatus(context.workspace.id),
-    getCreditBalance(context.workspace.id),
-  ]);
+  const setup = await getSetupStatus(context.workspace.id);
+  // Activation is the persisted completion gate for this workspace. The test
+  // step is informational and is not currently marked by the setup UI.
+  if (setup.steps.live) redirect("/dashboard");
+  const hostedCredits = await getCreditBalance(context.workspace.id);
   const done = setup.steps;
   const steps: SetupStep[] = [
     { number: 1, title: "Add your business", description: "Business details, hours and service area", status: done.business ? "Complete" : "Not started", tone: "blue", icon: <StoreIcon size={23} />, href: "/setup/business" },

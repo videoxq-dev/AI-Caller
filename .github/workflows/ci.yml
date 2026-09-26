@@ -204,6 +204,9 @@ jobs:
       - name: Milestone 3 browser regression verification
         run: npm run test:browser
 
+      - name: Returning-user onboarding browser regression verification
+        run: npm run test:browser:onboarding-return
+
       - name: Milestone 4 browser acceptance verification
         run: npm run test:browser:m4
 

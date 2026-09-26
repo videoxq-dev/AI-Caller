@@ -11,9 +11,9 @@ import { safeReturnPath } from "@/lib/safe-return-path";
 
 export default function SignInPage() {
   const router = useRouter();
-  const [returnTo, setReturnTo] = useState("/dashboard");
+  const [returnTo, setReturnTo] = useState("/welcome");
   useEffect(() => {
-    setReturnTo(safeReturnPath(new URLSearchParams(window.location.search).get("returnTo"), "/dashboard"));
+    setReturnTo(safeReturnPath(new URLSearchParams(window.location.search).get("returnTo"), "/welcome"));
   }, []);
   const [pending, setPending] = useState(false);
   const [error, setError] = useState("");
