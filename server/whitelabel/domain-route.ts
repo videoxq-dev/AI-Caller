@@ -165,7 +165,20 @@ export async function reconcileWhitelabelDomainRoute(domainId: string): Promise<
   }
 
   if (ROUTE_ABSENT.includes(domain.status)) {
+    // Always remove an unexpected/stale file first. A fresh pre-verification
+    // claim is still not route-ready and should preserve the D3 API contract;
+    // only lifecycle records that actually carried route metadata need a
+    // successful cleanup result.
     await removeRouteFile(target);
+    const preVerification = domain.status === "DRAFT" || domain.status === "AWAITING_DNS";
+    if (preVerification && !domain.routeId && !domain.routeProvisionedAt) {
+      throw new AppError(
+        "WHITELABEL_DOMAIN_ROUTE_NOT_READY",
+        "DNS ownership and routing must be verified before the custom-domain route can be provisioned.",
+        409,
+      );
+    }
+
     const [updated] = await db.update(whitelabelDomains).set({
       routeId: null,
       routeProvisionedAt: null,
