@@ -108,7 +108,15 @@ function checkHttpsAtEdge(pathname) {
           checkWhitelabelHoldingResponse({
             statusCode: response.statusCode ?? 0, body, hostname,
           });
-          resolve({ expiresAt, issuer: certificate.issuer?.O ?? "trusted issuer" });
+          if (!certificate.fingerprint256) {
+            reject(new Error("TLS_CERT_INVALID: certificate fingerprint is unavailable."));
+            return;
+          }
+          resolve({
+            expiresAt,
+            issuer: certificate.issuer?.O ?? "trusted issuer",
+            fingerprint256: certificate.fingerprint256,
+          });
         } catch {
           reject(new Error("TLS_ROUTE_NOT_READY: expected holding marker was not received."));
         }
@@ -162,7 +170,7 @@ const root = await checkHttpsAtEdge("/");
 const auth = await checkHttpsAtEdge("/api/auth/get-session");
 console.log("PASS: trusted customer-hostname TLS and guarded HTTPS holding response.");
 console.log(`Certificate expires: ${root.expiresAt.toISOString()}; issuer: ${root.issuer}.`);
-if (auth.expiresAt.getTime() !== root.expiresAt.getTime()) {
+if (auth.fingerprint256 !== root.fingerprint256) {
   throw new Error("Unexpected TLS certificate change between holding and auth checks.");
 }
 const storedExpiry = await verifyLiveRecord();
