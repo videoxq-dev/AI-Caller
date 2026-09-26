@@ -11,6 +11,7 @@ const field = (formData: FormData, name: string) => String(formData.get(name) ??
 
 export async function saveBusinessSetupAction(formData: FormData) {
   const context = await resolveWorkspaceContext(await headers());
+  requireWorkspacePermission(context.membership.role, "integration.manage");
   const hours = Array.from({ length: 7 }, (_, dayOfWeek) => ({
     dayOfWeek,
     enabled: formData.get(`hours.${dayOfWeek}.enabled`) === "on",
