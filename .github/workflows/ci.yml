@@ -144,6 +144,7 @@ jobs:
           sh -n scripts/inspect-deployos-postgres.sh
           node --test scripts/inspect-deployos-postgres.test.mjs
           sh -n scripts/inspect-deployos-traefik.sh
+          npm run test:whitelabel-domain:live
 
       - name: Verify existing PostgreSQL data survives a Compose upgrade
         run: sh scripts/verify-compose-postgres-compat.sh

@@ -38,7 +38,9 @@
     "test:browser:f12c": "node scripts/f12c-whitelabel-brand-browser-smoke.mjs",
     "test:browser:f12d-domain": "node scripts/f12d-domain-dns-browser-smoke.mjs",
     "whitelabel-edge-reconciler": "tsx worker/whitelabel-edge.ts",
-    "test:browser:f12d-host": "node scripts/f12d-host-guard-browser-smoke.mjs"
+    "test:browser:f12d-host": "node scripts/f12d-host-guard-browser-smoke.mjs",
+    "verify:whitelabel-domain:live": "node scripts/verify-whitelabel-domain-live.mjs",
+    "test:whitelabel-domain:live": "vitest run scripts/verify-whitelabel-domain-live.test.mjs"
   },
   "dependencies": {
     "better-auth": "^1.7.5",
