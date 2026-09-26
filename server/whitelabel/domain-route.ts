@@ -277,7 +277,9 @@ export async function recoverWhitelabelDomainRoutes(limit = 100, offset = 0) {
         isNotNull(whitelabelDomains.routeId),
       ),
     ))
-    .orderBy(asc(whitelabelDomains.updatedAt), asc(whitelabelDomains.id))
+    // Page on immutable keys. Reconciliation may update updatedAt, so using it
+    // here can move processed rows mid-scan and skip domains.
+    .orderBy(asc(whitelabelDomains.createdAt), asc(whitelabelDomains.id))
     .limit(Math.max(1, Math.min(limit, 500)))
     .offset(Math.max(0, offset));
 
