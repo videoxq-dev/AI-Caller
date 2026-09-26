@@ -6,12 +6,14 @@
  */
 import { resolve4, resolve6, resolveTxt } from "node:dns/promises";
 import { isIP } from "node:net";
+import { request as httpRequest } from "node:http";
 import { request as httpsRequest } from "node:https";
 import { checkServerIdentity } from "node:tls";
 import pg from "pg";
 import {
   checkWhitelabelPublicDns,
   checkWhitelabelHoldingResponse,
+  checkWhitelabelHttpReachability,
 } from "./whitelabel-live-verification.mjs";
 
 const { Pool } = pg;
@@ -34,6 +36,33 @@ async function optionalRecord(work) {
     if (error?.code === "ENODATA" || error?.code === "ENOTFOUND") return [];
     throw error;
   }
+}
+
+function checkHttpAtEdge() {
+  return new Promise((resolve, reject) => {
+    const request = httpRequest({
+      hostname: ipv4,
+      port: 80,
+      method: "GET",
+      path: "/",
+      headers: {
+        host: hostname,
+        "user-agent": "AI-Caller-F12-D8-HTTP-Probe/1.0",
+      },
+      timeout: 10000,
+    }, (response) => {
+      response.resume();
+      try {
+        checkWhitelabelHttpReachability({ statusCode: response.statusCode ?? 0 });
+        resolve(response.statusCode ?? 0);
+      } catch (error) {
+        reject(error);
+      }
+    });
+    request.on("timeout", () => request.destroy(new Error("HTTP_PROBE_TIMEOUT")));
+    request.on("error", reject);
+    request.end();
+  });
 }
 
 function checkHttpsAtEdge(pathname) {
@@ -125,6 +154,9 @@ checkWhitelabelPublicDns({
   expectedIpv4: ipv4, expectedIpv6: ipv6, expectedTxt,
 });
 console.log("PASS: public A/AAAA routing and purchaser TXT ownership proof.");
+
+const httpStatus = await checkHttpAtEdge();
+console.log(`PASS: public port 80 reached the configured edge (HTTP ${httpStatus}).`);
 
 const root = await checkHttpsAtEdge("/");
 const auth = await checkHttpsAtEdge("/api/auth/get-session");
