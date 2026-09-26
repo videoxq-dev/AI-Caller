@@ -16,7 +16,8 @@ Confirm on the actual DeployOS VPS:
 1. `main` has been deployed with migrations through
    `0044_whitelabel_domains.sql`.
 2. `sh scripts/inspect-deployos-traefik.sh` succeeds and reports the actual
-   mounted Traefik `/dynamic` directory, `aicaller-web` on `edge`, and\n   the dedicated edge reconciler mounted to that **same** host directory.
+   mounted Traefik `/dynamic` directory, `aicaller-web` on `edge`, and
+   the dedicated edge reconciler mounted to that **same** host directory.
 3. Public port **80** is reachable for the configured Traefik ACME HTTP-01
    challenge, and port **443** is reachable for HTTPS.
 4. Traefik's `letsencrypt` resolver exists and its ACME storage is persistent
@@ -69,6 +70,7 @@ unset WHITELABEL_TEST_TXT
 The probe checks:
 
 - all public A records resolve to the expected edge;
+- public port 80 returns an HTTP response at that edge, supporting HTTP-01 reachability;
 - AAAA records do not point at a conflicting server;
 - the exact current purchaser TXT proof resolves;
 - HTTPS connects to that edge with the **customer hostname as SNI**;
