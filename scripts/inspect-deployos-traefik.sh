@@ -83,6 +83,10 @@ if [ "$(readlink -f "$edge_source")" != "$(readlink -f "$dynamic_source")" ]; th
   echo 'Edge reconciler writes to a different directory than Traefik watches.' >&2
   exit 1
 fi
+if ! docker exec "$edge_reconciler" sh -c 'test -w /app/.data/traefik-domains'; then
+  echo 'Edge reconciler cannot write its Traefik dynamic-directory mount; check host directory permissions for the container user.' >&2
+  exit 1
+fi
 
 printf 'traefik_container=%s\n' "$traefik"
 printf 'traefik_dynamic_host_dir=%s\n' "$dynamic_source"
