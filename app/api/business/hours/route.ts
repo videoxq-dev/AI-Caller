@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { resolveWorkspaceContext } from "@/server/auth/workspace-context";
+import { requireWorkspacePermission } from "@/server/auth/permissions";
 import { getBusinessSetup, saveBusinessSetup } from "@/server/domain/onboarding/repository";
 import { businessHourSchema } from "@/server/domain/onboarding/schemas";
 import { AppError, toErrorResponse } from "@/server/http/errors";
@@ -10,6 +11,7 @@ const hoursInputSchema = z.object({ hours: z.array(businessHourSchema).length(7)
 export async function PUT(request: Request) {
   try {
     const context = await resolveWorkspaceContext(request.headers);
+    requireWorkspacePermission(context.membership.role, "integration.manage");
     const input = parseInput(hoursInputSchema, await request.json());
     const current = await getBusinessSetup(context.workspace.id);
     if (!current.profile) throw new AppError("BUSINESS_PROFILE_REQUIRED", "Save the business profile before business hours.", 409);

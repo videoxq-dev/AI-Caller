@@ -32,6 +32,7 @@
     "test:browser:phase1": "node scripts/phase1-agent-browser-smoke.mjs",
     "test:browser:booking": "node scripts/booking-remediation-browser-smoke.mjs",
     "test:browser:onboarding-return": "node scripts/onboarding-return-browser-smoke.mjs",
+    "test:browser:settings-general": "node scripts/settings-general-browser-smoke.mjs",
     "test:browser:phase4": "node scripts/phase4-automation-builder-browser-smoke.mjs",
     "test:browser:phase6a": "node scripts/phase6a-whatsapp-templates-browser-smoke.mjs",
     "test:browser:phase6c": "node scripts/phase6c-sms-readiness-browser-smoke.mjs",

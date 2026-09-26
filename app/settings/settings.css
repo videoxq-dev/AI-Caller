@@ -41,3 +41,6 @@
 .settingsSignOut button{justify-self:start;min-height:38px;padding:0 14px;border:1px solid #cbd8e8;border-radius:8px;color:#30445e;background:#fff;font-size:12px;font-weight:700;cursor:pointer}
 .settingsSignOut button:disabled{opacity:.6;cursor:default}
 .settingsSignOut p{margin:0;color:#b42318;font-size:11px}
+.settingsTopActions{margin-left:auto}
+.settingsSaveButton:disabled{opacity:.55;cursor:default}
+@media(max-width:760px){.settingsTopActions{display:flex}.settingsBillingTopLink{display:inline-flex}}

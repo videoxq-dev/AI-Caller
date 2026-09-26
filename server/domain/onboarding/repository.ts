@@ -100,6 +100,19 @@ export async function saveBusinessSetup(workspaceId: string, input: BusinessProf
   return profile;
 }
 
+export async function saveBusinessGeneralSettings(
+  workspaceId: string, input: Pick<BusinessProfileInput, "businessName" | "timezone">,
+) {
+  const now = new Date();
+  const [profile] = await db.insert(businessProfiles)
+    .values({ workspaceId, businessName: input.businessName, timezone: input.timezone, updatedAt: now })
+    .onConflictDoUpdate({
+      target: businessProfiles.workspaceId,
+      set: { businessName: input.businessName, timezone: input.timezone, updatedAt: now },
+    }).returning();
+  return profile;
+}
+
 export async function getAgentSetup(workspaceId: string) {
   const agent = await getWorkspaceAgent(workspaceId);
   const serviceRows = await db.select().from(services).where(eq(services.workspaceId, workspaceId)).orderBy(asc(services.createdAt));

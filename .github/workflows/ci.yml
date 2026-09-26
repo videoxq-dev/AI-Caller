@@ -207,6 +207,9 @@ jobs:
       - name: Returning-user onboarding browser regression verification
         run: npm run test:browser:onboarding-return
 
+      - name: General Settings persistence browser regression verification
+        run: npm run test:browser:settings-general
+
       - name: Milestone 4 browser acceptance verification
         run: npm run test:browser:m4
 

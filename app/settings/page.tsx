@@ -20,6 +20,7 @@ type WorkspaceRole = "OWNER" | "ADMIN" | "STAFF";
 type TeamMember = { userId: string; name: string; email: string; image: string | null; role: WorkspaceRole; joinedAt: string };
 type TeamInvitation = { id: string; email: string; role: "ADMIN" | "STAFF"; status: "PENDING"; expiresAt: string; createdAt: string; invitedByUserId: string };
 type TeamPlan = { id: "PERSONAL" | "GROWTH"; name: string; commercialSeatPackage?: "UNLIMITED" | null; subUserLimit: number; activeSubUsers: number; pendingInvitations: number; usedSeats: number; availableSeats: number };
+type BusinessProfile = { businessName: string; timezone: string };
 
 const settingsTabs: Array<{ id: SettingsTab; label: string }> = [
   { id: "general", label: "General" },
@@ -31,10 +32,13 @@ const settingsTabs: Array<{ id: SettingsTab; label: string }> = [
 export default function SettingsPage() {
   const [tab, setTab] = useState<SettingsTab>("general");
   const [saved, setSaved] = useState(false);
-  const [businessName, setBusinessName] = useState("Wellness Juvi");
-  const [timezone, setTimezone] = useState("Africa/Lagos");
-  const [language, setLanguage] = useState("English");
-  const [notificationEmail, setNotificationEmail] = useState("bella@wellnessjuvi.com");
+  const [businessName, setBusinessName] = useState("");
+  const [timezone, setTimezone] = useState("UTC");
+  const [timezones, setTimezones] = useState(["UTC"]);
+  const [generalLoaded, setGeneralLoaded] = useState(false);
+  const [generalRole, setGeneralRole] = useState<WorkspaceRole | null>(null);
+  const [generalError, setGeneralError] = useState<string | null>(null);
+  const [generalSaving, setGeneralSaving] = useState(false);
   const [inviteEmail, setInviteEmail] = useState("");
   const [inviteRole, setInviteRole] = useState<"ADMIN" | "STAFF">("STAFF");
   const [team, setTeam] = useState<TeamMember[]>([]);
@@ -46,16 +50,46 @@ export default function SettingsPage() {
   const [teamActionPending, setTeamActionPending] = useState(false);
 
   useEffect(() => {
+    setTimezones(["UTC", ...Intl.supportedValuesOf("timeZone").filter((zone) => zone !== "UTC")]);
     if (new URLSearchParams(window.location.search).get("tab") === "phone") setTab("phone");
+    Promise.all([
+      fetch("/api/business", { cache: "no-store" }),
+      fetch("/api/workspace", { cache: "no-store" }),
+    ]).then(async ([businessResponse, workspaceResponse]) => {
+      if (!businessResponse.ok || !workspaceResponse.ok) throw new Error("Unable to load business settings.");
+      const business = await businessResponse.json() as { profile: BusinessProfile | null };
+      const workspace = await workspaceResponse.json() as { data: { workspace: { name: string }; role: WorkspaceRole } };
+      setBusinessName(business.profile?.businessName ?? workspace.data.workspace.name);
+      setTimezone(business.profile?.timezone ?? "UTC");
+      setGeneralRole(workspace.data.role);
+    }).catch((reason) => setGeneralError(reason instanceof Error ? reason.message : "Unable to load business settings."))
+      .finally(() => setGeneralLoaded(true));
   }, []);
 
   const activeMembers = team.length;
   const canManageTeam = currentRole === "OWNER" || currentRole === "ADMIN";
 
-  const save = () => {
-    setSaved(true);
-    window.setTimeout(() => setSaved(false), 1600);
-  };
+  async function save() {
+    if (!generalLoaded || (generalRole !== "OWNER" && generalRole !== "ADMIN") || !businessName.trim() || generalSaving) return;
+    setGeneralSaving(true);
+    setSaved(false);
+    setGeneralError(null);
+    try {
+      const response = await fetch("/api/business", {
+        method: "PATCH", headers: { "content-type": "application/json" },
+        body: JSON.stringify({ businessName: businessName.trim(), timezone }),
+      });
+      const result = await response.json() as { profile?: BusinessProfile; error?: { message?: string } };
+      if (!response.ok || !result.profile) throw new Error(result.error?.message ?? "Unable to save business settings.");
+      setBusinessName(result.profile.businessName);
+      setTimezone(result.profile.timezone);
+      setSaved(true);
+    } catch (reason) {
+      setGeneralError(reason instanceof Error ? reason.message : "Unable to save business settings.");
+    } finally {
+      setGeneralSaving(false);
+    }
+  }
 
   async function loadTeam() {
     setTeamLoading(true);
@@ -157,7 +191,6 @@ export default function SettingsPage() {
 
       <section className="appWorkspace settingsWorkspace">
         <header className="settingsTopbar">
-          <label className="settingsGlobalSearch"><SearchIcon /><input placeholder="Search contacts, appointments, or settings..." /><kbd>⌘ K</kbd></label>
           <div className="settingsTopActions">
             <Link className="settingsBillingTopLink" href="/settings/billing">Billing &amp; Usage</Link>
           </div>
@@ -166,7 +199,7 @@ export default function SettingsPage() {
         <div className="settingsBody">
           <div className="settingsTitleRow">
             <div><h1>Settings</h1><p>Manage your account, team, channels and billing.</p></div>
-            {tab !== "team" && tab !== "phone" && <button className="settingsSaveButton" type="button" onClick={save}>{saved ? "Saved" : "Save changes"}</button>}
+            {tab === "general" && generalRole !== "STAFF" && <button className="settingsSaveButton" type="button" disabled={!generalLoaded || !generalRole || !businessName.trim() || generalSaving} onClick={() => void save()}>{generalSaving ? "Saving…" : saved ? "Saved" : "Save changes"}</button>}
           </div>
 
           <div className="settingsTabs settingsTabsWithBilling" role="tablist" aria-label="Settings sections">
@@ -175,7 +208,7 @@ export default function SettingsPage() {
           </div>
 
           {tab === "general" && (
-            <GeneralTab businessName={businessName} setBusinessName={setBusinessName} timezone={timezone} setTimezone={setTimezone} language={language} setLanguage={setLanguage} notificationEmail={notificationEmail} setNotificationEmail={setNotificationEmail} />
+            <GeneralTab businessName={businessName} setBusinessName={(value) => { setBusinessName(value); setSaved(false); }} timezone={timezone} setTimezone={(value) => { setTimezone(value); setSaved(false); }} timezones={timezones} loaded={generalLoaded} canEdit={generalRole === "OWNER" || generalRole === "ADMIN"} error={generalError} />
           )}
 
           {tab === "phone" && (
@@ -244,7 +277,6 @@ export default function SettingsPage() {
             <section className="channelSettingsGrid">
               <ChannelCard title="WhatsApp" provider="Meta connection" icon={<WhatsAppIcon />} detail="Business messaging" />
               <ChannelCard title="Web Chat" provider="AI Caller widget" icon={<MessageIcon size={20} />} detail="Website conversations" />
-              <article className="settingsCard channelRoutingCard"><div className="sectionHeading"><div><h2>Channel routing</h2><p>Shared handling rules</p></div></div><SettingToggle title="Allow AI to respond first" text="Human takeover remains available at any time." on /><SettingToggle title="Escalate when AI is unsure" text="Move the conversation to a human agent." on /><SettingToggle title="Notify team on takeover" text="Send an in-app notification when escalation happens." on /></article>
               <article className="settingsCard compactCard"><h2>Other channel setup</h2><p className="compactCopy">Manage WhatsApp and calendar connections from Integrations. Phone and SMS are managed directly by AI Caller.</p><Link className="settingsOutlineLink" href="/integrations">Manage integrations</Link></article>
             </section>
           )}
@@ -254,18 +286,17 @@ export default function SettingsPage() {
   );
 }
 
-function GeneralTab({ businessName, setBusinessName, timezone, setTimezone, language, setLanguage, notificationEmail, setNotificationEmail }: { businessName: string; setBusinessName: (value: string) => void; timezone: string; setTimezone: (value: string) => void; language: string; setLanguage: (value: string) => void; notificationEmail: string; setNotificationEmail: (value: string) => void }) {
+function GeneralTab({ businessName, setBusinessName, timezone, setTimezone, timezones, loaded, canEdit, error }: { businessName: string; setBusinessName: (value: string) => void; timezone: string; setTimezone: (value: string) => void; timezones: string[]; loaded: boolean; canEdit: boolean; error: string | null }) {
   return <section className="settingsGrid">
     <article className="settingsCard">
-      <div className="sectionHeading"><div><h2>Business details</h2><p>Default account information.</p></div></div>
+      <div className="sectionHeading"><div><h2>Business details</h2><p>Settings for the active workspace.</p></div></div>
+      {error && <p className="teamSettingsError" role="alert">{error}</p>}
       <div className="settingsFormGrid">
-        <label><span>Business name</span><input value={businessName} onChange={(event) => setBusinessName(event.target.value)} /></label>
-        <label><span>Notification email</span><input value={notificationEmail} onChange={(event) => setNotificationEmail(event.target.value)} type="email" /></label>
-        <label><span>Timezone</span><select value={timezone} onChange={(event) => setTimezone(event.target.value)}><option value="Africa/Lagos">West Africa Time (Lagos)</option><option value="America/New_York">Eastern Time</option><option value="America/Chicago">Central Time</option><option value="America/Los_Angeles">Pacific Time</option></select></label>
-        <label><span>Language</span><select value={language} onChange={(event) => setLanguage(event.target.value)}><option>English</option><option>Spanish</option><option>French</option></select></label>
+        <label><span>Business name</span><input value={businessName} onChange={(event) => setBusinessName(event.target.value)} disabled={!loaded || !canEdit} /></label>
+        <label><span>Timezone</span><select value={timezone} onChange={(event) => setTimezone(event.target.value)} disabled={!loaded || !canEdit}>{!timezones.includes(timezone) && <option value={timezone}>{timezone}</option>}{timezones.map((zone) => <option value={zone} key={zone}>{zone}</option>)}</select></label>
       </div>
     </article>
-    <aside className="settingsCard compactCard"><h2>Account</h2><SettingToggle title="Weekly performance email" text="Receive a weekly summary of conversations and bookings." on /><SettingToggle title="Product updates" text="Receive important product announcements." on={false} /><SignOutButton /></aside>
+    <aside className="settingsCard compactCard"><h2>Account</h2><Link className="settingsOutlineLink" href="/settings/billing">Billing &amp; Usage</Link><SignOutButton /></aside>
   </section>;
 }
 
@@ -294,10 +325,5 @@ function ChannelCard({ title, provider, icon, detail }: { title: string; provide
   return <article className="settingsCard channelCard"><div className="channelCardTop"><span className="channelIcon">{icon}</span><div><h2>{title}</h2><p>{detail}</p></div></div><div className="channelProvider"><span>Provider</span><strong>{provider}</strong></div><Link className="settingsOutlineLink" href="/integrations">Manage provider</Link></article>;
 }
 
-function SettingToggle({ title, text, on }: { title: string; text: string; on: boolean }) {
-  return <div className="settingToggleRow"><div><strong>{title}</strong><small>{text}</small></div><span className={`switch static ${on ? "on" : ""}`}><i /></span></div>;
-}
-
 function RoleLine({ title, text }: { title: string; text: string }) { return <div className="roleLine"><span><UsersIcon size={16} /></span><div><strong>{title}</strong><small>{text}</small></div></div>; }
-function SearchIcon() { return <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg>; }
 function WhatsAppIcon() { return <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round"><path d="M20.5 11.8A8.5 8.5 0 0 1 8 19.3L3.5 21l1.6-4.2A8.5 8.5 0 1 1 20.5 11.8Z"/><path d="M8.4 8.1c.4 3 2.4 5 5.4 5.8l1.2-1.4 2.2.9c-.5 1.8-1.8 2.6-3.6 2.3-4.2-.7-7.3-3.8-8-8-.3-1.8.5-3.1 2.3-3.6l.9 2.2-1.4 1.2"/></svg>; }
