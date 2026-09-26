@@ -14,6 +14,7 @@ import {
   checkWhitelabelPublicDns,
   checkWhitelabelHoldingResponse,
   checkWhitelabelHttpReachability,
+  checkWhitelabelStoredCertificateExpiry,
 } from "./whitelabel-live-verification.mjs";
 
 const { Pool } = pg;
@@ -176,10 +177,10 @@ if (auth.fingerprint256 !== root.fingerprint256) {
 const storedExpiry = await verifyLiveRecord();
 if (storedExpiry) {
   const recordedExpiry = new Date(storedExpiry);
-  if (!Number.isFinite(recordedExpiry.getTime())
-    || Math.abs(recordedExpiry.getTime() - root.expiresAt.getTime()) > 1000) {
-    throw new Error("Live database certificate expiry does not match the certificate served by the edge.");
-  }
+  checkWhitelabelStoredCertificateExpiry({
+    servedExpiry: root.expiresAt,
+    storedExpiry: recordedExpiry,
+  });
   console.log(`PASS: live DB domain is CERT_READY; recorded expiry matches served certificate: ${recordedExpiry.toISOString()}.`);
 } else {
   console.log("NOTE: DATABASE_URL unavailable; verify CERT_READY and matching certificate expiry in live Whitelabel settings.");
