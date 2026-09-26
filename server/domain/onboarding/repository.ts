@@ -173,14 +173,20 @@ export async function markSetupStep(
 }
 
 export async function getSetupStatus(workspaceId: string) {
-  const [progress] = await db.select().from(setupProgress).where(eq(setupProgress.workspaceId, workspaceId)).limit(1);
+  const [[progress], agent] = await Promise.all([
+    db.select().from(setupProgress).where(eq(setupProgress.workspaceId, workspaceId)).limit(1),
+    getWorkspaceAgent(workspaceId),
+  ]);
+  // Agents already activated before liveCompletedAt was written are also
+  // finished with onboarding, including accounts that later paused the agent.
+  const wentLive = Boolean(progress?.liveCompletedAt) || agent?.status === "ACTIVE" || agent?.status === "PAUSED";
   const completed = [
     Boolean(progress?.businessCompletedAt),
     Boolean(progress?.aiCompletedAt),
     Boolean(progress?.communicationCompletedAt),
     Boolean(progress?.calendarCompletedAt),
     Boolean(progress?.testCompletedAt),
-    Boolean(progress?.liveCompletedAt),
+    wentLive,
   ];
   const completedCount = completed.filter(Boolean).length;
   return {
